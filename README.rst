@@ -35,7 +35,7 @@ You can install Radarx via `pip` from PyPI:
 
 .. code-block:: bash
 
-    pip install radarx
+    python -m pip install radarx
 
 Alternatively, you can install it from source by cloning the repository and running:
 
@@ -43,7 +43,7 @@ Alternatively, you can install it from source by cloning the repository and runn
 
     git clone https://github.com/syedhamidali/radarx.git
     cd radarx
-    pip install .
+    python -m pip install .
 
 =================
 Usage
@@ -53,8 +53,7 @@ Here’s a simple example of how to use Radarx with `xradar` to load and process
 
 .. code-block:: python
 
-    import radarx
-    from radarx.io.imd import read_volume
+    import radarx as rx
 
     # List of radar files
     files = [
@@ -64,7 +63,7 @@ Here’s a simple example of how to use Radarx with `xradar` to load and process
     ]
 
     # Read volume data using Radarx, with xradar integration
-    volume = read_volume(files)
+    volume = rx.io.read_volume(files)
 
     # Access a specific sweep or variable
     dbz_data = volume['/volume_0']['DBZ']
