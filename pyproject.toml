@@ -1,0 +1,90 @@
+[project]
+name = "radarx"
+description = "Xarray based radar toolkit"
+authors = [
+  {name = "Hamid Ali Syed", email = "hamidsyed37@gmail.com"}
+]
+maintainers = [
+  {name = "Hamid Ali Syed", email = "hamidsyed37@gmail.com"}
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Atmospheric Science"
+]
+license = {text = "MIT license"}
+dependencies = []
+dynamic = ["version"]
+
+[project.optional-dependencies]
+dev = [
+    "coverage",  # testing
+    "mypy",  # linting
+    "pytest",  # testing
+    "ruff"  # linting
+]
+
+[project.urls]
+bugs = "https://github.com/syedhamidali/radarx/issues"
+changelog = "https://github.com/syedhamidali/radarx/blob/master/changelog.md"
+homepage = "https://github.com/syedhamidali/radarx"
+
+[build-system]
+requires = [
+    "setuptools>=45",
+    "wheel",
+    "setuptools_scm[toml]>=7.0"
+]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+readme = {file = ["README.md", "docs/history.md"], content-type = "text/markdown"}
+
+[tool.setuptools_scm]
+write_to = "radarx/version.py"
+version_scheme = "guess-next-dev"
+local_scheme = "no-local-version"  # This line prevents local versions
+fallback_version = "999"
+
+[tool.black]
+target-version = ["py39"]
+line-length = 88
+
+[tool.ruff]
+target-version = "py39"
+builtins = ["ellipsis"]
+exclude = [
+    ".eggs",
+    "doc"
+]
+
+[tool.ruff.lint]
+ignore = [
+    "E402",  # module level import not at top of file
+    "E501",  # line too long - let black worry about that
+    "E731"   # do not assign a lambda expression, use a def
+]
+select = [
+    # Pyflakes
+    "F",
+    # Pycodestyle
+    "E", "W",
+    # isort
+    "I",
+    # Pyupgrade
+    "UP"
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["radarx"]
