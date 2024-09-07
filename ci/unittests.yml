@@ -1,0 +1,28 @@
+name: radarx-unittests
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.9
+  - codecov
+  - cmweather
+  - coverage
+  - dask
+  - fsspec
+  - h5netcdf
+  - h5py
+  - lat_lon_parser
+  - netCDF4
+  - numpy
+  - open-radar-data>=0.3.0
+  - pip
+  - pyproj
+  - pytest
+  - pytest-cov
+  - pytest-doctestplus
+  - pytest-sugar
+  - pytest-xdist
+  - scipy
+  - setuptools
+  - xarray
+  - xarray-datatree>=0.0.10
+  - xmltodict
