@@ -27,14 +27,18 @@ Author:
     Email: hamidsyed37@gmail.com
 """
 
-
+import logging
 import itertools
-
 import numpy as np
 import xarray as xr
 from datatree import DataTree
 
-__all__ = ["read_sweep", "read_volume"]
+logger = logging.getLogger(__name__)
+
+__all__ = [
+    "read_sweep",
+    "read_volume",
+]
 
 
 def read_sweep(file):
@@ -103,7 +107,7 @@ def read_sweep(file):
     # Handle sweep numbers, Goes 6th
     ds = ds.pipe(_sweep_number)
 
-    # Assign start_end_ray_index, Goes 6th
+    # Assign start_end_ray_index, Goes 7th
     ds = ds.pipe(_assign_sweep_metadata)
 
     ds = ds.pipe(_assign_metadata)
@@ -421,10 +425,26 @@ def _determine_nsweeps(files):
     If the nsweeps cannot be determined from metadata, the
     function will detect where the sweep elevations start
     decreasing to identify the start of a new volume.
+
+    Parameters
+    ----------
+    files : list of str
+        List of file paths corresponding to radar sweep files.
+
+    Returns
+    -------
+    sweep_groups : list of list of str
+        List of sweep groups where each group contains radar sweep files
+        corresponding to a complete volume.
+
+    Notes
+    -----
+    The function first attempts to retrieve the number of sweeps (nsweeps)
+    from the metadata of the files. If it cannot be determined, it uses
+    the elevation angles to detect when the sweep elevations decrease,
+    which indicates the start of a new volume.
     """
     import re
-
-    import xarray as xr
 
     def _natural_sort_key(s, _re=re.compile(r"(\d+)")):
         return [int(t) if i & 1 else t.lower() for i, t in enumerate(_re.split(s))]
@@ -434,35 +454,36 @@ def _determine_nsweeps(files):
         if len(files):
             file = files[0]
         else:
+            logger.warning("No files provided.")
             return []
 
-        try:
-            ds = read_sweep(file)
-        except OSError:
-            ds = xr.open_dataset(file, engine="netcdf4")
+        ds = xr.open_dataset(file, engine="netcdf4")
 
         # Try to retrieve nsweeps from the dataset
         try:
-            nsweeps = ds.attrs["nsweeps"]
+            nsweeps = (
+                ds.attrs.get("nsweeps")
+                or ds.sizes.get("sweep")
+                or ds["sweep"].size
+                or ds["fixed_angle"].size
+            )
         except KeyError:
-            nsweeps = ds.sizes["sweep"]
-        except KeyError:
-            nsweeps = ds["sweep"].size
-        except KeyError:
-            nsweeps = ds["fixed_angle"].size
+            logger.error("Could not determine nsweeps from dataset metadata.")
+            raise ValueError("Could not determine nsweeps from dataset metadata.")
 
         # Sort the files naturally and group them by nsweeps
         files = sorted(files, key=_natural_sort_key)
-        sweep_groups = []
-        for i in range(0, len(files), nsweeps):
-            sweep_groups.append(files[i : i + nsweeps])
+        sweep_groups = [files[i : i + nsweeps] for i in range(0, len(files), nsweeps)]
 
         del ds
-
+        logger.info(
+            f"Successfully grouped files into {len(sweep_groups)} sweep groups."
+        )
         return sweep_groups
 
-    except Exception:
+    except Exception as e:
         # Fallback method if nsweeps cannot be determined from metadata
+        logger.warning(f"Failed to determine nsweeps from metadata: {e}")
         sweep_groups = []
         sweep_times = []
         sweep_elevs = []
@@ -471,60 +492,87 @@ def _determine_nsweeps(files):
         # Collect sweep times and elevations
         for file in files:
             ds = xr.open_dataset(file, engine="netcdf4")
-            if "esStartTime" in ds:
-                estime = (
-                    ds["esStartTime"].dt.strftime("%Y-%m-%dT%H:%M:%S").values.item()
-                )
-            elif "time_coverage_start" in ds:
-                estime = (
-                    ds["time_coverage_start"]
-                    .dt.strftime("%Y-%m-%dT%H:%M:%S")
-                    .values.item()
-                )
+            estime = ds.get("esStartTime", ds.get("time_coverage_start", None))
+            if estime is not None:
+                estime = estime.dt.strftime("%Y-%m-%dT%H:%M:%S").values.item()
 
-            if "elevationAngle" in ds:
-                ele_ang = ds["elevationAngle"].values.item()
-            elif "fixed_angle" in ds:
-                ele_ang = ds["fixed_angle"].values.item()
+            ele_ang = ds.get("elevationAngle", ds.get("fixed_angle", None))
+            if ele_ang is not None:
+                ele_ang = ele_ang.values.item()
+
             sweep_times.append(estime)
-            sweep_elevs.append(ele_ang)
+            sweep_elevs.append(ele_ang if ele_ang is not None else float("nan"))
             del ds
 
         # Determine sweep groups based on elevation increases/decreases
         current_group = []
-        nsweeps = 0
-
         for i in range(1, len(sweep_elevs)):
             current_group.append(files[i - 1])
 
             # Check if the elevation decreases, indicating the start of a new volume
-            if sweep_elevs[i] < sweep_elevs[i - 1]:
-                nsweeps = len(current_group)
+            if (
+                not (np.isnan(sweep_elevs[i]) or np.isnan(sweep_elevs[i - 1]))
+                and sweep_elevs[i] < sweep_elevs[i - 1]
+            ):
+                logger.info(f"Detected volume change at file index {i}.")
                 sweep_groups.append(current_group)
                 current_group = []
 
         # Append the last group
         current_group.append(files[-1])
         sweep_groups.append(current_group)
+        logger.info(f"Total number of sweep groups determined: {len(sweep_groups)}")
 
         return sweep_groups
 
 
 def _determine_volumes(files):
-    """Determine Volumes"""
+    """
+    Determine radar volumes from files.
+
+    Parameters
+    ----------
+    files : list of str
+        List of file paths corresponding to radar sweep files.
+
+    Returns
+    -------
+    volumes : list of list of xarray.Dataset
+        A list of radar volumes, where each volume is a list of xarray.Dataset objects.
+        Each dataset corresponds to a radar sweep.
+
+    Notes
+    -----
+    This function attempts to read radar sweep files using the `read_sweep` function.
+    If `read_sweep` raises an exception, the function falls back to `xarray.open_dataset`
+    for opening the file.
+    """
+    # Determine sweep lists based on the number of sweeps
     swp_lists = _determine_nsweeps(files)
     volumes = []
-    for i, swp_list in enumerate(swp_lists):
-        dataset = []
+
+    for swp_list in swp_lists:
+        volume = []
         for file in swp_list:
             try:
+                # Attempt to read sweep using custom `read_sweep`
                 ds = read_sweep(file)
-            except OSError:
-                ds = xr.open_dataset(file)
-            dataset.append(ds)
-            del ds
-        volumes.append(dataset)
-        del dataset
+            except (OSError, ValueError, KeyError) as e:
+                # Log the specific exception with the filename and fall back to `open_dataset`
+                logger.warning(
+                    f"Failed to read sweep from {file} with read_sweep. Error: {e}. Falling back to open_dataset."
+                )
+                try:
+                    ds = xr.open_dataset(file)
+                except Exception as open_error:
+                    logger.error(
+                        f"Failed to open {file} with open_dataset. Error: {open_error}"
+                    )
+                    raise open_error  # Raise the exception if fallback also fails
+
+            volume.append(ds)
+        volumes.append(volume)
+
     return volumes
 
 

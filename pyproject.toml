@@ -31,7 +31,8 @@ dev = [
     "coverage",  # testing
     "mypy",  # linting
     "pytest",  # testing
-    "ruff"  # linting
+    "ruff",  # linting
+    "pooch"  # data retrieval for testing
 ]
 
 [project.urls]
