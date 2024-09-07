@@ -12,4 +12,6 @@ Xarray Backends
 .. automodule:: radarx.io.imd
 """
 
-from imd import read_sweep, read_volume  # noqa
+from .imd import read_sweep, read_volume  # noqa
+
+__all__ = [s for s in dir() if not s.startswith("_")]

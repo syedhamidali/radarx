@@ -12,5 +12,6 @@ except Exception:
     __version__ = "999"
 
 from . import io  # noqa
+from . import testing  # noqa
 
 __all__ = [s for s in dir() if not s.startswith("_")]

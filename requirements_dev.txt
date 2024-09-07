@@ -10,3 +10,4 @@ pytest
 black
 isort
 fsspec
+pooch
