@@ -2,6 +2,7 @@
 # Copyright (c) 2019-2022, wradlib developers.
 # Copyright (c) 2022-2024, openradar developers.
 # Distributed under the MIT License. See LICENSE.txt for more info.
+# Borrowed from xradar
 
 import os
 import sys
