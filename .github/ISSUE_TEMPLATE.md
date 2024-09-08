@@ -1,4 +1,4 @@
-* xradar version:
+* radarx version:
 * Python version:
 * Operating System:
 
