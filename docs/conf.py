@@ -75,6 +75,7 @@ master_doc = "index"
 project = "radarx"
 copyright = "2022-2024, Hamid Ali Syed"
 author = "Hamid Ali Syed"
+html_title = project
 
 # Get radarx version and modules
 import radarx  # noqa
