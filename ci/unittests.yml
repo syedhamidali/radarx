@@ -24,5 +24,7 @@ dependencies:
   - scipy
   - setuptools
   - xarray
+  - xradar
+  - wradlib
   - xarray-datatree>=0.0.10
   - xmltodict
