@@ -30,3 +30,5 @@ dependencies:
   - arm_pyart
   - ffmpeg
   - zarr
+  - pooch
+  - xradar
