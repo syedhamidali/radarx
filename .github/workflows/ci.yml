@@ -112,9 +112,12 @@ jobs:
     - name: Version Info
       run: |
         python -c "import radarx; print(radarx.version.version)"
-    - name: Test with pytest
+    # - name: Test with pytest
+    #   run: |
+    #     pytest -n auto --dist loadfile --verbose --durations=15 --cov-report xml:coverage_notebook.xml --cov=radarx --pyargs examples/notebooks
+    - name: Test with pytest and collect coverage
       run: |
-        pytest -n auto --dist loadfile --verbose --durations=15 --cov-report xml:coverage_notebook.xml --cov=radarx --pyargs examples/notebooks
+          pytest --nbval --verbose --durations=15 --cov=radarx --cov-report=xml:coverage_notebook.xml examples/notebooks
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4
       with:
