@@ -140,7 +140,7 @@ subprocess.check_call(["cp", "-rp", "../examples/notebooks", "."])
 
 # -- Options for HTML output -------------------------------------------
 html_theme = "pydata_sphinx_theme"
-html_logo = "_static/Radarx_logo_micro.png"
+html_logo = "_static/radarx_logo_micro.svg"
 
 
 def _custom_edit_url(
