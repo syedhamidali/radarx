@@ -23,7 +23,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Atmospheric Science"
 ]
 license = {text = "MIT license"}
-dynamic = ["version", "dependencies", "optional-dependencies", "readme"]
+dynamic = ["version", "dependencies", "readme"]
 
 [project.optional-dependencies]
 dev = [
