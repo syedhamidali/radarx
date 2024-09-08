@@ -1,6 +1,6 @@
 # Radarx
 
-![Radarx Logo](docs/_static/Radarx_logo.png)
+![Radarx Logo](docs/_static/radarx_logo_micro.svg)
 
 [![Python Versions](https://img.shields.io/badge/Python-3.9%20|%203.10%20|%203.11%20|%203.12-blue)](https://www.python.org/downloads/)
 [![PyPI Version](https://img.shields.io/pypi/v/radarx.svg)](https://pypi.org/project/radarx/)
