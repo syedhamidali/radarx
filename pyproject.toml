@@ -23,8 +23,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Atmospheric Science"
 ]
 license = {text = "MIT license"}
-dependencies = []
-dynamic = ["version"]
+dynamic = ["version", "dependencies", "optional-dependencies", "readme"]
 
 [project.optional-dependencies]
 dev = [
@@ -39,6 +38,7 @@ dev = [
 bugs = "https://github.com/syedhamidali/radarx/issues"
 changelog = "https://github.com/syedhamidali/radarx/blob/master/changelog.md"
 homepage = "https://github.com/syedhamidali/radarx"
+documentation = "https://radarx.reathedocs.io"
 
 [build-system]
 requires = [
@@ -55,7 +55,6 @@ readme = {file = ["README.md", "docs/history.md"], content-type = "text/markdown
 [tool.setuptools_scm]
 write_to = "radarx/version.py"
 version_scheme = "guess-next-dev"
-local_scheme = "no-local-version"  # This line prevents local versions
 fallback_version = "999"
 
 [tool.black]
