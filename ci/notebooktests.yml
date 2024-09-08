@@ -35,3 +35,4 @@ dependencies:
   - arm_pyart
   - ffmpeg
   - zarr
+  - nbval
