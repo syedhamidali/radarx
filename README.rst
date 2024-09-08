@@ -17,7 +17,7 @@ Radarx: Xarray based toolkit for Radar Data Analysis
     :target: https://pypi.org/project/radarx/
     :alt: Python Version
 
-Radarx is a Python library built for radar data processing, especially targeting data from IMD (India Meteorological Department) radars. The library integrates tightly with `xradar` and leverages `xarray` and `DataTree` structures to enable easy and efficient manipulation of radar sweeps and volume data.
+Radarx is a Python library built for radar data processing, and visualization. The library integrates tightly with `xradar` and leverages `xarray` and `DataTree` structures to enable easy and efficient manipulation of radar sweeps and volume data.
 
 =================
 Key Features
@@ -25,10 +25,9 @@ Key Features
 
 - **Xradar Integration**: Uses `xradar` for reading radar data in different formats, providing a consistent interface for various radar types.
 - **IMD Radar Data Support**: Special support for reading and processing IMD radar data in NetCDF format.
-- **Volume Scanning**: Utilities to process radar sweeps and compile them into complete volume scans.
+- **Volume Scanning**: Utilities to process radar sweeps and group them into complete volume scans.
 - **Data Gridding**: Provides tools for converting radar data to regular Cartesian grids, supporting complex radar geometries.
 - **Xarray and DataTree Structured Data**: Radar data is returned as `xarray` datasets, organized into `DataTree` structures for easy navigation and analysis.
-- **Customizable Analysis**: Includes functionality to compute radar variables like DBZ, VEL, and other commonly used radar products.
 
 =================
 Installation
