@@ -1,21 +1,78 @@
 .. important::
     This project is currently in **high development mode**. Features may change frequently, and some parts of the library may be incomplete or subject to change. Please proceed with caution.
 
-====================================================
-Radarx: Xarray based toolkit for Radar Data Analysis
-====================================================
+======
+Radarx
+======
 
-.. image:: https://img.shields.io/pypi/v/radarx.svg
+**Xarray based toolkit for Radar Data Analysis**
+
+Deployment
+----------
+.. image:: https://badge.fury.io/py/radarx.svg
     :target: https://pypi.org/project/radarx/
     :alt: PyPI
 
-.. image:: https://img.shields.io/github/license/syedhamidali/radarx
-    :target: https://github.com/syedhamidali/radarx
-    :alt: License
+.. image:: https://img.shields.io/conda/vn/conda-forge/radarx.svg?logo=conda-forge&logoColor=white
+    :target: https://anaconda.org/conda-forge/radarx
+    :alt: Conda
 
-.. image:: https://img.shields.io/pypi/pyversions/radarx.svg
+
+Activity
+--------
+.. image:: https://img.shields.io/pypi/dm/radarx.svg?label=PyPI%20downloads
     :target: https://pypi.org/project/radarx/
-    :alt: Python Version
+    :alt: PyPI Downloads
+
+.. image:: https://img.shields.io/conda/dn/conda-forge/radarx.svg?label=Conda%20downloads
+    :target: https://anaconda.org/conda-forge/radarx
+    :alt: Conda Downloads
+
+Python Versions
+---------------
+.. image:: https://img.shields.io/badge/Python-3.9%20%203.10%20%203.11%20%203.12-blue
+    :target: https://www.python.org/downloads/
+    :alt: Python Versions
+
+Supported Systems
+-----------------
+.. image:: https://img.shields.io/github/actions/workflow/status/syedhamidali/radarx/.github/workflows/tests.yaml?label=Linux
+    :target: https://github.com/syedhamidali/radarx/actions/workflows/tests.yaml
+    :alt: Linux
+
+.. image:: https://img.shields.io/github/actions/workflow/status/syedhamidali/radarx/.github/workflows/tests.yaml?label=macOS
+    :target: https://github.com/syedhamidali/radarx/actions/workflows/tests.yaml
+    :alt: macOS
+
+.. image:: https://img.shields.io/github/actions/workflow/status/syedhamidali/radarx/.github/workflows/tests_windows.yaml?label=Windows
+    :target: https://github.com/syedhamidali/radarx/actions/workflows/tests_windows.yaml
+    :alt: Windows
+
+Build Status
+------------
+.. image:: https://github.com/syedhamidali/radarx/actions/workflows/tests.yaml/badge.svg
+    :target: https://github.com/syedhamidali/radarx/actions/workflows/tests.yaml
+    :alt: Tests
+
+.. image:: https://readthedocs.org/projects/radarx/badge/?version=latest
+    :target: https://radarx.readthedocs.io/en/latest/
+    :alt: Docs
+
+Linting and Code Quality
+------------------------
+.. image:: https://img.shields.io/badge/code%20style-black-000000.svg
+    :target: https://github.com/psf/black
+    :alt: Black
+
+.. image:: https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json
+    :target: https://github.com/astral-sh/ruff
+    :alt: Ruff
+
+License
+-------
+.. image:: https://img.shields.io/github/license/syedhamidali/radarx
+    :target: https://github.com/syedhamidali/radarx/blob/main/LICENSE
+    :alt: License
 
 Radarx is a Python library built for radar data processing, and visualization. The library integrates tightly with `xradar` and leverages `xarray` and `DataTree` structures to enable easy and efficient manipulation of radar sweeps and volume data.
 
