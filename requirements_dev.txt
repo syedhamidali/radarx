@@ -11,3 +11,5 @@ black
 isort
 fsspec
 pooch
+nbval
+pytest-cov
