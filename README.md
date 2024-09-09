@@ -57,7 +57,7 @@ python -m pip install radarx
 Alternatively, you can install it from source by cloning the repository
 and running:
 
-``` {.bash}
+```bash
 git clone https://github.com/syedhamidali/radarx.git
 cd radarx
 python -m pip install .
@@ -68,7 +68,7 @@ python -m pip install .
 Here's a simple example of how to use Radarx with [xradar]{.title-ref}
 to load and process a volume scan:
 
-``` {.python}
+```python
 import radarx as rx
 
 # List of radar files
