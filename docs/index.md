@@ -11,6 +11,7 @@ html_theme.sidebar_secondary.remove: true
 **Date:** {{today}}
 
 ```{include} ../README.md
+:parser: myst
 ```
 
 ```{toctree}

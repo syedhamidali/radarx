@@ -45,8 +45,12 @@ extensions = [
     "nbsphinx",
 ]
 
+# Enable additional MyST extensions
 myst_enable_extensions = [
     "substitution",
+    "colon_fence",  # For :: used in directives
+    "dollarmath",  # For LaTeX math
+    # "linkify",      # For automatic links
 ]
 
 extlinks = {
