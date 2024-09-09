@@ -1,6 +1,6 @@
 # Radarx
 
-![Radarx Logo](docs/_static/radarx_logo_micro.svg)
+![Radarx Logo](https://github.com/syedhamidali/radarx/raw/main/docs/_static/Radarx_Logo_micro.png)
 
 [![Python Versions](https://img.shields.io/badge/Python-3.9%20|%203.10%20|%203.11%20|%203.12-blue)](https://www.python.org/downloads/)
 [![PyPI Version](https://img.shields.io/pypi/v/radarx.svg)](https://pypi.org/project/radarx/)
@@ -8,20 +8,19 @@
 
 [![Conda Version](https://img.shields.io/conda/vn/conda-forge/radarx.svg?logo=conda-forge&logoColor=white)](https://anaconda.org/conda-forge/radarx)
 [![Conda Downloads](https://img.shields.io/conda/dn/conda-forge/radarx.svg?label=Conda%20downloads)](https://anaconda.org/conda-forge/radarx)
-[![CI](https://github.com/syedhamidali/radarx/actions/workflows/ci.yml/badge.svg)](https://github.com/syedhamidali/radarx/actions/workflows/ci.yml)
 
+[![CI](https://github.com/syedhamidali/radarx/actions/workflows/ci.yml/badge.svg)](https://github.com/syedhamidali/radarx/actions/workflows/ci.yml)
 [![Build distribution](https://github.com/syedhamidali/radarx/actions/workflows/upload_pypi.yml/badge.svg)](https://github.com/syedhamidali/radarx/actions/workflows/upload_pypi.yml)
 [![RTD Version](https://readthedocs.org/projects/radarx/badge/?version=latest)](https://radarx.readthedocs.io/en/latest/?version=latest)
 
-[![Linux](https://img.shields.io/github/actions/workflow/status/syedhamidali/radarx/.github/workflows/tests.yaml?label=Linux)](https://github.com/syedhamidali/radarx/actions/workflows/tests.yaml)
-[![macOS](https://img.shields.io/github/actions/workflow/status/syedhamidali/radarx/.github/workflows/tests.yaml?label=macOS)](https://github.com/syedhamidali/radarx/actions/workflows/tests.yaml)
-[![Windows](https://img.shields.io/github/actions/workflow/status/syedhamidali/radarx/.github/workflows/tests_windows.yaml?label=Windows)](https://github.com/syedhamidali/radarx/actions/workflows/tests_windows.yaml)
-
-[![Tests](https://github.com/syedhamidali/radarx/actions/workflows/tests.yaml/badge.svg)](https://github.com/syedhamidali/radarx/actions/workflows/tests.yaml)
 [![Docs](https://readthedocs.org/projects/radarx/badge/?version=latest)](https://radarx.readthedocs.io/en/latest/)
 [![Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![License](https://img.shields.io/github/license/syedhamidali/radarx)](https://github.com/syedhamidali/radarx/blob/main/LICENSE)
+
+[![Linux](https://img.shields.io/github/actions/workflow/status/syedhamidali/radarx/.github/workflows/tests.yaml?label=Linux)](https://github.com/syedhamidali/radarx/actions/workflows/tests.yaml)
+[![macOS](https://img.shields.io/github/actions/workflow/status/syedhamidali/radarx/.github/workflows/tests.yaml?label=macOS)](https://github.com/syedhamidali/radarx/actions/workflows/tests.yaml)
+[![Windows](https://img.shields.io/github/actions/workflow/status/syedhamidali/radarx/.github/workflows/tests_windows.yaml?label=Windows)](https://github.com/syedhamidali/radarx/actions/workflows/tests_windows.yaml)
 
 
 Radarx is a Python library built for radar data processing and visualization. The library integrates tightly with [xradar](https://xradar.readthedocs.io/en/latest/) and leverages [xarray](http://xarray.pydata.org/) and [DataTree](https://xarray.pydata.org/en/stable/related-projects/datree.html) structures to enable easy and efficient manipulation of radar sweeps and volume data.
