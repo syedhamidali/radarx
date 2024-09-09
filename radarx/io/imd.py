@@ -3,14 +3,14 @@
 # Distributed under the MIT License. See LICENSE for more info.
 
 """
-IMD Data Reader
-===============
+IMD Reader
+==========
 
 This sub-module provides functionality to read and process single radar files
 from the Indian Meteorological Department (IMD), returning a quasi-CF-Radial
 xarray Dataset.
 
-Example:
+Example usage:
 
     import radarx as rx
     dtree = rx.io.read_sweep(filename)
