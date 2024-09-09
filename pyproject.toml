@@ -1,6 +1,7 @@
 [project]
 name = "radarx"
 description = "Xarray based radar toolkit"
+readme = "README.md"
 authors = [
   {name = "Hamid Ali Syed", email = "hamidsyed37@gmail.com"}
 ]
@@ -22,8 +23,9 @@ classifiers = [
     "Topic :: Scientific/Engineering",
     "Topic :: Scientific/Engineering :: Atmospheric Science"
 ]
+
 license = {text = "MIT license"}
-dynamic = ["version"]
+dynamic = ["version", "dependencies"]
 
 [project.urls]
 bugs = "https://github.com/syedhamidali/radarx/issues"
