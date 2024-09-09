@@ -11,11 +11,10 @@ html_theme.sidebar_secondary.remove: true
 **Date:** {{today}}
 
 ```{include} ../README.md
-:parser: myst
 ```
 
 ```{toctree}
-:maxdepth: 2
+:maxdepth: 3
 :caption: Contents
 
 installation
@@ -24,6 +23,7 @@ modules
 contributing
 authors
 history
+reference
 ```
 
 Indices and tables
