@@ -4,7 +4,6 @@ description = "Xarray based radar toolkit"
 readme = "README.md"
 long_description = "README.md"
 long_description_content_type = "text/markdown"
-description = "Xarray based radar toolkit"
 authors = [
   {name = "Hamid Ali Syed", email = "hamidsyed37@gmail.com"}
 ]
