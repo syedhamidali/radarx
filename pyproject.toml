@@ -23,16 +23,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Atmospheric Science"
 ]
 license = {text = "MIT license"}
-dynamic = ["version", "dependencies", "readme"]
-
-[project.optional-dependencies]
-dev = [
-    "coverage",  # testing
-    "mypy",  # linting
-    "pytest",  # testing
-    "ruff",  # linting
-    "pooch"  # data retrieval for testing
-]
+dynamic = ["version"]
 
 [project.urls]
 bugs = "https://github.com/syedhamidali/radarx/issues"
@@ -41,11 +32,10 @@ homepage = "https://github.com/syedhamidali/radarx"
 documentation = "https://radarx.reathedocs.io"
 
 [build-system]
-requires = [
-    "setuptools>=45",
-    "wheel",
-    "setuptools_scm[toml]>=7.0"
-]
+requires = ["setuptools>=64",
+            "setuptools-scm>=8",
+            "wheel",
+            ]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.dynamic]
@@ -54,8 +44,38 @@ readme = {file = ["README.md", "docs/history.md"], content-type = "text/markdown
 
 [tool.setuptools_scm]
 write_to = "radarx/version.py"
-version_scheme = "guess-next-dev"
-fallback_version = "999"
+# version_scheme = "post-release"
+local_scheme = "no-local-version"  # To avoid post/dev versions
+fallback_version = "9999"
+
+
+[project.optional-dependencies]
+dev = ["coverage",  # testing
+        "mypy",  # linting
+        "pytest",  # testing
+        "ruff",  # linting
+        "pooch",  # data retrieval for testing
+        "pre-commit",
+        "black[jupyter]",
+        "blackdoc",
+        "codespell",
+        "pytest-cov",
+        "pytest-mock",
+        "pytest-check",
+        "pytest-sugar",
+        "pytest-watcher",
+        "deepdiff",
+        "pip-tools",
+        "bumpver",
+        "twine",
+        "wheel",
+        "build",
+        "setuptools>=61.0.0",
+        "sphinx",
+        "sphinx-gallery",
+        "sphinx-book-theme",
+        "nbsphinx",
+        "sphinx_mdinclude"]
 
 [tool.black]
 target-version = ["py39"]
