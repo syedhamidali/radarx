@@ -16,6 +16,7 @@
 [![Docs](https://readthedocs.org/projects/radarx/badge/?version=latest)](https://radarx.readthedocs.io/en/latest/)
 [![Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![CodeQL](https://github.com/syedhamidali/radarx/actions/workflows/codeql.yml/badge.svg)](https://github.com/syedhamidali/radarx/actions/workflows/codeql.yml)
 [![License](https://img.shields.io/github/license/syedhamidali/radarx)](https://github.com/syedhamidali/radarx/blob/main/LICENSE)
 
 [![Linux](https://img.shields.io/github/actions/workflow/status/syedhamidali/radarx/.github/workflows/tests.yaml?label=Linux)](https://github.com/syedhamidali/radarx/actions/workflows/tests.yaml)
