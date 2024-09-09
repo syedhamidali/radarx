@@ -25,7 +25,7 @@ classifiers = [
 ]
 
 license = {text = "MIT license"}
-dynamic = ["version", "dependencies", "readme"]
+dynamic = ["version", "dependencies"]
 
 [project.urls]
 bugs = "https://github.com/syedhamidali/radarx/issues"
