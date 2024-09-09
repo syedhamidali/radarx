@@ -1,6 +1,10 @@
 [project]
 name = "radarx"
 description = "Xarray based radar toolkit"
+readme = "README.md"
+long_description = "README.md"
+long_description_content_type = "text/markdown"
+description = "Xarray based radar toolkit"
 authors = [
   {name = "Hamid Ali Syed", email = "hamidsyed37@gmail.com"}
 ]
@@ -40,7 +44,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
-readme = {file = ["README.md", "docs/history.md"], content-type = "text/markdown"}
+
+# readme = "README.md"
+# {file = ["README.md", "docs/history.md"], content-type = "text/markdown"}
 
 [tool.setuptools_scm]
 write_to = "radarx/version.py"
