@@ -12,16 +12,22 @@
 [![CI](https://github.com/syedhamidali/radarx/actions/workflows/ci.yml/badge.svg)](https://github.com/syedhamidali/radarx/actions/workflows/ci.yml)
 [![Build distribution](https://github.com/syedhamidali/radarx/actions/workflows/upload_pypi.yml/badge.svg)](https://github.com/syedhamidali/radarx/actions/workflows/upload_pypi.yml)
 [![RTD Version](https://readthedocs.org/projects/radarx/badge/?version=latest)](https://radarx.readthedocs.io/en/latest/?version=latest)
+[![License](https://img.shields.io/github/license/syedhamidali/radarx)](https://github.com/syedhamidali/radarx/blob/main/LICENSE)
+![pre-commit enabled](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)
 
-[![Docs](https://readthedocs.org/projects/radarx/badge/?version=latest)](https://radarx.readthedocs.io/en/latest/)
+<!-- [![Docs](https://readthedocs.org/projects/radarx/badge/?version=latest)](https://radarx.readthedocs.io/en/latest/) -->
 [![Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![CodeQL](https://github.com/syedhamidali/radarx/actions/workflows/codeql.yml/badge.svg)](https://github.com/syedhamidali/radarx/actions/workflows/codeql.yml)
-[![License](https://img.shields.io/github/license/syedhamidali/radarx)](https://github.com/syedhamidali/radarx/blob/main/LICENSE)
+[![CodeQL](https://github.com/syedhamidali/radarx/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/syedhamidali/radarx/actions/workflows/github-code-scanning/codeql)
+[![CodeFactor](https://www.codefactor.io/repository/github/syedhamidali/radarx/badge)](https://www.codefactor.io/repository/github/syedhamidali/radarx)
+[![codebeat badge](https://codebeat.co/badges/9e6434e5-d40c-48d2-8f77-7e81241bd965)](https://codebeat.co/projects/github-com-syedhamidali-radarx-main)
+[![codecov](https://codecov.io/gh/syedhamidali/radarx/graph/badge.svg?token=59WL4GNQOP)](https://codecov.io/gh/syedhamidali/radarx)
+[![Codacy Badge](https://app.codacy.com/project/badge/Grade/092c74b48c0443aaa35cd292fa5aef54)](https://app.codacy.com/gh/syedhamidali/radarx/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
 
-[![Linux](https://img.shields.io/github/actions/workflow/status/syedhamidali/radarx/.github/workflows/tests.yaml?label=Linux)](https://github.com/syedhamidali/radarx/actions/workflows/tests.yaml)
+
+<!-- [![Linux](https://img.shields.io/github/actions/workflow/status/syedhamidali/radarx/.github/workflows/tests.yaml?label=Linux)](https://github.com/syedhamidali/radarx/actions/workflows/tests.yaml)
 [![macOS](https://img.shields.io/github/actions/workflow/status/syedhamidali/radarx/.github/workflows/tests.yaml?label=macOS)](https://github.com/syedhamidali/radarx/actions/workflows/tests.yaml)
-[![Windows](https://img.shields.io/github/actions/workflow/status/syedhamidali/radarx/.github/workflows/tests_windows.yaml?label=Windows)](https://github.com/syedhamidali/radarx/actions/workflows/tests_windows.yaml)
+[![Windows](https://img.shields.io/github/actions/workflow/status/syedhamidali/radarx/.github/workflows/tests_windows.yaml?label=Windows)](https://github.com/syedhamidali/radarx/actions/workflows/tests_windows.yaml) -->
 
 
 Radarx is a Python library built for radar data processing and visualization. The library integrates tightly with [xradar](https://xradar.readthedocs.io/en/latest/) and leverages [xarray](http://xarray.pydata.org/) and [DataTree](https://xarray.pydata.org/en/stable/related-projects/datree.html) structures to enable easy and efficient manipulation of radar sweeps and volume data.
@@ -79,14 +85,13 @@ volume = rx.io.read_volume(files)
 dbz_data = volume['/volume_0']['DBZ']
 ```
 
-Radarx leverages [xradar]{.title-ref} to handle radar file formats and
-integrates smoothly with [xarray]{.title-ref} and [DataTree]{.title-ref}
-for organizing and analyzing radar data.
+Radarx leverages [xradar](https://xradar.readthedocs.io/en/latest/) to handle radar file formats and
+integrates smoothly with [xarray](http://xarray.pydata.org/) and [DataTree](https://xarray.pydata.org/en/stable/related-projects/datree.html) for organizing and analyzing radar data.
 
 
 ## Xradar Integration
 
-Radarx makes use of the powerful [xradar]{.title-ref} library for radar data ingestion and format handling. This ensures that the package is flexible and can handle a variety of radar data formats, including ODIM_H5, Sigmet, and others. For more advanced users, [xradar]{.title-ref} functionality can be directly accessed to extend Radarx\'s capabilities.
+Radarx makes use of the powerful [xradar](https://xradar.readthedocs.io/en/latest/) library for radar data ingestion and format handling. This ensures that the package is flexible and can handle a variety of radar data formats, including ODIM_H5, Sigmet, and others. For more advanced users, [xradar](https://xradar.readthedocs.io/en/latest/) functionality can be directly accessed to extend Radarx\'s capabilities.
 
 
 ## Documentation
