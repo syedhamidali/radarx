@@ -54,7 +54,7 @@ readme = {file = ["README.md", "docs/history.md"], content-type = "text/markdown
 
 [tool.setuptools_scm]
 write_to = "radarx/version.py"
-version_scheme = "guess-next-dev"
+version_scheme = "post-release"
 fallback_version = "999"
 
 [tool.black]
