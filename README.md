@@ -51,7 +51,7 @@ Radarx is a Python library built for radar data processing and visualization. Th
 You can install `radarx` using conda from the `conda-forge` channel (recommended):
 
 ```bash
-$ conda install -c conda-forge radarx
+conda install -c conda-forge radarx
 ```
 
 You can also install `radarx` via pip from PyPI:
