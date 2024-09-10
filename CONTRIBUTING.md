@@ -57,7 +57,7 @@ local development.
 
 2.  Clone your fork locally:
 
-    ``` {.shell}
+    ```bash
     $ git clone git@github.com:your_name_here/radarx.git
     ```
 
@@ -65,7 +65,7 @@ local development.
     virtualenvwrapper installed, this is how you set up your fork for
     local development:
 
-    ``` {.shell}
+    ```bash
     $ mkvirtualenv radarx
     $ cd radarx/
     $ python setup.py develop
@@ -73,7 +73,7 @@ local development.
 
 4.  Create a branch for local development:
 
-    ``` {.shell}
+    ```bash
     $ git checkout -b name-of-your-bugfix-or-feature
     ```
 
@@ -83,7 +83,7 @@ local development.
     flake8 and the tests, including testing other Python versions with
     tox:
 
-    ``` {.shell}
+    ```bash
     $ make lint
     $ make test
     Or
@@ -94,7 +94,7 @@ local development.
 
 6.  Commit your changes and push your branch to GitHub:
 
-    ``` {.shell}
+    ```bash
     $ git add .
     $ git commit -m "Your detailed description of your changes."
     $ git push origin name-of-your-bugfix-or-feature
@@ -119,7 +119,7 @@ Before you submit a pull request, check that it meets these guidelines:
 
 To run a subset of tests:
 
-``` {.shell}
+```bash
 $ pytest tests.test_radarx
 ```
 
@@ -128,16 +128,8 @@ $ pytest tests.test_radarx
 A reminder for the maintainers on how to deploy. Make sure all your
 changes are committed (including an entry in HISTORY.rst). Then run:
 
-``` {.shell}
+```bash
 $ bump2version patch # possible: major / minor / patch
 $ git push
 $ git push --tags
 ```
-
-Travis will then deploy to PyPI if tests pass.
-
-## Code of Conduct
-
-Please note that this project is released with a [Contributor Code of
-Conduct](CODE_OF_CONDUCT.rst). By participating in this project you
-agree to abide by its terms.
