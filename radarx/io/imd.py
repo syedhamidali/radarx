@@ -10,21 +10,11 @@ This sub-module provides functionality to read and process single radar files
 from the Indian Meteorological Department (IMD), returning a quasi-CF-Radial
 xarray Dataset.
 
-Example usage:
-
-    import radarx as rx
-    dtree = rx.io.read_sweep(filename)
-    dtree = rx.io.read_volume(filename)
-
 .. autosummary::
    :nosignatures:
    :toctree: generated/
 
    {}
-
-Author:
-    Hamid Ali Syed
-    Email: hamidsyed37@gmail.com
 """
 
 import logging
@@ -43,17 +33,30 @@ __all__ = [
 
 def read_sweep(file):
     """
-    Reads a single radar file from IMD and processes it into a quasi-CF-Radial dataset.
+    Read and process a single radar file from the Indian Meteorological Department (IMD).
+
+    This function reads radar data and returns it as a quasi-CF-Radial `xarray.Dataset`,
+    with coordinates and variables properly renamed and calculated fields added as necessary.
 
     Parameters
     ----------
-    file : str or Path
-        Path to the radar file.
+    file : str or pathlib.Path
+        The file path to the radar data file.
 
     Returns
     -------
-    ds : xarray.Dataset
-        Quasi-CF-Radial dataset with renamed coordinates, variables, and calculated fields.
+    xarray.Dataset
+        A processed dataset in quasi-CF-Radial format, with variables and coordinates
+        appropriately renamed and additional fields calculated.
+
+    Examples
+    --------
+    >>> import radarx as rx
+    >>> ds = rx.io.read_sweep("path/to/radar/file")
+
+    See Also
+    --------
+    read_volume : Reads and processes radar volume data from multiple sweeps.
     """
     ds = xr.open_dataset(file, engine="netcdf4")
 
@@ -74,6 +77,7 @@ def read_sweep(file):
     # Rename site-related coordinates
     site_coords = {"siteLat": "latitude", "siteLon": "longitude", "siteAlt": "altitude"}
     ds = ds.rename_vars(site_coords)
+    ds = ds.rename_vars({k: v for k, v in site_coords.items() if k in ds})
 
     # Add ray gate spacing variable
     ds["ray_gate_spacing"] = xr.DataArray(
@@ -89,8 +93,10 @@ def read_sweep(file):
         "V": "VEL",  # Velocity
         "W": "WIDTH",  # Spectrum width
     }
+
     # Goes First in order
-    ds = ds.rename_vars(moments)
+    # # Rename only the variables that exist in the dataset
+    ds = ds.rename_vars({k: v for k, v in moments.items() if k in ds})
 
     # Compute range and assign to dataset, Goes 2nd
     ds = ds.pipe(_compute_range)
@@ -119,15 +125,31 @@ def read_sweep(file):
 
 def read_volume(files):
     """
-    Reads multiple files and creates a volume scan data.
+    Read and process multiple radar files to create a volume scan dataset.
+
+    This function reads a list of radar files (or a list of lists, in the case of multi-sweep data)
+    and returns a `DataTree` object containing the processed volume scan data.
 
     Parameters
     ----------
-    files : list of files or list of lists
+    files : list of str or pathlib.Path or list of list of str or pathlib.Path
+        A list of radar file paths or a list of lists, where each sublist represents
+        a separate sweep in the radar volume scan.
 
     Returns
     -------
-    DataTree of the volumes
+    DataTree
+        A `DataTree` object containing the volume scan data, organized by sweep.
+
+    Examples
+    --------
+    >>> import radarx as rx
+    >>> files = ["sweep1.nc", "sweep2.nc", "sweep3.nc"]
+    >>> volume_data = rx.io.read_volume(files)
+
+    See Also
+    --------
+    read_sweep : Read and process a single radar sweep file.
     """
     # Check if there are nested lists and merge them if needed
     if any(isinstance(i, list) for i in files):
