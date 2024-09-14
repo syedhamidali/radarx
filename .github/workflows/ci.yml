@@ -64,15 +64,14 @@ jobs:
     - name: Version Info
       run: |
         python -c "import radarx; print(radarx.version.version)"
-    - name: Test with pytest
+    - name: Test with pytest and collect coverage
       run: |
-        pytest -n auto --dist loadfile --verbose --durations=15 --cov-report xml:coverage_unit.xml --cov=radarx --pyargs tests
+        pytest -n auto --dist loadfile --verbose --durations=15 --cov=radarx --cov-report=xml --cov-report=term-missing tests/ > coverage_unit.xml
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4
       with:
-        file: ./coverage_unit.xml
+        files: coverage_unit.xml
         flags: unittests
-        env_vars: RUNNER_OS,PYTHON_VERSION
         name: codecov-gha
         fail_ci_if_error: false
         token: ${{ secrets.CODECOV_TOKEN }}
@@ -117,13 +116,12 @@ jobs:
     #     pytest -n auto --dist loadfile --verbose --durations=15 --cov-report xml:coverage_notebook.xml --cov=radarx --pyargs examples/notebooks
     - name: Test with pytest and collect coverage
       run: |
-          pytest --nbval --verbose --durations=15 --cov=radarx --cov-report=xml:coverage_notebook.xml examples/notebooks
+        pytest --nbval --verbose --durations=15 --cov=radarx --cov-report=xml --cov-report=term-missing examples/notebooks > coverage_notebook.xml
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4
       with:
-        file: ./coverage_notebook.xml
+        files: coverage_notebook.xml
         flags: notebooktests
-        env_vars: RUNNER_OS,PYTHON_VERSION
         name: codecov-gha
         fail_ci_if_error: false
         token: ${{ secrets.CODECOV_TOKEN }}
