@@ -30,9 +30,11 @@ jobs:
           command: |
             curl -L https://micro.mamba.pm/install.sh | bash
             source ~/micromamba/etc/profile.d/micromamba.sh
+            echo 'source ~/micromamba/etc/profile.d/micromamba.sh' >> ~/.bashrc
       - run:
           name: Create conda environment
           command: |
+            source ~/micromamba/etc/profile.d/micromamba.sh
             micromamba create --yes --name radarx-env python=3.12 numpy
       - run:
           name: Activate environment and install dependencies
