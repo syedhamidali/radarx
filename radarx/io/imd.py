@@ -10,6 +10,12 @@ This sub-module provides functionality to read and process single radar files
 from the Indian Meteorological Department (IMD), returning a quasi-CF-Radial
 xarray Dataset.
 
+Example::
+
+    import radarx as rx
+    dtree = rx.io.read_sweep(filename)
+    dtree = rx.io.read_volume(filename)
+
 .. autosummary::
    :nosignatures:
    :toctree: generated/
@@ -22,21 +28,39 @@ import itertools
 import numpy as np
 import xarray as xr
 from datatree import DataTree
+from xradar.io.backends.cfradial1 import (
+    _get_radar_calibration,
+    _get_required_root_dataset,
+    _get_subgroup,
+    _get_sweep_groups,
+)
+from xradar.io.backends.common import _attach_sweep_groups
+
+from xradar.model import (
+    georeferencing_correction_subgroup,
+    radar_parameters_subgroup,
+)
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "read_sweep",
     "read_volume",
+    "to_cfradial2",
+    "to_cfradial2_volumes",
 ]
+
+__doc__ = __doc__.format("\n   ".join(__all__))
 
 
 def read_sweep(file):
     """
-    Read and process a single radar file from the Indian Meteorological Department (IMD).
+    Read and process a single radar file from the Indian Meteorological
+    Department (IMD).
 
-    This function reads radar data and returns it as a quasi-CF-Radial `xarray.Dataset`,
-    with coordinates and variables properly renamed and calculated fields added as necessary.
+    This function reads radar data and returns it as a quasi-CF-Radial
+    `xarray.Dataset`, with coordinates and variables properly renamed
+    and calculated fields added as necessary.
 
     Parameters
     ----------
@@ -46,8 +70,9 @@ def read_sweep(file):
     Returns
     -------
     xarray.Dataset
-        A processed dataset in quasi-CF-Radial format, with variables and coordinates
-        appropriately renamed and additional fields calculated.
+        A processed dataset in quasi-CF-Radial format, with variables
+        and coordinates appropriately renamed and additional fields
+        calculated.
 
     Examples
     --------
@@ -75,8 +100,13 @@ def read_sweep(file):
     ds = ds.set_coords(["azimuth", "elevation"])
 
     # Rename site-related coordinates
-    site_coords = {"siteLat": "latitude", "siteLon": "longitude", "siteAlt": "altitude"}
-    ds = ds.rename_vars(site_coords)
+    site_coords = {
+        "siteLat": "latitude",
+        "siteLon": "longitude",
+        "siteAlt": "altitude",
+        "groundHeight": "altitude_agl",
+    }
+
     ds = ds.rename_vars({k: v for k, v in site_coords.items() if k in ds})
 
     # Add ray gate spacing variable
@@ -126,9 +156,9 @@ def read_sweep(file):
 def read_volume(files):
     """
     Read and process multiple radar files to create a volume scan dataset.
-
-    This function reads a list of radar files (or a list of lists, in the case of multi-sweep data)
-    and returns a `DataTree` object containing the processed volume scan data.
+    This function reads a list of radar files (or a list of lists, in the
+    case of multi-sweep data) and returns a `DataTree` object containing
+    the processed volume scan data.
 
     Parameters
     ----------
@@ -168,7 +198,8 @@ def read_volume(files):
             volume_datasets.append(vol)  # Only add if it's an xarray.Dataset
         del vol  # Cleanup after each volume is processed
 
-    # Construct the DataTree from the volume datasets (ensure that we pass datasets, not a list)
+    # Construct the DataTree from the volume datasets
+    # (ensure that we pass datasets, not a list)
     volumes = DataTree.from_dict(
         {f"volume_{i}": volume for i, volume in enumerate(volume_datasets)}
     )
@@ -560,14 +591,14 @@ def _determine_volumes(files):
     Returns
     -------
     volumes : list of list of xarray.Dataset
-        A list of radar volumes, where each volume is a list of xarray.Dataset objects.
-        Each dataset corresponds to a radar sweep.
+        A list of radar volumes, where each volume is a list of xarray.Dataset
+        objects. Each dataset corresponds to a radar sweep.
 
     Notes
     -----
-    This function attempts to read radar sweep files using the `read_sweep` function.
-    If `read_sweep` raises an exception, the function falls back to `xarray.open_dataset`
-    for opening the file.
+    This function attempts to read radar sweep files using the `read_sweep`
+    function. If `read_sweep` raises an exception, the function falls back
+    to `xarray.open_dataset` for opening the file.
     """
     # Determine sweep lists based on the number of sweeps
     swp_lists = _determine_nsweeps(files)
@@ -580,9 +611,11 @@ def _determine_volumes(files):
                 # Attempt to read sweep using custom `read_sweep`
                 ds = read_sweep(file)
             except (OSError, ValueError, KeyError) as e:
-                # Log the specific exception with the filename and fall back to `open_dataset`
+                # Log the specific exception with the filename and
+                # fall back to `open_dataset`
                 logger.warning(
-                    f"Failed to read sweep from {file} with read_sweep. Error: {e}. Falling back to open_dataset."
+                    f"Failed to read sweep from {file} with read_sweep. "
+                    f"Error: {e}. Falling back to open_dataset."
                 )
                 try:
                     ds = xr.open_dataset(file)
@@ -712,7 +745,8 @@ def create_volume(dataset_list):
     # Step 3: Concatenate the sweep-specific datasets along the sweep dimension
     sweep_concat = xr.concat(sweep_datasets, dim="sweep")
 
-    # Step 4: Merge the time-concatenated data, sweep-concatenated metadata, and constant variables
+    # Step 4: Merge the time-concatenated data,
+    # sweep-concatenated metadata, and constant variables
     combined_ds = xr.merge([time_concat, sweep_concat])
 
     # Step 5: Assign constant variables (they do not need to be concatenated)
@@ -729,3 +763,145 @@ def create_volume(dataset_list):
     )
 
     return combined_ds
+
+
+# to_cfradial2 function implementation
+def to_cfradial2(ds, **kwargs):
+    """
+    Convert a CfRadial1 Dataset to a CfRadial2 DataTree.
+
+    This function takes a CfRadial1 xarray.Dataset and converts it into a
+    DataTree following the CfRadial2 format. It organizes the dataset into a
+    hierarchical structure with a root node and subgroups for radar parameters,
+    radar calibration, georeferencing corrections, and sweep groups.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        The input dataset in CfRadial1 format to be converted.
+    **kwargs : dict, optional
+        Additional keyword arguments to customize the conversion process:
+        - first_dim : str, default 'auto'
+            Specifies the first dimension of the sweeps.
+        - optional : bool, default True
+            Whether to include optional fields.
+        - site_coords : bool, default True
+            Whether to include site coordinates.
+        - sweep : int or None, default None
+            Specifies a particular sweep to extract.
+
+    Returns
+    -------
+    DataTree
+        A DataTree object representing the dataset in CfRadial2 format.
+
+    Notes
+    -----
+    - This function relies on internal helper functions such as
+      `_get_required_root_dataset`, `_get_subgroup`, `_get_radar_calibration`,
+      `_attach_sweep_groups`, and `_get_sweep_groups`.
+    - The structure of the resulting DataTree includes the root, radar_parameters,
+      radar_calibration (if available), georeferencing_correction, and sweeps.
+
+    Examples
+    --------
+    >>> dtree = to_cfradial2(ds)
+    >>> print(dtree)
+    DataTree('root')
+    ├── DataTree('radar_parameters')
+    ├── DataTree('georeferencing_correction')
+    ├── DataTree('sweep_0')
+    ├── DataTree('sweep_1')
+    ├── ...
+    """
+    first_dim = kwargs.pop("first_dim", "auto")
+    optional = kwargs.pop("optional", True)
+    kwargs.pop("site_coords", True)
+    sweep = kwargs.pop("sweep", None)
+
+    # Create datatree root node with required data
+    root = _get_required_root_dataset(ds, optional=optional)
+    dtree = DataTree(data=root, name="root")
+
+    # Attach additional root metadata groups
+    radar_parameters = _get_subgroup(ds, radar_parameters_subgroup)
+    DataTree(radar_parameters, name="radar_parameters", parent=dtree)
+
+    calib = _get_radar_calibration(ds)
+    if calib:
+        DataTree(calib, name="radar_calibration", parent=dtree)
+
+    georeferencing = _get_subgroup(ds, georeferencing_correction_subgroup)
+    DataTree(georeferencing, name="georeferencing_correction", parent=dtree)
+
+    # Attach sweep child nodes
+    dtree = _attach_sweep_groups(
+        dtree,
+        list(
+            _get_sweep_groups(
+                ds,
+                sweep=sweep,
+                first_dim=first_dim,
+                optional=optional,
+                site_coords=True,
+            ).values()
+        ),
+    )
+
+    return dtree
+
+
+def to_cfradial2_volumes(volumes):
+    """
+    Convert multiple CfRadial1 volumes to a DataTree containing CfRadial2 structures.
+
+    This function processes a collection of radar volumes, converting each volume
+    from CfRadial1 format to CfRadial2 using `to_cfradial2`. It organizes these
+    volumes into a single DataTree where each top-level group corresponds to a
+    different radar volume.
+
+    Parameters
+    ----------
+    volumes : DataTree
+        A DataTree containing multiple radar volumes. Each child node should represent
+        a radar volume.
+
+    Returns
+    -------
+    DataTree
+        A root DataTree object named 'volumes' containing each converted radar volume as
+        a subgroup. Each subgroup (volume_{i}) is structured according to the CfRadial2
+        format, containing sweeps and other relevant metadata.
+
+    Examples
+    --------
+    >>> dtree_root = to_cfradial2_volumes(volumes)
+    >>> print(dtree_root.groups)
+    ['/volume_0', '/volume_1', '/volume_2', ...]
+
+    >>> print(dtree_root['volume_0'].groups)
+    ['/', '/radar_parameters', '/georeferencing_correction', '/sweep_0', '/sweep_1', ...]
+
+    Notes
+    -----
+    - Each radar volume is expected to be a CfRadial1 format dataset.
+    - The resulting structure has a root named 'volumes' with child nodes 'volume_0',
+      'volume_1', etc., each containing its respective subgroups.
+    """
+    volumes_list = []
+    for volume in volumes.children:
+        if "volume_" in volume:
+            vol = volumes[volume].to_dataset()
+            dtree = to_cfradial2(vol)
+            volumes_list.append(dtree)
+    # Create the root DataTree to hold all volumes
+    dtree_root = DataTree(name="volumes")
+
+    # Iterate over the volumes_list to create the required structure
+    for i, vol_dtree in enumerate(volumes_list):
+        # Create a new DataTree for this volume
+        volume_name = f"volume_{i}"
+        # Attach the entire vol_dtree directly to volume_name
+        dtree_root[volume_name] = vol_dtree
+
+    return dtree_root
