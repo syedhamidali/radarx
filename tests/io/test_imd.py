@@ -15,6 +15,8 @@ from radarx.io.imd import (
     _time_coverage,
     _sweep_number,
     _assign_metadata,
+    to_cfradial2,
+    to_cfradial2_volumes,
 )
 from radarx.testing.test_data_imd import fetch_imd_test_data
 import xarray as xr
@@ -442,6 +444,78 @@ def test_determine_volumes_fallback_fail(
 
     with pytest.raises(IOError, match="open_dataset failed"):
         _determine_volumes(radar_test_files)
+
+
+def test_to_cfradial2(imd_test_data):
+    """
+    Test the to_cfradial2 function to ensure it correctly converts a CfRadial1 Dataset to CfRadial2.
+    """
+    files = [
+        imd_test_data["GOA210515003646-IMD-C.nc"],
+        imd_test_data["GOA210515003646-IMD-C.nc.1"],
+    ]
+    dtree = read_volume(files)
+
+    dtree = to_cfradial2(dtree["volume_0"].to_dataset())
+
+    # Assertions to check the structure of the DataTree
+    assert dtree is not None, "Expected a valid DataTree object"
+    assert (
+        "radar_parameters" in dtree.children
+    ), "Expected 'radar_parameters' group in DataTree"
+    assert "sweep_0" in dtree.children, "Expected 'sweep_0' group in DataTree"
+
+
+def test_to_cfradial2_volumes(imd_test_data):
+    """
+    Test the to_cfradial2_volumes function to ensure it correctly converts multiple CfRadial1 volumes.
+    """
+    # List of test files
+    files = [
+        imd_test_data["GOA210515003646-IMD-C.nc"],
+        imd_test_data["GOA210515003646-IMD-C.nc.1"],
+        imd_test_data["GOA210515004746-IMD-C.nc"],
+        imd_test_data["GOA210515004746-IMD-C.nc.1"],
+        imd_test_data["GOA210515005811-IMD-C.nc"],
+        imd_test_data["GOA210515005811-IMD-C.nc.1"],
+    ]
+
+    # Read volumes using read_volume to simulate the creation of multiple volumes
+    dtree = read_volume(files)
+
+    # Convert to CfRadial2 Volumes DataTree
+    dtree_root = to_cfradial2_volumes(dtree)
+
+    # Assertions to check the structure of the root DataTree
+    assert dtree_root is not None, "Expected a valid root DataTree object"
+    assert "/volume_0" in dtree_root.groups, "Expected '/volume_0' in root DataTree"
+    assert "/volume_1" in dtree_root.groups, "Expected '/volume_1' in root DataTree"
+    assert "/volume_2" in dtree_root.groups, "Expected '/volume_2' in root DataTree"
+
+    # Further check that each volume contains sweeps with the full paths
+    assert (
+        "/volume_0/sweep_0" in dtree_root.groups
+    ), "Expected '/volume_0/sweep_0' in DataTree"
+    assert (
+        "/volume_0/sweep_1" in dtree_root.groups
+    ), "Expected '/volume_0/sweep_1' in DataTree"
+    assert (
+        "/volume_1/sweep_0" in dtree_root.groups
+    ), "Expected '/volume_1/sweep_0' in DataTree"
+    assert (
+        "/volume_1/sweep_1" in dtree_root.groups
+    ), "Expected '/volume_1/sweep_1' in DataTree"
+    assert (
+        "/volume_2/sweep_0" in dtree_root.groups
+    ), "Expected '/volume_2/sweep_0' in DataTree"
+    assert (
+        "/volume_2/sweep_1" in dtree_root.groups
+    ), "Expected '/volume_2/sweep_1' in DataTree"
+
+    # Check the presence of radar_parameters in one of the volumes as an example
+    assert (
+        "/volume_0/radar_parameters" in dtree_root.groups
+    ), "Expected '/volume_0/radar_parameters' in DataTree"
 
 
 if __name__ == "__main__":
