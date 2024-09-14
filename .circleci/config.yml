@@ -1,61 +1,99 @@
 version: 2.1
 
+executors:
+  python-executor:
+    docker:
+      - image: continuumio/miniconda3:latest
+    environment:
+      PATH: /opt/conda/bin:$PATH
+
 jobs:
   lint:
-    docker:
-      - image: python:3.12
+    executor: python-executor
     steps:
       - checkout
       - run:
-          name: Install dependencies
+          name: Install Python Dependencies for Linting
           command: |
-            python -m pip install --upgrade pip
+            conda install python=3.12 -y
+            pip install --upgrade pip
             pip install black black[jupyter] ruff
       - run:
-          name: Black style check
+          name: Black Style Check
           command: |
             black --check .
       - run:
-          name: Lint with ruff
+          name: Lint with Ruff
           command: |
             ruff check .
 
-  test:
-    docker:
-      - image: python:3.12
+  build_0:
+    executor: python-executor
+    parameters:
+      python-version:
+        type: string
+      numpy-version:
+        type: string
     steps:
       - checkout
       - run:
           name: Install micromamba
           command: |
-            curl -L https://micro.mamba.pm/install.sh | bash
+            curl micro.mamba.pm/install.sh | bash
             source ~/micromamba/etc/profile.d/micromamba.sh
-            echo 'source ~/micromamba/etc/profile.d/micromamba.sh' >> ~/.bashrc
+            micromamba shell init -s bash -p ~/micromamba
+            source ~/.bashrc
       - run:
-          name: Create conda environment
+          name: Create Conda Environment and Install Dependencies
           command: |
+            micromamba create --yes --name radarx-unit-tests python=<<parameters.python-version>> numpy=<<parameters.numpy-version>>
             source ~/micromamba/etc/profile.d/micromamba.sh
-            micromamba create --yes --name radarx-env python=3.12 numpy
-      - run:
-          name: Activate environment and install dependencies
-          command: |
-            source ~/micromamba/etc/profile.d/micromamba.sh
-            micromamba activate radarx-env
+            micromamba activate radarx-unit-tests
             python -m pip install . --no-deps
-            python -m pip install pytest pytest-cov
       - run:
-          name: Run tests with coverage
+          name: Test with pytest and collect coverage
           command: |
+            pytest -n auto --dist loadfile --verbose --durations=15 --cov=radarx --cov-report=xml --cov-report=term-missing tests/ > coverage_unit.xml
+      - run:
+          name: Upload coverage to Codecov
+          command: |
+            bash <(curl -s https://codecov.io/bash) -f coverage_unit.xml -F unittests -t $CODECOV_TOKEN
+
+  build_1:
+    executor: python-executor
+    steps:
+      - checkout
+      - run:
+          name: Install micromamba
+          command: |
+            curl micro.mamba.pm/install.sh | bash
             source ~/micromamba/etc/profile.d/micromamba.sh
-            micromamba activate radarx-env
-            pytest --cov=radarx --cov-report=xml:coverage.xml tests/
-      - store_artifacts:
-          path: coverage.xml
-          destination: coverage.xml
+            micromamba shell init -s bash -p ~/micromamba
+            source ~/.bashrc
+      - run:
+          name: Create Conda Environment and Install Dependencies
+          command: |
+            micromamba create --yes --name radarx-notebook-tests python=3.12 numpy=2
+            source ~/micromamba/etc/profile.d/micromamba.sh
+            micromamba activate radarx-notebook-tests
+            python -m pip install . --no-deps
+      - run:
+          name: Test with pytest and collect coverage
+          command: |
+            pytest --nbval --verbose --durations=15 --cov=radarx --cov-report=xml --cov-report=term-missing examples/notebooks > coverage_notebook.xml
+      - run:
+          name: Upload coverage to Codecov
+          command: |
+            bash <(curl -s https://codecov.io/bash) -f coverage_notebook.xml -F notebooktests -t $CODECOV_TOKEN
 
 workflows:
   version: 2
   lint_test:
     jobs:
       - lint
-      - test
+      - build_0:
+          matrix:
+            parameters:
+              python-version: ["3.10", "3.12"]
+              numpy-version: ["1", "2"]
+      - build_1
