@@ -36,3 +36,4 @@ dependencies:
   - ffmpeg
   - zarr
   - nbval
+  - pooch
