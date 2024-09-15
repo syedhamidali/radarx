@@ -27,3 +27,4 @@ dependencies:
   - xradar
   - xarray-datatree>=0.0.10
   - xmltodict
+  - pooch
