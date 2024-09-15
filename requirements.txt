@@ -10,3 +10,4 @@ xarray-datatree >= 0.0.10
 xmltodict
 matplotlib
 xradar
+pooch
