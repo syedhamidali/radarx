@@ -813,6 +813,10 @@ def to_cfradial2(ds, **kwargs):
     ├── DataTree('sweep_0')
     ├── DataTree('sweep_1')
     ├── ...
+
+    See Also
+    --------
+    to_cfradial2_volumes : Convert cfradial1 volume to cfradial2 volume.
     """
     first_dim = kwargs.pop("first_dim", "auto")
     optional = kwargs.pop("optional", True)
@@ -887,6 +891,10 @@ def to_cfradial2_volumes(volumes):
     - Each radar volume is expected to be a CfRadial1 format dataset.
     - The resulting structure has a root named 'volumes' with child nodes 'volume_0',
       'volume_1', etc., each containing its respective subgroups.
+
+    See Also
+    --------
+    to_cfradial2 : Convert a sweep to cfradial2 format
     """
     volumes_list = []
     for volume in volumes.children:
