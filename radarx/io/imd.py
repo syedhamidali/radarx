@@ -209,17 +209,23 @@ def read_volume(files):
 
 def _merge_file_lists(file_lists):
     """
-    Merges internal lists of files into a single list.
+    Merge multiple lists of file paths into a single, flattened list.
+
+    This function takes a list of lists, where each sublist contains file paths, and merges
+    them into a single flat list. This is useful when dealing with grouped file paths
+    that need to be processed collectively.
 
     Parameters
     ----------
     file_lists : list of lists
-        A list containing multiple internal lists of file paths.
+        A list containing multiple sublists, each holding file paths as strings.
+        Example: [['file1.txt', 'file2.txt'], ['file3.txt'], ['file4.txt', 'file5.txt']]
 
     Returns
     -------
     merged_list : list
-        A single list containing all the file paths from the internal lists.
+        A single flattened list containing all the file paths from the provided sublists.
+        Example: ['file1.txt', 'file2.txt', 'file3.txt', 'file4.txt', 'file5.txt']
     """
     # Use itertools.chain to flatten the list of lists
     merged_list = list(itertools.chain(*file_lists))
@@ -229,17 +235,30 @@ def _merge_file_lists(file_lists):
 
 def _compute_range(ds):
     """
-    Computes the range to each gate and adds it to the dataset.
+    Compute the range to each radar gate and add it as a coordinate to the dataset.
+
+    This function calculates the distance from the radar instrument to the center of each
+    gate based on the dataset's `firstGateRange` and `gateSize` values. The computed range
+    values are then added to the dataset as a new coordinate named "range".
 
     Parameters
     ----------
     ds : xarray.Dataset
-        Input dataset.
+        Input dataset containing radar data. The dataset must include the variables
+        'firstGateRange' and 'gateSize', which define the starting range and the distance
+        between consecutive gates, respectively.
 
     Returns
     -------
     ds : xarray.Dataset
-        Dataset with computed range coordinates.
+        The original dataset with an added "range" coordinate. This coordinate represents
+        the computed distances to each gate and is defined with the following attributes:
+        - "standard_name": Standardized name for the range.
+        - "long_name": Descriptive name for the range.
+        - "units": The units of the range, which are "meters".
+        - "spacing_is_constant": Indicates that the spacing between gates is constant.
+        - "meters_to_center_of_first_gate": Distance to the center of the first gate.
+        - "meters_between_gates": Spacing between consecutive gates.
     """
     # Using ds.sizes instead of ds.dims to avoid future warning
     gate_count = ds.sizes["range"]
