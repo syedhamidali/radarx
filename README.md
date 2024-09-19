@@ -32,6 +32,8 @@
 
 Radarx is a Python library built for radar data processing and visualization. The library integrates tightly with [xradar](https://xradar.readthedocs.io/en/latest/) and leverages [xarray](http://xarray.pydata.org/) and [DataTree](https://xarray.pydata.org/en/stable/related-projects/datree.html) structures to enable easy and efficient manipulation of radar sweeps and volume data.
 
+[![Project Status: Beta](https://img.shields.io/badge/status-beta-blue.svg)](https://www.repostatus.org/#beta)
+
 > [!WARNING]
 > **This project is currently in high development mode.**
 > Features may change frequently, and some parts of the library may be incomplete or subject to change. Please proceed with caution.

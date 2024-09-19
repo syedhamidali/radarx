@@ -12,7 +12,16 @@ This is the preferred method to install `radarx`, as it will always install the 
 
 If you don’t have [pip](https://pip.pypa.io) installed, this [Python installation guide](http://docs.python-guide.org/en/latest/starting/installation/) can guide you through the process.
 
-## Conda (via conda-forge)
+
+## Create a Conda Environment (`radar-env`)
+
+First, create and activate a conda environment named `radar-env`:
+
+```bash
+$ conda create -n radar-env --yes
+$ conda activate radar-env
+```
+### Conda (via conda-forge)
 
 You can also install `radarx` using conda from the `conda-forge` channel:
 
