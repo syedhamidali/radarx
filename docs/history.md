@@ -1,9 +1,30 @@
 # History
 
-## 0.1.5 (2024-10-04)
+## 0.1.8 (2024-09-18)
+- **ADD:** Codecov in the workflow. ({pull}`25`) by [@syedhamidali](https://github.com/syedhamidali)
+- **MNT:** Updated CI and fixed codecov. ({pull}`26`) by [@syedhamidali](https://github.com/syedhamidali)
+- **ADD:** Added CircleCI. ({pull}`27`) by [@syedhamidali](https://github.com/syedhamidali)
+- **FIX:** IMD fix. ({pull}`28`) by [@syedhamidali](https://github.com/syedhamidali)
+- **FIX:** Notebook fix. ({pull}`29`) by [@syedhamidali](https://github.com/syedhamidali)
+- **FIX:** Fixed IMD. ({pull}`31`) by [@syedhamidali](https://github.com/syedhamidali)
+- **ENH:** Improved docstrings in `imd.py`. ({pull}`32`) by [@syedhamidali](https://github.com/syedhamidali)
+- **MNT:** Changed Dependabot runs to weekly. ({pull}`33`) by [@syedhamidali](https://github.com/syedhamidali)
+
+## 0.1.7 (2024-09-14)
+- **ADD:** Function to convert data to CFRadial2. ({pull}`22`) by [@syedhamidali](https://github.com/syedhamidali)
+
+## 0.1.6 (2024-10-10)
+- **ENH:** Updated README. ({pull}`14`) by [@syedhamidali](https://github.com/syedhamidali)
+- **FIX:** `read_sweep` fix. ({pull}`17`) by [@syedhamidali](https://github.com/syedhamidali)
+- **FIX:** Fixed documentation issues. ({pull}`15`) by [@syedhamidali](https://github.com/syedhamidali)
+- **ADD:** Created `dependabot.yml`. ({pull}`18`) by [@syedhamidali](https://github.com/syedhamidali)
+- **ENH:** Added Dependabot. ({pull}`19`) by [@syedhamidali](https://github.com/syedhamidali)
+- **MNT:** Updated README. ({pull}`20`) by [@syedhamidali](https://github.com/syedhamidali)
+
+## 0.1.5 (2024-09-09)
 - **FIX:** Versioning issue resolved. ({pull}`13`) by [@syedhamidali](https://github.com/syedhamidali)
 
-## 0.1.4 (2024-10-04)
+## 0.1.4 (2024-09-08)
 - **ENH:** Added environment `.yml` file. ({pull}`2`) by [@syedhamidali](https://github.com/syedhamidali)
 - **ADD:** Links.rst added in docs. ({pull}`3`) by [@syedhamidali](https://github.com/syedhamidali)
 - **FIX:** Fixed HTML title issue. ({pull}`4`) by [@syedhamidali](https://github.com/syedhamidali)
@@ -14,7 +35,7 @@
 - **FIX:** history.md updates. ({pull}`11`) by [@syedhamidali](https://github.com/syedhamidali)
 - **ADD:** Added logo to `README.md`. ({pull}`12`) by [@syedhamidali](https://github.com/syedhamidali)
 
-## 0.1.3 (2024-10-03)
+## 0.1.3 (2024-09-08)
 - **ENH:** Added environment `.yml` file. ({pull}`2`) by [@syedhamidali](https://github.com/syedhamidali)
 - **ADD:** Added `Links.rst` in docs. ({pull}`3`) by [@syedhamidali](https://github.com/syedhamidali)
 - **FIX:** Fixed HTML title issue. ({pull}`4`) by [@syedhamidali](https://github.com/syedhamidali)
@@ -25,12 +46,12 @@
 - **FIX:** history.md updates. ({pull}`11`) by [@syedhamidali](https://github.com/syedhamidali)
 - **ADD:** Added logo to `README.md`. ({pull}`12`) by [@syedhamidali](https://github.com/syedhamidali)
 
-## 0.1.2 (2024-10-02)
+## 0.1.2 (2024-09-08)
 - **FIX:** Created issue template. ({pull}`1`) by [@syedhamidali](https://github.com/syedhamidali)
 
-## 0.1.1 (2024-10-01)
+## 0.1.1 (2024-09-07)
 - Initial enhancements and setup completed.
 - Full changelog: v0.1.0...v0.1.1
 
-## 0.1.0 (2024-09-30)
+## 0.1.0 (2024-09-05)
 - First commit and setup with pre-commit hooks.
