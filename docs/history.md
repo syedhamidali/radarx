@@ -13,7 +13,7 @@
 ## 0.1.7 (2024-09-14)
 - **ADD:** Function to convert data to CFRadial2. ({pull}`22`) by [@syedhamidali](https://github.com/syedhamidali)
 
-## 0.1.6 (2024-10-10)
+## 0.1.6 (2024-09-10)
 - **ENH:** Updated README. ({pull}`14`) by [@syedhamidali](https://github.com/syedhamidali)
 - **FIX:** `read_sweep` fix. ({pull}`17`) by [@syedhamidali](https://github.com/syedhamidali)
 - **FIX:** Fixed documentation issues. ({pull}`15`) by [@syedhamidali](https://github.com/syedhamidali)
