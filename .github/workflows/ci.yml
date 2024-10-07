@@ -48,7 +48,7 @@ jobs:
       with:
         fetch-depth: 0
     - name: Install micromamba environment
-      uses: mamba-org/setup-micromamba@v1
+      uses: mamba-org/setup-micromamba@v2
       with:
           environment-name: radarx-unit-tests
           environment-file: ${{env.CONDA_ENV_FILE}}
@@ -95,7 +95,7 @@ jobs:
       with:
         fetch-depth: 0
     - name: Install micromamba environment
-      uses: mamba-org/setup-micromamba@v1
+      uses: mamba-org/setup-micromamba@v2
       with:
           environment-name: radarx-notebook-tests
           environment-file: ${{env.CONDA_ENV_FILE}}
