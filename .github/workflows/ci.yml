@@ -58,6 +58,10 @@ jobs:
               python=${{matrix.python-version}}
               numpy=${{matrix.numpy-version}}
               conda
+
+    - name: Install coverage via pip   # ADD THIS STEP TO INSTALL COVERAGE
+      run: pip install coverage
+
     - name: Install radarx
       run: |
         python -m pip install . --no-deps
