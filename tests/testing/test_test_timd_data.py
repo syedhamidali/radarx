@@ -58,5 +58,22 @@ def test_fetch_imd_test_data_file_paths():
         ), f"The file {file_name} should exist at {file_path_obj}"
 
 
+def test_fetch_imd_test_data_error_handling(mocker, capture_logs):
+    """
+    Test to ensure that the fetch_imd_test_data function handles errors properly.
+    """
+    # Mock pooch's fetch method to raise an exception
+    mocker.patch("pooch.Pooch.fetch", side_effect=Exception("Download failed"))
+
+    # Call the function and assert that it raises an exception
+    with pytest.raises(Exception, match="Download failed"):
+        fetch_imd_test_data()
+
+    # Check that an error was logged
+    assert any(
+        "Failed to download" in record.message for record in capture_logs.records
+    ), "An error log should be present when a download fails."
+
+
 if __name__ == "__main__":
     pytest.main()

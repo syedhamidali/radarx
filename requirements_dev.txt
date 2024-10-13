@@ -14,3 +14,4 @@ pooch
 nbval
 pytest-cov
 pytest-xdist
+pytest-mock

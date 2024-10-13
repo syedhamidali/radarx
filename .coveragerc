@@ -1,0 +1,27 @@
+[run]
+# Only measure coverage for the radarx module
+source = radarx
+
+# Omit unnecessary files and directories
+omit =
+    */tests/*
+    */examples/*
+    */docs/*
+    */ci/*
+    */radarx.egg-info/*
+    */coverage.xml
+    */coverage_unit.xml
+    */coverage_notebook.xml
+    */pyproject.toml
+    */requirements*.txt
+    */rst2md.sh
+
+[report]
+# Fail if coverage is below 90%
+fail_under = 90
+
+# Show missing lines in the report
+show_missing = True
+
+# Optionally skip showing files that are 100% covered
+skip_covered = True
