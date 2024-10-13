@@ -13,3 +13,4 @@ fsspec
 pooch
 nbval
 pytest-cov
+pytest-xdist
