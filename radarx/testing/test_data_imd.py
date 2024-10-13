@@ -5,7 +5,7 @@ import pooch
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-__all__ = ["fetch_imd_test_data"]
+__all__ = ["fetch_imd_test_data", "display_fetched_files"]
 
 
 def fetch_imd_test_data():
@@ -53,8 +53,15 @@ def fetch_imd_test_data():
     return downloaded_files
 
 
-if __name__ == "__main__":
-    # Fetch the IMD data and print the paths of downloaded files
+def display_fetched_files():
+    """
+    Displays the downloaded file paths by logging them.
+    """
     files = fetch_imd_test_data()
     for file_name, file_path in files.items():
         logger.info(f"Local path for {file_name}: {file_path}")
+
+
+if __name__ == "__main__":
+    # Display the fetched IMD data file paths
+    display_fetched_files()

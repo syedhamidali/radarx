@@ -1,6 +1,6 @@
 import pytest
 import logging
-from radarx.testing.test_data_imd import fetch_imd_test_data
+from radarx.testing.test_data_imd import fetch_imd_test_data, display_fetched_files
 from pathlib import Path
 
 
@@ -73,6 +73,30 @@ def test_fetch_imd_test_data_error_handling(mocker, capture_logs):
     assert any(
         "Failed to download" in record.message for record in capture_logs.records
     ), "An error log should be present when a download fails."
+
+
+def test_display_fetched_files(mocker, capture_logs):
+    """
+    Test the display_fetched_files function to ensure that it logs the downloaded file paths.
+    """
+    # Mock fetch_imd_test_data to return sample data
+    mock_files = {
+        "GOA210515003646-IMD-C.nc": "/path/to/GOA210515003646-IMD-C.nc",
+        "GOA210515003646-IMD-C.nc.1": "/path/to/GOA210515003646-IMD-C.nc.1",
+    }
+    mocker.patch(
+        "radarx.testing.test_data_imd.fetch_imd_test_data", return_value=mock_files
+    )
+
+    # Call the display_fetched_files function
+    display_fetched_files()
+
+    # Verify that the file paths were logged
+    for file_name, file_path in mock_files.items():
+        assert any(
+            f"Local path for {file_name}: {file_path}" in record.message
+            for record in capture_logs.records
+        ), f"Log should contain the path for {file_name}"
 
 
 if __name__ == "__main__":
