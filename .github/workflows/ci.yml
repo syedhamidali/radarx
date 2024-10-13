@@ -61,7 +61,7 @@ jobs:
 
     - name: Install coverage via pip   # ADD THIS STEP TO INSTALL COVERAGE
       run: |
-        python -m pip install coverage pytest-cov pytest-xdist
+        python -m pip install coverage pytest-cov pytest-xdist pytest-mock
     - name: Install radarx
       run: |
         python -m pip install . --no-deps
@@ -112,7 +112,7 @@ jobs:
               conda
     - name: Install coverage and pytest via pip
       run: |
-        python -m pip install coverage pytest-cov pytest-xdist nbval
+        python -m pip install coverage pytest-cov pytest-xdist nbval pytest-mock
     - name: Install radarx
       run: |
         python -m pip install . --no-deps
@@ -121,7 +121,7 @@ jobs:
         python -c "import radarx; print(radarx.version.version)"
     - name: Test with pytest
       run: |
-        pytest --nbval --verbose --durations=15 --cov=radarx --cov-report=xml:coverage_notebook.xml --cov-report=term-missing examples/notebooks
+        pytest --nbval --verbose --durations=15 --cov=radarx --cov-report=xml:coverage_notebook.xml --cov-report=term-missing examples/notebooks > coverage_notebook.xml
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4
       with:
