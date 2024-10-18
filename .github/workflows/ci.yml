@@ -123,7 +123,7 @@ jobs:
     # Run notebook tests using pytest (mirroring xradar)
     - name: Test with pytest
       run: |
-        pytest -n auto --dist loadscope --verbose --durations=15 --cov-report xml:coverage_notebook.xml --cov=radarx --pyargs examples/notebooks
+        pytest --nbval --verbose --durations=15 --cov=radarx --cov-report=xml:coverage_notebook.xml --cov-report=term-missing examples/notebooks
 
     # Upload coverage to Codecov
     - name: Upload coverage to Codecov
