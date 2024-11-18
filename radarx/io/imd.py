@@ -27,14 +27,13 @@ import logging
 import itertools
 import numpy as np
 import xarray as xr
-from datatree import DataTree
+from xarray import DataTree
 from xradar.io.backends.cfradial1 import (
     _get_radar_calibration,
     _get_required_root_dataset,
     _get_subgroup,
     _get_sweep_groups,
 )
-from xradar.io.backends.common import _attach_sweep_groups
 
 from xradar.model import (
     georeferencing_correction_subgroup,
@@ -787,12 +786,7 @@ def create_volume(dataset_list):
 # to_cfradial2 function implementation
 def to_cfradial2(ds, **kwargs):
     """
-    Convert a CfRadial1 Dataset to a CfRadial2 DataTree.
-
-    This function takes a CfRadial1 xarray.Dataset and converts it into a
-    DataTree following the CfRadial2 format. It organizes the dataset into a
-    hierarchical structure with a root node and subgroups for radar parameters,
-    radar calibration, georeferencing corrections, and sweep groups.
+    Convert a CfRadial1 Dataset to a CfRadial2 hierarchical structure using xarray's native DataTree.
 
     Parameters
     ----------
@@ -812,15 +806,19 @@ def to_cfradial2(ds, **kwargs):
     Returns
     -------
     DataTree
-        A DataTree object representing the dataset in CfRadial2 format.
+        An xarray DataTree object representing the dataset in CfRadial2 format.
 
     Notes
     -----
-    - This function relies on internal helper functions such as
-      `_get_required_root_dataset`, `_get_subgroup`, `_get_radar_calibration`,
-      `_attach_sweep_groups`, and `_get_sweep_groups`.
-    - The structure of the resulting DataTree includes the root, radar_parameters,
-      radar_calibration (if available), georeferencing_correction, and sweeps.
+    - The hierarchical structure of the resulting DataTree will include:
+      - "/" (root): Contains required global attributes and general metadata.
+      - "/radar_parameters": Radar parameter data, if available.
+      - "/georeferencing_correction": Georeferencing correction data, if available.
+      - "/radar_calibration": Radar calibration data, if available.
+      - "/sweep_X": Individual sweep data for each sweep (e.g., "/sweep_0", "/sweep_1").
+    - Missing groups (e.g., calibration) will not be included in the DataTree.
+    - This function leverages helper functions `_get_required_root_dataset`,
+      `_get_subgroup`, `_get_radar_calibration`, and `_get_sweep_groups`.
 
     Examples
     --------
@@ -829,49 +827,44 @@ def to_cfradial2(ds, **kwargs):
     DataTree('root')
     ├── DataTree('radar_parameters')
     ├── DataTree('georeferencing_correction')
+    ├── DataTree('radar_calibration')
     ├── DataTree('sweep_0')
     ├── DataTree('sweep_1')
     ├── ...
 
     See Also
     --------
-    to_cfradial2_volumes : Convert cfradial1 volume to cfradial2 volume.
+    - to_cfradial2_volumes : Convert cfradial1 volume to cfradial2 volume.
     """
+    # Extract customization options
     first_dim = kwargs.pop("first_dim", "auto")
     optional = kwargs.pop("optional", True)
-    kwargs.pop("site_coords", True)
+    site_coords = kwargs.pop("site_coords", True)
     sweep = kwargs.pop("sweep", None)
 
-    # Create datatree root node with required data
-    root = _get_required_root_dataset(ds, optional=optional)
-    dtree = DataTree(data=root, name="root")
-
-    # Attach additional root metadata groups
-    radar_parameters = _get_subgroup(ds, radar_parameters_subgroup)
-    DataTree(radar_parameters, name="radar_parameters", parent=dtree)
-
-    calib = _get_radar_calibration(ds)
-    if calib:
-        DataTree(calib, name="radar_calibration", parent=dtree)
-
-    georeferencing = _get_subgroup(ds, georeferencing_correction_subgroup)
-    DataTree(georeferencing, name="georeferencing_correction", parent=dtree)
-
-    # Attach sweep child nodes
-    dtree = _attach_sweep_groups(
-        dtree,
-        list(
-            _get_sweep_groups(
-                ds,
-                sweep=sweep,
-                first_dim=first_dim,
-                optional=optional,
-                site_coords=True,
-            ).values()
+    # Build the base dictionary for DataTree
+    dtree: dict = {
+        "/": _get_required_root_dataset(ds, optional=optional),
+        "/radar_parameters": _get_subgroup(ds, radar_parameters_subgroup),
+        "/georeferencing_correction": _get_subgroup(
+            ds, georeferencing_correction_subgroup
         ),
-    )
+        "/radar_calibration": _get_radar_calibration(ds),
+    }
 
-    return dtree
+    # Add sweep groups to the dictionary
+    sweep_groups = _get_sweep_groups(
+        ds,
+        sweep=sweep,
+        first_dim=first_dim,
+        optional=optional,
+        site_coords=site_coords,
+    )
+    for sweep_name, sweep_data in sweep_groups.items():
+        dtree[f"/{sweep_name}"] = sweep_data
+
+    # Create and return the DataTree from the dictionary
+    return DataTree.from_dict(dtree)
 
 
 def to_cfradial2_volumes(volumes):
