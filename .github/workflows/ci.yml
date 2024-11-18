@@ -72,7 +72,7 @@ jobs:
       run: |
         pytest -n auto --dist loadfile --verbose --durations=15 --cov-report xml:coverage_unit.xml --cov=radarx --pyargs tests
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
+      uses: codecov/codecov-action@v5
       with:
         file: ./coverage_unit.xml
         flags: unittests
@@ -123,7 +123,7 @@ jobs:
     #   run: |
     #     pytest --nbval --verbose --durations=15 --cov=radarx --cov-report=xml:coverage_notebook.xml --cov-report=term-missing examples/notebooks
     # - name: Upload coverage to Codecov
-    #   uses: codecov/codecov-action@v4
+    #   uses: codecov/codecov-action@v5
     #   with:
     #     file: ./coverage_notebook.xml
     #     flags: notebooktests

@@ -5,8 +5,7 @@ numpy
 pyproj
 cartopy
 scipy
-xarray<= 2024.9.0
-xarray-datatree >= 0.0.10
+xarray>=2024.10.0
 xmltodict
 matplotlib
 xradar
