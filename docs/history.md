@@ -2,6 +2,7 @@
 
 ## 0.2.0 (2024-11-18)
 This is the first version which uses DataTree from xarray. Thus, xarray is pinned to version >=2024.10.0.
+- **REL:** Versin Release 0.2.0. ({pull}`46`) by [@syedhamidali](https://github.com/syedhamidali)
 - **MNT:** Fixed DataTree imports. ({pull}`45`) by [@syedhamidali](https://github.com/syedhamidali)
 
 ## 0.1.9 (2024-11-18)
