@@ -3,9 +3,8 @@ channels:
   - conda-forge
   - nodefaults
 dependencies:
-  - python >=3.9,<3.12
+  - python >=3.9
   - pydata-sphinx-theme
-  - pip
   - myst-parser
   - sphinx
   - sphinx-copybutton
@@ -31,3 +30,14 @@ dependencies:
   - zarr
   - pooch
   - xradar
+  - fsspec
+  - wradlib
+  - arm_pyart
+  - hvplot
+  - bokeh
+  - holoviews
+  - geoviews
+  - nbclassic
+  - pip
+  - pip:
+    - git+https://github.com/MeteoSwiss/fast-barnes-py.git

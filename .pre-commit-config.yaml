@@ -30,3 +30,4 @@ repos:
     hooks:
       - id: black
       - id: black-jupyter
+        args: ["--line-length", "88"]
