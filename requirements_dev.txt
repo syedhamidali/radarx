@@ -11,7 +11,14 @@ black
 isort
 fsspec
 pooch
+boto3
 nbval
 pytest-cov
 pytest-xdist
 pytest-mock
+myst-parser
+sphinx-copybutton
+sphinx-favicon
+nbsphinx
+pydata-sphinx-theme
+itables

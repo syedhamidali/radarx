@@ -35,6 +35,7 @@ dependencies:
   - zarr
   - nbval
   - pooch
+  - itables
   - pip
   - pip:
     - git+https://github.com/MeteoSwiss/fast-barnes-py.git
