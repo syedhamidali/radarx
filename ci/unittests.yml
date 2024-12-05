@@ -28,6 +28,7 @@ dependencies:
   - pooch
   - cartopy
   - arm_pyart
+  - boto3
   - pip
   - pip:
     - git+https://github.com/MeteoSwiss/fast-barnes-py.git
