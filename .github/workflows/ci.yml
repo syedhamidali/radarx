@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, grid-test ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, grid-test ]
 
   workflow_dispatch:
 
