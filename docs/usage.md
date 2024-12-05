@@ -20,4 +20,5 @@ import radarx
 :caption: Examples
 
 notebooks/IMD_Radar_Data
+notebooks/Grid_Radar
 ```
