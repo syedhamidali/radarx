@@ -9,7 +9,7 @@ Radarx Grid
 .. toctree::
     :maxdepth: 4
 
-.. automodule:: radarx.io.grid
+.. automodule:: radarx.grid.grid
 """
 
 from .grid import *  # noqa

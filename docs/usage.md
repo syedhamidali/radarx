@@ -21,4 +21,5 @@ import radarx
 
 notebooks/IMD_Radar_Data
 notebooks/Grid_Radar
+notebooks/aws_data
 ```
