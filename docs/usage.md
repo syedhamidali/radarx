@@ -30,4 +30,5 @@ notebooks/aws_data
 
 notebooks/gridding_rate_part1
 notebooks/gridding_rate_part2
+notebooks/gridding_rate_part3
 ```
