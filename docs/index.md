@@ -23,6 +23,7 @@ modules
 contributing
 authors
 history
+reference
 ```
 
 Indices and tables
