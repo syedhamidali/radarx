@@ -17,7 +17,6 @@ dependencies:
   - notebook
   - numpy
   - open-radar-data>=0.3.0
-  - pip
   - pyproj
   - pytest
   - pytest-cov
@@ -36,3 +35,7 @@ dependencies:
   - zarr
   - nbval
   - pooch
+  - itables
+  - pip
+  - pip:
+    - git+https://github.com/MeteoSwiss/fast-barnes-py.git

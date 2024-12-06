@@ -1,5 +1,8 @@
 # History
 
+## 0.2.1 (Unreleased)
+- **ADD:** Added fast-barnes-py gridding for radar. ({issue}`51`,`52`,`53`) and ({pull}`55`) by [@syedhamidali](https://github.com/syedhamidali)
+
 ## 0.2.0 (2024-11-18)
 This is the first version which uses DataTree from xarray. Thus, xarray is pinned to version >=2024.10.0.
 - **REL:** Version Release 0.2.0. ({issue}`45`), ({pull}`46`) by [@syedhamidali](https://github.com/syedhamidali)
