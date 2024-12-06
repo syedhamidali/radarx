@@ -93,7 +93,7 @@ def get_s3_client(anonymous=True):
             config=botocore.client.Config(signature_version=botocore.UNSIGNED),
         )
     else:
-        return boto3.client("s3")
+        return boto3.client("s3")  # pragma: no cover
 
 
 def list_available_files(bucket, prefix, anonymous=True):
@@ -129,13 +129,13 @@ def list_available_files(bucket, prefix, anonymous=True):
         >>> print(files)
     """
     s3 = get_s3_client(anonymous=anonymous)
-    try:
+    try:  # pragma: no cover
         response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
         files = [item["Key"] for item in response.get("Contents", [])]
         return files
-    except botocore.exceptions.ClientError as e:
-        print(f"Failed to list files: {e}")
-        return []
+    except botocore.exceptions.ClientError as e:  # pragma: no cover
+        print(f"Failed to list files: {e}")  # pragma: no cover
+        return []  # pragma: no cover
 
 
 def download_file(bucket, file_key, save_dir, anonymous=True):

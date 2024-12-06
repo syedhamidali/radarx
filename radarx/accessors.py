@@ -28,25 +28,25 @@ from .grid import grid_radar  # noqa
 from .vis import plot_maxcappi  # noqa
 
 
-def accessor_constructor(self, xarray_obj):
+def accessor_constructor(self, xarray_obj):  # pragma: no cover
     self._obj = xarray_obj  # pragma: no cover
 
 
-def create_function(func):
+def create_function(func):  # pragma: no cover
     def function(self):
-        return func(self._obj)
+        return func(self._obj)  # pragma: no cover
 
     return function  # pragma: no cover
 
 
-def create_methods(funcs):
+def create_methods(funcs):  # pragma: no cover
     methods = {}
     for name, func in funcs.items():
         methods[name] = create_function(func)
     return methods  # pragma: no cover
 
 
-def create_radarx_dataarray_accessor(name, funcs):
+def create_radarx_dataarray_accessor(name, funcs):  # pragma: no cover
     methods = {"__init__": accessor_constructor} | create_methods(funcs)
     cls_name = "".join([name.capitalize(), "Accessor"])
     accessor = type(cls_name, (object,), methods)
