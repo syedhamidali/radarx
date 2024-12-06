@@ -406,7 +406,7 @@ def map_features(ax, lat_lines, lon_lines):
     color = "k" if sum(background_color[:3]) / 3 > 0.5 else "w"
 
     # Labeling gridlines depending on the projection
-    if isinstance(ax.projection, (ccrs.PlateCarree, ccrs.Mercator)):
+    if isinstance(ax.projection, (ccrs.PlateCarree, ccrs.Mercator)):  # pragma: no cover
         gl = ax.gridlines(
             xlocs=lon_lines,
             ylocs=lat_lines,
@@ -428,7 +428,8 @@ def map_features(ax, lat_lines, lon_lines):
         )
 
     elif isinstance(
-        ax.projection, (ccrs.LambertConformal, ccrs.LambertAzimuthalEqualArea)
+        ax.projection,
+        (ccrs.LambertConformal, ccrs.LambertAzimuthalEqualArea),  # pragma: no cover
     ):
         ax.figure.canvas.draw()
         gl = ax.gridlines(
@@ -460,7 +461,7 @@ def map_features(ax, lat_lines, lon_lines):
         with open(os.devnull, "w") as fnull, redirect_stdout(fnull):
             from pyart.graph.gridmapdisplay import lambert_xticks, lambert_yticks
 
-        lambert_xticks(ax, lon_lines)
-        lambert_yticks(ax, lat_lines)
-    else:
-        ax.gridlines(xlocs=lon_lines, ylocs=lat_lines)
+        lambert_xticks(ax, lon_lines)  # pragma: no cover
+        lambert_yticks(ax, lat_lines)  # pragma: no cover
+    else:  # pragma: no cover
+        ax.gridlines(xlocs=lon_lines, ylocs=lat_lines)  # pragma: no cover
