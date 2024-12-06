@@ -1,6 +1,7 @@
 # History
 
-## 0.2.1 (Unreleased)
+## 0.2.1 (2024-12-06)
+- **REL** Version Release 0.2.1, ({pull}`56`) by [@syedhamidali](https://github.com/syedhamidali)
 - **ADD:** Added wradlib gridding example. ({issue}`51`, {issue}`52`, {issue}`53`) and ({pull}`56`) by [@syedhamidali](https://github.com/syedhamidali)
 - **ADD:** Added fast-barnes-py gridding for radar. ({issue}`51`, {issue}`52`, {issue}`53`) and ({pull}`55`) by [@syedhamidali](https://github.com/syedhamidali)
 
