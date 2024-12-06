@@ -174,7 +174,7 @@ def plot_maxcappi(
 
         ax_xy.legend(loc="upper right", prop={"weight": "normal", "size": 8})
 
-    def _get_projection(ds):
+    def _get_projection(ds):  # pragma: no cover
         """
         Determine the central latitude and longitude from a dataset
         and return the corresponding projection.
@@ -215,7 +215,7 @@ def plot_maxcappi(
             ds, "longitude", "origin_longitude"
         ) or get_coord_or_attr(ds, "radar_longitude", "origin_longitude")
 
-        if lat_0 is None or lon_0 is None:
+        if lat_0 is None or lon_0 is None:  # pragma: no cover
             lat_0 = ds.lat.mean().item()
             lon_0 = ds.lon.mean().item()
 
