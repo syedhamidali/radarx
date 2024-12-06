@@ -11,6 +11,7 @@ To extend :py:class:`xarray:xarray.DataArray` and  :py:class:`xarray:xarray.Data
 radarx provides accessors which downstream libraries can hook into.
 
 This module contains the functionality to create those accessors.
+
 .. autosummary::
    :nosignatures:
    :toctree: generated/

@@ -7,6 +7,7 @@ Radarx Utils
 ============
 
 This sub-module contains utilitiy functions for various purposes.
+
 .. autosummary::
    :nosignatures:
    :toctree: generated/
@@ -233,7 +234,7 @@ def combine_nexrad_sweeps(dtree):
         key=lambda k: int(k.split("_")[-1]),
     )
 
-    ordered_dtree = DataTree()
+    ordered_dtree = DataTree(dataset=dtree_copy.root.to_dataset())
     for new_index, swp in enumerate(sweeps_sorted):
         # Update the sweep_number and reassign the node to maintain order
         ds = new_dtree[swp].to_dataset()
