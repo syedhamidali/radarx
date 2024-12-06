@@ -256,6 +256,8 @@ texinfo_documents = [
     ),
 ]
 
+nbsphinx_timeout = 180  # Timeout in seconds (5 minutes)
+
 rst_epilog = ""
 with open("links.rst") as f:
     rst_epilog += f.read()
