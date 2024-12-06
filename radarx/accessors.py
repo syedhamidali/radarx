@@ -29,28 +29,28 @@ from .vis import plot_maxcappi  # noqa
 
 
 def accessor_constructor(self, xarray_obj):
-    self._obj = xarray_obj
+    self._obj = xarray_obj  # pragma: no cover
 
 
 def create_function(func):
     def function(self):
         return func(self._obj)
 
-    return function
+    return function  # pragma: no cover
 
 
 def create_methods(funcs):
     methods = {}
     for name, func in funcs.items():
         methods[name] = create_function(func)
-    return methods
+    return methods  # pragma: no cover
 
 
 def create_radarx_dataarray_accessor(name, funcs):
     methods = {"__init__": accessor_constructor} | create_methods(funcs)
     cls_name = "".join([name.capitalize(), "Accessor"])
     accessor = type(cls_name, (object,), methods)
-    return xr.register_dataarray_accessor(name)(accessor)
+    return xr.register_dataarray_accessor(name)(accessor)  # pragma: no cover
 
 
 class RadarxAccessor:

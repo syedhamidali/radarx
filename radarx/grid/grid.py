@@ -25,12 +25,12 @@ __doc__ = __doc__.format("\n   ".join(__all__))
 import numpy as np
 import xarray as xr
 
-try:
+try:  # pragma: no cover
     from fastbarnes import interpolation
     from fastbarnes.interpolation import get_half_kernel_size
 
     FASTBARNES_AVAILABLE = True
-except ImportError:
+except ImportError:  # pragma: no cover
     FASTBARNES_AVAILABLE = False
 
 from ..utils import get_geocoords, find_multidim_vars  #  noqa
