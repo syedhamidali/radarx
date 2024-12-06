@@ -12,25 +12,27 @@ specific paths and downloading them locally.
 
 Supported Buckets
 -----------------
-- NEXRAD Level II Archive: `noaa-nexrad-level2`
-- NEXRAD Level II Real-Time: `unidata-nexrad-level2-chunks`
-- NEXRAD Level III Real-Time: `unidata-nexrad-level3`
-- MRMS Data: `noaa-mrms-pds`
+
+- **NEXRAD Level II Archive**: ``noaa-nexrad-level2``
+- **NEXRAD Level II Real-Time**: ``unidata-nexrad-level2-chunks``
+- **NEXRAD Level III Real-Time**: ``unidata-nexrad-level3``
+- **MRMS Data**: ``noaa-mrms-pds``
 
 Usage Examples
 --------------
-1. List available files:
 
-    from radarx.io.aws_data import list_available_files
-    files = list_available_files('noaa-nexrad-level2', '2016/10/06/KAMX/')
-    print(files)
+1. List available files::
 
-2. Download a file:
+       from radarx.io.aws_data import list_available_files
+       files = list_available_files('noaa-nexrad-level2', '2016/10/06/KAMX/')
+       print(files)
 
-    from radarx.io.aws_data import download_file
-    file_path = download_file('noaa-nexrad-level2',
-        '2016/10/06/KAMX/KAMX20161006_170414_V06', './downloads')
-    print('File downloaded to', file_path)
+2. Download a file::
+
+       from radarx.io.aws_data import download_file
+       file_path = download_file('noaa-nexrad-level2',
+           '2016/10/06/KAMX/KAMX20161006_170414_V06', './downloads')
+       print('File downloaded to', file_path)
 
 This sub-module contains functions necessary to grid the radar data.
 

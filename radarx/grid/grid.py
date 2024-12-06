@@ -162,6 +162,7 @@ def make_3d_grid(
     geographic coordinates.
     - This function assumes the dataset is compatible with `xradar`
     and has a valid CRS.
+
     """
     # Create Cartesian grid arrays
     x = np.arange(x_lim[0], x_lim[1] + x_step, x_step)
