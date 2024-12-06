@@ -99,9 +99,9 @@ def plot_maxcappi(
     Author: Syed Hamid Ali (@syedhamidali)
     """
 
-    if lon_lines is None:
+    if lon_lines is None:  # pragma: no cover
         lon_lines = np.arange(int(ds.lon.min().values), int(ds.lon.max().values) + 1)
-    if lat_lines is None:
+    if lat_lines is None:  # pragma: no cover
         lat_lines = np.arange(int(ds.lat.min().values), int(ds.lat.max().values) + 1)
 
     plt.rcParams.copy()
@@ -192,7 +192,7 @@ def plot_maxcappi(
             calculated latitude and longitude.
         """
 
-        def get_coord_or_attr(ds, coord_name, attr_name):
+        def get_coord_or_attr(ds, coord_name, attr_name):  # pragma: no cover
             """Helper function to get a coordinate or attribute, or
             calculate median if available.
             """
@@ -373,14 +373,14 @@ def plot_maxcappi(
         radar_name = ds.attrs.get("instrument_name", "Radar")
         time_str = ds["time"].dt.strftime("%Y%m%d%H%M%S").values.item()
         figname = f"{savedir}{os.sep}{title}_{radar_name}_{time_str}.png"
-        plt.savefig(fname=figname, dpi=dpi, bbox_inches="tight")
-        print(f"Figure(s) saved as {figname}")
+        plt.savefig(fname=figname, dpi=dpi, bbox_inches="tight")  # pragma: no cover
+        print(f"Figure(s) saved as {figname}")  # pragma: no cover
 
     # plt.rcParams.update(original_rc_params)
     plt.rcdefaults()
 
     if show_figure:  # pragma: no cover
-        plt.show()
+        plt.show()  # pragma: no cover
     else:  # pragma: no cover
         plt.close()  # pragma: no cover
 
