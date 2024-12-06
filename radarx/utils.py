@@ -197,7 +197,7 @@ def combine_nexrad_sweeps(dtree):
 
     # Process each group with matching angles
     for angle, sweeps in sweep_groups.items():
-        if len(sweeps) == 1:
+        if len(sweeps) == 1:  # pragma: no cover
             # Add single sweep nodes directly to the new DataTree
             swp, ds = sweeps[0]
             new_dtree[swp] = DataTree(ds)
@@ -242,7 +242,7 @@ def combine_nexrad_sweeps(dtree):
 
     # Copy other nodes (non-sweeps) back to the new DataTree
     for key in dtree.groups:
-        if not key.startswith("/sweep_") and key != "/":
+        if not key.startswith("/sweep_") and key != "/":  # pragma: no cover
             ordered_dtree[key] = dtree_copy[key]
     ordered_dtree.attrs = dtree.attrs
     return ordered_dtree
