@@ -382,7 +382,7 @@ def plot_maxcappi(
     if show_figure:  # pragma: no cover
         plt.show()
     else:  # pragma: no cover
-        plt.close()
+        plt.close()  # pragma: no cover
 
 
 def map_features(ax, lat_lines, lon_lines):
