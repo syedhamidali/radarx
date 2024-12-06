@@ -256,7 +256,8 @@ texinfo_documents = [
     ),
 ]
 
-nbsphinx_timeout = 180  # Timeout in seconds (5 minutes)
+nbsphinx_timeout = 300  # Timeout in seconds (5 minutes)
+nbsphinx_cache = "./.jupyter_cache"
 
 rst_epilog = ""
 with open("links.rst") as f:
