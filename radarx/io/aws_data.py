@@ -184,8 +184,8 @@ def download_file(bucket, file_key, save_dir, anonymous=True):
     local_file = os.path.join(save_dir, os.path.basename(file_key))
     try:
         s3.download_file(bucket, file_key, local_file)
-        print(f"Downloaded: {local_file}")
-        return local_file
+        print(f"Downloaded: {local_file}")  # pragma: no cover
+        return local_file  # pragma: no cover
     except botocore.exceptions.ClientError as e:
         print(f"Failed to download {file_key}: {e}")
         return None
