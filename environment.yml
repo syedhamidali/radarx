@@ -16,6 +16,8 @@ dependencies:
   - lat_lon_parser
   - netCDF4
   - open-radar-data>=0.1.0
+  - proj
+  - proj-data
   - pyproj
   - xarray>=2024.10.0
   - xmltodict
