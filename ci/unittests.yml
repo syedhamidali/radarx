@@ -14,7 +14,6 @@ dependencies:
   - netCDF4
   - numpy
   - open-radar-data>=0.3.0
-  - pip
   - pyproj
   - pytest
   - pytest-cov
@@ -27,3 +26,9 @@ dependencies:
   - xradar
   - xmltodict
   - pooch
+  - cartopy
+  - arm_pyart
+  - boto3
+  - pip
+  - pip:
+    - git+https://github.com/MeteoSwiss/fast-barnes-py.git

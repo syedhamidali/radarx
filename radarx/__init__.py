@@ -11,7 +11,10 @@ except Exception:
     # Disable minimum version checks on downstream libraries.
     __version__ = "999"
 
+from . import accessors  # noqa
 from . import io  # noqa
 from . import testing  # noqa
+from . import grid  # noqa
+from .utils import *  # noqa
 
 __all__ = [s for s in dir() if not s.startswith("_")]

@@ -28,7 +28,7 @@ import xarray as xr
 import pandas as pd
 
 
-def create_mock_radar_dataset(
+def mock_imd_radar_dataset(
     radial_dim=360,
     bin_dim=831,
     elevation_angle=0.5,
