@@ -44,7 +44,6 @@ This sub-module contains functions necessary to grid the radar data.
 """
 
 __all__ = [
-    "AWS_BUCKETS",
     "get_s3_client",
     "list_available_files",
     "download_file",
