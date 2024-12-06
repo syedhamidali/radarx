@@ -99,12 +99,13 @@ def plot_maxcappi(
     Author: Syed Hamid Ali (@syedhamidali)
     """
 
-    if lon_lines is None:  # pragma: no cover
+    # Define default latitude and longitude lines if not provided
+    if lon_lines is None:
         lon_lines = np.arange(int(ds.lon.min().values), int(ds.lon.max().values) + 1)
-    if lat_lines is None:  # pragma: no cover
+    if lat_lines is None:
         lat_lines = np.arange(int(ds.lat.min().values), int(ds.lat.max().values) + 1)
 
-    plt.rcParams.copy()
+    # Configure plotting parameters
     plt.rcParams.update(
         {
             "font.weight": "bold",
@@ -122,112 +123,23 @@ def plot_maxcappi(
         }
     )
 
+    # Extract maximum values across dimensions
     max_c = ds[data_var].max(dim="z")
     max_x = ds[data_var].max(dim="y")
     max_y = ds[data_var].max(dim="x").T
 
-    trgx = ds["x"].values
-    trgy = ds["y"].values
-    trgz = ds["z"].values
-
+    # Extract coordinate and dimension information
+    trgx, trgy, trgz = ds["x"].values, ds["y"].values, ds["z"].values
     max_height = int(np.floor(trgz.max()) / 1e3)
     sideticks = np.arange(max_height / 4, max_height + 1, max_height / 4).astype(int)
 
-    if cmap is None:  # pragma: no cover
-        cmap = "NWSRef"
-    if vmin is None:  # pragma: no cover
-        vmin = ds[data_var].min().item()
-    if vmax is None:  # pragma: no cover
-        vmax = ds[data_var].max().item()
-    if title is None:  # pragma: no cover
-        title = f"Max-{data_var.upper()[:3]}"
-
-    def plot_range_rings(ax_xy, max_range):
-        """
-        Plots range rings at 50 km intervals.
-
-        Parameters
-        ----------
-        ax_xy : matplotlib.axes.Axes
-            The axis on which to plot the range rings.
-        max_range : float
-            The maximum range for the range rings.
-
-        Returns
-        -------
-        None
-        """
-        background_color = ax_xy.get_facecolor()  # pragma: no cover
-        color = "k" if sum(background_color[:3]) / 3 > 0.5 else "w"  # pragma: no cover
-
-        for i, r in enumerate(
-            np.arange(5e4, np.floor(max_range) + 1, 5e4)
-        ):  # pragma: no cover
-            label = (
-                f"Ring Dist. {int(r/1e3)} km" if i == 0 else None
-            )  # pragma: no cover
-            ax_xy.plot(
-                r * np.cos(np.arange(0, 360) * np.pi / 180),
-                r * np.sin(np.arange(0, 360) * np.pi / 180),
-                color=color,
-                ls="--",
-                linewidth=0.4,
-                alpha=0.3,
-                label=label,
-            )  # pragma: no cover
-
-        ax_xy.legend(loc="upper right", prop={"weight": "normal", "size": 8})
-
-    def _get_projection(ds):  # pragma: no cover
-        """
-        Determine the central latitude and longitude from a dataset
-        and return the corresponding projection.
-
-        Parameters
-        ----------
-        ds : xarray.Dataset
-            The dataset from which to extract latitude and longitude
-            information.
-
-        Returns
-        -------
-        projection : cartopy.crs.Projection
-            A Cartopy projection object centered on the extracted or
-            calculated latitude and longitude.
-        """
-
-        def get_coord_or_attr(ds, coord_name, attr_name):  # pragma: no cover
-            """Helper function to get a coordinate or attribute, or
-            calculate median if available.
-            """
-            if coord_name in ds:  # pragma: no cover
-                return (
-                    ds[coord_name].values.item()
-                    if ds[coord_name].values.ndim == 0  # pragma: no cover
-                    else ds[coord_name].values[0]  # pragma: no cover
-                )
-            if f"origin_{coord_name}" in ds.coords:  # pragma: no cover
-                return ds.coords[f"origin_{coord_name}"].median().item()
-            if f"radar_{coord_name}" in ds.coords:  # pragma: no cover
-                return ds.coords[f"radar_{coord_name}"].median().item()
-            return ds.attrs.get(attr_name, None)
-
-        lat_0 = get_coord_or_attr(
-            ds, "latitude", "origin_latitude"
-        ) or get_coord_or_attr(ds, "radar_latitude", "origin_latitude")
-        lon_0 = get_coord_or_attr(
-            ds, "longitude", "origin_longitude"
-        ) or get_coord_or_attr(ds, "radar_longitude", "origin_longitude")
-
-        if lat_0 is None or lon_0 is None:  # pragma: no cover
-            lat_0 = ds.lat.mean().item()
-            lon_0 = ds.lon.mean().item()
-
-        projection = ccrs.LambertAzimuthalEqualArea(lon_0, lat_0)
-        return projection
+    # Set colormap and value ranges
+    cmap = cmap or "ChaseSpectral"
+    vmin = vmin if vmin is not None else ds[data_var].min().item()
+    vmax = vmax if vmax is not None else ds[data_var].max().item()
+    title = title or f"Max-{data_var.upper()[:3]}"
 
     projection = _get_projection(ds)
-
     # FIG
     fig = plt.figure(figsize=[10.3, 10])
     left, bottom, width, height = 0.1, 0.1, 0.6, 0.2
@@ -252,12 +164,12 @@ def plot_maxcappi(
 
     # Add map features
     if add_map:  # pragma: no cover
-        map_features(ax_xy, lat_lines, lon_lines)
+        _add_map_features(ax_xy, lat_lines, lon_lines)
 
     ax_xy.minorticks_on()
 
     if range_rings:  # pragma: no cover
-        plot_range_rings(ax_xy, trgx.max())
+        _plot_range_rings(ax_xy, trgx.max())
 
     ax_xy.set_xlim(trgx.min(), trgx.max())
     ax_xy.set_ylim(trgx.min(), trgx.max())
@@ -296,100 +208,154 @@ def plot_maxcappi(
         labelbottom=False,
     )
 
-    # Initialize an empty list to store the processed radar names
-    full_title = []
+    # Title and metadata
+    _add_plot_metadata(ax_cnr, ds, title, trgx, trgz)  # pragma: no cover
 
-    # Check if radar_name is a list (or list-like) or a simple string
-    if isinstance(ds.attrs["radar_name"], list):  # pragma: no cover
-        # Iterate over each radar name in the list
-        for name in ds.attrs["radar_name"]:
-            # Decode if it's a byte string and take the first 4 characters
-            if isinstance(name, bytes):  # pragma: no cover
-                site_title = name.decode("utf-8")[:4]
-            else:  # pragma: no cover
-                site_title = name[:4]
-            full_title.append(site_title)
-    else:  # pragma: no cover
-        # Handle the case where radar_name is a single string
-        site_title = ds.attrs["radar_name"][:4]
-        full_title.append(site_title)
-
-    # Join the processed radar names into a single string with commas separating them
-    formatted_title = ", ".join(full_title)
-
-    # Center-align text in the corner box
-    plt.text(
-        0.5,
-        0.90,
-        f"{formatted_title}",
-        size=13,
-        weight="bold",
-        ha="center",
-        va="center",
-    )
-    plt.text(0.5, 0.76, title, size=13, weight="bold", ha="center", va="center")
-    plt.text(
-        0.5,
-        0.63,
-        f"Max Range: {np.floor(trgx.max() / 1e3)} km",
-        size=11,
-        ha="center",
-        va="center",
-    )
-    plt.text(
-        0.5,
-        0.47,
-        f"Max Height: {np.floor(trgz.max() / 1e3)} km",
-        size=11,
-        ha="center",
-        va="center",
-    )
-    plt.text(
-        0.5,
-        0.28,
-        ds["time"].dt.strftime("%H:%M:%S Z").values.item(),
-        weight="bold",
-        size=16,
-        ha="center",
-        va="center",
-    )
-    plt.text(
-        0.5,
-        0.13,
-        ds["time"].dt.strftime("%d %b, %Y UTC").values.item(),
-        size=13.5,
-        ha="center",
-        va="center",
-    )
     ax_xy.set_aspect("auto")
 
     if add_slogan:  # pragma: no cover
-        fig.text(
-            0.1,
-            0.06,
-            "Powered by Radarx",  # Coordinates close to (0, 0) for lower-left corner
-            fontsize=9,
-            fontname="Courier New",
-            # bbox=dict(facecolor='none', boxstyle='round,pad=0.5')
-        )
+        _add_slogan(fig)
 
-    if savedir is not None:  # pragma: no cover
-        radar_name = ds.attrs.get("instrument_name", "Radar")
-        time_str = ds["time"].dt.strftime("%Y%m%d%H%M%S").values.item()
-        figname = f"{savedir}{os.sep}{title}_{radar_name}_{time_str}.png"
-        plt.savefig(fname=figname, dpi=dpi, bbox_inches="tight")  # pragma: no cover
-        print(f"Figure(s) saved as {figname}")  # pragma: no cover
-
+    _save_and_display_plot(
+        fig, ds, title, savedir, dpi, show_figure
+    )  # pragma: no cover
     # plt.rcParams.update(original_rc_params)
     plt.rcdefaults()
 
-    if show_figure:  # pragma: no cover
-        plt.show()  # pragma: no cover
-    else:  # pragma: no cover
-        plt.close()  # pragma: no cover
+
+def _add_slogan(fig):
+    """Add Slogan"""
+    text = "Plot by Radarx" + " | " + "Powered by Xradar"
+    fig.text(
+        0.5,
+        0.05,
+        text,
+        fontsize=10,
+        fontname="Courier New",
+        ha="center",
+        # bbox=dict(facecolor='none', boxstyle='round,pad=0.5')
+    )
 
 
-def map_features(ax, lat_lines, lon_lines):
+def _save_and_display_plot(fig, ds, title, savedir, dpi, show_figure):
+    """
+    Save the plot to file or display it based on user preference.
+    """
+    if savedir:  # pragma: no cover
+        time_str = ds["time"].dt.strftime("%Y%m%d%H%M%S").values.item()
+        radar_name = ds.attrs.get("instrument_name", "Radar")
+        filepath = f"{savedir}{os.sep}{title}_{radar_name}_{time_str}.png"
+        plt.savefig(filepath, dpi=dpi, bbox_inches="tight")
+        print(f"Figure saved as {filepath}")
+    plt.show() if show_figure else plt.close()  # pragma: no cover
+
+
+def _add_plot_metadata(ax_cnr, ds, title, trgx, trgz):  # pragma: no cover
+    """
+    Add metadata such as radar name, date, time, and title to the plot.
+    """
+    radar_name = ds.attrs.get("radar_name", "").split(",")[0][:4]
+    date_str = ds["time"].dt.strftime("%d %b, %Y UTC").values.item()
+    time_str = ds["time"].dt.strftime("%H:%M:%S Z").values.item()
+    max_range, max_height = int(trgx.max() / 1e3), int(trgz.max() / 1e3)
+
+    ax_cnr.text(0.5, 0.9, radar_name, size=13, weight="bold", ha="center", va="center")
+    ax_cnr.text(0.5, 0.76, title, size=13, weight="bold", ha="center", va="center")
+    ax_cnr.text(
+        0.5, 0.63, f"Max Range: {max_range} km", size=11, ha="center", va="center"
+    )
+    ax_cnr.text(
+        0.5, 0.47, f"Max Height: {max_height} km", size=11, ha="center", va="center"
+    )
+    ax_cnr.text(0.5, 0.28, time_str, weight="bold", size=16, ha="center", va="center")
+    ax_cnr.text(0.5, 0.13, date_str, size=13.5, ha="center", va="center")
+
+
+def _plot_range_rings(ax_xy, max_range):  # pragma: no cover
+    """
+    Plots range rings at 50 km intervals.
+
+    Parameters
+    ----------
+    ax_xy : matplotlib.axes.Axes
+        The axis on which to plot the range rings.
+    max_range : float
+        The maximum range for the range rings.
+
+    Returns
+    -------
+    None
+    """
+    background_color = ax_xy.get_facecolor()  # pragma: no cover
+    color = "k" if sum(background_color[:3]) / 3 > 0.5 else "w"  # pragma: no cover
+
+    for i, r in enumerate(
+        np.arange(5e4, np.floor(max_range) + 1, 5e4)
+    ):  # pragma: no cover
+        label = f"Ring Dist. {int(r/1e3)} km" if i == 0 else None  # pragma: no cover
+        ax_xy.plot(
+            r * np.cos(np.arange(0, 360) * np.pi / 180),
+            r * np.sin(np.arange(0, 360) * np.pi / 180),
+            color=color,
+            ls="--",
+            linewidth=0.4,
+            alpha=0.3,
+            label=label,
+        )  # pragma: no cover
+
+    ax_xy.legend(loc="upper right", prop={"weight": "normal", "size": 8})
+
+
+def _get_projection(ds):  # pragma: no cover
+    """
+    Determine the central latitude and longitude from a dataset
+    and return the corresponding projection.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        The dataset from which to extract latitude and longitude
+        information.
+
+    Returns
+    -------
+    projection : cartopy.crs.Projection
+        A Cartopy projection object centered on the extracted or
+        calculated latitude and longitude.
+    """
+
+    def _get_coord_or_attr(ds, coord_name, attr_name):  # pragma: no cover
+        """Helper function to get a coordinate or attribute, or
+        calculate median if available.
+        """
+        if coord_name in ds:  # pragma: no cover
+            return (
+                ds[coord_name].values.item()
+                if ds[coord_name].values.ndim == 0  # pragma: no cover
+                else ds[coord_name].values[0]  # pragma: no cover
+            )
+        if f"origin_{coord_name}" in ds.coords:  # pragma: no cover
+            return ds.coords[f"origin_{coord_name}"].median().item()
+        if f"radar_{coord_name}" in ds.coords:  # pragma: no cover
+            return ds.coords[f"radar_{coord_name}"].median().item()
+        return ds.attrs.get(attr_name, None)
+
+    lat_0 = _get_coord_or_attr(ds, "latitude", "origin_latitude") or _get_coord_or_attr(
+        ds, "radar_latitude", "origin_latitude"
+    )
+    lon_0 = _get_coord_or_attr(
+        ds, "longitude", "origin_longitude"
+    ) or _get_coord_or_attr(ds, "radar_longitude", "origin_longitude")
+
+    if lat_0 is None or lon_0 is None:  # pragma: no cover
+        lat_0 = ds.lat.mean().item()
+        lon_0 = ds.lon.mean().item()
+
+    projection = ccrs.LambertAzimuthalEqualArea(lon_0, lat_0)
+    return projection
+
+
+def _add_map_features(ax, lat_lines, lon_lines):  # pragma: no cover
     """
     Adds map features and gridlines to the plot.
 

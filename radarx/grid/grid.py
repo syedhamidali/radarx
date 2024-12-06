@@ -318,7 +318,7 @@ def grid_radar(
             # Create pseudo-CAPPI by extrapolating to lower levels
             pseudo_cappi_field = field.copy()
             for z_idx in range(
-                len(z) - 2, -1, -1
+                len(z) - 3, -1, -1
             ):  # Iterate from higher levels to lower levels
                 upper_level = pseudo_cappi_field[
                     z_idx + 1, :, :
