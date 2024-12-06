@@ -177,9 +177,6 @@ def combine_nexrad_sweeps(dtree):
     Combine sweeps in a radar DataTree:
 
     >>> combined_dtree = combine_sweeps(radar_dtree)
-    >>> combined_dtree
-    <xarray.DataTree>
-    ```
 
     """
     dtree_copy = dtree.copy(deep=True)
