@@ -6,13 +6,18 @@ from radar data using an xarray dataset. The function includes options for addin
 color bars, and customized visual settings.
 
 Author: Syed Hamid Ali (@syedhamidali)
+
+.. autosummary::
+   :nosignatures:
+   :toctree: generated/
+
+   {}
 """
 
 __all__ = ["plot_maxcappi"]
 __doc__ = __doc__.format("\n   ".join(__all__))
 
 import os
-import warnings
 import cmweather  # noqa
 import cartopy.crs as ccrs
 import cartopy.feature as feat
@@ -21,7 +26,7 @@ import numpy as np
 from cartopy.mpl.gridliner import LATITUDE_FORMATTER, LONGITUDE_FORMATTER
 from matplotlib.ticker import NullFormatter
 
-warnings.filterwarnings("ignore")
+# warnings.filterwarnings("ignore")
 
 
 def plot_maxcappi(
@@ -135,8 +140,8 @@ def plot_maxcappi(
 
     # Set colormap and value ranges
     cmap = cmap or "ChaseSpectral"
-    vmin = vmin if vmin is not None else ds[data_var].min().item()
-    vmax = vmax if vmax is not None else ds[data_var].max().item()
+    vmin = vmin if vmin is not None else ds[data_var].min().values
+    vmax = vmax if vmax is not None else ds[data_var].max().values
     title = title or f"Max-{data_var.upper()[:3]}"
 
     projection = _get_projection(ds)

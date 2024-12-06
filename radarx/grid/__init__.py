@@ -4,7 +4,7 @@
 
 """
 Radarx Grid
-=========
+===========
 
 .. toctree::
     :maxdepth: 4

@@ -7,7 +7,7 @@ Radarx Visualization
 ====================
 
 .. toctree::
-    :maxdepth: 4
+    :maxdepth: 3
 
 .. automodule:: radarx.vis.maxcappi
 """

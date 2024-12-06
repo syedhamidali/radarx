@@ -10,6 +10,7 @@ Radarx IO
     :maxdepth: 4
 
 .. automodule:: radarx.io.imd
+.. automodule:: radarx.io.aws_data
 """
 
 from .imd import *  # noqa
