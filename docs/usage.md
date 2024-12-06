@@ -22,5 +22,13 @@ import radarx
 notebooks/IMD_Radar_Data
 notebooks/Grid_Radar
 notebooks/aws_data
-notebooks/Compare_Gridding
+```
+
+```{toctree}
+:maxdepth: 2
+:caption: Gridding Rates
+
+notebooks/gridding_rate_part1
+notebooks/gridding_rate_part2
+notebooks/gridding_rate_part3
 ```
