@@ -164,6 +164,7 @@ def make_3d_grid(
     and has a valid CRS.
 
     """
+
     # Create Cartesian grid arrays
     x = np.arange(x_lim[0], x_lim[1] + x_step, x_step)
     y = np.arange(y_lim[0], y_lim[1] + y_step, y_step)
