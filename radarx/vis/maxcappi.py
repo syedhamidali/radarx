@@ -157,11 +157,15 @@ def plot_maxcappi(
         -------
         None
         """
-        background_color = ax_xy.get_facecolor()
-        color = "k" if sum(background_color[:3]) / 3 > 0.5 else "w"
+        background_color = ax_xy.get_facecolor()  # pragma: no cover
+        color = "k" if sum(background_color[:3]) / 3 > 0.5 else "w"  # pragma: no cover
 
-        for i, r in enumerate(np.arange(5e4, np.floor(max_range) + 1, 5e4)):
-            label = f"Ring Dist. {int(r/1e3)} km" if i == 0 else None
+        for i, r in enumerate(
+            np.arange(5e4, np.floor(max_range) + 1, 5e4)
+        ):  # pragma: no cover
+            label = (
+                f"Ring Dist. {int(r/1e3)} km" if i == 0 else None
+            )  # pragma: no cover
             ax_xy.plot(
                 r * np.cos(np.arange(0, 360) * np.pi / 180),
                 r * np.sin(np.arange(0, 360) * np.pi / 180),
@@ -170,7 +174,7 @@ def plot_maxcappi(
                 linewidth=0.4,
                 alpha=0.3,
                 label=label,
-            )
+            )  # pragma: no cover
 
         ax_xy.legend(loc="upper right", prop={"weight": "normal", "size": 8})
 

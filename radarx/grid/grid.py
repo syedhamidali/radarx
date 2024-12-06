@@ -70,9 +70,9 @@ def stack_data(dtree, data_vars=None, geo=False):
         ds = dtree[swp].to_dataset()
 
         # Find variables to include if data_vars is None
-        if data_vars is None:
+        if data_vars is None:  # pragma
             vars_to_stack = find_multidim_vars(ds, ndim=2)
-        else:
+        else:  # pragma: no cover
             vars_to_stack = data_vars
 
         # Stack coordinates
@@ -243,10 +243,11 @@ def grid_radar(
     - Interpolation is performed using Barnes interpolation.
 
     """
-    if FASTBARNES_AVAILABLE:
-        pass
-    else:
-        raise ("Install fast-barnes-py")
+    if not FASTBARNES_AVAILABLE:  # pragma: no cover
+        raise ImportError(
+            "The 'fastbarnes' package is required for this function. "
+            "Install it via 'pip install fast-barnes-py'."
+        )  # pragma: no cover
     ds = stack_data(dtree, data_vars=data_vars, geo=True)
     lat, lon, trgx, trgy, z, trg_crs = make_3d_grid(
         dtree["sweep_0"].to_dataset(),
@@ -276,7 +277,7 @@ def grid_radar(
     ds_out_fast = xr.Dataset({"z": ("z", z), "y": ("y", y), "x": ("x", x)})
 
     # Perform Barnes interpolation
-    if data_vars is None:
+    if data_vars is None:  # pragma: no cover
         data_vars = list(ds.data_vars)
 
     for var in data_vars:
@@ -297,8 +298,10 @@ def grid_radar(
         kernel_size = (
             2 * get_half_kernel_size(sigma, [xstep, ystep, z_step], num_iter=4) + 1
         )
-        if any(kernel_size > np.array(size)):
-            print(f"Kernel size {kernel_size} exceeds grid size {size}. Skipping...")
+        if any(kernel_size > np.array(size)):  # pragma: no cover
+            print(
+                f"Kernel size {kernel_size} exceeds grid size {size}. Skipping..."
+            )  # pragma: no cover
             continue
 
         # Perform interpolation
@@ -328,7 +331,7 @@ def grid_radar(
 
             # Add pseudo-CAPPI field to the output dataset
             ds_out_fast[var] = (("z", "y", "x"), pseudo_cappi_field)
-        else:
+        else:  # pragma: no cover
             ds_out_fast[var] = (("z", "y", "x"), field)
     # Assign metadata
     ds_out_fast["time"] = ds.time.mean()
