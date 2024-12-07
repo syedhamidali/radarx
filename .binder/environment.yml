@@ -19,7 +19,7 @@ dependencies:
   - fsspec
   - cmweather
   - itables
-  - open_radar_data
+  - open-radar-data
   - pip
   - pip:
     - git+https://github.com/MeteoSwiss/fast-barnes-py.git
