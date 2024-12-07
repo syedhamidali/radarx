@@ -3,15 +3,12 @@ channels:
   - conda-forge
 dependencies:
   - python>=3.10
-  - boto3
-  - cftime
   - matplotlib
-  - netcdf4
-  - numba
   - numpy
   - pandas
   - pooch
   - setuptools
+  - radarx
   - xarray
   - xradar
   - arm_pyart
