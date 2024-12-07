@@ -1,0 +1,39 @@
+name: radarx-examples
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10
+  - boto3
+  - bottleneck
+  - cartopy
+  - cfgrib
+  - cftime
+  - h5netcdf
+  - matplotlib
+  - nc-time-axis
+  - netcdf4
+  - numba
+  - numpy
+  - packaging
+  - pandas
+  - pooch
+  - scipy
+  - setuptools
+  - xarray
+  - zarr
+  - numbagg
+  - xradar
+  - arm_pyart
+  - wradlib
+  - fsspec
+  - pyproj
+  - osgeo
+  - cmweather
+  - itables
+  - open_radar_data
+  - jupyterlab
+  - jupyterlab_rise
+  - jupyter_server
+  - pip
+  - pip:
+    - git+https://github.com/MeteoSwiss/fast-barnes-py.git
