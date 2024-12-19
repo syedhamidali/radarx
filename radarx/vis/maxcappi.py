@@ -227,6 +227,8 @@ def plot_maxcappi(
     # plt.rcParams.update(original_rc_params)
     plt.rcdefaults()
 
+    return fig
+
 
 def _add_slogan(fig):
     """Add Slogan"""
