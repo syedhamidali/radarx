@@ -23,7 +23,7 @@ dependencies:
   - pytest-doctestplus
   - pytest-sugar
   - pytest-xdist
-  - scipy
+  - scipy<=1.14.1
   - setuptools
   - xarray>=2024.10.0
   - xmltodict
