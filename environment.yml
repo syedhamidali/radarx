@@ -3,7 +3,7 @@ channels:
   - conda-forge
   - nodefaults
 dependencies:
-  - python >=3.9
+  - python >=3.9,<3.13.1
   - pydata-sphinx-theme
   - myst-parser
   - sphinx
