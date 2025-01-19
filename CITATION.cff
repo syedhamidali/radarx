@@ -1,0 +1,16 @@
+# YAML 1.2
+# Metadata for citation of this software according to the CFF format (https://citation-file-format.github.io/)
+cff-version: 1.0.3
+message: If you use this software, please cite it using these metadata.
+# FIXME title as repository name might not be the best name, please make human readable
+title: 'Radarx: An Xarray-based Python package for radar data processing'
+authors:
+- given-names: Hamid Ali
+  family-names: Syed
+  affiliation: Purdue University
+  orcid: https://orcid.org/0000-0002-7188-2544
+
+version: 0.2.3
+date-released: 2025-01-19
+repository-code: https://github.com/syedhamidali/radarx
+license: MIT
