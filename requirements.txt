@@ -4,7 +4,7 @@ netCDF4
 numpy
 pyproj
 cartopy
-scipy
+scipy<=1.14.1
 xarray>=2024.10.0
 xmltodict
 matplotlib
