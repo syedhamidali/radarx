@@ -4,6 +4,7 @@ cff-version: 1.0.3
 message: If you use this software, please cite it using these metadata.
 # FIXME title as repository name might not be the best name, please make human readable
 title: 'Radarx: An Xarray-based Python package for radar data processing'
+doi: 10.5281/zenodo.14699312
 authors:
 - given-names: Hamid Ali
   family-names: Syed
