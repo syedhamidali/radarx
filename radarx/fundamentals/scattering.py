@@ -2,8 +2,9 @@
 Rayleigh Scattering Approximations
 ==================================
 
-Functions for computing backscatter cross-sections and size parameters
-under Rayleigh scattering assumptions.
+Functions for computing backscatter cross-sections, size parameters,
+and absorption, scattering, and extinction coefficients under Rayleigh
+scattering assumptions.
 
 .. autosummary::
    :nosignatures:
@@ -12,6 +13,9 @@ under Rayleigh scattering assumptions.
    backscatter_cross_section
    normalized_backscatter_cross_section
    size_parameter
+   absorption_coefficient
+   scattering_coefficient
+   extinction_coefficient
 
 References
 ----------
@@ -86,8 +90,84 @@ def size_parameter(diameter, wavelength):
     return np.pi * np.asarray(diameter) / wavelength
 
 
+def absorption_coefficient(radius, wavelength, refractive_index):
+    """
+    Compute Rayleigh absorption coefficient.
+
+    Parameters
+    ----------
+    radius : float or array-like
+        Particle radius [m]
+    wavelength : float
+        Radar wavelength [m]
+    refractive_index : complex
+        Complex refractive index of the particle
+
+    Returns
+    -------
+    float or array-like
+        Absorption efficiency (Qa)
+    """
+    x = 2 * np.pi * radius / wavelength
+    m = refractive_index
+    m2 = m * m
+    return np.maximum(4 * x * np.imag((m2 - 1) / (m2 + 2)), 0.0)
+
+
+def scattering_coefficient(radius, wavelength, refractive_index):
+    """
+    Compute Rayleigh scattering coefficient.
+
+    Parameters
+    ----------
+    radius : float or array-like
+        Particle radius [m]
+    wavelength : float
+        Radar wavelength [m]
+    refractive_index : complex
+        Complex refractive index of the particle
+
+    Returns
+    -------
+    float or array-like
+        Scattering efficiency (Qs)
+    """
+    x = 2 * np.pi * radius / wavelength
+    m = refractive_index
+    m2 = m * m
+    return (8 / 3) * x**4 * np.abs((m2 - 1) / (m2 + 2)) ** 2
+
+
+def extinction_coefficient(radius, wavelength, refractive_index):
+    """
+    Compute Rayleigh extinction coefficient (Qa + Qs).
+
+    Parameters
+    ----------
+    radius : float or array-like
+        Particle radius [m]
+    wavelength : float
+        Radar wavelength [m]
+    refractive_index : complex
+        Complex refractive index of the particle
+
+    Returns
+    -------
+    float or array-like
+        Extinction efficiency (Qe)
+    """
+    return np.maximum(
+        absorption_coefficient(radius, wavelength, refractive_index)
+        + scattering_coefficient(radius, wavelength, refractive_index),
+        0.0,
+    )
+
+
 __all__ = [
     "backscatter_cross_section",
     "normalized_backscatter_cross_section",
     "size_parameter",
+    "absorption_coefficient",
+    "scattering_coefficient",
+    "extinction_coefficient",
 ]

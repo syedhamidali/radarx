@@ -3,8 +3,10 @@
 # Distributed under the MIT License. See LICENSE for more info.
 
 """
-Radarx Fundmantals
-====================
+Radar Fundmentals
+=================
+
+This module adapts and extends concepts and calculations inspired by the CSU Radar Tools and wradlib packages. We acknowledge their foundational contributions to radar meteorology software development.
 
 .. toctree::
     :maxdepth: 4
