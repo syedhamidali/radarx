@@ -8,11 +8,12 @@ Functions related to Doppler radar performance and velocity limits.
    :nosignatures:
    :toctree: generated/
 
+   doppler_dilemma
+   doppler_frequency_shift
+   dual_prf_velocity
    max_frequency
    nyquist_velocity
    unambiguous_range
-   doppler_dilemma
-   dual_prf_velocity
 
 References
 ----------
@@ -77,6 +78,36 @@ def unambiguous_range(prf):
     return C / (2.0 * np.asarray(prf))
 
 
+def doppler_frequency_shift(frequency, vr, exact=False, relativistic=False):
+    """
+    Compute Doppler frequency shift.
+
+    Parameters
+    ----------
+    frequency : float or array-like
+        Transmitted radar frequency [Hz]
+    vr : float or array-like
+        Radial velocity of the target [m/s], positive if approaching
+    exact : bool, optional
+        If True, uses the classical but accurate Doppler formula: (2 * f * v) / (c - v).
+    relativistic : bool, optional
+        If True, uses the relativistic Doppler formula. Overrides `exact` if both are True.
+
+    Returns
+    -------
+    float or array-like
+        Doppler frequency shift [Hz]
+    """
+    frequency = np.asarray(frequency)
+    vr = np.asarray(vr)
+    if relativistic:
+        return frequency * (np.sqrt((1 + vr / C) / (1 - vr / C)) - 1)
+    elif exact:
+        return 2.0 * frequency * vr / (C - vr)
+    else:
+        return 2.0 * frequency * vr / C
+
+
 def doppler_dilemma(value, wavelength):
     """
     Solve the Doppler dilemma equation: trade-off between unambiguous range and velocity.
@@ -123,6 +154,7 @@ def dual_prf_velocity(wavelength, prf1, prf2):
 
 __all__ = [
     "doppler_dilemma",
+    "doppler_frequency_shift",
     "dual_prf_velocity",
     "max_frequency",
     "nyquist_velocity",

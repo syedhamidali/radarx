@@ -60,3 +60,39 @@ def test_power_return_target():
     r = 10000
     p = system.power_return_target(power_t, gain, wl, sig, r)
     assert p > 0
+
+
+def test_radar_const():
+    power_t = 1e6  # 1 MW
+    gain = 45.0  # dB
+    tau = 1e-6  # pulse width in seconds
+    wavelength = 0.05  # 5 cm
+    bw_h = 1.0  # degrees
+    bw_v = 1.0  # degrees
+    aloss = 2.0  # dB
+    rloss = 1.0  # dB
+
+    const = system.radar_const(power_t, gain, tau, wavelength, bw_h, bw_v, aloss, rloss)
+    assert const > 0
+
+
+def test_radar_equation():
+    power_t = 1000.0
+    gain = 1000.0
+    wavelength = 0.03
+    sigma = 1.0
+    r = 10000.0
+    received_power = system.radar_equation(power_t, gain, gain, wavelength, sigma, r)
+    assert received_power > 0
+
+
+def test_solve_peak_power():
+    received_power = 1e-14
+    gain = 1000.0
+    wavelength = 0.03
+    sigma = 1.0
+    r = 100000.0
+    peak_power = system.solve_peak_power(
+        received_power, gain, gain, wavelength, sigma, r
+    )
+    assert peak_power > 0
