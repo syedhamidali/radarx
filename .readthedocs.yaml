@@ -5,3 +5,6 @@ build:
   os: 'ubuntu-20.04'
   tools:
     python: 'mambaforge-latest'
+sphinx:
+  # Path to your Sphinx configuration file.
+  configuration: docs/conf.py
