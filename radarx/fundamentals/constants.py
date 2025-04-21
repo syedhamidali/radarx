@@ -2,13 +2,29 @@
 Constants
 =========
 
-Physical and radar-related constants for use in radarx fundamental calculations.
+.. module:: radarx.fundamentals.constants
+   :synopsis: Physical and radar-related constants for use in radarx fundamental calculations.
+
+This module contains constants used across radar signal processing and physical modeling, including:
+- Physical constants (e.g., speed of light, Boltzmann constant)
+- Radar-specific constants (e.g., dielectric constants, beamwidths)
 
 .. autosummary::
    :nosignatures:
    :toctree: generated/
 
-   {}
+   C
+   DBZ_TO_Z_FACTOR
+   DIELECTRIC_ICE
+   DIELECTRIC_WATER
+   EARTH_RADIUS
+   EFFECTIVE_RADIUS_4_3
+   K_BOLTZMANN
+   RADAR_BANDS
+   T_STANDARD
+   TYPICAL_BEAMWIDTH
+   TYPICAL_PULSE_WIDTHS
+   Z_TO_DBZ_FACTOR
 """
 
 __all__ = [

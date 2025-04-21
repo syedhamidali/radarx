@@ -3,6 +3,32 @@ Common Utilities
 ================
 
 Shared helper functions for internal use across radarx.fundamentals modules.
+
+.. module:: radarx.fundamentals.common
+   :synopsis: Shared helper functions for unit conversion and internal use across radarx.fundamentals modules.
+
+.. autosummary::
+   :nosignatures:
+   :toctree: generated/
+
+   dbz_from_z
+   dbz_to_z
+   ensure_positive
+   kts_to_mps
+   kts_to_si
+   km_to_m
+   km_to_si
+   kilometers_to_meters
+   kilometers_to_si
+   linearize_dbz
+   m_to_km
+   meters_to_kilometers
+   mps_to_kts
+   mps_to_knots
+   si_to_kilometers
+   si_to_km
+   si_to_kts
+   z_to_dbz
 """
 
 __all__ = [
