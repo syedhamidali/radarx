@@ -12,6 +12,7 @@ except Exception:
     __version__ = "999"
 
 from . import accessors  # noqa
+from . import core  # noqa
 from . import fundamentals  # noqa
 from . import grid  # noqa
 from . import io  # noqa
