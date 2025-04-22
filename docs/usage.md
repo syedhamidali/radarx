@@ -37,5 +37,5 @@ notebooks/gridding_rate_part3
 :maxdepth: 2
 :caption: Exercises
 
-notebooks/ExerciseonFundamentals
+notebooks/radarx_fundamentals_examples
 ```
