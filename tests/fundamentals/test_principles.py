@@ -68,3 +68,12 @@ def test_compute_snr():
         principles.compute_snr(power_received, noise_bandwidth, system_temp),
         expected_snr,
     )
+
+
+def test_compute_nyquist_velocity():
+    prf = 1000  # Hz
+    wavelength = 0.1  # m
+    expected_nyquist = wavelength * prf / 4
+    assert np.isclose(
+        principles.compute_nyquist_velocity(prf, wavelength), expected_nyquist
+    )

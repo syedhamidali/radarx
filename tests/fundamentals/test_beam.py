@@ -33,3 +33,13 @@ def test_compute_beamwidth():
     beamwidth = beam.compute_beamwidth(wavelength, antenna_diameter)
     expected = 1.22 * wavelength / antenna_diameter
     assert np.isclose(beamwidth, expected)
+
+
+def test_compute_volume_resolution():
+    range_m = 10000  # 10 km
+    beamwidth_rad = np.deg2rad(1.0)  # 1 degree in radians
+    pulse_length = 150  # meters
+    vol = beam.compute_volume_resolution(range_m, beamwidth_rad, pulse_length)
+    az_res = beam.azimuthal_resolution(range_m, np.rad2deg(beamwidth_rad))
+    expected = az_res * az_res * pulse_length
+    assert np.isclose(vol, expected)
