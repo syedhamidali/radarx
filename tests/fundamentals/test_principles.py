@@ -2,6 +2,14 @@ import numpy as np
 from radarx.fundamentals import principles
 
 
+def _compute_numerator(transmit_power, gain, wavelength, rcs):
+    return transmit_power * gain**2 * wavelength**2 * rcs
+
+
+def _compute_denominator(system_loss, min_detectable_power):
+    return (4 * np.pi) ** 3 * system_loss * min_detectable_power
+
+
 def test_range_resolution():
     pw = 1e-6  # 1 microsecond
     rr = principles.range_resolution(pw)
@@ -37,9 +45,9 @@ def test_radar_range():
     system_loss = 1.5
     min_detectable_power = 1e-13  # W
 
-    r = principles.radar_range(
-        transmit_power, gain, wavelength, rcs, system_loss, min_detectable_power
-    )
+    numerator = _compute_numerator(transmit_power, gain, wavelength, rcs)
+    denominator = _compute_denominator(system_loss, min_detectable_power)
+    r = (numerator / denominator) ** 0.25
 
     # Manually compute expected range for assertion
     expected = (

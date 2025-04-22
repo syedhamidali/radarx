@@ -36,6 +36,14 @@ import numpy as np
 from .constants import C, K_BOLTZMANN
 
 
+def _compute_numerator(transmit_power, gain, wavelength, rcs):
+    return transmit_power * gain**2 * wavelength**2 * rcs
+
+
+def _compute_denominator(system_loss, min_detectable_power):
+    return (4 * np.pi) ** 3 * system_loss * min_detectable_power
+
+
 def radar_range(
     transmit_power, gain, wavelength, rcs, system_loss, min_detectable_power
 ):
@@ -67,14 +75,8 @@ def radar_range(
     - Rinehart (2004), Eq. 2.1
     - Doviak and Zrnić (1993), Section 3.2
     """
-    # Split numerator and denominator into smaller expressions
-    gain_squared = gain**2
-    wavelength_squared = wavelength**2
-    numerator = transmit_power * gain_squared * wavelength_squared * rcs
-
-    pi_cubed = (4 * np.pi) ** 3
-    denominator = pi_cubed * system_loss * min_detectable_power
-
+    numerator = _compute_numerator(transmit_power, gain, wavelength, rcs)
+    denominator = _compute_denominator(system_loss, min_detectable_power)
     return (numerator / denominator) ** 0.25
 
 
