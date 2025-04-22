@@ -135,9 +135,7 @@ for more details.
 -   Syed Hamid Ali
 
 ## Citation
-
 >Syed, H. A. (2025). Radarx: An Xarray-based Python package for radar data processing (v0.2). Zenodo. https://doi.org/10.5281/zenodo.14699312
-
 
 ```python
 @software{syed_2025_14699312,
