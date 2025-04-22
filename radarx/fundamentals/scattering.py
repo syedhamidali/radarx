@@ -90,6 +90,44 @@ def size_parameter(diameter, wavelength):
     return np.pi * np.asarray(diameter) / wavelength
 
 
+def _size_parameter(radius, wavelength):
+    """
+    Calculate size parameter x = 2π * radius / wavelength.
+
+    Parameters
+    ----------
+    radius : float or array-like
+        Particle radius [m]
+    wavelength : float
+        Radar wavelength [m]
+
+    Returns
+    -------
+    float or array-like
+        Size parameter (unitless)
+    """
+    return 2 * np.pi * np.asarray(radius) / wavelength
+
+
+def _complex_ratio(refractive_index):
+    """
+    Calculate the complex ratio (m^2 - 1) / (m^2 + 2).
+
+    Parameters
+    ----------
+    refractive_index : complex
+        Complex refractive index of the particle
+
+    Returns
+    -------
+    complex or array-like of complex
+        Complex ratio used in scattering calculations
+    """
+    m = refractive_index
+    m2 = m * m
+    return (m2 - 1) / (m2 + 2)
+
+
 def absorption_coefficient(radius, wavelength, refractive_index):
     """
     Compute Rayleigh absorption coefficient.
@@ -132,10 +170,9 @@ def scattering_coefficient(radius, wavelength, refractive_index):
     float or array-like
         Scattering efficiency (Qs)
     """
-    x = 2 * np.pi * radius / wavelength
-    m = refractive_index
-    m2 = m * m
-    return (8 / 3) * x**4 * np.abs((m2 - 1) / (m2 + 2)) ** 2
+    x = _size_parameter(radius, wavelength)
+    ratio = _complex_ratio(refractive_index)
+    return (8 / 3) * x**4 * np.abs(ratio) ** 2
 
 
 def extinction_coefficient(radius, wavelength, refractive_index):
