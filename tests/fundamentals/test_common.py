@@ -38,3 +38,39 @@ def test_si_to_kts_and_back():
 def test_si_to_km_and_back():
     assert np.isclose(common.si_to_km(1000.0), 1.0)
     assert np.isclose(common.km_to_si(1.0), 1000.0)
+
+
+def test_z_to_dbz_and_back():
+    z = 1000.0
+    dbz = common.z_to_dbz(z)
+    assert np.isclose(dbz, 10 * np.log10(z))
+    assert np.isclose(common.dbz_to_z(dbz), z)
+
+
+def test_meters_kilometers_conversion():
+    assert np.isclose(common.meters_to_kilometers(3000), 3.0)
+    assert np.isclose(common.kilometers_to_meters(3.0), 3000.0)
+
+
+def test_ensure_positive_valid():
+    assert common.ensure_positive(5.0) == 5.0
+
+
+def test_ensure_positive_invalid():
+    try:
+        common.ensure_positive(-1.0)
+    except ValueError as e:
+        assert str(e) == "value must be positive, got -1.0"
+    else:
+        assert False, "Expected ValueError for negative input"
+
+
+def test_si_to_kilometers_units():
+    assert np.isclose(common.si_to_kilometers(1000, unit="m"), 1.0)
+    assert np.isclose(common.si_to_kilometers(2.0, unit="km"), 2.0)
+    try:
+        common.si_to_kilometers(100, unit="mi")
+    except ValueError as e:
+        assert "Unsupported unit" in str(e)
+    else:
+        assert False, "Expected ValueError for unsupported unit"

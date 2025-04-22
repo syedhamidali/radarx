@@ -25,3 +25,11 @@ def test_volume_resolution():
     bw_v_rad = np.deg2rad(bw_v)
     expected = range_m**2 * bw_h_rad * bw_v_rad * pulse_length / (4 * np.log(2))
     assert np.isclose(vol, expected)
+
+
+def test_compute_beamwidth():
+    wavelength = 0.1  # 10 cm
+    antenna_diameter = 1.0  # 1 meter
+    beamwidth = beam.compute_beamwidth(wavelength, antenna_diameter)
+    expected = 1.22 * wavelength / antenna_diameter
+    assert np.isclose(beamwidth, expected)
