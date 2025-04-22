@@ -29,3 +29,32 @@ def test_dual_prf_velocity():
     wavelength = 0.05  # 5 cm
     v_dual = doppler.dual_prf_velocity(wavelength, prf1, prf2)
     assert np.isclose(np.abs(v_dual), 50.0, rtol=1e-6)
+
+
+def test_max_frequency():
+    prf = 2000  # Hz
+    expected = prf / 2
+    assert np.isclose(doppler.max_frequency(prf), expected)
+
+
+def test_doppler_frequency_shift_basic():
+    frequency = 3e9  # Hz
+    vr = 15.0  # m/s
+    expected = 2 * frequency * vr / C
+    assert np.isclose(doppler.doppler_frequency_shift(frequency, vr), expected)
+
+
+def test_doppler_frequency_shift_exact():
+    frequency = 3e9  # Hz
+    vr = 15.0  # m/s
+    expected = 2 * frequency * vr / (C - vr)
+    result = doppler.doppler_frequency_shift(frequency, vr, exact=True)
+    assert np.isclose(result, expected)
+
+
+def test_doppler_frequency_shift_relativistic():
+    frequency = 3e9  # Hz
+    vr = 15.0  # m/s
+    expected = frequency * (np.sqrt((1 + vr / C) / (1 - vr / C)) - 1)
+    result = doppler.doppler_frequency_shift(frequency, vr, relativistic=True)
+    assert np.isclose(result, expected)
