@@ -1,5 +1,20 @@
 # History
 
+## 0.2.5 (2025-04-22)
+- **ADD:** Added `fundamentals` module with core radar computation utilities. ({pull}`66`) by [@syedhamidali](https://github.com/syedhamidali)
+- **CHG:** Refactored Doppler and scattering fundamentals to reduce complexity.
+- **ADD:** Tests for PRF, beamwidth, radar range, Doppler shift, and SNR calculations. ({pull}`66`) by [@syedhamidali](https://github.com/syedhamidali)
+
+## 0.2.4 (2025-01-20)
+- **ADD:** Citation metadata for radarx. ({pull}`61`) by [@syedhamidali](https://github.com/syedhamidali)
+
+## 0.2.3 (2025-01-19)
+- **ADD:** Binder support setup. ({pull}`58`, {pull}`59`) by [@syedhamidali](https://github.com/syedhamidali)
+- **MNT:** Update `max_cappi` to return figure object. ({pull}`60`) by [@syedhamidali](https://github.com/syedhamidali)
+
+## 0.2.2 (2024-12-19)
+- **MNT:** Enhancements for Binder support. ({pull}`58`, {pull}`59`) by [@syedhamidali](https://github.com/syedhamidali)
+
 ## 0.2.1 (2024-12-06)
 - **REL** Version Release 0.2.1, ({pull}`56`) by [@syedhamidali](https://github.com/syedhamidali)
 - **ADD:** Added wradlib gridding example. ({issue}`51`, {issue}`52`, {issue}`53`) and ({pull}`56`) by [@syedhamidali](https://github.com/syedhamidali)
