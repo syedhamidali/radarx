@@ -24,3 +24,30 @@ def test_size_parameter():
     size_param = scattering.size_parameter(diameter, wavelength)
     assert size_param.shape == diameter.shape
     assert np.all(size_param > 0)
+
+
+def test_absorption_coefficient():
+    radius = 0.0005  # 0.5 mm
+    wavelength = 0.03  # 3 cm
+    refractive_index = 8.5 + 1.0j
+    coeff = scattering.absorption_coefficient(radius, wavelength, refractive_index)
+    assert np.isfinite(coeff)
+    assert coeff >= 0
+
+
+def test_scattering_coefficient():
+    radius = 0.0005
+    wavelength = 0.03
+    refractive_index = 8.5 + 1.0j
+    coeff = scattering.scattering_coefficient(radius, wavelength, refractive_index)
+    assert np.isfinite(coeff)
+    assert coeff >= 0
+
+
+def test_extinction_coefficient():
+    radius = 0.0005
+    wavelength = 0.03
+    refractive_index = 8.5 + 1.0j
+    coeff = scattering.extinction_coefficient(radius, wavelength, refractive_index)
+    assert np.isfinite(coeff)
+    assert coeff >= 0

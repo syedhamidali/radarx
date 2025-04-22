@@ -31,3 +31,11 @@ def test_blind_range():
     pulse_width = 1e-6  # 1 microsecond
     blind = timing.compute_blind_range(pulse_width)
     assert blind > 0
+
+
+def test_compute_prf():
+    pulse_width = 1e-6  # 1 microsecond
+    duty_cycle = 0.1
+    prf = timing.compute_prf(pulse_width, duty_cycle)
+    expected_prf = duty_cycle / pulse_width
+    assert prf == expected_prf
