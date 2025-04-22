@@ -74,3 +74,7 @@ def test_si_to_kilometers_units():
         assert "Unsupported unit" in str(e)
     else:
         assert False, "Expected ValueError for unsupported unit"
+
+
+def test_kilometers_to_si():
+    assert np.isclose(common.kilometers_to_si(3.0), 3000.0)
