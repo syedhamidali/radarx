@@ -67,8 +67,14 @@ def radar_range(
     - Rinehart (2004), Eq. 2.1
     - Doviak and Zrnić (1993), Section 3.2
     """
-    numerator = transmit_power * gain**2 * wavelength**2 * rcs
-    denominator = (4 * np.pi) ** 3 * system_loss * min_detectable_power
+    # Split numerator and denominator into smaller expressions
+    gain_squared = gain**2
+    wavelength_squared = wavelength**2
+    numerator = transmit_power * gain_squared * wavelength_squared * rcs
+
+    pi_cubed = (4 * np.pi) ** 3
+    denominator = pi_cubed * system_loss * min_detectable_power
+
     return (numerator / denominator) ** 0.25
 
 

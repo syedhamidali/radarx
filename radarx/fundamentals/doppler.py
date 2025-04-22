@@ -78,6 +78,18 @@ def unambiguous_range(prf):
     return C / (2.0 * np.asarray(prf))
 
 
+def _doppler_shift_relativistic(frequency, vr):
+    return frequency * (np.sqrt((1 + vr / C) / (1 - vr / C)) - 1)
+
+
+def _doppler_shift_exact(frequency, vr):
+    return 2.0 * frequency * vr / (C - vr)
+
+
+def _doppler_shift_basic(frequency, vr):
+    return 2.0 * frequency * vr / C
+
+
 def doppler_frequency_shift(frequency, vr, exact=False, relativistic=False):
     """
     Compute Doppler frequency shift.
@@ -100,12 +112,12 @@ def doppler_frequency_shift(frequency, vr, exact=False, relativistic=False):
     """
     frequency = np.asarray(frequency)
     vr = np.asarray(vr)
+
     if relativistic:
-        return frequency * (np.sqrt((1 + vr / C) / (1 - vr / C)) - 1)
-    elif exact:
-        return 2.0 * frequency * vr / (C - vr)
-    else:
-        return 2.0 * frequency * vr / C
+        return _doppler_shift_relativistic(frequency, vr)
+    if exact:
+        return _doppler_shift_exact(frequency, vr)
+    return _doppler_shift_basic(frequency, vr)
 
 
 def doppler_dilemma(value, wavelength):
@@ -159,4 +171,7 @@ __all__ = [
     "max_frequency",
     "nyquist_velocity",
     "unambiguous_range",
+    "_doppler_shift_basic",
+    "_doppler_shift_exact",
+    "_doppler_shift_relativistic",
 ]

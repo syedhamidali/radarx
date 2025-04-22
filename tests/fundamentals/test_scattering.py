@@ -44,6 +44,32 @@ def test_scattering_coefficient():
     assert coeff >= 0
 
 
+def test_scattering_coefficient_zero_radius():
+    radius = 0.0
+    wavelength = 0.03
+    refractive_index = 8.5 + 1.0j
+    coeff = scattering.scattering_coefficient(radius, wavelength, refractive_index)
+    assert coeff == 0.0
+
+
+def test_scattering_coefficient_large_radius():
+    radius = 0.01  # 10 mm
+    wavelength = 0.03
+    refractive_index = 8.5 + 1.0j
+    coeff = scattering.scattering_coefficient(radius, wavelength, refractive_index)
+    assert np.isfinite(coeff)
+    assert coeff > 0
+
+
+def test_scattering_coefficient_real_index_only():
+    radius = 0.0005
+    wavelength = 0.03
+    refractive_index = 1.33 + 0.0j  # No imaginary part
+    coeff = scattering.scattering_coefficient(radius, wavelength, refractive_index)
+    assert np.isfinite(coeff)
+    assert coeff >= 0
+
+
 def test_extinction_coefficient():
     radius = 0.0005
     wavelength = 0.03
