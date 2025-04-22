@@ -2,6 +2,7 @@
 
 ![Radarx Logo](https://github.com/syedhamidali/radarx/raw/main/docs/_static/Radarx_Logo_micro.png)
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.14699312.svg)](https://doi.org/10.5281/zenodo.14699312)
 [![Python Versions](https://img.shields.io/badge/Python-3.9%20|%203.10%20|%203.11%20|%203.12-blue)](https://www.python.org/downloads/)
 [![PyPI Version](https://img.shields.io/pypi/v/radarx.svg)](https://pypi.org/project/radarx/)
 [![PyPI Downloads](https://img.shields.io/pypi/dm/radarx.svg?label=PyPI%20downloads)](https://pypi.org/project/radarx/)
@@ -73,8 +74,8 @@ python -m pip install .
 
 ## Usage
 
-Here's a simple example of how to use Radarx with [xradar]{.title-ref}
-to load and process a volume scan:
+Here's a simple example of how to use Radarx with [xradar](https://xradar.readthedocs.io/en/latest/)
+to load IMD radar data and process a volume scan:
 
 ```python
 import radarx as rx
@@ -132,3 +133,28 @@ for more details.
 ## Authors
 
 -   Syed Hamid Ali
+
+## Citation
+
+>Syed, H. A. (2025). Radarx: An Xarray-based Python package for radar data processing (v0.2). Zenodo. https://doi.org/10.5281/zenodo.14699312
+
+
+```python
+@software{syed_2025_14699312,
+  author       = {Syed, Hamid Ali},
+  title        = {Radarx: An Xarray-based Python package for radar
+                   data processing
+                  },
+  month        = jan,
+  year         = 2025,
+  publisher    = {Zenodo},
+  version      = {v0.2},
+  doi          = {10.5281/zenodo.14699312},
+  url          = {https://doi.org/10.5281/zenodo.14699312},
+  swhid        = {swh:1:dir:eb4e11846680cf6416be5940f36b363f74e1a3ec
+                   ;origin=https://doi.org/10.5281/zenodo.14699306;vi
+                   sit=swh:1:snp:f6755852f0e71678ed579651ec997ac4496f
+                   3b30;anchor=swh:1:rel:ebd79cd3cf49a7e8a5e9b9576fb7
+                   7f7c8bd0227e;path=syedhamidali-radarx-ec92870
+                  },
+}```
