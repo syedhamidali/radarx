@@ -12,9 +12,11 @@ except Exception:
     __version__ = "999"
 
 from . import accessors  # noqa
+from . import fundamentals  # noqa
+from . import grid  # noqa
 from . import io  # noqa
 from . import testing  # noqa
-from . import grid  # noqa
+from . import vis  # noqa
 from .utils import *  # noqa
 
 __all__ = [s for s in dir() if not s.startswith("_")]
