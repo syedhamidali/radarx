@@ -4,20 +4,16 @@ Radar Principles
 
 Core physical and theoretical principles in radar meteorology.
 
-.. autosummary::
-   :nosignatures:
-   :toctree: generated/
-
-   radar_range
-   compute_nyquist_velocity
-   compute_range_resolution
-   compute_doppler_shift
-   compute_snr
-
 References
 ----------
 - Rinehart, R. E. (2004). Radar for Meteorologists. 4th ed. Rinehart Publications.
 - Doviak, R. J., & Zrnić, D. S. (1993). Doppler Radar and Weather Observations. Academic Press.
+
+.. autosummary::
+   :nosignatures:
+   :toctree: generated/
+
+   {}
 """
 
 __all__ = [
@@ -31,6 +27,8 @@ __all__ = [
     "round_trip_time",
     "snr",
 ]
+
+__doc__ = __doc__.format("\n   ".join(__all__))
 
 import numpy as np
 from .constants import C, K_BOLTZMANN

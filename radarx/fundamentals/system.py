@@ -9,22 +9,28 @@ wavelength/frequency conversion, and radar constants.
     :nosignatures:
     :toctree: generated/
 
-    ant_eff_area
-    antenna_gain
-    frequency
-    frequency_from_wavelength
-    power_return_target
-    pulse_duration
-    pulse_duration_from_length
-    pulse_length
-    pulse_length_from_duration
-    radar_const
-    radar_equation
-    size_param
-    solve_peak_power
-    wavelength
-    wavelength_from_frequency
+    {}
 """
+
+__all__ = [
+    "ant_eff_area",
+    "antenna_gain",
+    "frequency",
+    "frequency_from_wavelength",
+    "power_return_target",
+    "pulse_duration",
+    "pulse_duration_from_length",
+    "pulse_length",
+    "pulse_length_from_duration",
+    "radar_const",
+    "radar_equation",
+    "size_param",
+    "solve_peak_power",
+    "wavelength",
+    "wavelength_from_frequency",
+]
+
+__doc__ = __doc__.format("\n   ".join(__all__))
 
 import numpy as np
 from .constants import C
@@ -332,22 +338,3 @@ def wavelength_from_frequency(freq):
          Wavelength [m]
     """
     return C / np.asarray(freq)
-
-
-__all__ = [
-    "ant_eff_area",
-    "antenna_gain",
-    "frequency",
-    "frequency_from_wavelength",
-    "power_return_target",
-    "pulse_duration",
-    "pulse_duration_from_length",
-    "pulse_length",
-    "pulse_length_from_duration",
-    "radar_const",
-    "radar_equation",
-    "size_param",
-    "solve_peak_power",
-    "wavelength",
-    "wavelength_from_frequency",
-]

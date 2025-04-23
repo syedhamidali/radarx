@@ -6,22 +6,28 @@ Functions for computing backscatter cross-sections, size parameters,
 and absorption, scattering, and extinction coefficients under Rayleigh
 scattering assumptions.
 
-.. autosummary::
-   :nosignatures:
-   :toctree: generated/
-
-   backscatter_cross_section
-   normalized_backscatter_cross_section
-   size_parameter
-   absorption_coefficient
-   scattering_coefficient
-   extinction_coefficient
-
 References
 ----------
 - Rinehart (1997). Radar for Meteorologists.
 - Battan (1973). Radar Observations of the Atmosphere.
+
+.. autosummary::
+   :nosignatures:
+   :toctree: generated/
+
+   {}
 """
+
+__all__ = [
+    "backscatter_cross_section",
+    "normalized_backscatter_cross_section",
+    "size_parameter",
+    "absorption_coefficient",
+    "scattering_coefficient",
+    "extinction_coefficient",
+]
+
+__doc__ = __doc__.format("\n   ".join(__all__))
 
 import numpy as np
 
@@ -198,13 +204,3 @@ def extinction_coefficient(radius, wavelength, refractive_index):
         + scattering_coefficient(radius, wavelength, refractive_index),
         0.0,
     )
-
-
-__all__ = [
-    "backscatter_cross_section",
-    "normalized_backscatter_cross_section",
-    "size_parameter",
-    "absorption_coefficient",
-    "scattering_coefficient",
-    "extinction_coefficient",
-]

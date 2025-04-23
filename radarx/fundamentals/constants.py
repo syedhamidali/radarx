@@ -13,18 +13,7 @@ This module contains constants used across radar signal processing and physical 
    :nosignatures:
    :toctree: generated/
 
-   C
-   DBZ_TO_Z_FACTOR
-   DIELECTRIC_ICE
-   DIELECTRIC_WATER
-   EARTH_RADIUS
-   EFFECTIVE_RADIUS_4_3
-   K_BOLTZMANN
-   RADAR_BANDS
-   T_STANDARD
-   TYPICAL_BEAMWIDTH
-   TYPICAL_PULSE_WIDTHS
-   Z_TO_DBZ_FACTOR
+    {}
 """
 
 __all__ = [
@@ -41,6 +30,8 @@ __all__ = [
     "TYPICAL_PULSE_WIDTHS",
     "Z_TO_DBZ_FACTOR",
 ]
+
+__doc__ = __doc__.format("\n   ".join(__all__))
 
 # Speed of light in vacuum
 C = 299_792_458  # [m/s]
