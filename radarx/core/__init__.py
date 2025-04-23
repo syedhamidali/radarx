@@ -7,7 +7,7 @@ Radarx Core
 ===========
 
 .. toctree::
-    :maxdepth: 4
+    :maxdepth: 5
 
 .. automodule:: radarx.core.conversion
 """

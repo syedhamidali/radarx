@@ -4,21 +4,27 @@ Radar-Derived Variables
 
 Functions related to reflectivity, differential reflectivity, and radial velocity.
 
-.. autosummary::
-   :nosignatures:
-   :toctree: generated/
-
-   reflectivity_factor
-   differential_reflectivity
-   linear_depolarization_ratio
-   circular_depolarization_ratio
-   radial_velocity
-
 References
 ----------
 - Rinehart, R. E. (1997). Radar for Meteorologists.
 - Doviak and Zrnic (1993). Doppler Radar and Weather Observations.
+
+.. autosummary::
+   :nosignatures:
+   :toctree: generated/
+
+   {}
 """
+
+__all__ = [
+    "reflectivity_factor",
+    "differential_reflectivity",
+    "linear_depolarization_ratio",
+    "circular_depolarization_ratio",
+    "radial_velocity",
+]
+
+__doc__ = __doc__.format("\n   ".join(__all__))
 
 import numpy as np
 
@@ -122,12 +128,3 @@ def radial_velocity(f_shift, wavelength):
         Radial velocity [m/s]
     """
     return np.asarray(f_shift) * np.asarray(wavelength) / 2.0
-
-
-__all__ = [
-    "reflectivity_factor",
-    "differential_reflectivity",
-    "linear_depolarization_ratio",
-    "circular_depolarization_ratio",
-    "radial_velocity",
-]

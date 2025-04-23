@@ -62,6 +62,8 @@ __all__ = [
     "si_to_fahrenheit",
 ]
 
+__doc__ = __doc__.format("\n   ".join(__all__))
+
 from typing import Union
 import numpy as np
 

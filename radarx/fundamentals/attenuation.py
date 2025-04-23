@@ -4,20 +4,26 @@ Attenuation and Scattering Coefficients
 
 Functions related to absorption, scattering, and extinction for spherical particles.
 
-.. autosummary::
-   :nosignatures:
-   :toctree: generated/
-
-   absorption_coefficient
-   extinction_coefficient
-   k_complex
-   scattering_coefficient
-
 References
 ----------
 - Doviak and Zrnic (1993). Doppler Radar and Weather Observations.
 - Battan (1973). Radar Observations of the Atmosphere.
+
+.. autosummary::
+   :nosignatures:
+   :toctree: generated/
+
+   {}
 """
+
+__all__ = [
+    "absorption_coefficient",
+    "extinction_coefficient",
+    "k_complex",
+    "scattering_coefficient",
+]
+
+__doc__ = __doc__.format("\n   ".join(__all__))
 
 import numpy as np
 
@@ -106,11 +112,3 @@ def extinction_coefficient(diameter, wavelength, m):
     Qa = absorption_coefficient(diameter, wavelength, m)
     Qs = scattering_coefficient(diameter, wavelength, m)
     return Qa + Qs
-
-
-__all__ = [
-    "absorption_coefficient",
-    "extinction_coefficient",
-    "k_complex",
-    "scattering_coefficient",
-]

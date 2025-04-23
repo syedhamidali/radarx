@@ -4,20 +4,15 @@ Timing Calculations
 
 Functions for radar timing-related calculations: PRF, duty cycle, blind range, etc.
 
+References
+----------
+- Doviak, R. J., & Zrnić, D. S. (1993). Doppler Radar and Weather Observations. Academic Press.
+
 .. autosummary::
    :nosignatures:
    :toctree: generated/
 
-   compute_blind_range
-   compute_duty_cycle
-   compute_max_unambiguous_range
-   compute_max_unambiguous_velocity
-   compute_prf
-   compute_pulse_repetition_interval
-
-References
-----------
-- Doviak, R. J., & Zrnić, D. S. (1993). Doppler Radar and Weather Observations. Academic Press.
+   {}
 """
 
 __all__ = [
@@ -28,6 +23,8 @@ __all__ = [
     "compute_prf",
     "compute_pulse_repetition_interval",
 ]
+
+__doc__ = __doc__.format("\n   ".join(__all__))
 
 from .constants import C
 

@@ -4,20 +4,25 @@ Radar Geometry Calculations
 
 Functions related to beam propagation, height, and sampling volume estimation.
 
-.. autosummary::
-   :nosignatures:
-   :toctree: generated/
-
-   effective_radius
-   beam_center_height
-   sample_volume_gaussian
-   half_power_radius
-
 References
 ----------
 - Rinehart, R. E. (1997). Radar for Meteorologists.
 - Bech et al. (2003). JAOT, Beam Blockage Corrections.
+
+.. autosummary::
+   :nosignatures:
+   :toctree: generated/
+
+   {}
 """
+
+__all__ = [
+    "beam_center_height",
+    "effective_radius",
+    "half_power_radius",
+    "sample_volume_gaussian",
+]
+__doc__ = __doc__.format("\n   ".join(__all__))
 
 import numpy as np
 from .constants import EARTH_RADIUS, EFFECTIVE_RADIUS_4_3
@@ -110,11 +115,3 @@ def half_power_radius(range_m, beamwidth_half_deg):
         Half-power radius [m]
     """
     return (range_m * np.deg2rad(beamwidth_half_deg)) / 2.0
-
-
-__all__ = [
-    "beam_center_height",
-    "effective_radius",
-    "half_power_radius",
-    "sample_volume_gaussian",
-]
