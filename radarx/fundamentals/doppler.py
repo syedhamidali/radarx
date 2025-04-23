@@ -4,22 +4,31 @@ Doppler Radar Calculations
 
 Functions related to Doppler radar performance and velocity limits.
 
-.. autosummary::
-   :nosignatures:
-   :toctree: generated/
-
-   doppler_dilemma
-   doppler_frequency_shift
-   dual_prf_velocity
-   max_frequency
-   nyquist_velocity
-   unambiguous_range
-
 References
 ----------
 - Rinehart, R. E. (1997). Radar for Meteorologists.
 - Doviak, R. J., & Zrnić, D. S. (1993). Doppler Radar and Weather Observations.
+
+.. autosummary::
+   :nosignatures:
+   :toctree: generated/
+
+   {}
 """
+
+__all__ = [
+    "doppler_dilemma",
+    "doppler_frequency_shift",
+    "dual_prf_velocity",
+    "max_frequency",
+    "nyquist_velocity",
+    "unambiguous_range",
+    "_doppler_shift_basic",
+    "_doppler_shift_exact",
+    "_doppler_shift_relativistic",
+]
+
+__doc__ = __doc__.format("\n   ".join(__all__))
 
 import numpy as np
 from .constants import C
@@ -162,16 +171,3 @@ def dual_prf_velocity(wavelength, prf1, prf2):
     The sign of the result depends on the order of PRF values. Ensure prf1 > prf2 for positive velocity.
     """
     return wavelength / (4.0 * (1.0 / prf1 - 1.0 / prf2))
-
-
-__all__ = [
-    "doppler_dilemma",
-    "doppler_frequency_shift",
-    "dual_prf_velocity",
-    "max_frequency",
-    "nyquist_velocity",
-    "unambiguous_range",
-    "_doppler_shift_basic",
-    "_doppler_shift_exact",
-    "_doppler_shift_relativistic",
-]

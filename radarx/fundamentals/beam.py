@@ -4,20 +4,15 @@ Beam Geometry and Resolution
 
 Functions related to radar beamwidth and spatial resolution.
 
+References
+----------
+- Doviak, R. J., & Zrnić, D. S. (1993). Doppler Radar and Weather Observations. Academic Press.
+
 .. autosummary::
    :nosignatures:
    :toctree: generated/
 
-   azimuthal_resolution
-   beamwidth_to_radians
-   compute_azimuth_resolution
-   compute_beamwidth
-   compute_volume_resolution
-   volume_resolution
-
-References
-----------
-- Doviak, R. J., & Zrnić, D. S. (1993). Doppler Radar and Weather Observations. Academic Press.
+    {}
 """
 
 __all__ = [
@@ -28,6 +23,8 @@ __all__ = [
     "compute_volume_resolution",
     "volume_resolution",
 ]
+
+__doc__ = __doc__.format("\n   ".join(__all__))
 
 
 def compute_beamwidth(wavelength, antenna_diameter):
