@@ -14,10 +14,16 @@ References:
    :nosignatures:
    :toctree: generated/
 
-   z_to_r_marshall_palmer
-   z_to_r_custom
-   dbz_attenuation_correction
+   {}
 """
+
+__all__ = [
+    "dbz_attenuation_correction",
+    "z_to_r_custom",
+    "z_to_r_marshall_palmer",
+]
+
+__doc__ = __doc__.format("\n   ".join(__all__))
 
 import numpy as np
 
@@ -86,10 +92,3 @@ def dbz_attenuation_correction(dbz, alpha=0.01, beta=0.85):
     """
     att = alpha * (np.maximum(0, dbz) ** beta)
     return dbz + att
-
-
-__all__ = [
-    "dbz_attenuation_correction",
-    "z_to_r_custom",
-    "z_to_r_marshall_palmer",
-]

@@ -4,18 +4,16 @@ Radar Power Calculations
 
 Functions for computing peak power, average power, and minimum detectable signal.
 
-.. autosummary::
-   :nosignatures:
-   :toctree: generated/
-
-   compute_peak_power
-   compute_average_power
-   compute_min_detectable_signal
-
 References
 ----------
 - Rinehart, R. E. (2004). Radar for Meteorologists. 4th ed.
 - Doviak, R. J., & Zrnić, D. S. (1993). Doppler Radar and Weather Observations.
+
+.. autosummary::
+   :nosignatures:
+   :toctree: generated/
+
+   {}
 """
 
 __all__ = [
@@ -23,6 +21,8 @@ __all__ = [
     "compute_min_detectable_signal",
     "compute_peak_power",
 ]
+
+__doc__ = __doc__.format("\n   ".join(__all__))
 
 from .constants import K_BOLTZMANN
 
