@@ -129,7 +129,6 @@ class RadarxDataTreeAccessor(RadarxAccessor):
         y_smth=0.2,
         z_smth=1,
     ):
-
         dtree = grid_radar(
             self.xarray_obj,
             data_vars,
