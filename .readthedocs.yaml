@@ -2,8 +2,8 @@ version: 2
 conda:
   environment: environment.yml
 build:
-  os: 'ubuntu-20.04'
+  os: "ubuntu-24.04"
   tools:
-    python: 'mambaforge-latest'
+    python: "miniforge3-latest"
 sphinx:
   configuration: docs/conf.py
