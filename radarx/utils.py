@@ -28,8 +28,12 @@ from pyproj import CRS, Transformer
 import xradar as xd
 import xarray as xr
 import numpy as np
-from xarray import DataTree
 import warnings
+
+try:
+    from xarray import DataTree
+except ImportError:  # pragma: no cover
+    from datatree import DataTree
 
 
 def get_geocoords(ds):

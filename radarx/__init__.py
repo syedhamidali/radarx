@@ -15,7 +15,12 @@ from . import accessors  # noqa
 from . import core  # noqa
 from . import fundamentals  # noqa
 from . import grid  # noqa
-from . import io  # noqa
+
+try:  # pragma: no cover
+    from . import io  # noqa
+except ModuleNotFoundError:  # pragma: no cover
+    io = None
+from . import retrieve  # noqa
 from . import testing  # noqa
 from . import vis  # noqa
 

@@ -26,7 +26,17 @@ __doc__ = __doc__.format("\n   ".join(__all__))
 
 import xarray as xr
 from .grid import grid_radar  # noqa
+from .retrieve import create_cappi as retrieve_cappi  # noqa
 from .vis import plot_maxcappi  # noqa
+from .vis import plot_cappi, plot_ppi, plot_rhi  # noqa
+
+try:  # pragma: no cover
+    from xarray import DataTree as RadarxDataTreeType
+
+    register_datatree_accessor = xr.register_datatree_accessor
+except (ImportError, AttributeError):  # pragma: no cover
+    from datatree import DataTree as RadarxDataTreeType
+    from datatree import register_datatree_accessor
 
 
 def accessor_constructor(self, xarray_obj):  # pragma: no cover
@@ -60,14 +70,14 @@ class RadarxAccessor:
     """
 
     def __init__(
-        self, xarray_obj: xr.Dataset | xr.DataArray | xr.DataTree
+        self, xarray_obj: xr.Dataset | xr.DataArray | RadarxDataTreeType
     ) -> RadarxAccessor:
         self.xarray_obj = xarray_obj
 
 
 @xr.register_dataset_accessor("radarx")
 class RadarxDataSetAccessor(RadarxAccessor):
-    """Adds a number of radarx specific methods to xarray.DataArray objects."""
+    """Dataset-level radarx plotting utilities."""
 
     def plot_max_cappi(
         self,
@@ -87,8 +97,8 @@ class RadarxDataSetAccessor(RadarxAccessor):
         show_figure=True,
         add_slogan=False,
         **kwargs,
-    ) -> xr.DataSet:
-        """Plot Max Cappi"""
+    ) -> xr.Dataset:
+        """Plot a maximum CAPPI product from a 3D gridded radar dataset."""
         radar = self.xarray_obj
         return radar.pipe(
             plot_maxcappi,
@@ -110,10 +120,106 @@ class RadarxDataSetAccessor(RadarxAccessor):
             **kwargs,
         )
 
+    def plot_ppi(
+        self,
+        data_var,
+        cmap=None,
+        vmin=None,
+        vmax=None,
+        title=None,
+        colorbar=True,
+        ax=None,
+        dpi=100,
+        savedir=None,
+        show_figure=True,
+        add_slogan=False,
+        **kwargs,
+    ) -> xr.Dataset:
+        """Plot a georeferenced plan-position view using ``x`` and ``y``."""
+        return self.xarray_obj.pipe(
+            plot_ppi,
+            data_var,
+            cmap,
+            vmin,
+            vmax,
+            title,
+            colorbar,
+            ax,
+            dpi,
+            savedir,
+            show_figure,
+            add_slogan,
+            **kwargs,
+        )
 
-@xr.register_datatree_accessor("radarx")
+    def plot_rhi(
+        self,
+        data_var,
+        cmap=None,
+        vmin=None,
+        vmax=None,
+        title=None,
+        colorbar=True,
+        ax=None,
+        dpi=100,
+        savedir=None,
+        show_figure=True,
+        add_slogan=False,
+        **kwargs,
+    ) -> xr.Dataset:
+        """Plot a vertical cross-section using ground range and height."""
+        return self.xarray_obj.pipe(
+            plot_rhi,
+            data_var,
+            cmap,
+            vmin,
+            vmax,
+            title,
+            colorbar,
+            ax,
+            dpi,
+            savedir,
+            show_figure,
+            add_slogan,
+            **kwargs,
+        )
+
+    def plot_cappi(
+        self,
+        data_var,
+        cmap=None,
+        vmin=None,
+        vmax=None,
+        title=None,
+        colorbar=True,
+        ax=None,
+        dpi=100,
+        savedir=None,
+        show_figure=True,
+        add_slogan=False,
+        **kwargs,
+    ) -> xr.Dataset:
+        """Plot a CAPPI dataset on the horizontal plane."""
+        return self.xarray_obj.pipe(
+            plot_cappi,
+            data_var,
+            cmap,
+            vmin,
+            vmax,
+            title,
+            colorbar,
+            ax,
+            dpi,
+            savedir,
+            show_figure,
+            add_slogan,
+            **kwargs,
+        )
+
+
+@register_datatree_accessor("radarx")
 class RadarxDataTreeAccessor(RadarxAccessor):
-    """Adds a number of radarx specific methods to xarray.DataTree objects."""
+    """DataTree-level radarx retrieval and gridding utilities."""
 
     def to_grid(
         self,
@@ -129,7 +235,7 @@ class RadarxDataTreeAccessor(RadarxAccessor):
         y_smth=0.2,
         z_smth=1,
     ):
-
+        """Grid a georeferenced radar volume onto a Cartesian 3D domain."""
         dtree = grid_radar(
             self.xarray_obj,
             data_vars,
@@ -145,3 +251,73 @@ class RadarxDataTreeAccessor(RadarxAccessor):
             z_smth,
         )
         return dtree
+
+    def create_cappi(
+        self,
+        height,
+        method="cartesian_idw",
+        vertical_tolerance=None,
+        apply_filter=False,
+        *,
+        fields=None,
+        sweeps=None,
+        x=None,
+        y=None,
+        x_res=1000.0,
+        y_res=1000.0,
+        padding=0.0,
+    ):
+        """
+        Create a CAPPI from a georeferenced radar volume.
+
+        Parameters
+        ----------
+        height : float
+            Target CAPPI altitude in meters.
+        method : {
+            "cartesian_idw",
+            "polar_vertical_interpolation",
+            "height_window_composite",
+        }, optional
+            Retrieval algorithm to use. Legacy aliases ``"cartesian"``,
+            ``"polar"``, and ``"pseudo_cappi"`` are accepted.
+        vertical_tolerance : float or None, optional
+            Maximum vertical distance above and below the requested CAPPI
+            height, in meters, used by the selected retrieval method.
+        apply_filter : bool, optional
+            Apply built-in gate filtering when supported by the selected
+            retrieval method.
+        fields : list[str] or None, optional
+            Radar variables to retrieve. If omitted, likely 2D radar fields are
+            selected automatically.
+        sweeps : list[str] or None, optional
+            Sweep names to include. If omitted, all available sweep groups are
+            used.
+        x, y : array-like or None, optional
+            Target Cartesian grid coordinates in meters. Used only with
+            ``method="cartesian_idw"``.
+        x_res, y_res : float, optional
+            Cartesian output spacing in meters when ``x`` and ``y`` are not
+            supplied. Used only with ``method="cartesian_idw"``.
+        padding : float, optional
+            Extra padding, in meters, applied to the Cartesian output domain.
+            Used only with ``method="cartesian_idw"``.
+        """
+        return retrieve_cappi(
+            self.xarray_obj,
+            height=height,
+            method=method,
+            vertical_tolerance=vertical_tolerance,
+            apply_filter=apply_filter,
+            fields=fields,
+            sweeps=sweeps,
+            x=x,
+            y=y,
+            x_res=x_res,
+            y_res=y_res,
+            padding=padding,
+        )
+
+    def to_cappi(self, *args, **kwargs):
+        """Convenience alias for :meth:`create_cappi`."""
+        return self.create_cappi(*args, **kwargs)
