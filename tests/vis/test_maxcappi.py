@@ -46,7 +46,7 @@ def test_plot_maxcappi_basic(mock_dtree, tmp_path):
         vmin=0,
         vmax=60,
         title="Test Max-CAPPI",
-        add_map=True,
+        add_map=False,
         colorbar=True,
         show_figure=False,
         savedir=str(save_dir),
