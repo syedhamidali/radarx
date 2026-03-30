@@ -465,3 +465,265 @@ def test_plot_max_cappi_accessor_returns_axis(tmp_path):
 
     assert hasattr(ax, "figure")
     assert (tmp_path / "Test Max-CAPPI_MockRadar_20240101000000.png").exists()
+
+
+# ---------------------------------------------------------------------------
+# Coverage-targeted tests for radarx/retrieve/cappi.py helper functions
+# ---------------------------------------------------------------------------
+
+
+def test_create_cappi_auto_detect_fields(synthetic_volume):
+    """fields=None exercises _default_cappi_fields auto-detection."""
+    ds = create_cappi(synthetic_volume, height=150.0)
+    assert "DBZH" in ds.data_vars or "VRADH" in ds.data_vars
+    assert ds.attrs["product"] == "CAPPI"
+
+
+def test_create_cappi_explicit_sweeps(synthetic_volume):
+    """Explicit sweeps list exercises the _iter_sweeps sweep-list branch."""
+    ds = create_cappi(
+        synthetic_volume,
+        height=150.0,
+        fields=["DBZH"],
+        sweeps=["sweep_0", "sweep_1"],
+    )
+    assert "DBZH" in ds.data_vars
+
+
+def test_create_cappi_with_vertical_tolerance(synthetic_volume):
+    """Explicit vertical_tolerance exercises _resolve_vertical_tolerance non-None path."""
+    ds = create_cappi(
+        synthetic_volume,
+        height=150.0,
+        fields=["DBZH"],
+        vertical_tolerance=500.0,
+    )
+    assert ds.attrs["product"] == "CAPPI"
+
+
+def test_create_cappi_polar_nearest(synthetic_volume):
+    """nearest vertical_interpolation exercises the nearest-selection branch."""
+    from radarx.retrieve.cappi import _create_cappi_polar_vertical_interpolation
+
+    ds = _create_cappi_polar_vertical_interpolation(
+        synthetic_volume,
+        height=150.0,
+        fields=["DBZH"],
+        vertical_interpolation="nearest",
+    )
+    assert "DBZH" in ds.data_vars
+    assert ds.attrs["method"] == "polar_vertical_interpolation"
+
+
+def test_create_cappi_polar_invalid_interpolation(synthetic_volume):
+    """Invalid vertical_interpolation raises a clear ValueError."""
+    from radarx.retrieve.cappi import _create_cappi_polar_vertical_interpolation
+
+    with pytest.raises(ValueError, match="vertical_interpolation must be"):
+        _create_cappi_polar_vertical_interpolation(
+            synthetic_volume,
+            height=150.0,
+            fields=["DBZH"],
+            vertical_interpolation="cubic",
+        )
+
+
+def test_create_cappi_height_is_none_raises(synthetic_volume):
+    """height=None raises ValueError for cartesian_idw."""
+    with pytest.raises(ValueError, match="height must be provided"):
+        create_cappi(synthetic_volume, height=None)
+
+
+def test_create_cappi_no_sweeps_height_window():
+    """Empty DataTree raises ValueError inside _create_cappi_height_window_composite."""
+    from radarx.retrieve.cappi import _create_cappi_height_window_composite
+
+    with pytest.raises(ValueError, match="No sweep groups found"):
+        _create_cappi_height_window_composite(DataTree(), height=150.0, fields=["DBZH"])
+
+
+def test_create_cappi_polar_auto_detect_fields(synthetic_volume):
+    """fields=None with polar method exercises _default_cappi_fields in that path."""
+    ds = create_cappi(
+        synthetic_volume,
+        height=150.0,
+        method="polar_vertical_interpolation",
+    )
+    assert "DBZH" in ds.data_vars or "VRADH" in ds.data_vars
+
+
+def test_create_cappi_height_window_auto_detect_fields(synthetic_volume):
+    """fields=None with height_window_composite exercises _default_cappi_fields in that path."""
+    ds = create_cappi(
+        synthetic_volume,
+        height=150.0,
+        method="height_window_composite",
+    )
+    assert "DBZH" in ds.data_vars or "VRADH" in ds.data_vars
+
+
+def test_decode_if_bytes():
+    """_decode_if_bytes handles bytes, np.bytes_, and plain values."""
+    from radarx.retrieve.cappi import _decode_if_bytes
+
+    assert _decode_if_bytes(b"radar") == "radar"
+    assert _decode_if_bytes(np.bytes_(b"site")) == "site"
+    assert _decode_if_bytes("already_str") == "already_str"
+    assert _decode_if_bytes(42) == 42
+
+
+def test_infer_field_name_no_match():
+    """_infer_field_name returns None when none of the candidates are present."""
+    from radarx.retrieve.cappi import _infer_field_name
+
+    ds = xr.Dataset({"DBZH": (("azimuth", "range"), np.zeros((4, 3)))})
+    assert _infer_field_name(ds, ["VEL", "VR", "VRAD"]) is None
+
+
+def test_build_target_grid_raises_on_partial_none():
+    """_build_target_grid raises when only one of x/y is None."""
+    from radarx.retrieve.cappi import _build_target_grid
+
+    with pytest.raises(ValueError, match="Both x and y must be provided"):
+        _build_target_grid(None, np.array([1.0, 2.0]))
+
+
+def test_default_cappi_fields_excludes_metadata():
+    """_default_cappi_fields skips reserved names and non-2D variables."""
+    from radarx.retrieve.cappi import _default_cappi_fields
+
+    ds = xr.Dataset(
+        {
+            "DBZH": (("azimuth", "range"), np.zeros((4, 3))),
+            "x": (("azimuth", "range"), np.zeros((4, 3))),
+            "time": (("azimuth",), np.zeros(4)),
+        }
+    )
+    fields = _default_cappi_fields(ds)
+    assert "DBZH" in fields
+    assert "x" not in fields
+    assert "time" not in fields
+
+
+def test_cappi_polar_mismatched_azimuth_grids():
+    """Sweeps with different azimuth counts force _interp_to_reference interpolation loop."""
+    from radarx.retrieve.cappi import _create_cappi_polar_vertical_interpolation
+
+    sweep_0 = _make_ppi_sweep(1.0, "2024-01-01T00:00:00")
+
+    # Second sweep with 8 azimuths instead of 4
+    azimuth2 = np.linspace(0.0, 315.0, 8)
+    ranges2 = np.array([1000.0, 2000.0, 3000.0], dtype=float)
+    az2_2d, r2_2d = np.meshgrid(np.deg2rad(azimuth2), ranges2, indexing="ij")
+    el2 = np.deg2rad(3.0)
+    sweep_1 = xr.Dataset(
+        data_vars={
+            "DBZH": (
+                ("azimuth", "range"),
+                30.0 + r2_2d / 1000.0,
+                {"units": "dBZ"},
+            ),
+            "VRADH": (
+                ("azimuth", "range"),
+                np.full_like(r2_2d, 3.0),
+                {"units": "m s-1"},
+            ),
+        },
+        coords={
+            "azimuth": ("azimuth", azimuth2),
+            "range": ("range", ranges2),
+            "x": (("azimuth", "range"), r2_2d * np.sin(az2_2d)),
+            "y": (("azimuth", "range"), r2_2d * np.cos(az2_2d)),
+            "z": (("azimuth", "range"), 100.0 + r2_2d * np.sin(el2)),
+            "time": np.datetime64("2024-01-01T00:00:00"),
+            "latitude": 28.61,
+            "longitude": 77.23,
+            "altitude": 100.0,
+        },
+        attrs={"instrument_name": "MockRadar", "sweep_mode": "azimuth_surveillance"},
+    )
+
+    tree = DataTree.from_dict({"sweep_0": sweep_0, "sweep_1": sweep_1})
+    ds = _create_cappi_polar_vertical_interpolation(tree, height=150.0, fields=["DBZH"])
+    assert "DBZH" in ds.data_vars
+
+
+def test_get_reference_time_axis_no_time():
+    """_get_reference_time_axis returns integer indices when 'time' is absent."""
+    from radarx.retrieve.cappi import _get_reference_time_axis
+
+    ds = xr.Dataset({"x": ("a", [1, 2, 3])})
+    result = _get_reference_time_axis(ds, 5)
+    np.testing.assert_array_equal(result, np.arange(5, dtype=int))
+
+
+def test_interp_vertical_column_no_valid_points():
+    """_interp_vertical_column returns (nan, True) when all values are NaN."""
+    from radarx.retrieve.cappi import _interp_vertical_column
+
+    val, masked = _interp_vertical_column([np.nan, np.nan], [np.nan, np.nan], 500.0)
+    assert np.isnan(val)
+    assert masked is True
+
+
+def test_interp_vertical_column_single_valid_point():
+    """_interp_vertical_column returns (nan, True) when only one valid point."""
+    from radarx.retrieve.cappi import _interp_vertical_column
+
+    val, masked = _interp_vertical_column([100.0, np.nan], [5.0, np.nan], 500.0)
+    assert np.isnan(val)
+    assert masked is True
+
+
+def test_cappi_reference_metadata_empty_tree():
+    """_cappi_reference_metadata returns empty dicts when no sweeps are present."""
+    from radarx.retrieve.cappi import _cappi_reference_metadata
+
+    coords, attrs = _cappi_reference_metadata(DataTree())
+    assert coords == {}
+    assert attrs == {}
+
+
+def test_create_cappi_polar_explicit_max_vertical_distance(synthetic_volume):
+    """Explicit max_vertical_distance exercises the non-None tolerance branch."""
+    from radarx.retrieve.cappi import _create_cappi_polar_vertical_interpolation
+
+    ds = _create_cappi_polar_vertical_interpolation(
+        synthetic_volume,
+        height=150.0,
+        fields=["DBZH"],
+        max_vertical_distance=500.0,
+    )
+    assert "DBZH" in ds.data_vars
+
+
+def test_create_cappi_polar_no_2d_fields_raises():
+    """Polar method raises when no 2D azimuth/range fields are available."""
+    from radarx.retrieve.cappi import _create_cappi_polar_vertical_interpolation
+
+    ds_1d = xr.Dataset(
+        {
+            "azimuth": ("azimuth", np.array([0.0, 90.0])),
+            "range": ("range", np.array([1000.0, 2000.0])),
+            "META": ("azimuth", np.array([1.0, 2.0])),
+        }
+    )
+    tree = DataTree.from_dict({"sweep_0": ds_1d})
+    with pytest.raises(ValueError, match="No 2D azimuth/range fields"):
+        _create_cappi_polar_vertical_interpolation(tree, height=150.0)
+
+
+def test_create_cappi_height_window_no_2d_fields_raises():
+    """height_window_composite raises when no 2D azimuth/range fields are available."""
+    from radarx.retrieve.cappi import _create_cappi_height_window_composite
+
+    ds_1d = xr.Dataset(
+        {
+            "azimuth": ("azimuth", np.array([0.0, 90.0])),
+            "range": ("range", np.array([1000.0, 2000.0])),
+            "META": ("azimuth", np.array([1.0, 2.0])),
+        }
+    )
+    tree = DataTree.from_dict({"sweep_0": ds_1d})
+    with pytest.raises(ValueError, match="No 2D azimuth/range fields"):
+        _create_cappi_height_window_composite(tree, height=150.0)
