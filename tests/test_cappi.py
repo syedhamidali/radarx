@@ -10,6 +10,8 @@ import numpy as np
 import pytest
 import xarray as xr
 
+import matplotlib.pyplot as plt
+
 import radarx  # noqa: F401
 from radarx.retrieve import create_cappi
 from radarx.vis import plot_cappi, plot_ppi
@@ -185,6 +187,20 @@ def test_create_cappi_accessor(synthetic_volume):
     assert ds.attrs["product"] == "CAPPI"
 
 
+def test_create_cappi_custom_cartesian_grid(synthetic_volume):
+    ds = create_cappi(
+        synthetic_volume,
+        height=150.0,
+        fields=["DBZH"],
+        x=np.array([-1500.0, 0.0, 1500.0]),
+        y=np.array([-1000.0, 1000.0]),
+    )
+
+    assert ds["DBZH"].shape == (2, 3)
+    assert np.allclose(ds["x"].values, [-1500.0, 0.0, 1500.0])
+    assert np.allclose(ds["y"].values, [-1000.0, 1000.0])
+
+
 def test_create_cappi_polar_method(synthetic_volume):
     ds = create_cappi(
         synthetic_volume,
@@ -228,6 +244,18 @@ def test_create_cappi_legacy_method_aliases(synthetic_volume):
 
     assert ds.attrs["method"] == "polar_vertical_interpolation"
     assert ds.attrs["vertical_interpolation"] == "linear"
+
+
+def test_create_cappi_height_window_legacy_alias(synthetic_volume):
+    ds = create_cappi(
+        synthetic_volume,
+        height=150.0,
+        fields=["DBZH"],
+        method="pseudo_cappi",
+    )
+
+    assert ds.attrs["method"] == "height_window_composite"
+    assert bool(ds.attrs["apply_quality_control"]) is False
 
 
 def test_create_cappi_height_window_composite(synthetic_volume):
@@ -274,6 +302,42 @@ def test_create_cappi_height_window_composite_sparse_velocity(synthetic_volume):
     assert not caught
 
 
+def test_create_cappi_invalid_method_raises(synthetic_volume):
+    with pytest.raises(ValueError, match="Unsupported CAPPI method"):
+        create_cappi(synthetic_volume, height=150.0, method="bad_method")
+
+
+def test_create_cappi_missing_georeference_raises(synthetic_volume):
+    ungeoreferenced = DataTree.from_dict(
+        {"sweep_0": synthetic_volume["sweep_0"].to_dataset().drop_vars(["x", "y", "z"])}
+    )
+
+    with pytest.raises(ValueError, match="Run radar.xradar.georeference"):
+        create_cappi(ungeoreferenced, height=150.0, fields=["DBZH"])
+
+
+def test_create_cappi_no_sweeps_raises():
+    empty_tree = DataTree()
+
+    with pytest.raises(ValueError, match="No sweep groups found"):
+        create_cappi(
+            empty_tree,
+            height=150.0,
+            method="polar_vertical_interpolation",
+            fields=["DBZH"],
+        )
+
+
+def test_create_cappi_polar_out_of_range_raises(synthetic_volume):
+    with pytest.raises(ValueError, match="outside available gate heights"):
+        create_cappi(
+            synthetic_volume,
+            height=10000.0,
+            fields=["DBZH"],
+            method="polar_vertical_interpolation",
+        )
+
+
 def test_create_cappi_polar_georeference_and_cf2(synthetic_volume):
     ds = create_cappi(
         synthetic_volume,
@@ -306,6 +370,31 @@ def test_plot_ppi_function(synthetic_volume, tmp_path):
     assert (tmp_path / "Test PPI_MockRadar_20240101000000.png").exists()
 
 
+def test_plot_ppi_accessor_returns_axis(synthetic_volume, tmp_path):
+    ds = synthetic_volume["sweep_0"].to_dataset()
+    ax = ds.radarx.plot_ppi("DBZH", savedir=str(tmp_path), show_figure=False)
+
+    assert hasattr(ax, "figure")
+    assert ax.get_title() == "PPI DBZH"
+
+
+def test_plot_ppi_dataarray_unknown_time_and_bytes_name(tmp_path):
+    ds = _make_ppi_sweep(1.0, "2024-01-01T00:00:00").drop_vars("time")
+    ds.attrs["instrument_name"] = b"ByteRadar"
+    ax = plot_ppi(
+        ds["DBZH"], None, title="Byte PPI", savedir=str(tmp_path), show_figure=False
+    )
+
+    assert hasattr(ax, "figure")
+    created_files = list(tmp_path.glob("Byte PPI_*_unknown_time.png"))
+    assert len(created_files) == 1
+
+
+def test_plot_ppi_missing_data_var_raises(synthetic_volume):
+    with pytest.raises(ValueError, match="data_var must be provided"):
+        plot_ppi(synthetic_volume["sweep_0"].to_dataset(), None, show_figure=False)
+
+
 def test_plot_rhi_accessor(tmp_path):
     ds = _make_rhi_dataset()
     ax = ds.radarx.plot_rhi(
@@ -317,6 +406,15 @@ def test_plot_rhi_accessor(tmp_path):
 
     assert hasattr(ax, "figure")
     assert (tmp_path / "Test RHI_MockRadar_20240101000000.png").exists()
+
+
+def test_plot_rhi_with_existing_axis(tmp_path):
+    ds = _make_rhi_dataset()
+    fig, ax = plt.subplots()
+    returned_ax = ds.radarx.plot_rhi("DBZH", ax=ax, colorbar=False, show_figure=False)
+
+    assert returned_ax is ax
+    plt.close(fig)
 
 
 def test_plot_cappi_function(synthetic_volume, tmp_path):
@@ -332,6 +430,27 @@ def test_plot_cappi_function(synthetic_volume, tmp_path):
 
     assert hasattr(ax, "figure")
     assert (tmp_path / "Test CAPPI_MockRadar_20240101000000.png").exists()
+
+
+def test_plot_cappi_accessor_returns_axis(synthetic_volume, tmp_path):
+    ds = synthetic_volume.radarx.to_cappi(height=150.0, fields=["DBZH"])
+    ax = ds.radarx.plot_cappi("DBZH", savedir=str(tmp_path), show_figure=False)
+
+    assert hasattr(ax, "figure")
+    assert "CAPPI" in ax.get_title()
+
+
+def test_plot_cappi_without_z_uses_generic_title(synthetic_volume, tmp_path):
+    ds = create_cappi(
+        synthetic_volume,
+        height=150.0,
+        fields=["DBZH"],
+        x_res=1000.0,
+        y_res=1000.0,
+    ).drop_vars("z")
+    ax = plot_cappi(ds, "DBZH", savedir=str(tmp_path), show_figure=False)
+
+    assert ax.get_title() == "CAPPI DBZH"
 
 
 def test_plot_max_cappi_accessor_returns_axis(tmp_path):
