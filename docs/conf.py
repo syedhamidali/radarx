@@ -133,7 +133,7 @@ copybutton_prompt_text = r">>> |\.\.\. |\$ |In \[\d*\]: | {2,5}\.\.\.: | {5,8}: 
 copybutton_prompt_is_regexp = True
 
 # -- nbsphinx specifics --
-nbsphinx_execute = "always"
+nbsphinx_execute = "never"
 shutil.copytree("../examples/notebooks", "notebooks", dirs_exist_ok=True)
 
 # -- Options for HTML output -------------------------------------------
