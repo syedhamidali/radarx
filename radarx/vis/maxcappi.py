@@ -20,12 +20,18 @@ __doc__ = __doc__.format("\n   ".join(__all__))
 
 import os
 import cmweather  # noqa
-import cartopy.crs as ccrs
-import cartopy.feature as feat
 import matplotlib.pyplot as plt
 import numpy as np
-from cartopy.mpl.gridliner import LATITUDE_FORMATTER, LONGITUDE_FORMATTER
 from matplotlib.ticker import NullFormatter
+
+try:
+    import cartopy.crs as ccrs
+    import cartopy.feature as feat
+    from cartopy.mpl.gridliner import LATITUDE_FORMATTER, LONGITUDE_FORMATTER
+
+    _CARTOPY_AVAILABLE = True
+except ImportError:
+    _CARTOPY_AVAILABLE = False
 
 # warnings.filterwarnings("ignore")
 
@@ -115,6 +121,12 @@ def plot_maxcappi(
 
     Author: Syed Hamid Ali (@syedhamidali)
     """
+
+    if not _CARTOPY_AVAILABLE:
+        raise ImportError(
+            "cartopy is required for plot_maxcappi. "
+            "Install it with: pip install cartopy"
+        )
 
     # Define default latitude and longitude lines if not provided
     if lon_lines is None:

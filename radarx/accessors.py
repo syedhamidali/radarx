@@ -27,7 +27,6 @@ __doc__ = __doc__.format("\n   ".join(__all__))
 import xarray as xr
 from .grid import grid_radar  # noqa
 from .retrieve import create_cappi as retrieve_cappi  # noqa
-from .vis import plot_maxcappi  # noqa
 from .vis import plot_cappi, plot_ppi, plot_rhi  # noqa
 
 try:  # pragma: no cover
@@ -99,6 +98,8 @@ class RadarxDataSetAccessor(RadarxAccessor):
         **kwargs,
     ) -> xr.Dataset:
         """Plot a maximum CAPPI product from a 3D gridded radar dataset."""
+        from .vis import plot_maxcappi
+
         radar = self.xarray_obj
         return radar.pipe(
             plot_maxcappi,
