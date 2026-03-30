@@ -5,27 +5,14 @@
 #
 import datetime as dt
 import glob
-import types
 import os
-import subprocess
+import shutil
 import sys
+import types
 import warnings
 from importlib.metadata import version
 
 sys.path.insert(0, os.path.abspath(".."))
-
-# check readthedocs
-on_rtd = os.environ.get("READTHEDOCS") == "True"
-
-# processing on readthedocs
-if on_rtd:
-    # install radarx from checked out source
-    commit = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip()
-    print(f"Installing commit {commit}")
-    url = "https://github.com/syedhamidali/radarx.git"
-    subprocess.check_call(
-        ["python", "-m", "pip", "install", "--no-deps", f"git+{url}@{commit}"]
-    )
 
 # -- General configuration ---------------------------------------------------
 
@@ -140,7 +127,7 @@ copybutton_prompt_is_regexp = True
 
 # -- nbsphinx specifics --
 nbsphinx_execute = "always"
-subprocess.check_call(["cp", "-rp", "../examples/notebooks", "."])
+shutil.copytree("../examples/notebooks", "notebooks", dirs_exist_ok=True)
 
 # -- Options for HTML output -------------------------------------------
 html_theme = "pydata_sphinx_theme"
@@ -185,13 +172,23 @@ html_context = {
     "github_repo": "radarx",
     "github_version": "main",
     "doc_path": "docs",
-    "edit_page_url_template": "{{ radarx_custom_edit_url(github_user, github_repo, github_version, doc_path, file_name, default_edit_page_url_template) }}",
-    "default_edit_page_url_template": "https://github.com/{github_user}/{github_repo}/edit/{github_version}/{docpath}/{filename}",
+    "edit_page_url_template": (
+        "{{ radarx_custom_edit_url(github_user, github_repo, github_version, "
+        "doc_path, file_name, default_edit_page_url_template) }}"
+    ),
+    "default_edit_page_url_template": (
+        "https://github.com/{github_user}/{github_repo}/edit/"
+        "{github_version}/{docpath}/{filename}"
+    ),
     "radarx_custom_edit_url": _custom_edit_url,
 }
 
 html_theme_options = {
-    "announcement": "<p>radarx is in an early stage of development, please report any issues <a href='https://github.com/syedhamidali/radarx/issues'>here!</a></p>",
+    "announcement": (
+        "<p>radarx is in an early stage of development, please report any "
+        "issues <a href='https://github.com/syedhamidali/radarx/issues'>"
+        "here!</a></p>"
+    ),
     "github_url": "https://github.com/syedhamidali/radarx",
     "icon_links": [
         {
