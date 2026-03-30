@@ -10,7 +10,11 @@ import shutil
 import sys
 import types
 import warnings
-from importlib.metadata import version
+
+try:
+    from importlib.metadata import PackageNotFoundError, version as get_version
+except ImportError:  # pragma: no cover
+    from importlib_metadata import PackageNotFoundError, version as get_version
 
 sys.path.insert(0, os.path.abspath(".."))
 
@@ -99,7 +103,10 @@ rst_files = glob.glob("*.rst")
 autosummary_generate = rst_files
 autoclass_content = "both"
 
-version = version("radarx")
+try:
+    version = get_version("radarx")
+except PackageNotFoundError:
+    version = getattr(radarx, "__version__", "999")
 release = version
 
 myst_substitutions = {
