@@ -70,7 +70,7 @@ def test_plot_maxcappi_accessor(mock_dtree, tmp_path):
     save_dir.mkdir()
 
     # Plot Max-CAPPI using the accessor
-    gridded_ds.radarx.plot_max_cappi(
+    ax = gridded_ds.radarx.plot_max_cappi(
         data_var="corrected_reflectivity_horizontal",
         cmap="viridis",
         vmin=0,
@@ -81,6 +81,8 @@ def test_plot_maxcappi_accessor(mock_dtree, tmp_path):
         show_figure=False,
         savedir=str(save_dir),
     )
+
+    assert hasattr(ax, "figure")
 
     # Dynamically construct the expected file name
     radar_name = gridded_ds.attrs.get("instrument_name", "Radar")
