@@ -293,7 +293,7 @@ def test_create_cappi_polar_georeference_and_cf2(synthetic_volume):
         if xradar_to_cfradial2 is None:
             pytest.skip("Current xradar version does not expose CfRadial2 conversion.")
         dtree = xradar_to_cfradial2(ds)
-    assert "sweep_0" in dtree.groups
+    assert "/sweep_0" in dtree.groups
 
 
 def test_plot_ppi_function(synthetic_volume, tmp_path):
