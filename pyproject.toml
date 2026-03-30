@@ -58,7 +58,7 @@ dev = ["coverage",  # testing
         "ruff",  # linting
         "pooch",  # data retrieval for testing
         "pre-commit",
-        "black[jupyter]",
+        "black[jupyter]==24.2.0",
         "blackdoc",
         "codespell",
         "pytest-cov",
