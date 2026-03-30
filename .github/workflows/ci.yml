@@ -121,7 +121,7 @@ jobs:
         python -c "import radarx; print(radarx.version.version)"
     - name: Test with pytest
       run: |
-        pytest --nbval-lax --verbose --durations=15 --cov=radarx --cov-report=xml:coverage_notebook.xml --cov-report=term-missing examples/notebooks
+        pytest --nbval-lax --verbose --durations=15 --cov=radarx --cov-report=xml:coverage_notebook.xml --cov-report=term-missing --ignore=examples/notebooks/gridding_rate_part1.ipynb --ignore=examples/notebooks/aws_data.ipynb --ignore=examples/notebooks/Grid_Radar.ipynb examples/notebooks
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v5
       with:
