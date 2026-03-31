@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install black black[jupyter] ruff
+          pip install "black==24.2.0" "black[jupyter]==24.2.0" ruff
       - name: Black style check
         run: |
           black --check .
@@ -74,7 +74,7 @@ jobs:
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v5
       with:
-        file: ./coverage_unit.xml
+        files: ./coverage_unit.xml
         flags: unittests
         env_vars: RUNNER_OS,PYTHON_VERSION
         name: codecov-gha
@@ -110,27 +110,27 @@ jobs:
               python=${{matrix.python-version}}
               numpy=${{matrix.numpy-version}}
               conda
-    # - name: Install coverage and pytest via pip
-    #   run: |
-    #     python -m pip install coverage pytest-cov pytest-xdist nbval pytest-mock
-    # - name: Install radarx
-    #   run: |
-    #     python -m pip install . --no-deps
-    # - name: Version Info
-    #   run: |
-    #     python -c "import radarx; print(radarx.version.version)"
-    # - name: Test with pytest
-    #   run: |
-    #     pytest --nbval --verbose --durations=15 --cov=radarx --cov-report=xml:coverage_notebook.xml --cov-report=term-missing examples/notebooks
-    # - name: Upload coverage to Codecov
-    #   uses: codecov/codecov-action@v5
-    #   with:
-    #     file: ./coverage_notebook.xml
-    #     flags: notebooktests
-    #     env_vars: RUNNER_OS,PYTHON_VERSION
-    #     name: codecov-gha
-    #     fail_ci_if_error: false
-    #     token: ${{ secrets.CODECOV_TOKEN}}
+    - name: Install coverage and pytest via pip
+      run: |
+        python -m pip install coverage pytest-cov pytest-xdist nbval pytest-mock
+    - name: Install radarx
+      run: |
+        python -m pip install . --no-deps
+    - name: Version Info
+      run: |
+        python -c "import radarx; print(radarx.version.version)"
+    - name: Test with pytest
+      run: |
+        pytest --nbval-lax --verbose --durations=15 --cov=radarx --cov-report=xml:coverage_notebook.xml --cov-report=term-missing --cov-fail-under=0 --ignore=examples/notebooks/gridding_rate_part1.ipynb --ignore=examples/notebooks/gridding_rate_part2.ipynb --ignore=examples/notebooks/gridding_rate_part3.ipynb --ignore=examples/notebooks/aws_data.ipynb --ignore=examples/notebooks/Grid_Radar.ipynb --ignore=examples/notebooks/IMD_Radar_Data.ipynb examples/notebooks
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v5
+      with:
+        files: ./coverage_notebook.xml
+        flags: notebooktests
+        env_vars: RUNNER_OS,PYTHON_VERSION
+        name: codecov-gha
+        fail_ci_if_error: false
+        token: ${{ secrets.CODECOV_TOKEN}}
 
   test_build_distribution_testpypi:
     name: test build distribution for testpypi

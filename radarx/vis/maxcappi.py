@@ -1,9 +1,10 @@
 """
 Plot Max-CAPPI
 
-This module provides a function to plot a Maximum Constant Altitude Plan Position Indicator (Max-CAPPI)
-from radar data using an xarray dataset. The function includes options for adding map features, range rings,
-color bars, and customized visual settings.
+This module provides a function to plot a Maximum Constant Altitude Plan
+Position Indicator (Max-CAPPI) from radar data using an xarray dataset.
+The function includes options for adding map features, range rings, color
+bars, and customized visual settings.
 
 Author: Syed Hamid Ali (@syedhamidali)
 
@@ -19,12 +20,18 @@ __doc__ = __doc__.format("\n   ".join(__all__))
 
 import os
 import cmweather  # noqa
-import cartopy.crs as ccrs
-import cartopy.feature as feat
 import matplotlib.pyplot as plt
 import numpy as np
-from cartopy.mpl.gridliner import LATITUDE_FORMATTER, LONGITUDE_FORMATTER
 from matplotlib.ticker import NullFormatter
+
+try:
+    import cartopy.crs as ccrs
+    import cartopy.feature as feat
+    from cartopy.mpl.gridliner import LATITUDE_FORMATTER, LONGITUDE_FORMATTER
+
+    _CARTOPY_AVAILABLE = True
+except ImportError:
+    _CARTOPY_AVAILABLE = False
 
 # warnings.filterwarnings("ignore")
 
@@ -49,7 +56,8 @@ def plot_maxcappi(
     **kwargs,
 ):
     """
-    Plot a Maximum Constant Altitude Plan Position Indicator (Max-CAPPI) using an xarray Dataset.
+    Plot a Maximum Constant Altitude Plan Position Indicator (Max-CAPPI)
+    using an xarray Dataset.
 
     Parameters
     ----------
@@ -60,19 +68,24 @@ def plot_maxcappi(
     cmap : str or matplotlib colormap, optional
         Colormap to use for the plot. Default is "NWSRef".
     vmin : float, optional
-        Minimum value for the color scaling. Default is set to the minimum value of the data if not provided.
+        Minimum value for the color scaling. Default is set to the minimum
+        value of the data if not provided.
     vmax : float, optional
-        Maximum value for the color scaling. Default is set to the maximum value of the data if not provided.
+        Maximum value for the color scaling. Default is set to the maximum
+        value of the data if not provided.
     title : str, optional
         Title of the plot. If None, the title is set to "Max-{data_var}".
     lat_lines : array-like, optional
-        Latitude lines to be included in the plot. Default is calculated based on dataset coordinates.
+        Latitude lines to be included in the plot. Default is calculated
+        based on dataset coordinates.
     lon_lines : array-like, optional
-        Longitude lines to be included in the plot. Default is calculated based on dataset coordinates.
+        Longitude lines to be included in the plot. Default is calculated
+        based on dataset coordinates.
     add_map : bool, optional
         Whether to include a map background in the plot. Default is True.
     projection : cartopy.crs.Projection, optional
-        The map projection for the plot. Default is automatically determined based on dataset coordinates.
+        The map projection for the plot. Default is automatically
+        determined based on dataset coordinates.
     colorbar : bool, optional
         Whether to include a colorbar in the plot. Default is True.
     range_rings : bool, optional
@@ -84,25 +97,36 @@ def plot_maxcappi(
     show_figure : bool, optional
         Whether to display the plot. Default is True.
     add_slogan : bool, optional
-        Whether to add a slogan like "Powered by Radarx" to the plot. Default is False.
+        Whether to add a slogan like "Powered by Radarx" to the plot.
+        Default is False.
     **kwargs : dict, optional
-        Additional keyword arguments to pass to matplotlib's `pcolormesh` function.
+        Additional keyword arguments to pass to matplotlib's `pcolormesh`
+        function.
 
     Returns
     -------
-    None
-        This function does not return any value. It generates and optionally displays or saves a plot.
+    matplotlib.axes.Axes
+        Main plan-view axis used for the Max-CAPPI plot.
 
     Notes
     -----
-    - The function extracts the maximum value across the altitude (z) dimension to create the Max-CAPPI.
-    - It supports customizations such as map projections, color scales, and range rings.
-    - If the radar_name attribute in the dataset is a byte string, it will be decoded and limited to 4 characters.
+    - The function extracts the maximum value across the altitude (z)
+      dimension to create the Max-CAPPI.
+    - It supports customizations such as map projections, color scales,
+      and range rings.
+    - If the radar_name attribute in the dataset is a byte string, it
+      will be decoded and limited to 4 characters.
     - If add_map is True, map features and latitude/longitude lines are included.
     - The plot can be saved to a specified directory in PNG format.
 
     Author: Syed Hamid Ali (@syedhamidali)
     """
+
+    if not _CARTOPY_AVAILABLE:
+        raise ImportError(
+            "cartopy is required for plot_maxcappi. "
+            "Install it with: pip install cartopy"
+        )
 
     # Define default latitude and longitude lines if not provided
     if lon_lines is None:
@@ -227,7 +251,7 @@ def plot_maxcappi(
     # plt.rcParams.update(original_rc_params)
     plt.rcdefaults()
 
-    return fig
+    return ax_xy
 
 
 def _add_slogan(fig):

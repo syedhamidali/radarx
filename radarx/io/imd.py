@@ -27,7 +27,6 @@ import logging
 import itertools
 import numpy as np
 import xarray as xr
-from xarray import DataTree
 from xradar.io.backends.cfradial1 import (
     _get_radar_calibration,
     _get_required_root_dataset,
@@ -39,6 +38,11 @@ from xradar.model import (
     georeferencing_correction_subgroup,
     radar_parameters_subgroup,
 )
+
+try:
+    from xarray import DataTree
+except ImportError:  # pragma: no cover
+    from datatree import DataTree
 
 logger = logging.getLogger(__name__)
 

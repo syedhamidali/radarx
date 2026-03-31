@@ -10,8 +10,10 @@ Radarx Visualization
     :maxdepth: 3
 
 .. automodule:: radarx.vis.maxcappi
+.. automodule:: radarx.vis.plots
 """
 
 from .maxcappi import *  # noqa
+from .plots import *  # noqa
 
 __all__ = [s for s in dir() if not s.startswith("_")]
