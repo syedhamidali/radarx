@@ -1,5 +1,10 @@
 # History
 
+## Unreleased
+- **ADD:** Added CAPPI retrieval support with `cartesian_idw`, `polar_vertical_interpolation`, and `height_window_composite` methods, plus `plot_ppi`, `plot_rhi`, and `plot_cappi` helpers.
+- **MNT:** Simplified the CAPPI API around `height`, `method`, `vertical_tolerance`, optional filtering, and essential Cartesian grid controls.
+- **FIX:** Improved CAPPI/xradar interoperability by preserving sweep-style metadata and broader DataTree compatibility across supported xarray setups.
+
 ## 0.2.5 (2025-04-22)
 - **ADD:** Added `fundamentals` module with core radar computation utilities. ({pull}`66`) by [@syedhamidali](https://github.com/syedhamidali)
 - **CHG:** Refactored Doppler and scattering fundamentals to reduce complexity.

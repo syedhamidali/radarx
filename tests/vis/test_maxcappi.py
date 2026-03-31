@@ -46,7 +46,7 @@ def test_plot_maxcappi_basic(mock_dtree, tmp_path):
         vmin=0,
         vmax=60,
         title="Test Max-CAPPI",
-        add_map=True,
+        add_map=False,
         colorbar=True,
         show_figure=False,
         savedir=str(save_dir),
@@ -59,6 +59,43 @@ def test_plot_maxcappi_basic(mock_dtree, tmp_path):
 
     # Assert the plot was saved
     assert expected_file.exists(), f"Expected file {expected_file} was not created."
+
+
+def test_plot_maxcappi_no_cartopy(monkeypatch):
+    """Calling plot_maxcappi without cartopy raises a clear ImportError."""
+    import radarx.vis.maxcappi as _mod
+
+    monkeypatch.setattr(_mod, "_CARTOPY_AVAILABLE", False)
+    with pytest.raises(ImportError, match="cartopy is required"):
+        _mod.plot_maxcappi(None, "DBZH")
+
+
+def test_import_radarx_does_not_require_cartopy(monkeypatch):
+    """Importing radarx must not force a cartopy import."""
+    import sys
+    import types
+
+    # Block cartopy by inserting a broken stub before any import
+    stub = types.ModuleType("cartopy")
+    stub.__spec__ = None
+
+    def _raise(*a, **kw):
+        raise ImportError("cartopy blocked for test")
+
+    stub.__getattr__ = _raise
+    monkeypatch.setitem(sys.modules, "cartopy", stub)
+    monkeypatch.setitem(sys.modules, "cartopy.crs", None)
+    monkeypatch.setitem(sys.modules, "cartopy.feature", None)
+    monkeypatch.setitem(sys.modules, "cartopy.mpl", None)
+    monkeypatch.setitem(sys.modules, "cartopy.mpl.gridliner", None)
+
+    # Re-importing the vis.maxcappi module must succeed even with cartopy blocked
+    import importlib
+
+    import radarx.vis.maxcappi as _mod
+
+    importlib.reload(_mod)
+    assert not _mod._CARTOPY_AVAILABLE
 
 
 if __name__ == "__main__":
