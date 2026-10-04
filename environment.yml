@@ -41,6 +41,7 @@ dependencies:
   - panel
   - datashader
   - uxarray
+  - spatialpandas
   - geoviews
   - nbclassic
   - itables

@@ -10,7 +10,10 @@ import numpy as np
 import pytest
 import xarray as xr
 
-ux = pytest.importorskip("uxarray")
+try:
+    import uxarray as ux  # noqa: F401
+except Exception as err:  # some uxarray/numba combinations fail at import
+    pytest.skip(f"uxarray not usable: {err}", allow_module_level=True)
 
 import radarx  # noqa: E402,F401
 from radarx.grid import ugrid  # noqa: E402
