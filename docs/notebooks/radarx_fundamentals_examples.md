@@ -13,7 +13,7 @@ kernelspec:
 
 # Exercise on Fundamentals
 This notebook reproduces several textbook radar problems, solved with functions from `radarx.fundamentals`.
-These probelms are taken from
+These problems are taken from
  - Rahman, H. (2019). Fundamental principles of radar. CRC Press.
 
 ```{code-cell} ipython3
@@ -55,8 +55,8 @@ f_d = doppler.doppler_frequency_shift(f0, v_r)
 
 print(f"Unambiguous range      : {R_unamb:,.0f} m")
 print(f"Range resolution       : {R_res:,.2f} m")
-print(f"Duty cycle             : {duty:.4f}  (fraction)")
-print(f"Duty factor (τ·PRF)    : {duty_factor:.4f}")
+print(f"Duty cycle             : {duty:.5f}  (fraction)")
+print(f"Duty factor (τ·PRF)    : {duty_factor:.5f}")
 print(f"Average power          : {P_avg:,.1f} W")
 print(f"Energy in first 10 ms  : {E_10ms:.4f} J")
 print(f"Doppler shift (30 m/s) : {f_d:.2f} Hz")
@@ -99,9 +99,10 @@ L_lin = 10 ** (3 / 10)  # 3 dB loss
 Ae = rho * np.pi * (D / 2) ** 2
 G = 4 * np.pi * Ae / lam**2
 
-P_tx = system.solve_peak_power(P_rx, G, lam, sigma, R, L_lin)
-P_tx
-# print(f"Required peak power ≈ {P_tx/1e6:.2f} MW")
+# the same antenna transmits and receives, so g_tx = g_rx = G
+P_tx = system.solve_peak_power(P_rx, G, G, lam, sigma, R, L_lin)
+print(f"Antenna gain        ≈ {10 * np.log10(G):.2f} dB")
+print(f"Required peak power ≈ {P_tx / 1e3:.2f} kW")
 ```
 
 ### Multipath Propagation Example
@@ -112,6 +113,11 @@ P_tx
 > Above a smooth plane, estimate:
 > 1. **(a)** Multipath propagation factor (two‑ray).
 > 2. **(b)** Received signal power.
+>
+> Over a smooth, flat surface the reflection coefficient is −1, so the
+> two‑ray propagation factor is $F = 2\,|\sin(2\pi h_t h_r / (\lambda R))|$.
+> It applies on the way to the target and back, so the received power is the
+> free‑space value times $F^4$.
 
 ```{code-cell} ipython3
 ht, hr, R = 30.0, 50.0, 40e3
@@ -121,13 +127,15 @@ f_c = 5.4e9
 lam_c = constants.C / f_c
 G_lin = 10 ** (34.77 / 10)
 
-delta_r = 2 * ht * hr / R
-delta_phi = 4 * np.pi * delta_r / lam_c
-F = 2 * np.abs(np.cos(delta_phi / 2))
+delta_r = 2 * ht * hr / R  # path difference between direct and reflected ray
+delta_phi = 2 * np.pi * delta_r / lam_c  # phase difference
+F = 2 * np.abs(np.sin(delta_phi / 2))  # reflection coefficient -1
 print(f"Propagation factor |F| ≈ {F:.2f}")
 
-P_r = system.radar_equation(P_t, G_lin, lam_c, sigma, R, 1.0) * F**2
-print(f"Received power ≈ {P_r:.2e} W")
+P_free = system.radar_equation(P_t, G_lin, G_lin, lam_c, sigma, R, 1.0)
+P_r = P_free * F**4
+print(f"Free-space received power ≈ {P_free:.2e} W")
+print(f"Received power with multipath ≈ {P_r:.2e} W")
 ```
 
 ### Missile Doppler Shift
