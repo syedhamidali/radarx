@@ -7,3 +7,9 @@ build:
     python: "miniforge3-latest"
 sphinx:
   configuration: docs/conf.py
+# notebooks run in a separate kernel, so radarx must be installed (not just
+# on sys.path) for them to import it
+python:
+  install:
+    - method: pip
+      path: .
