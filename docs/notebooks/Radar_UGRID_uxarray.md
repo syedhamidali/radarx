@@ -245,25 +245,53 @@ statistics and remapping below possible.
 ## Gate areas
 
 uxarray computes the area of every face (on the unit sphere, so multiply by
-the Earth radius squared). A gate's area grows linearly with range, from a few
-thousand square metres near the radar to over 300 000 m² at 150 km:
+the Earth radius squared). A gate's area is its length times its width, and
+the width grows in proportion to range, so a 0.5° × 250 m gate covers about
+4 600 m² at 2 km but 330 000 m² at 150 km.
+
+What matters for statistics is how gates and area are spread over range.
+Gates are evenly spaced in range, so the share of gates within a given
+distance grows linearly, but the share of area grows with the square of the
+distance:
 
 ```{code-cell} ipython3
 earth_radius = 6371008.8  # m
 area = uxds.uxgrid.face_areas.values * earth_radius**2
 
-n_range = sweep.sizes["range"]
-mean_area = area.reshape(-1, n_range).mean(axis=0)
-hv.Curve(
-    (sweep.range.values / 1e3, mean_area / 1e6), "Range (km)", "Gate area (km²)"
-).opts(title="Gate area vs range", frame_width=350, frame_height=350)
+# cumulative share of gates and of area, ordered by range
+gate_range_km = uxds["range"].values / 1e3
+order = np.argsort(gate_range_km)
+range_sorted = gate_range_km[order]
+share_gates = np.arange(1, order.size + 1) / order.size
+share_area = np.cumsum(area[order]) / area.sum()
+
+half = np.searchsorted(share_gates, 0.5)
+print(
+    f"Half of all gates lie within {range_sorted[half]:.0f} km of the radar "
+    f"but cover only {100 * share_area[half]:.0f} % of the area."
+)
+
+step = max(order.size // 2000, 1)  # thin out the curves for plotting
+curve_opts = dict(frame_width=350, frame_height=350, ylim=(0, 1))
+(
+    hv.Curve(
+        (range_sorted[::step], share_gates[::step]), "Range (km)", "Cumulative share",
+        label="gates",
+    )
+    * hv.Curve((range_sorted[::step], share_area[::step]), label="area")
+).opts(
+    hv.opts.Curve(**curve_opts),
+    hv.opts.Overlay(title="Share of gates and of area within a range", legend_position="top_left"),
+)
 ```
+
+So a plain average over gates is dominated by the area close to the radar.
 
 ## Area-weighted statistics
 
 Every gate counts once in a plain average, so the many small gates close to
-the radar dominate it. Weighting by area gives each square kilometre the same
-weight. Reflectivity is averaged in linear units (Z), not in dBZ.
+the radar dominate it, as shown above. Weighting by area gives each square
+kilometre the same weight. Reflectivity is averaged in linear units (Z), not in dBZ.
 
 ```{code-cell} ipython3
 dbz = uxds["DBZH"]

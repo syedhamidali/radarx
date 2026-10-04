@@ -23,6 +23,7 @@ dependencies:
   - panel
   - datashader
   - uxarray
+  - spatialpandas
   - open-radar-data
   - pip
   - pip:
