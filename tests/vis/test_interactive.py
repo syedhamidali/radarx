@@ -213,3 +213,14 @@ def test_imd_volume_from_xradar():
     dtree = xd.io.open_imd_datatree(files)
     _render(dtree.radarx.plot.ppi("DBZH"))
     _render(dtree.radarx.plot.cappi("DBZH", height=3000, x_res=4000, y_res=4000))
+
+
+def test_large_fields_rasterize_by_default(sweep, monkeypatch):
+    """Big polar meshes are rasterized (if datashader exists); mesh never is."""
+    pytest.importorskip("datashader")
+    monkeypatch.setattr(interactive, "RASTERIZE_THRESHOLD", 100)
+    da = sweep[VAR]
+    assert isinstance(da.radarx.plot.ppi(), hv.DynamicMap)
+    assert isinstance(da.radarx.plot.ppi(rasterize=False), hv.QuadMesh)
+    assert isinstance(da.radarx.plot.mesh(), hv.QuadMesh)
+    _render(da.radarx.plot.ppi())

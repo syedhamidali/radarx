@@ -60,6 +60,9 @@ import numpy as np
 import xarray as xr
 
 DEFAULT_CMAP = "ChaseSpectral"
+# Above this many gates, bokeh output of a full-resolution polar mesh gets
+# very large (one polygon per gate), so ppi/rhi rasterize by default.
+RASTERIZE_THRESHOLD = 50_000
 
 # import speedup trick (borrowed from uxarray): importing hvplot is slow, so it
 # is only done once a plot accessor is actually created.
@@ -193,6 +196,18 @@ def _ppi_title(da, kind="PPI"):
     return f"{kind}{angle} {da.name or ''}".strip()
 
 
+def _default_rasterize(da, kwargs):
+    """Rasterize large fields with datashader unless the caller decided."""
+    if "rasterize" in kwargs or da.size <= RASTERIZE_THRESHOLD:
+        return kwargs
+    try:
+        import datashader  # noqa: F401
+    except ImportError:
+        return kwargs
+    kwargs["rasterize"] = True
+    return kwargs
+
+
 def _plan_axes(kwargs):
     kwargs.setdefault("aspect", "equal")
     kwargs.setdefault("xlabel", "x (km)")
@@ -225,6 +240,16 @@ def hvplot_range_azimuth(da, backend=None, **kwargs):
     ------
     ValueError
         If ``da`` has no ``range`` dimension or no ray dimension.
+
+    Examples
+    --------
+    >>> import xradar as xd  # doctest: +SKIP
+    >>> from open_radar_data import DATASETS  # doctest: +SKIP
+    >>> from radarx.vis import hvplot_range_azimuth  # doctest: +SKIP
+    >>> file = DATASETS.fetch("swx_20120520_0641.nc")  # doctest: +SKIP
+    >>> dtree = xd.io.open_cfradial1_datatree(file)  # doctest: +SKIP
+    >>> da = dtree["sweep_0"]["corrected_reflectivity_horizontal"]  # doctest: +SKIP
+    >>> hvplot_range_azimuth(da)  # or da.radarx.plot()  # doctest: +SKIP
     """
     _assign_backend(backend)
     ray_dim = next((d for d in da.dims if d != "range"), None)
@@ -263,6 +288,18 @@ def hvplot_ppi(da, backend=None, **kwargs):
     ------
     ValueError
         If ``da`` cannot be georeferenced.
+
+    Notes
+    -----
+    Fields with more than ``RASTERIZE_THRESHOLD`` (50 000) gates are
+    rasterized with datashader by default when it is installed, which keeps
+    plots and saved HTML small; pass ``rasterize=False`` for full vector
+    output.
+
+    Examples
+    --------
+    >>> hvplot_ppi(da, clim=(-10, 60), frame_width=400)  # doctest: +SKIP
+    >>> da.radarx.plot.ppi(backend="matplotlib")  # static figure  # doctest: +SKIP
     """
     _assign_backend(backend)
     if not ({"x", "y"} <= set(da.dims)):
@@ -270,6 +307,7 @@ def hvplot_ppi(da, backend=None, **kwargs):
     else:
         da = da.assign_coords(x=da["x"] / 1e3, y=da["y"] / 1e3)
     kwargs = _plan_axes(_clim_title_defaults(da, kwargs, _ppi_title(da)))
+    kwargs = _default_rasterize(da, kwargs)
     return da.hvplot.quadmesh(x="x", y="y", **kwargs)
 
 
@@ -299,10 +337,16 @@ def hvplot_mesh(da, backend=None, line_color="black", line_width=0.2, **kwargs):
     -------
     holoviews.QuadMesh
         Plan view with gate outlines.
+
+    Examples
+    --------
+    >>> subset = da.isel(azimuth=slice(0, 40), range=slice(0, 80))  # doctest: +SKIP
+    >>> hvplot_mesh(subset, line_color="white")  # doctest: +SKIP
     """
     import holoviews as hv
 
-    plot = hvplot_ppi(da, backend=backend, **kwargs)
+    # gate outlines only exist in the vector (non-rasterized) rendering
+    plot = hvplot_ppi(da, backend=backend, rasterize=False, **kwargs)
     if hv.Store.current_backend == "matplotlib":
         return plot.opts(edgecolors=line_color, linewidths=line_width)
     return plot.opts(line_color=line_color, line_width=line_width)
@@ -328,6 +372,10 @@ def hvplot_centroids(da, backend=None, **kwargs):
     -------
     holoviews.Points
         One point per valid gate at its ``x``/``y`` location in km.
+
+    Examples
+    --------
+    >>> hvplot_centroids(da.isel(range=slice(0, 150)), size=4)  # doctest: +SKIP
     """
     _assign_backend(backend)
     name = da.name or "value"
@@ -362,6 +410,18 @@ def hvplot_rhi(da, backend=None, **kwargs):
     -------
     holoviews.QuadMesh
         Ground range (km) on the x-axis against height (km) on the y-axis.
+
+    Notes
+    -----
+    Fields with more than ``RASTERIZE_THRESHOLD`` (50 000) gates are
+    rasterized with datashader by default when it is installed, which keeps
+    plots and saved HTML small; pass ``rasterize=False`` for full vector
+    output.
+
+    Examples
+    --------
+    >>> dtree.radarx.plot.rhi("DBZH")  # RHI-mode sweeps of a volume  # doctest: +SKIP
+    >>> hvplot_rhi(rhi_sweep["DBZH"], clim=(0, 60))  # doctest: +SKIP
     """
     _assign_backend(backend)
     da = _georeference(da)
@@ -372,6 +432,7 @@ def hvplot_rhi(da, backend=None, **kwargs):
     kwargs = _clim_title_defaults(da, kwargs, title.strip())
     kwargs.setdefault("xlabel", "Ground range (km)")
     kwargs.setdefault("ylabel", "Height (km)")
+    kwargs = _default_rasterize(da, kwargs)
     return da.hvplot.quadmesh(x="ground_range", y="z", **kwargs)
 
 
@@ -398,6 +459,12 @@ def hvplot_cappi(da, z=None, backend=None, **kwargs):
     -------
     holoviews.QuadMesh or holoviews.DynamicMap
         Plan view, or a height slider over all levels of a 3D grid.
+
+    Examples
+    --------
+    >>> grid = dtree.radarx.to_grid(data_vars=["DBZH"])  # doctest: +SKIP
+    >>> hvplot_cappi(grid["DBZH"], z=2000)  # single level  # doctest: +SKIP
+    >>> hvplot_cappi(grid["DBZH"])  # height slider  # doctest: +SKIP
     """
     if "z" in da.dims:
         if z is not None:
@@ -444,6 +511,11 @@ def hvplot_max_cappi(da, backend=None, **kwargs):
     See Also
     --------
     radarx.vis.plot_maxcappi : Static matplotlib/cartopy Max-CAPPI.
+
+    Examples
+    --------
+    >>> grid = dtree.radarx.to_grid(data_vars=["DBZH"])  # doctest: +SKIP
+    >>> hvplot_max_cappi(grid["DBZH"], clim=(0, 60))  # doctest: +SKIP
     """
     import holoviews as hv
 
