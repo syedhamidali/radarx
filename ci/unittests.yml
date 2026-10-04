@@ -29,6 +29,7 @@ dependencies:
   - bokeh
   - panel
   - datashader
+  - uxarray
   - xmltodict
   - pooch
   - cartopy

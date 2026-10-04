@@ -22,6 +22,7 @@ dependencies:
   - bokeh
   - panel
   - datashader
+  - uxarray
   - open-radar-data
   - pip
   - pip:

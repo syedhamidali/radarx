@@ -33,6 +33,7 @@ dependencies:
   - bokeh
   - panel
   - datashader
+  - uxarray
   - wradlib
   - boto3
   - arm_pyart
