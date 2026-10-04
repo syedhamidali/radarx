@@ -1,5 +1,8 @@
 # History
 
+## Unreleased
+- **FIX:** Declare ``boto3`` as a dependency. Without it, ``radarx.io`` silently failed to import on pip installs (``radarx.io`` was ``None``). by [@syedhamidali](https://github.com/syedhamidali)
+
 ## 0.3.0 (2026-10-04)
 
 This release adds CAPPI retrieval, interactive hvplot-based radar plots and
