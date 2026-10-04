@@ -40,6 +40,7 @@ dependencies:
   - holoviews
   - panel
   - datashader
+  - uxarray
   - geoviews
   - nbclassic
   - itables
