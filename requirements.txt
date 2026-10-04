@@ -10,3 +10,4 @@ xmltodict
 matplotlib
 xradar
 pooch
+boto3
