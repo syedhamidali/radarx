@@ -7,6 +7,7 @@ import xarray as xr
 import numpy as np
 import xradar as xd
 from radarx.grid import stack_data, make_3d_grid, grid_radar
+from radarx.grid.grid import _sweep_dataset
 from open_radar_data import DATASETS
 
 
@@ -38,7 +39,7 @@ def test_stack_data(mock_dtree):
 
 def test_make_3d_grid(mock_dtree):
     """Test `make_3d_grid` function."""
-    ds = mock_dtree["sweep_0"].to_dataset()
+    ds = _sweep_dataset(mock_dtree, "sweep_0")
     lat, lon, x, y, z, trg_crs = make_3d_grid(ds)
 
     # Assertions
