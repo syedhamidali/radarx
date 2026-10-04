@@ -10,6 +10,17 @@ This sub-module provides functionality to read and process single radar files
 from the Indian Meteorological Department (IMD), returning a quasi-CF-Radial
 xarray Dataset.
 
+.. deprecated:: 0.3.0
+   The radarx IMD reader is deprecated and will be removed in the next
+   release. IMD data is read natively by xradar (releases after 0.12.0)::
+
+       import xarray as xr
+       import xradar as xd
+
+       ds = xr.open_dataset(filename, engine="imd")  # single sweep
+       dtree = xd.io.open_imd_datatree(files)  # one volume
+       tree = xd.io.open_imd_volumes(files)  # many volumes (vcp_NN)
+
 Example::
 
     import radarx as rx
@@ -23,8 +34,12 @@ Example::
    {}
 """
 
-import logging
+import functools
+import inspect
 import itertools
+import logging
+import warnings
+
 import numpy as np
 import xarray as xr
 from xradar.io.backends.cfradial1 import (
@@ -55,7 +70,61 @@ __all__ = [
 
 __doc__ = __doc__.format("\n   ".join(__all__))
 
+_XRADAR_IMD_REPLACEMENTS = {
+    "read_sweep": "xr.open_dataset(file, engine='imd')",
+    "read_volume": (
+        "xradar.io.open_imd_volumes(files) (or xradar.io.group_imd_files + "
+        "xradar.io.open_imd_datatree per volume)"
+    ),
+    "to_cfradial2": (
+        "xradar.io.open_imd_datatree(files), which already returns CfRadial2"
+    ),
+    "to_cfradial2_volumes": (
+        "xradar.io.open_imd_volumes(files), which already returns CfRadial2"
+    ),
+}
+_deprecated_call_depth = 0
 
+
+def _deprecated(func):
+    """
+    Emit a FutureWarning for user-facing calls of the retiring IMD reader.
+
+    Nested calls (e.g. ``read_volume`` -> ``read_sweep``) do not warn again.
+
+    Parameters
+    ----------
+    func : callable
+        Public IMD reader function to deprecate.
+
+    Returns
+    -------
+    callable
+        Wrapped function that warns before delegating to ``func``.
+    """
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        global _deprecated_call_depth
+        if _deprecated_call_depth == 0:
+            replacement = _XRADAR_IMD_REPLACEMENTS[func.__name__]
+            warnings.warn(
+                f"radarx.io.{func.__name__} is deprecated and will be removed in "
+                "the next radarx release. IMD data is read natively by "
+                f"xradar (releases after 0.12.0); use {replacement} instead.",
+                FutureWarning,
+                stacklevel=2,
+            )
+        _deprecated_call_depth += 1
+        try:
+            return func(*args, **kwargs)
+        finally:
+            _deprecated_call_depth -= 1
+
+    return wrapper
+
+
+@_deprecated
 def read_sweep(file):
     """
     Read and process a single radar file from the Indian Meteorological
@@ -156,6 +225,7 @@ def read_sweep(file):
     return ds
 
 
+@_deprecated
 def read_volume(files):
     """
     Read and process multiple radar files to create a volume scan dataset.
@@ -788,6 +858,7 @@ def create_volume(dataset_list):
 
 
 # to_cfradial2 function implementation
+@_deprecated
 def to_cfradial2(ds, **kwargs):
     """
     Convert a CfRadial1 Dataset to a CfRadial2 hierarchical structure using xarray's native DataTree.
@@ -857,12 +928,18 @@ def to_cfradial2(ds, **kwargs):
     }
 
     # Add sweep groups to the dictionary
+    # xradar 0.12 renamed ``site_coords`` to ``site_as_coords``
+    site_kwarg = (
+        "site_as_coords"
+        if "site_as_coords" in inspect.signature(_get_sweep_groups).parameters
+        else "site_coords"
+    )
     sweep_groups = _get_sweep_groups(
         ds,
         sweep=sweep,
         first_dim=first_dim,
         optional=optional,
-        site_coords=site_coords,
+        **{site_kwarg: site_coords},
     )
     for sweep_name, sweep_data in sweep_groups.items():
         dtree[f"/{sweep_name}"] = sweep_data
@@ -871,6 +948,7 @@ def to_cfradial2(ds, **kwargs):
     return DataTree.from_dict(dtree)
 
 
+@_deprecated
 def to_cfradial2_volumes(volumes):
     """
     Convert multiple CfRadial1 volumes to a DataTree containing CfRadial2 structures.
