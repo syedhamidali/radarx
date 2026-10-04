@@ -1,5 +1,8 @@
 # History
 
+## Unreleased
+- **DOC:** Fix the fundamentals exercises: Example 3.9 and the multipath example passed one antenna gain to ``radar_equation``/``solve_peak_power``, which take separate transmit and receive gains; the multipath example also used a doubled phase difference, the wrong reflection sign and ``F**2`` instead of ``F**4``. by [@syedhamidali](https://github.com/syedhamidali)
+
 ## 0.3.1 (2026-10-04)
 - **DOC:** Tagged documentation builds show the release version (the v0.3.0 docs showed ``0.3.1.dev0``). ({pull}`75`) by [@syedhamidali](https://github.com/syedhamidali)
 - **FIX:** Declare ``boto3`` as a dependency. Without it, ``radarx.io`` silently failed to import on pip installs (``radarx.io`` was ``None``). ({pull}`75`) by [@syedhamidali](https://github.com/syedhamidali)
