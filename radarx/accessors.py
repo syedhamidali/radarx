@@ -26,6 +26,7 @@ __doc__ = __doc__.format("\n   ".join(__all__))
 
 import xarray as xr
 from .grid import grid_radar  # noqa
+from .grid import to_uxarray  # noqa
 from .retrieve import create_cappi as retrieve_cappi  # noqa
 from .vis import plot_cappi, plot_ppi, plot_rhi  # noqa
 from .vis.interactive import (
@@ -99,6 +100,27 @@ class RadarxDataArrayAccessor(RadarxAccessor):
         """
         return RadarxDataArrayPlotAccessor(self.xarray_obj)
 
+    def to_uxarray(self, variables=None):
+        """
+        Convert the sweep into a uxarray dataset with one face per gate.
+
+        Parameters
+        ----------
+        variables : str or list of str, optional
+            Variables to attach to the faces. By default all
+            ``(azimuth, range)`` variables.
+
+        Returns
+        -------
+        uxarray.UxDataset
+            Dataset on the ``n_face`` dimension with a UGRID grid.
+
+        See Also
+        --------
+        radarx.grid.to_uxarray
+        """
+        return to_uxarray(self.xarray_obj, variables=variables)
+
 
 @xr.register_dataset_accessor("radarx")
 class RadarxDataSetAccessor(RadarxAccessor):
@@ -119,6 +141,27 @@ class RadarxDataSetAccessor(RadarxAccessor):
         radarx.vis.interactive
         """
         return RadarxDatasetPlotAccessor(self.xarray_obj)
+
+    def to_uxarray(self, variables=None):
+        """
+        Convert the sweep into a uxarray dataset with one face per gate.
+
+        Parameters
+        ----------
+        variables : str or list of str, optional
+            Variables to attach to the faces. By default all
+            ``(azimuth, range)`` variables.
+
+        Returns
+        -------
+        uxarray.UxDataset
+            Dataset on the ``n_face`` dimension with a UGRID grid.
+
+        See Also
+        --------
+        radarx.grid.to_uxarray
+        """
+        return to_uxarray(self.xarray_obj, variables=variables)
 
     def plot_max_cappi(
         self,

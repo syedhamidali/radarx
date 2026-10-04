@@ -33,6 +33,9 @@ dependencies:
   - bokeh
   - panel
   - datashader
+  - uxarray
+  - spatialpandas
+  - geopandas
   - wradlib
   - boto3
   - arm_pyart
