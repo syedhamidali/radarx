@@ -86,3 +86,19 @@ def test_grid_radar(mock_dtree):
 
 if __name__ == "__main__":
     pytest.main()
+
+
+def test_sweep_dataset_falls_back_for_older_xarray(mock_dtree, monkeypatch):
+    """Without inherit="all_coords" support, plain to_dataset() is used."""
+    node = mock_dtree["sweep_0"]
+    original = type(node).to_dataset
+
+    def old_to_dataset(self, inherit=True):
+        if inherit == "all_coords":
+            raise TypeError("unsupported")
+        return original(self, inherit=inherit)
+
+    monkeypatch.setattr(type(node), "to_dataset", old_to_dataset)
+    ds = _sweep_dataset(mock_dtree, "sweep_0")
+    assert isinstance(ds, xr.Dataset)
+    assert "DBZH" in ds
