@@ -139,15 +139,13 @@ copybutton_prompt_is_regexp = True
 
 # -- myst_nb specifics --
 # Notebooks are MyST markdown (jupytext) without outputs; they are executed at
-# build time. aws_data needs anonymous S3 access, which fails on the docs
-# builders, so it is rendered without outputs.
+# build time.
 nb_execution_mode = "auto"
 nb_execution_kernel_name = "python3"
 nb_execution_in_temp = True
 nb_execution_timeout = 600
 # fail the build instead of publishing a traceback
 nb_execution_raise_on_error = True
-nb_execution_excludepatterns = ["notebooks/aws_data.md"]
 # HoloViews also emits a comm payload for live kernels; static docs use the
 # HTML output, so the unknown mime type is expected.
 suppress_warnings = ["mystnb.unknown_mime_type"]

@@ -35,7 +35,7 @@ v_res = 500
 ## Load data
 
 ```{code-cell} ipython3
-file = "s3://noaa-nexrad-level2/2018/06/12/KSGF/KSGF20180612_083109_V06"
+file = "s3://unidata-nexrad-level2/2018/06/12/KSGF/KSGF20180612_083109_V06"
 radar = pyart.io.read_nexrad_archive(file)
 filename = os.path.basename(file) + ".nc"
 if not os.path.exists(filename):

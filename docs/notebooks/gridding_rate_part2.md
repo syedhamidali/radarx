@@ -40,6 +40,19 @@ v_res = 500
 ## Load data
 
 ```{code-cell} ipython3
+import os
+
+import pyart
+
+# Created in part 1; recreate it when this notebook runs on its own
+if not os.path.exists("KSGF20180612_083109_V06.nc"):
+    radar = pyart.io.read_nexrad_archive(
+        "s3://unidata-nexrad-level2/2018/06/12/KSGF/KSGF20180612_083109_V06"
+    )
+    pyart.io.write_cfradial("KSGF20180612_083109_V06.nc", radar)
+```
+
+```{code-cell} ipython3
 filename = "KSGF20180612_083109_V06.nc"
 ```
 

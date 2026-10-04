@@ -46,7 +46,7 @@ def display_files(bucket_name, prefix):
 ## NEXRAD Level II
 
 ```{code-cell} ipython3
-bucket_name = "noaa-nexrad-level2"
+bucket_name = "unidata-nexrad-level2"
 prefix = "2016/10/06/KAMX/"
 files = display_files(bucket_name, prefix)
 
@@ -133,10 +133,10 @@ data = {
         "Recursively lists all files in the bucket for a given prefix.",
     ],
     "Supported Products": [
-        "noaa-nexrad-level2, unidata-nexrad-level2-chunks, unidata-nexrad-level3, noaa-mrms-pds",
+        "unidata-nexrad-level2, unidata-nexrad-level2-chunks, unidata-nexrad-level3, noaa-mrms-pds",
         "Same as above",
         "Same as above",
-        "noaa-nexrad-level2, unidata-nexrad-level3",
+        "unidata-nexrad-level2, unidata-nexrad-level3",
         "noaa-mrms-pds",
         "unidata-nexrad-level2-chunks, noaa-mrms-pds",
         "All buckets",
