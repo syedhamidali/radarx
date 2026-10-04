@@ -520,3 +520,12 @@ def test_to_cfradial2_volumes(imd_test_data):
 
 if __name__ == "__main__":
     pytest.main()
+
+
+def test_imd_reader_is_deprecated(imd_test_data):
+    """Public IMD reader functions warn once per call, pointing to xradar."""
+    files = [imd_test_data[k] for k in sorted(imd_test_data)][:2]
+    with pytest.warns(FutureWarning, match="open_imd_volumes") as record:
+        read_volume(files)
+    # nested read_sweep calls inside read_volume must not warn again
+    assert sum("radarx.io." in str(w.message) for w in record) == 1
