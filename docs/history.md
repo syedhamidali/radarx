@@ -1,6 +1,7 @@
 # History
 
 ## Unreleased
+- **DOC:** Tagged documentation builds show the release version (the v0.3.0 docs showed ``0.3.1.dev0``). by [@syedhamidali](https://github.com/syedhamidali)
 - **FIX:** Declare ``boto3`` as a dependency. Without it, ``radarx.io`` silently failed to import on pip installs (``radarx.io`` was ``None``). by [@syedhamidali](https://github.com/syedhamidali)
 
 ## 0.3.0 (2026-10-04)
