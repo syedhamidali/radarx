@@ -24,6 +24,7 @@ dependencies:
   - datashader
   - uxarray
   - spatialpandas
+  - geopandas
   - open-radar-data
   - pip
   - pip:
