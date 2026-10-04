@@ -16,6 +16,12 @@ dependencies:
   - fsspec
   - cmweather
   - itables
+  - jupytext
+  - hvplot
+  - holoviews
+  - bokeh
+  - panel
+  - datashader
   - open-radar-data
   - pip
   - pip:

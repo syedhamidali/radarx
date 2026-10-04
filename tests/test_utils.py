@@ -99,5 +99,28 @@ def test_combine_nexrad_sweeps():
     assert combined["/sweep_0"].to_dataset()["range"].size == 100
 
 
+def test_combine_nexrad_sweeps_unindexed_range():
+    """Sweeps whose ``range`` has no index (recent xradar) are aligned too."""
+    rng_long = np.arange(0, 1000, 10.0)
+    rng_short = np.arange(0, 500, 10.0)
+    ds1 = xr.Dataset(
+        {"DBZH": ("range", np.ones(rng_long.size))},
+        coords={"sweep_fixed_angle": 0.5, "range": ("range", rng_long)},
+    ).drop_indexes("range")
+    ds2 = xr.Dataset(
+        {"DBZH": ("range", np.full(rng_short.size, 2.0))},
+        coords={"sweep_fixed_angle": 0.5, "range": ("range", rng_short)},
+    ).drop_indexes("range")
+    dtree = DataTree.from_dict({"/sweep_0": DataTree(ds1), "/sweep_1": DataTree(ds2)})
+
+    combined = combine_nexrad_sweeps(dtree)["/sweep_0"].to_dataset()
+    short = combined["DBZH_SHORT"]
+    assert combined.sizes["range"] == rng_long.size
+    # inside the short sweep's range the data is kept ...
+    assert (short.sel(range=slice(0, 490)) == 2.0).all()
+    # ... beyond it gates are missing, not the last gate repeated
+    assert short.sel(range=slice(500, None)).isnull().all()
+
+
 if __name__ == "__main__":
     pytest.main()

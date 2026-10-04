@@ -11,8 +11,13 @@ __all__ = ["fetch_imd_test_data", "display_fetched_files"]
 def fetch_imd_test_data():
     """
     Fetches IMD radar data files using pooch.
+
     Downloads files from the specified remote URL if they are not cached locally.
     Also ensures that the files match their expected checksums.
+
+    .. deprecated:: 0.3.0
+       Will be removed together with the radarx IMD reader. Use
+       ``open_radar_data.DATASETS.fetch("IMD/...")`` with xradar instead.
 
     Returns:
         dict: A dictionary containing the local paths of the downloaded files.

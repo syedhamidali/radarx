@@ -5,11 +5,11 @@ channels:
 dependencies:
   - python >=3.9,<3.13
   - pydata-sphinx-theme
-  - myst-parser
+  - myst-nb
+  - jupytext
   - sphinx
   - sphinx-copybutton
   - sphinx-favicon
-  - nbsphinx
   - ipykernel
   - h5netcdf
   - h5py
@@ -38,9 +38,13 @@ dependencies:
   - hvplot
   - bokeh
   - holoviews
+  - panel
+  - datashader
   - geoviews
   - nbclassic
   - itables
   - pip
   - pip:
     - git+https://github.com/MeteoSwiss/fast-barnes-py.git
+    # IMD backend is only on xradar main until the next release
+    - git+https://github.com/openradar/xradar.git@main

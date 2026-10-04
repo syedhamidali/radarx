@@ -37,6 +37,32 @@ except ImportError:  # pragma: no cover
 from ..utils import get_geocoords, find_multidim_vars  #  noqa
 
 
+def _sweep_dataset(dtree, name):
+    """
+    Return a sweep node as a Dataset including the radar site coordinates.
+
+    Newer xarray only inherits indexed coordinates by default, so the site
+    ``latitude``/``longitude``/``altitude`` stored on the root node are lost
+    unless ``inherit="all_coords"`` is requested.
+
+    Parameters
+    ----------
+    dtree : xarray.DataTree
+        Radar volume.
+    name : str
+        Sweep group name, e.g. ``"sweep_0"``.
+
+    Returns
+    -------
+    xarray.Dataset
+        Sweep dataset with inherited coordinates.
+    """
+    try:
+        return dtree[name].to_dataset(inherit="all_coords")
+    except (TypeError, ValueError):  # xarray without "all_coords"
+        return dtree[name].to_dataset()
+
+
 def stack_data(dtree, data_vars=None, geo=False):
     """
     Stack data from a radar DataTree into a single xarray Dataset.
@@ -68,7 +94,7 @@ def stack_data(dtree, data_vars=None, geo=False):
 
     # Loop through sweeps
     for swp in dtree.match("sweep_*"):
-        ds = dtree[swp].to_dataset()
+        ds = _sweep_dataset(dtree, swp)
 
         # Find variables to include if data_vars is None
         if data_vars is None:  # pragma
@@ -253,7 +279,7 @@ def grid_radar(
         )  # pragma: no cover
     ds = stack_data(dtree, data_vars=data_vars, geo=True)
     lat, lon, trgx, trgy, z, trg_crs = make_3d_grid(
-        dtree["sweep_0"].to_dataset(),
+        _sweep_dataset(dtree, "sweep_0"),
         x_lim=x_lim,
         y_lim=y_lim,
         x_step=x_step,

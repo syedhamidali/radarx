@@ -1,9 +1,32 @@
 # History
 
-## Unreleased
-- **ADD:** Added CAPPI retrieval support with `cartesian_idw`, `polar_vertical_interpolation`, and `height_window_composite` methods, plus `plot_ppi`, `plot_rhi`, and `plot_cappi` helpers.
-- **MNT:** Simplified the CAPPI API around `height`, `method`, `vertical_tolerance`, optional filtering, and essential Cartesian grid controls.
-- **FIX:** Improved CAPPI/xradar interoperability by preserving sweep-style metadata and broader DataTree compatibility across supported xarray setups.
+## 0.3.0 (2026-10-04)
+
+This release adds CAPPI retrieval, interactive hvplot-based radar plots and
+deprecates the radarx IMD reader in favour of xradar's IMD backend. The IMD
+reader will be removed in the release following the first xradar version
+that ships the IMD backend.
+
+### Deprecations
+- **DEP:** The radarx IMD reader (``read_sweep``, ``read_volume``, ``to_cfradial2``, ``to_cfradial2_volumes``) and ``radarx.testing.fetch_imd_test_data`` are deprecated and emit a ``FutureWarning`` naming the replacement. IMD data is read natively by xradar (releases after 0.12.0) via ``xr.open_dataset(file, engine="imd")``, ``xradar.io.open_imd_datatree`` and ``xradar.io.open_imd_volumes``. ({pull}`74`) by [@syedhamidali](https://github.com/syedhamidali)
+
+### New features
+- **ADD:** CAPPI retrieval with ``cartesian_idw``, ``polar_vertical_interpolation`` and ``height_window_composite`` methods (``dt.radarx.create_cappi``), plus matplotlib ``plot_ppi``, ``plot_rhi`` and ``plot_cappi`` helpers. ({pull}`73`) by [@syedhamidali](https://github.com/syedhamidali)
+- **ADD:** Interactive hvplot/HoloViews plots via the ``.radarx.plot`` accessor on DataArray, Dataset and DataTree: range-azimuth, PPI, gate mesh, gate centroids, RHI, CAPPI and Max-CAPPI views, faceting over variables and sweeps, ``backend="bokeh"|"matplotlib"`` and fallthrough to ``.hvplot``, following the accessor roadmap in openradar/xradar#174. Large polar sweeps are rasterized with datashader by default. Install the optional dependencies with ``pip install radarx[plot]``. ({pull}`74`) by [@syedhamidali](https://github.com/syedhamidali)
+
+### Fixes
+- **FIX:** NEXRAD Level II data now comes from the ``unidata-nexrad-level2`` bucket; ``noaa-nexrad-level2`` no longer allows anonymous access (``radarx.io.aws_data``). ({pull}`74`) by [@syedhamidali](https://github.com/syedhamidali)
+- **FIX:** ``combine_nexrad_sweeps`` works with recent xradar, which returns ``range`` without an index, and leaves gates beyond the short-range sweep missing instead of repeating its last gate. ({pull}`74`) by [@syedhamidali](https://github.com/syedhamidali)
+- **FIX:** Gridding (``to_grid``, ``make_3d_grid``) keeps the radar site coordinates with newer xarray, which no longer inherits non-index root coordinates by default. ({pull}`74`) by [@syedhamidali](https://github.com/syedhamidali)
+- **FIX:** ``to_cfradial2`` works with xradar 0.12, which renamed ``site_coords`` to ``site_as_coords``. ({pull}`74`) by [@syedhamidali](https://github.com/syedhamidali)
+- **FIX:** Improved CAPPI/xradar interoperability by preserving sweep-style metadata and broader DataTree compatibility across supported xarray setups. ({pull}`73`) by [@syedhamidali](https://github.com/syedhamidali)
+- **FIX:** cartopy is now an optional, lazy import for ``plot_maxcappi``. ({pull}`73`) by [@syedhamidali](https://github.com/syedhamidali)
+
+### Documentation and maintenance
+- **DOC:** Notebooks moved to MyST markdown in ``docs/notebooks`` (following xradar) and are executed during the docs build again, so the documentation shows figures; all notebooks are also run in CI. ({pull}`74`) by [@syedhamidali](https://github.com/syedhamidali)
+- **DOC:** IMD notebook rewritten to read data with xradar; new Interactive Plots notebook. ({pull}`74`) by [@syedhamidali](https://github.com/syedhamidali)
+- **MNT:** Simplified the CAPPI API around ``height``, ``method``, ``vertical_tolerance``, optional filtering and essential Cartesian grid controls. ({pull}`73`) by [@syedhamidali](https://github.com/syedhamidali)
+- **MNT:** CI pins black and ruff, adds a Codacy configuration and builds the docs with myst-nb. ({pull}`73`, {pull}`74`) by [@syedhamidali](https://github.com/syedhamidali)
 
 ## 0.2.5 (2025-04-22)
 - **ADD:** Added `fundamentals` module with core radar computation utilities. ({pull}`66`) by [@syedhamidali](https://github.com/syedhamidali)
