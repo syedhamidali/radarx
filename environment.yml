@@ -38,6 +38,7 @@ dependencies:
   - hvplot
   - bokeh
   - holoviews
+  - panel
   - geoviews
   - nbclassic
   - itables

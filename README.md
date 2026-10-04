@@ -43,7 +43,7 @@ Radarx is a Python library built for radar data processing and visualization. Th
 ## Key Features
 
 - **Xradar Integration**: Uses [xradar](https://xradar.readthedocs.io/en/latest/) for reading radar data in different formats, providing a consistent interface for various radar types.
-- **IMD Radar Data Support**: Special support for reading and processing IMD radar data in NetCDF format.
+- **Interactive Plotting**: Optional [hvplot](https://hvplot.holoviz.org/)-based PPI, RHI, CAPPI and Max-CAPPI views via `ds.radarx.plot`.
 - **Volume Scanning**: Utilities to process radar sweeps and group them into complete volume scans.
 - **Data Gridding**: Provides tools for converting radar data to regular Cartesian grids, supporting complex radar geometries.
 - **Xarray and DataTree Structured Data**: Radar data is returned as [xarray](http://xarray.pydata.org/) datasets, organized into [DataTree](https://xarray.pydata.org/en/stable/related-projects/datree.html) structures for easy navigation and analysis.
@@ -75,24 +75,25 @@ python -m pip install .
 ## Usage
 
 Here's a simple example of how to use Radarx with [xradar](https://xradar.readthedocs.io/en/latest/)
-to load IMD radar data and process a volume scan:
+to load radar data, grid it and plot it interactively:
 
 ```python
-import radarx as rx
+import xradar as xd
+import radarx  # noqa: registers the ``.radarx`` accessors
 
-# List of radar files
-files = [
-    'radar_file1.nc',
-    'radar_file2.nc',
-    'radar_file3.nc'
-]
+# IMD radar data is read by xradar (releases after 0.12.0)
+dtree = xd.io.open_imd_datatree(["radar_file.nc", "radar_file.nc.1", "radar_file.nc.2"])
 
-# Read volume data using Radarx, with xradar integration
-volume = rx.io.read_volume(files)
-
-# Access a specific sweep or variable
-dbz_data = volume['/volume_0']['DBZ']
+# Grid the volume and plot an interactive Max-CAPPI (requires hvplot)
+grid = dtree.radarx.to_grid(data_vars=["DBZH"])
+grid.radarx.plot.max_cappi("DBZH")
 ```
+
+> [!WARNING]
+> The radarx IMD reader (`rx.io.read_sweep`, `rx.io.read_volume`, `rx.io.to_cfradial2`,
+> `rx.io.to_cfradial2_volumes`) is **deprecated** and will be removed in the next release.
+> IMD data is read natively by xradar (releases after 0.12.0): use
+> `xr.open_dataset(file, engine="imd")` or `xd.io.open_imd_datatree(files)` instead.
 
 Radarx leverages [xradar](https://xradar.readthedocs.io/en/latest/) to handle radar file formats and
 integrates smoothly with [xarray](http://xarray.pydata.org/) and [DataTree](https://xarray.pydata.org/en/stable/related-projects/datree.html) for organizing and analyzing radar data.

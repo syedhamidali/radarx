@@ -1,6 +1,9 @@
 # History
 
 ## Unreleased
+- **ADD:** Interactive hvplot/HoloViews plots via the ``.radarx.plot`` accessor on DataArray, Dataset and DataTree: range-azimuth, PPI, gate mesh, gate centroids, RHI, CAPPI and Max-CAPPI views with faceting over variables and sweeps, ``backend="bokeh"|"matplotlib"`` switching and fallthrough to ``.hvplot`` (following the accessor roadmap in openradar/xradar#174). Install the optional dependencies with ``pip install radarx[plot]``.
+- **DEP:** The radarx IMD reader (``read_sweep``, ``read_volume``, ``to_cfradial2``, ``to_cfradial2_volumes``) and ``radarx.testing.fetch_imd_test_data`` are deprecated and emit a ``FutureWarning``. IMD data is read natively by xradar (releases after 0.12.0) via ``xr.open_dataset(file, engine="imd")``, ``xradar.io.open_imd_datatree`` and ``xradar.io.open_imd_volumes``; the radarx reader will be removed in the release after that xradar version is available.
+- **FIX:** ``to_cfradial2`` works with xradar 0.12, which renamed the ``site_coords`` keyword of its CfRadial1 sweep extraction to ``site_as_coords``.
 - **ADD:** Added CAPPI retrieval support with `cartesian_idw`, `polar_vertical_interpolation`, and `height_window_composite` methods, plus `plot_ppi`, `plot_rhi`, and `plot_cappi` helpers.
 - **MNT:** Simplified the CAPPI API around `height`, `method`, `vertical_tolerance`, optional filtering, and essential Cartesian grid controls.
 - **FIX:** Improved CAPPI/xradar interoperability by preserving sweep-style metadata and broader DataTree compatibility across supported xarray setups.

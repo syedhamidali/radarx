@@ -52,6 +52,7 @@ fallback_version = "9999"
 
 
 [project.optional-dependencies]
+plot = ["hvplot", "holoviews", "bokeh", "panel"]
 dev = ["coverage",  # testing
         "mypy",  # linting
         "pytest",  # testing

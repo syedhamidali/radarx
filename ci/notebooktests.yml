@@ -28,6 +28,10 @@ dependencies:
   - xarray>=2024.10.0
   - xmltodict
   - xradar
+  - hvplot>=0.11
+  - holoviews>=1.20
+  - bokeh
+  - panel
   - wradlib
   - boto3
   - arm_pyart
