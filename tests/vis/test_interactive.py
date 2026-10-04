@@ -224,3 +224,61 @@ def test_large_fields_rasterize_by_default(sweep, monkeypatch):
     assert isinstance(da.radarx.plot.ppi(rasterize=False), hv.QuadMesh)
     assert isinstance(da.radarx.plot.mesh(), hv.QuadMesh)
     _render(da.radarx.plot.ppi())
+
+
+def test_default_calls_for_grids_and_other_arrays(grid):
+    assert isinstance(grid[VAR].isel(z=0).radarx.plot(), hv.QuadMesh)
+    assert isinstance(grid.isel(z=0).radarx.plot(), hv.Layout)
+    series = xr.DataArray(np.arange(5.0), dims="t", name="a")
+    assert series.radarx.plot() is not None
+
+
+def test_dataset_rhi_mesh_centroids(sweep, rhi_sweep):
+    rhi_ds = rhi_sweep.to_dataset()
+    assert isinstance(_render(rhi_ds.radarx.plot.rhi(VAR)), hv.QuadMesh)
+    small = sweep.isel(azimuth=slice(0, 5), range=slice(0, 5))
+    assert isinstance(small.radarx.plot.mesh(VAR), hv.QuadMesh)
+    assert isinstance(small.radarx.plot.centroids(VAR), hv.Points)
+
+
+def test_datatree_rhi_selects_rhi_sweeps(rhi_sweep, sweep):
+    rhi = rhi_sweep.to_dataset().assign(sweep_mode="rhi")
+    ppi = sweep.assign(sweep_mode="azimuth_surveillance")
+    dtree = xr.DataTree.from_dict({"/": xr.Dataset(), "sweep_0": ppi, "sweep_1": rhi})
+    plot = dtree.radarx.plot.rhi(VAR)
+    assert isinstance(plot, hv.QuadMesh)  # only the RHI sweep is picked
+    # without any RHI sweep, all sweeps are used
+    only_ppi = xr.DataTree.from_dict({"/": xr.Dataset(), "sweep_0": ppi})
+    assert isinstance(only_ppi.radarx.plot.rhi(VAR), hv.QuadMesh)
+
+
+def test_datatree_mesh_centroids_and_empty(dtree):
+    small = dtree.map_over_datasets(
+        lambda ds: ds.isel(azimuth=slice(0, 5), range=slice(0, 5)) if ds.sizes else ds
+    )
+    assert isinstance(small.radarx.plot.mesh(VAR), hv.QuadMesh)
+    assert isinstance(small.radarx.plot.centroids(VAR), hv.Points)
+    with pytest.raises(ValueError, match="No sweep groups"):
+        xr.DataTree(xr.Dataset()).radarx.plot.ppi(VAR)
+
+
+def test_large_fields_without_datashader(sweep, monkeypatch):
+    import sys
+
+    monkeypatch.setattr(interactive, "RASTERIZE_THRESHOLD", 100)
+    monkeypatch.setitem(sys.modules, "datashader", None)
+    assert isinstance(sweep[VAR].radarx.plot.ppi(), hv.QuadMesh)
+
+
+@pytest.mark.parametrize("module", ["holoviews", "hvplot.xarray"])
+def test_missing_plot_dependencies(sweep, monkeypatch, module):
+    import sys
+
+    monkeypatch.setattr(interactive, "_IMPORTED_HVPLOT", False)
+    monkeypatch.setitem(sys.modules, module, None)
+    with pytest.raises(ImportError, match=r"radarx\[plot\]"):
+        sweep[VAR].radarx.plot
+
+
+def test_dataset_default_call_on_sweep(sweep):
+    assert isinstance(sweep.radarx.plot(), hv.Layout)
