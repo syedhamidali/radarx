@@ -28,6 +28,11 @@ import xarray as xr
 from .grid import grid_radar  # noqa
 from .retrieve import create_cappi as retrieve_cappi  # noqa
 from .vis import plot_cappi, plot_ppi, plot_rhi  # noqa
+from .vis.interactive import (
+    RadarxDataArrayPlotAccessor,
+    RadarxDatasetPlotAccessor,
+    RadarxDataTreePlotAccessor,
+)
 
 try:  # pragma: no cover
     from xarray import DataTree as RadarxDataTreeType
@@ -74,9 +79,46 @@ class RadarxAccessor:
         self.xarray_obj = xarray_obj
 
 
+@xr.register_dataarray_accessor("radarx")
+class RadarxDataArrayAccessor(RadarxAccessor):
+    """DataArray-level radarx utilities."""
+
+    @property
+    def plot(self) -> RadarxDataArrayPlotAccessor:
+        """
+        Interactive hvplot-based plots, e.g. ``da.radarx.plot.ppi()``.
+
+        Returns
+        -------
+        radarx.vis.interactive.RadarxDataArrayPlotAccessor
+            Plot accessor; requires the optional hvplot dependencies.
+
+        See Also
+        --------
+        radarx.vis.interactive
+        """
+        return RadarxDataArrayPlotAccessor(self.xarray_obj)
+
+
 @xr.register_dataset_accessor("radarx")
 class RadarxDataSetAccessor(RadarxAccessor):
     """Dataset-level radarx plotting utilities."""
+
+    @property
+    def plot(self) -> RadarxDatasetPlotAccessor:
+        """
+        Interactive hvplot-based plots, e.g. ``ds.radarx.plot.ppi()``.
+
+        Returns
+        -------
+        radarx.vis.interactive.RadarxDatasetPlotAccessor
+            Plot accessor; requires the optional hvplot dependencies.
+
+        See Also
+        --------
+        radarx.vis.interactive
+        """
+        return RadarxDatasetPlotAccessor(self.xarray_obj)
 
     def plot_max_cappi(
         self,
@@ -221,6 +263,22 @@ class RadarxDataSetAccessor(RadarxAccessor):
 @register_datatree_accessor("radarx")
 class RadarxDataTreeAccessor(RadarxAccessor):
     """DataTree-level radarx retrieval and gridding utilities."""
+
+    @property
+    def plot(self) -> RadarxDataTreePlotAccessor:
+        """
+        Interactive hvplot-based plots, e.g. ``dt.radarx.plot.ppi("DBZH")``.
+
+        Returns
+        -------
+        radarx.vis.interactive.RadarxDataTreePlotAccessor
+            Plot accessor; requires the optional hvplot dependencies.
+
+        See Also
+        --------
+        radarx.vis.interactive
+        """
+        return RadarxDataTreePlotAccessor(self.xarray_obj)
 
     def to_grid(
         self,
