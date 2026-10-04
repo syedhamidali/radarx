@@ -31,7 +31,7 @@ print(rx.__version__)
 ```
 
 ```{code-cell} ipython3
-file = "s3://noaa-nexrad-level2/2022/03/30/KGWX/KGWX20220330_234639_V06"
+file = "s3://unidata-nexrad-level2/2022/03/30/KGWX/KGWX20220330_234639_V06"
 local_file = fsspec.open_local(
     f"simplecache::s3://{file}",
     s3={"anon": True},
