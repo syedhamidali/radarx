@@ -12,13 +12,13 @@ isort
 fsspec
 pooch
 boto3
-nbval
+jupytext
+nbclient
 pytest-cov
 pytest-xdist
 pytest-mock
-myst-parser
+myst-nb
 sphinx-copybutton
 sphinx-favicon
-nbsphinx
 pydata-sphinx-theme
 itables

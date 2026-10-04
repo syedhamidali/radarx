@@ -15,11 +15,6 @@ repos:
       - id: pyupgrade
         args:
           - '--py38-plus'
-  - repo: https://github.com/kynan/nbstripout
-    rev: 0.7.1
-    hooks:
-      - id: nbstripout
-        args: ['--extra-keys', 'metadata.kernelspec cell.metadata.pycharm cell.metadata.tags']
   - repo: https://github.com/charliermarsh/ruff-pre-commit
     rev: 'v0.2.2'
     hooks:

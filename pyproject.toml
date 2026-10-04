@@ -52,7 +52,7 @@ fallback_version = "9999"
 
 
 [project.optional-dependencies]
-plot = ["hvplot", "holoviews", "bokeh", "panel"]
+plot = ["hvplot", "holoviews", "bokeh", "panel", "datashader"]
 dev = ["coverage",  # testing
         "mypy",  # linting
         "pytest",  # testing
@@ -77,7 +77,8 @@ dev = ["coverage",  # testing
         "sphinx",
         "sphinx-gallery",
         "sphinx-book-theme",
-        "nbsphinx",
+        "myst-nb",
+        "jupytext",
         "sphinx_mdinclude"]
 
 [tool.black]
