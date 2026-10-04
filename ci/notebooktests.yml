@@ -32,14 +32,19 @@ dependencies:
   - holoviews>=1.20
   - bokeh
   - panel
+  - datashader
   - wradlib
   - boto3
   - arm_pyart
   - ffmpeg
   - zarr
-  - nbval
+  - jupytext
+  - nbclient
+  - nbformat
   - pooch
   - itables
   - pip
   - pip:
     - git+https://github.com/MeteoSwiss/fast-barnes-py.git
+    # IMD backend is only on xradar main until the next release
+    - git+https://github.com/openradar/xradar.git@main

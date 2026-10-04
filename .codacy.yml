@@ -1,0 +1,4 @@
+# Codacy reads this file, not bandit.yml; keep it in sync.
+# pytest relies on plain assert, so tests are excluded (Bandit B101).
+exclude_paths:
+  - "tests/**"
