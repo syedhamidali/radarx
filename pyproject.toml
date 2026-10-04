@@ -53,6 +53,7 @@ fallback_version = "9999"
 
 [project.optional-dependencies]
 plot = ["hvplot", "holoviews", "bokeh", "panel", "datashader"]
+uxarray = ["uxarray", "spatialpandas", "geopandas"]
 dev = ["coverage",  # testing
         "mypy",  # linting
         "pytest",  # testing

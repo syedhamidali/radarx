@@ -1,7 +1,9 @@
 # History
 
 ## Unreleased
-- **DOC:** Fix the fundamentals exercises: Example 3.9 and the multipath example passed one antenna gain to ``radar_equation``/``solve_peak_power``, which take separate transmit and receive gains; the multipath example also used a doubled phase difference, the wrong reflection sign and ``F**2`` instead of ``F**4``. by [@syedhamidali](https://github.com/syedhamidali)
+- **ADD:** ``to_uxarray`` (``ds.radarx.to_uxarray()``) converts a PPI sweep into a uxarray dataset in the UGRID conventions, with one quadrilateral face per gate whose corners lie halfway to the neighbouring rays and gates. This gives true gate footprints and areas, area-weighted statistics and uxarray's subsetting and remapping on the native polar geometry (openradar/xradar#212, UXARRAY/uxarray#976). Install with ``pip install radarx[uxarray]``. ({pull}`77`) by [@syedhamidali](https://github.com/syedhamidali)
+- **DOC:** New notebook: radar sweeps as unstructured grids with uxarray. ({pull}`77`) by [@syedhamidali](https://github.com/syedhamidali)
+- **DOC:** Fix the fundamentals exercises: Example 3.9 and the multipath example passed one antenna gain to ``radar_equation``/``solve_peak_power``, which take separate transmit and receive gains; the multipath example also used a doubled phase difference, the wrong reflection sign and ``F**2`` instead of ``F**4``. ({pull}`76`) by [@syedhamidali](https://github.com/syedhamidali)
 
 ## 0.3.1 (2026-10-04)
 - **DOC:** Tagged documentation builds show the release version (the v0.3.0 docs showed ``0.3.1.dev0``). ({pull}`75`) by [@syedhamidali](https://github.com/syedhamidali)
