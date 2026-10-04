@@ -110,6 +110,11 @@ try:
     version = get_version("radarx")
 except PackageNotFoundError:
     version = getattr(radarx, "__version__", "999")
+# On Read the Docs, setuptools-scm can see the checkout as modified and
+# report the next dev version (e.g. 0.3.1.dev0 for the v0.3.0 tag), so tag
+# builds use the tag name itself.
+if os.environ.get("READTHEDOCS_VERSION_TYPE") == "tag":
+    version = os.environ.get("READTHEDOCS_GIT_IDENTIFIER", version).lstrip("v")
 release = version
 
 myst_substitutions = {
