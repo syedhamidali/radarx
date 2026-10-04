@@ -13,7 +13,7 @@ specific paths and downloading them locally.
 Supported Buckets
 -----------------
 
-- **NEXRAD Level II Archive**: ``noaa-nexrad-level2``
+- **NEXRAD Level II Archive**: ``unidata-nexrad-level2``
 - **NEXRAD Level II Real-Time**: ``unidata-nexrad-level2-chunks``
 - **NEXRAD Level III Real-Time**: ``unidata-nexrad-level3``
 - **MRMS Data**: ``noaa-mrms-pds``
@@ -24,13 +24,13 @@ Usage Examples
 1. List available files::
 
        from radarx.io.aws_data import list_available_files
-       files = list_available_files('noaa-nexrad-level2', '2016/10/06/KAMX/')
+       files = list_available_files('unidata-nexrad-level2', '2016/10/06/KAMX/')
        print(files)
 
 2. Download a file::
 
        from radarx.io.aws_data import download_file
-       file_path = download_file('noaa-nexrad-level2',
+       file_path = download_file('unidata-nexrad-level2',
            '2016/10/06/KAMX/KAMX20161006_170414_V06', './downloads')
        print('File downloaded to', file_path)
 
@@ -57,7 +57,7 @@ import os
 
 # AWS Buckets for different radar data
 AWS_BUCKETS = {
-    "NEXRAD_ARCHIVE": "noaa-nexrad-level2",
+    "NEXRAD_ARCHIVE": "unidata-nexrad-level2",
     "NEXRAD_REALTIME": "unidata-nexrad-level2-chunks",
     "NEXRAD_LEVEL3": "unidata-nexrad-level3",
     "MRMS": "noaa-mrms-pds",
@@ -120,7 +120,7 @@ def list_available_files(bucket, prefix, anonymous=True):
     --------
     List files in the NEXRAD Level II archive bucket:
 
-        >>> files = list_available_files("noaa-nexrad-level2",
+        >>> files = list_available_files("unidata-nexrad-level2",
             "2016/10/06/KAMX/")
         >>> print(files)
 
@@ -165,7 +165,7 @@ def download_file(bucket, file_key, save_dir, anonymous=True):
     Download a NEXRAD Level II file:
 
         >>> file_path = download_file(
-        ...     "noaa-nexrad-level2",
+        ...     "unidata-nexrad-level2",
         ...     "2016/10/06/KAMX/KAMX20161006_170414_V06",
         ...     "./downloads"
         ... )
