@@ -94,8 +94,13 @@ def test_import_radarx_does_not_require_cartopy(monkeypatch):
 
     import radarx.vis.maxcappi as _mod
 
-    importlib.reload(_mod)
-    assert not _mod._CARTOPY_AVAILABLE
+    try:
+        importlib.reload(_mod)
+        assert not _mod._CARTOPY_AVAILABLE
+    finally:
+        # restore the real cartopy so later tests on this worker can use it
+        monkeypatch.undo()
+        importlib.reload(_mod)
 
 
 if __name__ == "__main__":

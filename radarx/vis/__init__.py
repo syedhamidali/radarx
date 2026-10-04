@@ -11,9 +11,11 @@ Radarx Visualization
 
 .. automodule:: radarx.vis.maxcappi
 .. automodule:: radarx.vis.plots
+.. automodule:: radarx.vis.interactive
 """
 
 from .maxcappi import *  # noqa
 from .plots import *  # noqa
+from .interactive import *  # noqa
 
 __all__ = [s for s in dir() if not s.startswith("_")]

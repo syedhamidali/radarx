@@ -24,6 +24,11 @@ dependencies:
   - setuptools
   - xarray>=2024.10.0
   - xradar
+  - hvplot>=0.11
+  - holoviews>=1.20
+  - bokeh
+  - panel
+  - datashader
   - xmltodict
   - pooch
   - cartopy
