@@ -19,7 +19,6 @@
 <!-- [![Docs](https://readthedocs.org/projects/radarx/badge/?version=latest)](https://radarx.readthedocs.io/en/latest/) -->
 [![Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![CodeQL](https://github.com/syedhamidali/radarx/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/syedhamidali/radarx/actions/workflows/github-code-scanning/codeql)
 [![CodeFactor](https://www.codefactor.io/repository/github/syedhamidali/radarx/badge)](https://www.codefactor.io/repository/github/syedhamidali/radarx)
 [![codebeat badge](https://codebeat.co/badges/9e6434e5-d40c-48d2-8f77-7e81241bd965)](https://codebeat.co/projects/github-com-syedhamidali-radarx-main)
 [![codecov](https://codecov.io/gh/syedhamidali/radarx/graph/badge.svg?token=59WL4GNQOP)](https://codecov.io/gh/syedhamidali/radarx)
