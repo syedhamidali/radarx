@@ -30,8 +30,11 @@ from .grid import (
     grid_radar,  # noqa
     to_uxarray,  # noqa
 )
+from .retrieve import advect as retrieve_advect  # noqa
 from .retrieve import create_cappi as retrieve_cappi  # noqa
 from .retrieve import dealias_velocity
+from .retrieve import estimate_motion as retrieve_estimate_motion  # noqa
+from .retrieve import interpolate_time as retrieve_interpolate_time  # noqa
 from .retrieve import shear as _shear
 from .vis import plot_cappi, plot_ppi, plot_rhi  # noqa
 from .vis.interactive import (
@@ -189,6 +192,84 @@ class RadarxDataArrayAccessor(RadarxAccessor):
         """
         return to_uxarray(self.xarray_obj, variables=variables)
 
+    def estimate_motion(self, other, field=None, **kwargs):
+        """
+        Storm motion from this gridded volume to a later one.
+
+        Parameters
+        ----------
+        other : xarray.Dataset or xarray.DataArray
+            The later gridded volume on the same grid.
+        field : str, optional
+            Field to track (Dataset only). Default: the reflectivity.
+        **kwargs
+            Passed to :func:`radarx.retrieve.estimate_motion`.
+
+        Returns
+        -------
+        xarray.Dataset
+            ``u`` and ``v`` storm motion (m/s) and the correlation ``quality``.
+
+        See Also
+        --------
+        radarx.retrieve.estimate_motion
+        """
+        return retrieve_estimate_motion(self.xarray_obj, other, field, **kwargs)
+
+    def advect(self, u, v=None, dt=None, **kwargs):
+        """
+        Move the gridded fields along the storm motion.
+
+        Parameters
+        ----------
+        u : float, xarray.DataArray or xarray.Dataset
+            Eastward motion (m/s), or the result of :meth:`estimate_motion`.
+        v : float or xarray.DataArray, optional
+            Northward motion (m/s).
+        dt : float or timedelta, optional
+            Time step in seconds (or pass ``time=`` as a target time).
+        **kwargs
+            Passed to :func:`radarx.retrieve.advect`.
+
+        Returns
+        -------
+        xarray.Dataset or xarray.DataArray
+            The advected fields.
+
+        See Also
+        --------
+        radarx.retrieve.advect
+        """
+        return retrieve_advect(self.xarray_obj, u, v, dt, **kwargs)
+
+    def interpolate_time(self, other, times, motion=None, **kwargs):
+        """
+        Advection-corrected time interpolation to a later gridded volume.
+
+        Parameters
+        ----------
+        other : xarray.Dataset or xarray.DataArray
+            The later gridded volume on the same grid.
+        times : datetime-like or array-like
+            Target times between the two volumes.
+        motion : xarray.Dataset, optional
+            Storm motion; estimated from the two volumes by default.
+        **kwargs
+            Passed to :func:`radarx.retrieve.interpolate_time`.
+
+        Returns
+        -------
+        xarray.Dataset or xarray.DataArray
+            Fields with a new ``time`` dimension.
+
+        See Also
+        --------
+        radarx.retrieve.interpolate_time
+        """
+        return retrieve_interpolate_time(
+            self.xarray_obj, other, times, motion, **kwargs
+        )
+
 
 @xr.register_dataset_accessor("radarx")
 class RadarxDataSetAccessor(_ShearMixin, RadarxAccessor):
@@ -230,6 +311,84 @@ class RadarxDataSetAccessor(_ShearMixin, RadarxAccessor):
         radarx.grid.to_uxarray
         """
         return to_uxarray(self.xarray_obj, variables=variables)
+
+    def estimate_motion(self, other, field=None, **kwargs):
+        """
+        Storm motion from this gridded volume to a later one.
+
+        Parameters
+        ----------
+        other : xarray.Dataset or xarray.DataArray
+            The later gridded volume on the same grid.
+        field : str, optional
+            Field to track (Dataset only). Default: the reflectivity.
+        **kwargs
+            Passed to :func:`radarx.retrieve.estimate_motion`.
+
+        Returns
+        -------
+        xarray.Dataset
+            ``u`` and ``v`` storm motion (m/s) and the correlation ``quality``.
+
+        See Also
+        --------
+        radarx.retrieve.estimate_motion
+        """
+        return retrieve_estimate_motion(self.xarray_obj, other, field, **kwargs)
+
+    def advect(self, u, v=None, dt=None, **kwargs):
+        """
+        Move the gridded fields along the storm motion.
+
+        Parameters
+        ----------
+        u : float, xarray.DataArray or xarray.Dataset
+            Eastward motion (m/s), or the result of :meth:`estimate_motion`.
+        v : float or xarray.DataArray, optional
+            Northward motion (m/s).
+        dt : float or timedelta, optional
+            Time step in seconds (or pass ``time=`` as a target time).
+        **kwargs
+            Passed to :func:`radarx.retrieve.advect`.
+
+        Returns
+        -------
+        xarray.Dataset or xarray.DataArray
+            The advected fields.
+
+        See Also
+        --------
+        radarx.retrieve.advect
+        """
+        return retrieve_advect(self.xarray_obj, u, v, dt, **kwargs)
+
+    def interpolate_time(self, other, times, motion=None, **kwargs):
+        """
+        Advection-corrected time interpolation to a later gridded volume.
+
+        Parameters
+        ----------
+        other : xarray.Dataset or xarray.DataArray
+            The later gridded volume on the same grid.
+        times : datetime-like or array-like
+            Target times between the two volumes.
+        motion : xarray.Dataset, optional
+            Storm motion; estimated from the two volumes by default.
+        **kwargs
+            Passed to :func:`radarx.retrieve.interpolate_time`.
+
+        Returns
+        -------
+        xarray.Dataset or xarray.DataArray
+            Fields with a new ``time`` dimension.
+
+        See Also
+        --------
+        radarx.retrieve.interpolate_time
+        """
+        return retrieve_interpolate_time(
+            self.xarray_obj, other, times, motion, **kwargs
+        )
 
     def dealias(self, field="VRADH", nyquist_velocity=None, **kwargs):
         """

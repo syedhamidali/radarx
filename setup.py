@@ -2,7 +2,7 @@
 # Copyright (c) 2024-2026, Radarx developers.
 # Distributed under the MIT License. See LICENSE for more info.
 
-"""Build the optional compiled cone-gridding kernel.
+"""Build the optional compiled kernels (cone gridding, advection).
 
 Project metadata lives in pyproject.toml. The extension is optional: if it
 cannot be compiled, radarx still installs and uses a NumPy implementation.
@@ -36,6 +36,13 @@ setup(
         Pybind11Extension(
             "radarx.retrieve._dealias",
             ["radarx/retrieve/_dealias.cpp"],
+            cxx_std=17,
+            extra_compile_args=extra_compile_args,
+            optional=True,
+        ),
+        Pybind11Extension(
+            "radarx.retrieve._advection",
+            ["radarx/retrieve/_advection.cpp"],
             cxx_std=17,
             extra_compile_args=extra_compile_args,
             optional=True,

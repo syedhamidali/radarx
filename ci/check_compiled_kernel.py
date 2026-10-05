@@ -4,7 +4,7 @@
 
 """Fail if radarx was installed without its compiled kernels.
 
-The extension is optional at build time (radarx falls back to NumPy), so a
+The extensions are optional at build time (radarx falls back to NumPy), so a
 broken compiler setup would otherwise go unnoticed in wheels and CI.
 """
 
@@ -13,7 +13,7 @@ import sys
 import numpy as np
 
 from radarx.grid import cone
-from radarx.retrieve import dealias, shear
+from radarx.retrieve import advection, dealias, shear
 
 if not cone.HAS_COMPILED_KERNEL:
     sys.exit("radarx.grid._cone was not built: the compiled kernel is missing")
@@ -56,3 +56,14 @@ links = np.ones(36, dtype=np.uint8)
 if folds.shape != aliased.shape or (comps < 0).any():
     sys.exit("compiled dealiasing kernel returned an unexpected result")
 print("compiled dealiasing kernel OK")
+if not advection.HAS_COMPILED_KERNEL:
+    sys.exit("radarx.retrieve._advection was not built: the compiled kernel is missing")
+planes = np.arange(12.0).reshape(1, 3, 4)
+rows = np.broadcast_to(np.arange(3.0)[None, :, None], (1, 3, 4))
+cols = np.broadcast_to(np.arange(4.0)[None, None, :] - 1.0, (1, 3, 4))
+moved = advection._advection.advect(planes, rows, cols, 1, 0.5, 0)
+if moved.shape != (1, 1, 3, 4) or not np.allclose(
+    moved[0, 0, :, 1:], planes[0, :, :-1]
+):
+    sys.exit(f"compiled advection kernel returned an unexpected result: {moved}")
+print("compiled advection kernel OK")

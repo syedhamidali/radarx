@@ -14,10 +14,13 @@ Radarx Retrieval
 .. automodule:: radarx.retrieve.shear
 
 .. automodule:: radarx.retrieve.dealias
+
+.. automodule:: radarx.retrieve.advection
 """
 
 from .cappi import *  # noqa
 from .shear import *  # noqa
 from .dealias import *  # noqa
+from .advection import *  # noqa
 
 __all__ = [s for s in dir() if not s.startswith("_")]
