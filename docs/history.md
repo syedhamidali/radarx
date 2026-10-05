@@ -1,12 +1,25 @@
 # History
 
-## Unreleased
+## 0.4.0 (2026-10-05)
+
+This release makes cone gridding the default: a new gridder built for radar
+geometry, with a compiled C++ kernel, that is much faster and more accurate
+than Barnes interpolation. It also adds a uxarray (UGRID) conversion, speeds
+up ``import radarx`` and fixes the SciPy/NumPy compatibility pin.
+
+radarx now ships compiled wheels for Linux, macOS and Windows. Building from
+source needs a C++ compiler for the fast kernel; without one, radarx falls
+back to an equivalent NumPy implementation.
+
 - **ADD:** Cone gridding (``radarx.grid.grid_cones``, now the default ``method="cone"`` of ``grid_radar`` / ``dtree.radarx.to_grid``). Each sweep is interpolated bilinearly at every output column from its four surrounding gates, using the measured ray azimuths and elevations, and each level is interpolated in height between the two sweeps that bracket it. No radius of influence or smoothing to tune; values never overshoot the data; cells not bracketed by two sweeps stay empty (``pseudo_cappi`` fills below the lowest sweep). A compiled C++ kernel (pybind11, multithreaded) does the work, with an identical NumPy fallback. On a NEXRAD volume it grids 43 million cells in 0.13 s (fast-barnes 5.5 s, Py-ART 63 s) and reconstructs a held-out tilt with about half the error of Barnes. ``method="barnes"`` remains available. ({pull}`79`) by [@syedhamidali](https://github.com/syedhamidali)
 - **FIX:** Drop the ``scipy<=1.14.1`` pin. SciPy 1.14.1 does not support NumPy >= 2.3, so environments with a current NumPy got an incompatible SciPy and a warning on import. The test suite passes with SciPy 1.18 and NumPy 2.5. ({pull}`78`) by [@syedhamidali](https://github.com/syedhamidali)
 - **ENH:** ``import radarx`` is about 25 % faster: matplotlib, cmweather, cartopy and boto3 are now imported only when a matplotlib plot or AWS helper is used. As a result, ``import radarx`` no longer registers the cmweather colormaps (e.g. ``ChaseSpectral``) for other libraries; radarx's own plots still register them, and ``import cmweather`` makes them available elsewhere. ({pull}`78`) by [@syedhamidali](https://github.com/syedhamidali)
 - **ADD:** ``to_uxarray`` (``ds.radarx.to_uxarray()``) converts a PPI sweep into a uxarray dataset in the UGRID conventions, with one quadrilateral face per gate whose corners lie halfway to the neighbouring rays and gates. This gives true gate footprints and areas, area-weighted statistics and uxarray's subsetting and remapping on the native polar geometry (openradar/xradar#212, UXARRAY/uxarray#976). Install with ``pip install radarx[uxarray]``. ({pull}`77`) by [@syedhamidali](https://github.com/syedhamidali)
 - **DOC:** New notebook: radar sweeps as unstructured grids with uxarray. ({pull}`77`) by [@syedhamidali](https://github.com/syedhamidali)
 - **DOC:** Fix the fundamentals exercises: Example 3.9 and the multipath example passed one antenna gain to ``radar_equation``/``solve_peak_power``, which take separate transmit and receive gains; the multipath example also used a doubled phase difference, the wrong reflection sign and ``F**2`` instead of ``F**4``. ({pull}`76`) by [@syedhamidali](https://github.com/syedhamidali)
+- **MNT:** Platform wheels are built with cibuildwheel; CI checks that the compiled kernel is present; workflows use read-only GitHub token permissions. ({pull}`79`) by [@syedhamidali](https://github.com/syedhamidali)
+- **MNT:** ``docs/history.md`` uses ``merge=union`` so changelog entries from different branches no longer conflict. ({pull}`80`) by [@syedhamidali](https://github.com/syedhamidali)
+- **DOC:** Updated README (features, optional extras, a runnable example, links, Python 3.10-3.13) and citation metadata: the all-versions Zenodo DOI ``10.5281/zenodo.14699306`` is used everywhere, and ``CITATION.cff`` follows CFF 1.2.0. Removed the CodeQL and codebeat badges. ({pull}`81`, {pull}`82`, {pull}`83`) by [@syedhamidali](https://github.com/syedhamidali)
 
 ## 0.3.1 (2026-10-04)
 - **DOC:** Tagged documentation builds show the release version (the v0.3.0 docs showed ``0.3.1.dev0``). ({pull}`75`) by [@syedhamidali](https://github.com/syedhamidali)
