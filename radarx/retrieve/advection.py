@@ -325,6 +325,33 @@ def _tile_motion(a, b, mask, size, overlap, min_quality, guess, **options):
     return dy, dx, centres
 
 
+def _motion_field(a, b, mask, size, overlap, min_quality, smooth, guess, options):
+    """Smooth per-cell displacements (rows, columns) from tiled estimates."""
+    ny, nx = a.shape
+    if np.isnan(guess[0]):  # no first guess: no tiled motion either
+        return np.full((ny, nx), np.nan), np.full((ny, nx), np.nan)
+    trows, tcols, centres = _tile_motion(
+        a, b, mask, size, overlap, min_quality, guess, **options
+    )
+    trows = _smooth_fill(trows, guess[0], smooth)
+    tcols = _smooth_fill(tcols, guess[1], smooth)
+    return _to_grid(trows, centres, ny, nx), _to_grid(tcols, centres, ny, nx)
+
+
+def _pair_seconds(obj_t0, obj_t1, dt):
+    """Time between two volumes in seconds, from ``dt`` or their times."""
+    if dt is None:
+        t0, t1 = _time_of(obj_t0), _time_of(obj_t1)
+        if t0 is None or t1 is None:
+            raise ValueError("the volumes have no scalar 'time': pass dt=")
+        dt_s = float((t1 - t0) / np.timedelta64(1, "s"))
+    else:
+        dt_s = _seconds(dt)
+    if dt_s == 0 or not np.isfinite(dt_s):
+        raise ValueError("the two volumes must be at different times")
+    return dt_s
+
+
 def _smooth_fill(values, fallback, sigma):
     """Fill failed tiles with ``fallback`` and smooth with a Gaussian (tiles)."""
     from scipy.ndimage import gaussian_filter
@@ -480,15 +507,7 @@ def estimate_motion(
     >>> float(motion.u), float(motion.v)  # doctest: +SKIP
     """
     use_compiled = _use_compiled(engine)
-    if dt is None:
-        t0, t1 = _time_of(obj_t0), _time_of(obj_t1)
-        if t0 is None or t1 is None:
-            raise ValueError("the volumes have no scalar 'time': pass dt=")
-        dt_s = float((t1 - t0) / np.timedelta64(1, "s"))
-    else:
-        dt_s = _seconds(dt)
-    if dt_s == 0 or not np.isfinite(dt_s):
-        raise ValueError("the two volumes must be at different times")
+    dt_s = _pair_seconds(obj_t0, obj_t1, dt)
     da0 = _field(obj_t0, field)
     da1 = _field(obj_t1, field)
     dx, dy = _step(da0, x), _step(da0, y)
@@ -522,16 +541,10 @@ def estimate_motion(
     dims, coords = (), {}
     if tile is not None:
         size = (max(4, round(tile / abs(dy))), max(4, round(tile / abs(dx))))
-        if np.isnan(rows):  # no first guess: no tiled motion either
-            u_val = v_val = np.full((ny, nx), np.nan)
-        else:
-            trows, tcols, centres = _tile_motion(
-                a, b, mask, size, overlap, min_quality, (rows, cols), **options
-            )
-            trows = _smooth_fill(trows, rows, smooth)
-            tcols = _smooth_fill(tcols, cols, smooth)
-            u_val = _to_grid(tcols, centres, ny, nx) * to_u
-            v_val = _to_grid(trows, centres, ny, nx) * to_v
+        trows, tcols = _motion_field(
+            a, b, mask, size, overlap, min_quality, smooth, (rows, cols), options
+        )
+        u_val, v_val = tcols * to_u, trows * to_v
         dims = (y, x)
         coords = {
             name: c
@@ -877,8 +890,7 @@ def advect(
     >>> moved = radarx.retrieve.advect(grid0, motion, dt=120.0)  # doctest: +SKIP
     """
     use_compiled = _use_compiled(engine)
-    if method not in _ORDERS:
-        raise ValueError(f"method must be 'linear' or 'cubic', not {method!r}")
+    order = _order(method)
     t0 = _time_of(obj)
     if (dt is None) == (time is None):
         raise ValueError("give exactly one of dt and time")
@@ -897,7 +909,7 @@ def advect(
         [da.values for da in fields.values()],
         src_row,
         src_col,
-        _ORDERS[method],
+        order,
         min_weight,
         use_compiled,
         n_threads,
@@ -997,13 +1009,8 @@ def interpolate_time(
     >>> frames = radarx.retrieve.interpolate_time(grid0, grid1, times)  # doctest: +SKIP
     """
     use_compiled = _use_compiled(engine)
-    if method not in _ORDERS:
-        raise ValueError(f"method must be 'linear' or 'cubic', not {method!r}")
-    t0, t1 = _time_of(obj_t0), _time_of(obj_t1)
-    if t0 is None or t1 is None:
-        raise ValueError("both volumes need a scalar 'time'")
-    if t1 <= t0:
-        raise ValueError("obj_t1 must be later than obj_t0")
+    order = _order(method)
+    t0, t1, times = _check_times(obj_t0, obj_t1, times)
     if motion is None:
         motion = estimate_motion(
             obj_t0,
@@ -1023,59 +1030,75 @@ def interpolate_time(
         u, v = _motion_arrays(motion, None, x, y, ny, nx)
     except ValueError as err:
         raise ValueError(f"no usable motion ({err}): pass motion=") from err
-    times = np.atleast_1d(np.asarray(times, dtype="datetime64[ns]"))
-    if times.ndim != 1 or np.any(times < t0) or np.any(times > t1):
-        raise ValueError("target times must lie between the two volumes")
     span = (t1 - t0) / np.timedelta64(1, "s")
     frac = (times - t0) / np.timedelta64(1, "s") / span
-    order = _ORDERS[method]
-    common = (u, v, None, dx, dy, ny, nx, use_compiled, n_threads)
+    fields0, fields1 = _fields(obj_t0, x, y), _fields(obj_t1, x, y)
+    if isinstance(obj_t0, xr.Dataset) and set(fields0) - set(fields1):
+        raise ValueError(f"obj_t1 lacks {sorted(set(fields0) - set(fields1))}")
 
     # every target time of each volume in one kernel call
-    fields0, fields1 = _fields(obj_t0, x, y), _fields(obj_t1, x, y)
-    if isinstance(obj_t0, xr.Dataset):
-        missing = set(fields0) - set(fields1)
-        if missing:
-            raise ValueError(f"obj_t1 lacks {sorted(missing)}")
     moved = []
     for fields, dts in ((fields0, frac * span), (fields1, -(1.0 - frac) * span)):
-        src_row, src_col = _departure(*common[:2], dts, *common[3:])
+        src_row, src_col = _departure(
+            u, v, dts, dx, dy, ny, nx, use_compiled, n_threads
+        )
+        arrays = [da.values for da in fields.values()]
+        options = (order, min_weight, use_compiled, n_threads)
         moved.append(
-            _advect_fields(
-                [da.values for da in fields.values()],
-                src_row,
-                src_col,
-                order,
-                min_weight,
-                use_compiled,
-                n_threads,
-            )
+            dict(zip(fields, _advect_fields(arrays, src_row, src_col, *options)))
         )
-    later = dict(zip(fields1, moved[1]))
-    blended = {}
-    names = list(fields0)
-    for n, name in enumerate(names):
-        a = moved[0][n]
-        b = moved[1][0] if isinstance(obj_t0, xr.DataArray) else later[name]
-        f = frac.reshape((-1,) + (1,) * (a.ndim - 1)).astype(a.dtype)
-        both = np.isfinite(a) & np.isfinite(b)
-        out = np.where(np.isfinite(a), a, b)
-        np.copyto(out, (1 - f) * a + f * b, where=both)
-        da = fields0[name]
-        blended[name] = xr.DataArray(
-            out,
-            dims=("time",) + da.dims,
-            coords={k: c for k, c in da.coords.items() if k != "time"},
-            attrs=da.attrs,
-            name=da.name,
-        )
+    if isinstance(obj_t0, xr.DataArray):  # names of the two may differ
+        moved[1] = dict(zip(moved[0], moved[1].values()))
     time_coord = xr.DataArray(
         times, dims="time", attrs=dict(obj_t0["time"].attrs), name="time"
     )
+    blended = {
+        name: _blend(moved[0][name], moved[1][name], frac, da)
+        for name, da in fields0.items()
+    }
     if isinstance(obj_t0, xr.DataArray):
-        da = blended[names[0]]
+        da = next(iter(blended.values()))
         return da.transpose("time", *obj_t0.dims).assign_coords(time=time_coord)
     out = obj_t0.drop_vars("time", errors="ignore")
-    for name in names:
-        out[name] = blended[name].transpose("time", *obj_t0[name].dims)
+    for name, da in blended.items():
+        out[name] = da.transpose("time", *obj_t0[name].dims)
     return out.assign_coords(time=time_coord)
+
+
+def _order(method):
+    """Interpolation order (1 or 3) of ``method``."""
+    if method not in _ORDERS:
+        raise ValueError(f"method must be 'linear' or 'cubic', not {method!r}")
+    return _ORDERS[method]
+
+
+def _check_times(obj_t0, obj_t1, times):
+    """Volume times and target times (datetime64[ns]) between them."""
+    t0, t1 = _time_of(obj_t0), _time_of(obj_t1)
+    if t0 is None or t1 is None:
+        raise ValueError("both volumes need a scalar 'time'")
+    if t1 <= t0:
+        raise ValueError("obj_t1 must be later than obj_t0")
+    times = np.atleast_1d(np.asarray(times, dtype="datetime64[ns]"))
+    if times.ndim != 1 or np.any(times < t0) or np.any(times > t1):
+        raise ValueError("target times must lie between the two volumes")
+    return t0, t1, times
+
+
+def _blend(a, b, frac, template):
+    """
+    ``(1 - f) a + f b`` where both are defined, else the defined one.
+
+    ``a`` and ``b`` are (time, ...) arrays; the result is a DataArray with the
+    dimensions, coordinates and attributes of ``template`` after ``time``.
+    """
+    f = frac.reshape((-1,) + (1,) * (a.ndim - 1)).astype(a.dtype)
+    out = np.where(np.isfinite(a), a, b)
+    np.copyto(out, (1 - f) * a + f * b, where=np.isfinite(a) & np.isfinite(b))
+    return xr.DataArray(
+        out,
+        dims=("time",) + template.dims,
+        coords={k: c for k, c in template.coords.items() if k != "time"},
+        attrs=template.attrs,
+        name=template.name,
+    )
