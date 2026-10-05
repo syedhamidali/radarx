@@ -349,11 +349,13 @@ def _load_volume(dtree):
         raise ValueError("No sweep groups found in DataTree.")
     sweeps = [_sweep_dataset(dtree, name) for name in names]
     first = sweeps[0]
-    site_coords = {
-        key: first[key].reset_coords(drop=True)
-        for key in ("latitude", "longitude", "altitude")
-        if key in first
-    }
+    root = dtree.root.to_dataset()
+    site_coords = {}
+    for key in ("latitude", "longitude", "altitude"):
+        # sweeps usually inherit the site; older xarray only exposes it on the root
+        source = first if key in first else root if key in root else None
+        if source is not None:
+            site_coords[key] = source[key].reset_coords(drop=True)
     if "latitude" not in site_coords or "longitude" not in site_coords:
         raise ValueError("The volume needs the radar site 'latitude' and 'longitude'.")
     site = {key: float(value) for key, value in site_coords.items()}
