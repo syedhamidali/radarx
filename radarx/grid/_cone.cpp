@@ -32,7 +32,8 @@ using DArray = py::array_t<double, py::array::c_style | py::array::forcecast>;
 namespace {
 
 constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
-constexpr double kDeg = M_PI / 180.0;
+constexpr double kPi = 3.14159265358979323846;  // M_PI is not standard (MSVC)
+constexpr double kDeg = kPi / 180.0;
 
 struct Sweep {
     const double* data = nullptr;  // (nray, ngate), row-major
