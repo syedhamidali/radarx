@@ -68,6 +68,9 @@ jobs:
     - name: Version Info
       run: |
         python -c "import radarx; print(radarx.version.version)"
+    - name: Check the compiled gridding kernel
+      run: |
+        python ci/check_compiled_kernel.py
     - name: Test with pytest
       run: |
         pytest -n auto --dist loadfile --verbose --durations=15 --cov-report xml:coverage_unit.xml --cov=radarx --pyargs tests
@@ -169,7 +172,8 @@ jobs:
           TWINE_PASSWORD: ${{ secrets.TESTPYPI_API_TOKEN }}
         run: |
           rm -f dist/radarx1.gz
-          twine upload --repository testpypi dist/*
+          # platform wheels are built by cibuildwheel on release; upload the sdist
+          twine upload --repository testpypi dist/*.tar.gz
 
   test_build_distribution_pypi:
     name: test build distribution
