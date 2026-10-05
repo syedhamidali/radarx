@@ -54,6 +54,27 @@ def test_make_3d_grid(mock_dtree):
     assert lon.shape == x.shape, "Shapes should be equal"
 
 
+@pytest.mark.parametrize("pseudo_cappi", [True, False])
+def test_grid_radar_barnes(mock_dtree, pseudo_cappi):
+    """The Barnes method stays available next to the default cone method."""
+    pytest.importorskip("fastbarnes")
+    gridded_ds = grid_radar(
+        mock_dtree,
+        data_vars=["DBZH"],
+        pseudo_cappi=pseudo_cappi,
+        x_lim=(-50e3, 50e3),
+        y_lim=(-50e3, 50e3),
+        z_lim=(0, 5e3),
+        x_step=2000,
+        y_step=2000,
+        z_step=1000,
+        method="barnes",
+    )
+    assert gridded_ds["DBZH"].shape == (6, 51, 51)
+    assert np.isfinite(gridded_ds["DBZH"].values).any()
+    assert "gridding_method" not in gridded_ds.attrs
+
+
 def test_grid_radar(mock_dtree):
     """Test `grid_radar` function."""
     gridded_ds = grid_radar(
