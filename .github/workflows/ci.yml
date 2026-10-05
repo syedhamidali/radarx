@@ -42,6 +42,7 @@ jobs:
         shell: bash -l {0}
     env:
       CONDA_ENV_FILE: ci/unittests.yml
+      PYTHON_VERSION: ${{ matrix.python-version }}
     strategy:
       fail-fast: false
       matrix:
@@ -51,13 +52,16 @@ jobs:
     - uses: actions/checkout@v4
       with:
         fetch-depth: 0
+    - name: Get date for the environment cache key
+      id: date
+      run: echo "today=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
     - name: Install micromamba environment
       uses: mamba-org/setup-micromamba@v2
       with:
           environment-name: radarx-unit-tests
           environment-file: ${{env.CONDA_ENV_FILE}}
           cache-environment: true
-          cache-environment-key: "${{runner.os}}-${{runner.arch}}-py${{env.PYTHON_VERSION}}-${{env.TODAY}}-${{hashFiles(env.CONDA_ENV_FILE)}}"
+          cache-environment-key: "${{runner.os}}-${{runner.arch}}-py${{env.PYTHON_VERSION}}-np${{matrix.numpy-version}}-${{steps.date.outputs.today}}-${{hashFiles(env.CONDA_ENV_FILE)}}"
           create-args: >-
               python=${{matrix.python-version}}
               numpy=${{matrix.numpy-version}}
@@ -97,6 +101,7 @@ jobs:
         shell: bash -l {0}
     env:
       CONDA_ENV_FILE: ci/notebooktests.yml
+      PYTHON_VERSION: ${{ matrix.python-version }}
     strategy:
       fail-fast: false
       matrix:
@@ -106,13 +111,16 @@ jobs:
     - uses: actions/checkout@v4
       with:
         fetch-depth: 0
+    - name: Get date for the environment cache key
+      id: date
+      run: echo "today=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
     - name: Install micromamba environment
       uses: mamba-org/setup-micromamba@v2
       with:
           environment-name: radarx-notebook-tests
           environment-file: ${{env.CONDA_ENV_FILE}}
           cache-environment: true
-          cache-environment-key: "${{runner.os}}-${{runner.arch}}-py${{env.PYTHON_VERSION}}-${{env.TODAY}}-${{hashFiles(env.CONDA_ENV_FILE)}}"
+          cache-environment-key: "${{runner.os}}-${{runner.arch}}-py${{env.PYTHON_VERSION}}-np${{matrix.numpy-version}}-${{steps.date.outputs.today}}-${{hashFiles(env.CONDA_ENV_FILE)}}"
           create-args: >-
               python=${{matrix.python-version}}
               numpy=${{matrix.numpy-version}}
