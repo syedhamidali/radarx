@@ -1,0 +1,3 @@
+# Changelog entries from different branches are kept side by side on merge
+# and rebase instead of conflicting (GitHub's web merge ignores this).
+docs/history.md merge=union
