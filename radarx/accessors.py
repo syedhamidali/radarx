@@ -32,7 +32,10 @@ from .grid import (
 )
 from .retrieve import advect as retrieve_advect  # noqa
 from .retrieve import create_cappi as retrieve_cappi  # noqa
-from .retrieve import dealias_velocity
+from .retrieve import (
+    dealias_velocity,
+    estimate_kdp,  # noqa
+)
 from .retrieve import estimate_motion as retrieve_estimate_motion  # noqa
 from .retrieve import interpolate_time as retrieve_interpolate_time  # noqa
 from .retrieve import shear as _shear
@@ -390,6 +393,29 @@ class RadarxDataSetAccessor(_ShearMixin, RadarxAccessor):
             self.xarray_obj, other, times, motion, **kwargs
         )
 
+    def kdp(self, phidp=None, rhohv=None, dbzh=None, **kwargs):
+        """
+        Process the differential phase and estimate KDP for this sweep.
+
+        Parameters
+        ----------
+        phidp, rhohv, dbzh : str, optional
+            Field names; by default the usual xradar/CfRadial names.
+        **kwargs
+            Options of :func:`radarx.retrieve.estimate_kdp`, e.g. ``method``.
+
+        Returns
+        -------
+        xarray.Dataset
+            ``PHIDP_processed`` (degrees), ``KDP`` (degrees/km) and
+            ``PHIDP_OFFSET``.
+
+        See Also
+        --------
+        radarx.retrieve.estimate_kdp
+        """
+        return estimate_kdp(self.xarray_obj, phidp, rhohv, dbzh, **kwargs)
+
     def dealias(self, field="VRADH", nyquist_velocity=None, **kwargs):
         """
         Dealias (unfold) the Doppler velocity of this sweep.
@@ -639,6 +665,32 @@ class RadarxDataTreeAccessor(_ShearMixin, RadarxAccessor):
             method=method,
             n_threads=n_threads,
         )
+
+    def kdp(self, phidp=None, rhohv=None, dbzh=None, **kwargs):
+        """
+        Process the differential phase and estimate KDP for every sweep.
+
+        All rays of all sweeps are processed in one call of the compiled
+        kernel.
+
+        Parameters
+        ----------
+        phidp, rhohv, dbzh : str, optional
+            Field names; by default the usual xradar/CfRadial names.
+        **kwargs
+            Options of :func:`radarx.retrieve.estimate_kdp`, e.g. ``method``.
+
+        Returns
+        -------
+        xarray.DataTree
+            The root of the volume and one node per sweep with processed
+            ``PHIDP_processed`` (degrees), ``KDP`` (degrees/km) and ``PHIDP_OFFSET``.
+
+        See Also
+        --------
+        radarx.retrieve.estimate_kdp
+        """
+        return estimate_kdp(self.xarray_obj, phidp, rhohv, dbzh, **kwargs)
 
     def dealias(self, field="VRADH", nyquist_velocity=None, **kwargs):
         """

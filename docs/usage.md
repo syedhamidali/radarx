@@ -26,6 +26,7 @@ notebooks/Advection_Correction
 notebooks/Interactive_Plots
 notebooks/Radar_UGRID_uxarray
 notebooks/Azimuthal_Shear
+notebooks/KDP
 notebooks/aws_data
 ```
 
