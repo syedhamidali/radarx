@@ -202,9 +202,46 @@ def test_errors():
         llsd(ds, "VEL")
     with pytest.raises(TypeError):
         llsd(ds["VRADH"])
-    if not shear_mod.HAS_COMPILED_KERNEL:
-        with pytest.raises(ImportError):
-            llsd(ds, engine="compiled")
+    with pytest.raises(ValueError, match="range must increase"):
+        llsd(ds.isel(range=slice(None, None, -1)), engine="numpy")
+    with pytest.raises(ValueError, match="2-D"):
+        llsd(ds.isel(range=0, drop=False).expand_dims("time"), engine="numpy")
+    with pytest.raises(ValueError, match="one azimuth per ray"):
+        bad = xr.Dataset(
+            {"VRADH": (("time", "range"), np.zeros((az.size, RANGE.size)))},
+            coords={"azimuth": ("other", az[:5]), "range": RANGE},
+        )
+        llsd(bad, engine="numpy")
+    tree = xr.DataTree.from_dict({"/": xr.Dataset(), "sweep_0": ds})
+    with pytest.raises(ValueError, match="No sweep contains"):
+        llsd(tree, "VEL")
+
+
+def test_compiled_engine_unavailable(monkeypatch):
+    az = jittered_azimuths()
+    ds = sweep(np.zeros((az.size, RANGE.size)), az, RANGE)
+    monkeypatch.setattr(shear_mod, "HAS_COMPILED_KERNEL", False)
+    with pytest.raises(ImportError, match="compiled LLSD kernel"):
+        llsd(ds, engine="compiled")
+    out = llsd(ds, engine="auto")  # falls back to NumPy
+    np.testing.assert_allclose(out["azimuthal_shear"], 0.0, atol=1e-12)
+
+
+def test_datatree_older_xarray(monkeypatch):
+    """Without inherit="all_coords" support, plain to_dataset() is used."""
+    az = jittered_azimuths()
+    vel, *_ = rankine(az, RANGE)
+    tree = xr.DataTree.from_dict({"/": xr.Dataset(), "sweep_0": sweep(vel, az, RANGE)})
+    original = xr.DataTree.to_dataset
+
+    def old_to_dataset(self, inherit=True):
+        if inherit == "all_coords":
+            raise TypeError("unsupported")
+        return original(self, inherit=inherit)
+
+    monkeypatch.setattr(xr.DataTree, "to_dataset", old_to_dataset)
+    out = llsd(tree)
+    assert "azimuthal_shear" in out["sweep_0"].data_vars
 
 
 @pytest.fixture(scope="module")
