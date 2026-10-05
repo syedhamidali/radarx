@@ -1,17 +1,23 @@
-# YAML 1.2
-# Metadata for citation of this software according to the CFF format (https://citation-file-format.github.io/)
-cff-version: 1.0.3
+# Citation metadata in the Citation File Format (https://citation-file-format.github.io/).
+# The DOI is the Zenodo concept DOI: it covers all versions and resolves to the
+# latest release, so citations of every version are counted together.
+cff-version: 1.2.0
 message: If you use this software, please cite it using these metadata.
-# FIXME title as repository name might not be the best name, please make human readable
+type: software
 title: 'Radarx: An Xarray-based Python package for radar data processing'
 doi: 10.5281/zenodo.14699306
 authors:
-- given-names: Hamid Ali
-  family-names: Syed
-  affiliation: Purdue University
-  orcid: https://orcid.org/0000-0002-7188-2544
-
+  - given-names: Hamid Ali
+    family-names: Syed
+    affiliation: Purdue University
+    orcid: https://orcid.org/0000-0002-7188-2544
 version: 0.3.1
 date-released: 2026-10-04
 repository-code: https://github.com/syedhamidali/radarx
+url: https://radarx.readthedocs.io/
 license: MIT
+keywords:
+  - weather radar
+  - xarray
+  - xradar
+  - gridding
