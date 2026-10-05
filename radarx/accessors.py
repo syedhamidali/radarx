@@ -336,9 +336,39 @@ class RadarxDataTreeAccessor(RadarxAccessor):
         x_smth=0.2,
         y_smth=0.2,
         z_smth=1,
+        method="cone",
+        n_threads=None,
     ):
-        """Grid a georeferenced radar volume onto a Cartesian 3D domain."""
-        dtree = grid_radar(
+        """
+        Grid the radar volume onto a Cartesian 3D domain.
+
+        Parameters
+        ----------
+        data_vars : list of str, optional
+            Fields to grid. By default all fields.
+        pseudo_cappi : bool, optional
+            Fill levels below the lowest sweep. Default True.
+        x_lim, y_lim, z_lim : tuple of float, optional
+            Grid extent in metres (``z`` above sea level).
+        x_step, y_step, z_step : float, optional
+            Grid spacing in metres.
+        x_smth, y_smth, z_smth : float, optional
+            Smoothing factors, for ``method="barnes"`` only.
+        method : {"cone", "barnes"}, optional
+            Interpolation method. Default ``"cone"``.
+        n_threads : int, optional
+            Threads for ``method="cone"``. Default: all cores.
+
+        Returns
+        -------
+        xarray.Dataset
+            Gridded fields on ``(z, y, x)``.
+
+        See Also
+        --------
+        radarx.grid.grid_radar, radarx.grid.grid_cones
+        """
+        return grid_radar(
             self.xarray_obj,
             data_vars,
             pseudo_cappi,
@@ -351,8 +381,9 @@ class RadarxDataTreeAccessor(RadarxAccessor):
             x_smth,
             y_smth,
             z_smth,
+            method=method,
+            n_threads=n_threads,
         )
-        return dtree
 
     def create_cappi(
         self,

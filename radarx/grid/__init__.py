@@ -10,10 +10,12 @@ Radarx Grid
     :maxdepth: 4
 
 .. automodule:: radarx.grid.grid
+.. automodule:: radarx.grid.cone
 .. automodule:: radarx.grid.ugrid
 """
 
 from .grid import *  # noqa
+from .cone import *  # noqa
 from .ugrid import *  # noqa
 
 __all__ = [s for s in dir() if not s.startswith("_")]
