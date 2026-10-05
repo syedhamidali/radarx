@@ -223,9 +223,16 @@ def grid_radar(
     x_smth=0.2,
     y_smth=0.2,
     z_smth=1,
+    method="cone",
+    n_threads=None,
 ):
     """
     Interpolate radar data to a 3D grid and optionally create a pseudo-CAPPI.
+
+    Two methods are available. ``"cone"`` (default) interpolates within each
+    sweep and then between sweeps (see :func:`radarx.grid.grid_cones`): it
+    needs no smoothing parameters, keeps the native resolution and is much
+    faster. ``"barnes"`` uses Barnes objective analysis via fast-barnes-py.
 
     Parameters
     ----------
@@ -258,6 +265,11 @@ def grid_radar(
         Smoothing factor for the y-dimension. Defaults to 0.2.
     z_smth : float, optional
         Smoothing factor for the z-dimension. Defaults to 1.
+        ``x_smth``, ``y_smth`` and ``z_smth`` apply to ``method="barnes"`` only.
+    method : {"cone", "barnes"}, optional
+        Interpolation method. Default ``"cone"``.
+    n_threads : int, optional
+        Threads for ``method="cone"``. Default: all cores.
 
     Returns
     -------
@@ -269,9 +281,23 @@ def grid_radar(
     -----
     - The pseudo-CAPPI is created by extrapolating data from higher altitudes
       to fill missing values at lower altitudes.
-    - Interpolation is performed using Barnes interpolation.
+    - With ``method="cone"``, ``pseudo_cappi`` fills levels below the lowest
+      sweep with that sweep's value; other cells not bracketed by two sweeps
+      stay empty.
+    - With ``method="barnes"``, interpolation uses Barnes objective analysis.
 
     """
+    if method == "cone":
+        from .cone import grid_cones
+
+        x = np.arange(x_lim[0], x_lim[1] + x_step, x_step)
+        y = np.arange(y_lim[0], y_lim[1] + y_step, y_step)
+        z = np.arange(z_lim[0], z_lim[1] + z_step, z_step)
+        return grid_cones(
+            dtree, data_vars, x, y, z, fill_below=pseudo_cappi, n_threads=n_threads
+        )
+    if method != "barnes":
+        raise ValueError(f"method must be 'cone' or 'barnes', not {method!r}")
     if not FASTBARNES_AVAILABLE:  # pragma: no cover
         raise ImportError(
             "The 'fastbarnes' package is required for this function. "
