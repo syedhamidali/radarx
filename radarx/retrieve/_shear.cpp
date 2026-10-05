@@ -99,25 +99,26 @@ struct Plan {
     std::vector<double> P;          // cumulative sums (uniform weights)
 };
 
-void prepare(Plan& pl, const DArray& data, const DArray& azimuth, const DArray& range,
-             double window_range, double window_azimuth) {
+// Shape checks; keeps pointers to the velocity and range arrays.
+void check_inputs(Plan& pl, const DArray& data, const DArray& azimuth, const DArray& range) {
     if (data.ndim() != 2) throw std::invalid_argument("data must be 2-D (ray, gate)");
-    const int64_t nray = data.shape(0), ngate = data.shape(1);
-    if (azimuth.size() != nray || range.size() != ngate)
+    pl.nray = data.shape(0);
+    pl.ngate = data.shape(1);
+    if (azimuth.size() != pl.nray || range.size() != pl.ngate)
         throw std::invalid_argument("azimuth/range do not match data shape");
-    if (nray < 3 || ngate < 3) throw std::invalid_argument("sweep too small");
-    const double* rg = range.data();
-    for (int64_t g = 1; g < ngate; ++g)
-        if (!(rg[g] > rg[g - 1])) throw std::invalid_argument("range must increase");
+    if (pl.nray < 3 || pl.ngate < 3) throw std::invalid_argument("sweep too small");
     pl.v = data.data();
-    pl.rg = rg;
-    pl.nray = nray;
-    pl.ngate = ngate;
+    pl.rg = range.data();
+    for (int64_t g = 1; g < pl.ngate; ++g)
+        if (!(pl.rg[g] > pl.rg[g - 1])) throw std::invalid_argument("range must increase");
+}
 
-    // Rays sorted by azimuth (radians).
+// Rays sorted by azimuth (radians); returns the median azimuth step.
+double sort_azimuths(Plan& pl, const double* azimuth) {
+    const int64_t nray = pl.nray;
     std::vector<std::pair<double, int64_t>> rays(nray);
     for (int64_t q = 0; q < nray; ++q) {
-        double a = std::fmod(azimuth.data()[q], 360.0);
+        const double a = std::fmod(azimuth[q], 360.0);
         rays[q] = {(a < 0 ? a + 360.0 : a) * kDeg, q};
     }
     std::stable_sort(rays.begin(), rays.end(),
@@ -130,13 +131,16 @@ void prepare(Plan& pl, const DArray& data, const DArray& azimuth, const DArray& 
     }
     std::vector<double> steps(nray - 1);
     for (int64_t q = 0; q + 1 < nray; ++q) steps[q] = pl.az[q + 1] - pl.az[q];
-    const double az_step = median(steps);
+    return median(steps);
+}
+
+// Per gate: half-angle of the window and its range extent [k0, k1].
+void set_windows(Plan& pl, double window_range, double window_azimuth, double az_step) {
+    const int64_t ngate = pl.ngate;
+    const double* rg = pl.rg;
     std::vector<double> dsteps(ngate - 1);
     for (int64_t g = 0; g + 1 < ngate; ++g) dsteps[g] = rg[g + 1] - rg[g];
-    const double r_step = median(dsteps);
-
-    // Per gate: half-angle of the window and its range extent [k0, k1].
-    pl.half_r = std::max(0.5 * window_range, 1.5 * r_step);
+    pl.half_r = std::max(0.5 * window_range, 1.5 * median(dsteps));
     pl.half_angle.resize(ngate);
     pl.k0.resize(ngate);
     pl.k1.resize(ngate);
@@ -145,11 +149,18 @@ void prepare(Plan& pl, const DArray& data, const DArray& azimuth, const DArray& 
         const double ha = r0 > 0 ? 0.5 * window_azimuth / r0 : kPi;
         pl.half_angle[g] = std::max(std::min(ha, 0.5 * kPi), 1.5 * az_step);
         while (rg[lo] < r0 - pl.half_r) ++lo;
-        if (hi < g) hi = g;
+        hi = std::max(hi, g);
         while (hi + 1 < ngate && rg[hi + 1] <= r0 + pl.half_r) ++hi;
         pl.k0[g] = lo;
         pl.k1[g] = hi;
     }
+}
+
+void prepare(Plan& pl, const DArray& data, const DArray& azimuth, const DArray& range,
+             double window_range, double window_azimuth) {
+    check_inputs(pl, data, azimuth, range);
+    const double az_step = sort_azimuths(pl, azimuth.data());
+    set_windows(pl, window_range, window_azimuth, az_step);
 }
 
 // Cumulative sums along range of one sorted ray: count, r, r^2, v, v*r over
@@ -158,106 +169,162 @@ void prefix_ray(Plan& pl, int64_t q) {
     const int64_t ngate = pl.ngate;
     const double* row = pl.v + pl.ray[q] * ngate;
     double* p = pl.P.data() + 5 * q * (ngate + 1);
-    double c0 = 0, c1 = 0, c2 = 0, c3 = 0, c4 = 0;
+    double c[5] = {0, 0, 0, 0, 0};
     for (int64_t g = 0; g < ngate; ++g) {
-        p[5 * g] = c0;
-        p[5 * g + 1] = c1;
-        p[5 * g + 2] = c2;
-        p[5 * g + 3] = c3;
-        p[5 * g + 4] = c4;
+        for (int m = 0; m < 5; ++m) p[5 * g + m] = c[m];
         const double x = row[g];
-        if (!std::isnan(x)) {
-            const double r = pl.rg[g];
-            c0 += 1.0;
-            c1 += r;
-            c2 += r * r;
-            c3 += x;
-            c4 += x * r;
-        }
+        if (std::isnan(x)) continue;
+        const double r = pl.rg[g];
+        c[0] += 1.0;
+        c[1] += r;
+        c[2] += r * r;
+        c[3] += x;
+        c[4] += x * r;
     }
-    double* e = p + 5 * ngate;
-    e[0] = c0;
-    e[1] = c1;
-    e[2] = c2;
-    e[3] = c3;
-    e[4] = c4;
+    for (int m = 0; m < 5; ++m) p[5 * ngate + m] = c[m];
+}
+
+// The window of one centre gate.
+struct Window {
+    double r0, ha, ngates, inv_ha2, inv_hr2;
+    int64_t a, b;  // gate range [a, b]
+};
+
+// Sums of sorted ray q (azimuth offset dt) from its cumulative sums (uniform).
+inline void add_uniform(const Plan& pl, const Window& w, int64_t q, double dt, Sums& S) {
+    const double* p = pl.P.data() + 5 * q * (pl.ngate + 1);
+    const double* pa = p + 5 * w.a;
+    const double* pb = p + 5 * (w.b + 1);
+    const double n = pb[0] - pa[0], sr = pb[1] - pa[1], srr = pb[2] - pa[2];
+    const double sv = pb[3] - pa[3], svr = pb[4] - pa[4];
+    const double r0 = w.r0;
+    S.n_total += w.ngates;
+    S.n_valid += n;
+    S.w += n;
+    S.ws += dt * sr;
+    S.wr += sr - r0 * n;
+    S.wss += dt * dt * srr;
+    S.wsr += dt * (srr - r0 * sr);
+    S.wrr += srr - 2.0 * r0 * sr + r0 * r0 * n;
+    S.wv += sv;
+    S.wvs += dt * svr;
+    S.wvr += svr - r0 * sv;
+}
+
+// Sums of sorted ray q (azimuth offset dt) gate by gate (Gaussian weights).
+inline void add_gaussian(const Plan& pl, const Window& w, int64_t q, double dt, Sums& S) {
+    const double* row = pl.v + pl.ray[q] * pl.ngate;
+    const double wa = std::exp(-2.0 * dt * dt * w.inv_ha2);
+    S.n_total += w.ngates;
+    for (int64_t k = w.a; k <= w.b; ++k) {
+        const double x = row[k];
+        if (std::isnan(x)) continue;
+        const double dr = pl.rg[k] - w.r0, s = pl.rg[k] * dt;
+        const double wt = wa * std::exp(-2.0 * dr * dr * w.inv_hr2);
+        S.n_valid += 1.0;
+        S.w += wt;
+        S.ws += wt * s;
+        S.wr += wt * dr;
+        S.wss += wt * s * s;
+        S.wsr += wt * s * dr;
+        S.wrr += wt * dr * dr;
+        S.wv += wt * x;
+        S.wvs += wt * x * s;
+        S.wvr += wt * x * dr;
+    }
+}
+
+template <bool Gaussian>
+inline void add_ray(const Plan& pl, const Window& w, int64_t q, double dt, Sums& S) {
+    if constexpr (Gaussian)
+        add_gaussian(pl, w, q, dt, S);
+    else
+        add_uniform(pl, w, q, dt, S);
+}
+
+// Sums over the window of sorted ray i: the centre ray, then outwards in
+// azimuth on both sides (the window is a contiguous arc).
+template <bool Gaussian>
+inline Sums window_sums(const Plan& pl, const Window& w, int64_t i) {
+    const int64_t nray = pl.nray;
+    Sums S;
+    add_ray<Gaussian>(pl, w, i, 0.0, S);
+    int64_t used = 1;
+    for (int64_t d = 1; used < nray; ++d, ++used) {
+        const int64_t q = i + d < nray ? i + d : i + d - nray;
+        const double dt = wrap(pl.az[q] - pl.az[i]);
+        if (dt < 0 || dt > w.ha) break;
+        add_ray<Gaussian>(pl, w, q, dt, S);
+    }
+    for (int64_t d = 1; used < nray; ++d, ++used) {
+        const int64_t q = i - d >= 0 ? i - d : i - d + nray;
+        const double dt = wrap(pl.az[q] - pl.az[i]);
+        if (dt > 0 || dt < -w.ha) break;
+        add_ray<Gaussian>(pl, w, q, dt, S);
+    }
+    return S;
 }
 
 // Shear and divergence for every gate of sorted ray i.
-void fit_ray(const Plan& pl, int64_t i, bool gaussian, double min_fraction) {
-    const int64_t nray = pl.nray, ngate = pl.ngate, np1 = ngate + 1;
-    const double* rg = pl.rg;
+template <bool Gaussian>
+void fit_ray(const Plan& pl, int64_t i, double min_fraction) {
+    const int64_t ngate = pl.ngate;
     const int64_t ri = pl.ray[i];
     const double* centre = pl.v + ri * ngate;
     float* out_s = pl.out + ri * ngate;
-    float* out_d = pl.out + nray * ngate + ri * ngate;
+    float* out_d = pl.out + pl.nray * ngate + ri * ngate;
     const double inv_hr2 = 1.0 / (pl.half_r * pl.half_r);
     for (int64_t g = 0; g < ngate; ++g) {
         double shear = kNaN, div = kNaN;
         if (!std::isnan(centre[g])) {
-            const double r0 = rg[g], ha = pl.half_angle[g];
-            const int64_t a = pl.k0[g], b = pl.k1[g];
-            const double ngates = static_cast<double>(b - a + 1);
-            const double inv_ha2 = 1.0 / (ha * ha);
-            Sums S;
-            auto add_ray = [&](int64_t q, double dt) {
-                S.n_total += ngates;
-                if (!gaussian) {
-                    const double* pa = pl.P.data() + 5 * (q * np1 + a);
-                    const double* pb = pl.P.data() + 5 * (q * np1 + b + 1);
-                    const double n = pb[0] - pa[0], sr = pb[1] - pa[1], srr = pb[2] - pa[2],
-                                 sv = pb[3] - pa[3], svr = pb[4] - pa[4];
-                    S.n_valid += n;
-                    S.w += n;
-                    S.ws += dt * sr;
-                    S.wr += sr - r0 * n;
-                    S.wss += dt * dt * srr;
-                    S.wsr += dt * (srr - r0 * sr);
-                    S.wrr += srr - 2.0 * r0 * sr + r0 * r0 * n;
-                    S.wv += sv;
-                    S.wvs += dt * svr;
-                    S.wvr += svr - r0 * sv;
-                } else {
-                    const double* row = pl.v + pl.ray[q] * ngate;
-                    const double wa = std::exp(-2.0 * dt * dt * inv_ha2);
-                    for (int64_t k = a; k <= b; ++k) {
-                        const double x = row[k];
-                        if (std::isnan(x)) continue;
-                        const double dr = rg[k] - r0, s = rg[k] * dt;
-                        const double w = wa * std::exp(-2.0 * dr * dr * inv_hr2);
-                        S.n_valid += 1.0;
-                        S.w += w;
-                        S.ws += w * s;
-                        S.wr += w * dr;
-                        S.wss += w * s * s;
-                        S.wsr += w * s * dr;
-                        S.wrr += w * dr * dr;
-                        S.wv += w * x;
-                        S.wvs += w * x * s;
-                        S.wvr += w * x * dr;
-                    }
-                }
-            };
-            add_ray(i, 0.0);
-            // Walk outwards in azimuth; the window is a contiguous arc.
-            int64_t used = 1;
-            for (int64_t d = 1; used < nray; ++d, ++used) {
-                const int64_t q = i + d < nray ? i + d : i + d - nray;
-                const double dt = wrap(pl.az[q] - pl.az[i]);
-                if (dt < 0 || dt > ha) break;
-                add_ray(q, dt);
-            }
-            for (int64_t d = 1; used < nray; ++d, ++used) {
-                const int64_t q = i - d >= 0 ? i - d : i - d + nray;
-                const double dt = wrap(pl.az[q] - pl.az[i]);
-                if (dt > 0 || dt < -ha) break;
-                add_ray(q, dt);
-            }
-            solve(S, min_fraction, shear, div);
+            const double ha = pl.half_angle[g];
+            const Window w{pl.rg[g], ha, static_cast<double>(pl.k1[g] - pl.k0[g] + 1),
+                           1.0 / (ha * ha), inv_hr2, pl.k0[g], pl.k1[g]};
+            solve(window_sums<Gaussian>(pl, w, i), min_fraction, shear, div);
         }
         out_s[g] = static_cast<float>(shear);
         out_d[g] = static_cast<float>(div);
     }
+}
+
+// Runs body(plan, ray) over every ray of the sweeps [k_begin, k_end) on nt
+// threads, handing out chunks of rays from an atomic counter.
+template <class Body>
+void run_rays(std::vector<Plan>& plans, const std::vector<int64_t>& start, size_t k_begin,
+              size_t k_end, int nt_req, Body&& body) {
+    const int64_t first = start[k_begin], total = start[k_end] - first;
+    const int nt = static_cast<int>(std::min<int64_t>(nt_req, total));
+    std::atomic<int64_t> next{0};
+    constexpr int64_t chunk = 4;
+    auto worker = [&]() {
+        size_t k = k_begin;
+        for (int64_t u0; (u0 = next.fetch_add(chunk)) < total;) {
+            const int64_t u1 = std::min(total, u0 + chunk);
+            for (int64_t u = first + u0; u < first + u1; ++u) {
+                while (u >= start[k + 1]) ++k;
+                body(plans[k], u - start[k]);
+            }
+        }
+    };
+    std::vector<std::thread> pool;
+    for (int t = 1; t < nt; ++t) pool.emplace_back(worker);
+    worker();
+    for (auto& th : pool) th.join();
+}
+
+// End of the group of sweeps starting at k_begin whose cumulative sums fit
+// in about 512 MB (a whole NEXRAD volume needs several times that).
+size_t group_end(const std::vector<Plan>& plans, size_t k_begin) {
+    constexpr double budget = 512.0 * 1024 * 1024;
+    size_t k_end = k_begin;
+    double bytes = 0.0;
+    while (k_end < plans.size()) {
+        const double b = 40.0 * plans[k_end].nray * (plans[k_end].ngate + 1);
+        if (k_end > k_begin && bytes + b > budget) break;
+        bytes += b;
+        ++k_end;
+    }
+    return k_end;
 }
 
 }  // namespace
@@ -265,7 +332,7 @@ void fit_ray(const Plan& pl, int64_t i, bool gaussian, double min_fraction) {
 // Batched over sweeps: data[k] is (nray_k, ngate_k) radial velocity with NaN
 // for missing gates. Returns one (2, nray_k, ngate_k) float32 array per sweep
 // holding the azimuthal shear and radial divergence. The rays of all sweeps
-// form one pool of work shared by the threads.
+// (in groups bounded by memory) form one pool of work shared by the threads.
 std::vector<py::array_t<float>> llsd(const std::vector<DArray>& data,
                                      const std::vector<DArray>& azimuth,
                                      const std::vector<DArray>& range, double window_range,
@@ -286,54 +353,25 @@ std::vector<py::array_t<float>> llsd(const std::vector<DArray>& data,
 
     {
         py::gil_scoped_release release;
-        unsigned hw = std::max(1u, std::thread::hardware_concurrency());
-        const int nt_req = n_threads > 0 ? n_threads : static_cast<int>(hw);
-
-        // Dynamic scheduling over all rays of the sweeps [k_begin, k_end).
-        auto run = [&](size_t k_begin, size_t k_end, auto&& body) {
-            const int64_t first = start[k_begin], total = start[k_end] - first;
-            const int nt = static_cast<int>(std::min<int64_t>(nt_req, total));
-            std::atomic<int64_t> next{0};
-            const int64_t chunk = 4;
-            auto worker = [&]() {
-                size_t k = k_begin;
-                for (;;) {
-                    const int64_t u0 = next.fetch_add(chunk);
-                    if (u0 >= total) break;
-                    const int64_t u1 = std::min(total, u0 + chunk);
-                    for (int64_t u = first + u0; u < first + u1; ++u) {
-                        while (u >= start[k + 1]) ++k;
-                        while (u < start[k]) --k;
-                        body(plans[k], u - start[k]);
-                    }
-                }
-            };
-            std::vector<std::thread> pool;
-            for (int t = 1; t < nt; ++t) pool.emplace_back(worker);
-            worker();
-            for (auto& th : pool) th.join();
-        };
-
-        // Sweeps are processed in groups whose cumulative sums fit in about
-        // 512 MB (a whole NEXRAD volume needs several times that); each group
-        // is one pool of rays shared by all threads.
-        const double budget = 512.0 * 1024 * 1024;
+        const int nt = n_threads > 0
+                           ? n_threads
+                           : static_cast<int>(std::max(1u, std::thread::hardware_concurrency()));
         for (size_t k_begin = 0; k_begin < nk;) {
-            size_t k_end = k_begin;
-            double bytes = 0.0;
-            while (k_end < nk) {
-                const double b = 40.0 * plans[k_end].nray * (plans[k_end].ngate + 1);
-                if (k_end > k_begin && bytes + b > budget) break;
-                bytes += b;
-                ++k_end;
-            }
+            const size_t k_end = group_end(plans, k_begin);
             if (!gaussian) {
                 for (size_t k = k_begin; k < k_end; ++k)
                     plans[k].P.resize(static_cast<size_t>(5 * plans[k].nray * (plans[k].ngate + 1)));
-                run(k_begin, k_end, [&](Plan& pl, int64_t q) { prefix_ray(pl, q); });
+                run_rays(plans, start, k_begin, k_end, nt,
+                         [](Plan& pl, int64_t q) { prefix_ray(pl, q); });
             }
-            run(k_begin, k_end,
-                [&](Plan& pl, int64_t i) { fit_ray(pl, i, gaussian, min_valid_fraction); });
+            if (gaussian)
+                run_rays(plans, start, k_begin, k_end, nt, [&](Plan& pl, int64_t i) {
+                    fit_ray<true>(pl, i, min_valid_fraction);
+                });
+            else
+                run_rays(plans, start, k_begin, k_end, nt, [&](Plan& pl, int64_t i) {
+                    fit_ray<false>(pl, i, min_valid_fraction);
+                });
             for (size_t k = k_begin; k < k_end; ++k) std::vector<double>().swap(plans[k].P);
             k_begin = k_end;
         }
