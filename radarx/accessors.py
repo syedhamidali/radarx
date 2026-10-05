@@ -31,6 +31,7 @@ from .grid import (
     to_uxarray,  # noqa
 )
 from .retrieve import create_cappi as retrieve_cappi  # noqa
+from .retrieve import dealias_velocity
 from .retrieve import shear as _shear
 from .vis import plot_cappi, plot_ppi, plot_rhi  # noqa
 from .vis.interactive import (
@@ -229,6 +230,34 @@ class RadarxDataSetAccessor(_ShearMixin, RadarxAccessor):
         radarx.grid.to_uxarray
         """
         return to_uxarray(self.xarray_obj, variables=variables)
+
+    def dealias(self, field="VRADH", nyquist_velocity=None, **kwargs):
+        """
+        Dealias (unfold) the Doppler velocity of this sweep.
+
+        Parameters
+        ----------
+        field : str, optional
+            Radial velocity field. Default ``"VRADH"``.
+        nyquist_velocity : float, optional
+            Nyquist velocity in m/s. By default read from the sweep's
+            ``nyquist_velocity`` (xradar).
+        **kwargs
+            Further options of :func:`radarx.retrieve.dealias_velocity`, e.g.
+            ``reference`` or ``wind_profile``.
+
+        Returns
+        -------
+        xarray.DataArray
+            Dealiased velocity with the input's coordinates.
+
+        See Also
+        --------
+        radarx.retrieve.dealias_velocity
+        """
+        return dealias_velocity(
+            self.xarray_obj, field, nyquist_velocity=nyquist_velocity, **kwargs
+        )
 
     def plot_max_cappi(
         self,
@@ -450,6 +479,34 @@ class RadarxDataTreeAccessor(_ShearMixin, RadarxAccessor):
             z_smth,
             method=method,
             n_threads=n_threads,
+        )
+
+    def dealias(self, field="VRADH", nyquist_velocity=None, **kwargs):
+        """
+        Dealias (unfold) the Doppler velocity of every sweep.
+
+        Parameters
+        ----------
+        field : str, optional
+            Radial velocity field. Default ``"VRADH"``.
+        nyquist_velocity : float or dict, optional
+            Nyquist velocity in m/s, or a dict by sweep name. By default read
+            from each sweep's ``nyquist_velocity`` (xradar).
+        **kwargs
+            Further options of :func:`radarx.retrieve.dealias_velocity`, e.g.
+            ``wind_profile``, ``sweep_continuity`` or ``name``.
+
+        Returns
+        -------
+        xarray.DataTree
+            Copy of the volume with the dealiased field in every sweep.
+
+        See Also
+        --------
+        radarx.retrieve.dealias_velocity
+        """
+        return dealias_velocity(
+            self.xarray_obj, field, nyquist_velocity=nyquist_velocity, **kwargs
         )
 
     def create_cappi(

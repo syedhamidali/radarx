@@ -13,7 +13,7 @@ import sys
 import numpy as np
 
 from radarx.grid import cone
-from radarx.retrieve import shear
+from radarx.retrieve import dealias, shear
 
 if not cone.HAS_COMPILED_KERNEL:
     sys.exit("radarx.grid._cone was not built: the compiled kernel is missing")
@@ -46,3 +46,13 @@ velocity = np.broadcast_to(1e-3 * rng, data.shape)
 if out.shape != (2,) + data.shape or not np.allclose(out[1], 1e-3, rtol=1e-4):
     sys.exit(f"compiled LLSD kernel returned an unexpected result: {out}")
 print("compiled LLSD kernel OK")
+if not dealias.HAS_COMPILED_KERNEL:
+    sys.exit("radarx.retrieve._dealias was not built: the compiled kernel is missing")
+nyquist = 10.0
+truth = np.tile(np.linspace(-25.0, 25.0, 50), (36, 1))
+aliased = np.mod(truth + nyquist, 2 * nyquist) - nyquist
+links = np.ones(36, dtype=np.uint8)
+((folds, comps),) = dealias._dealias.region_folds([aliased], [links], [nyquist])
+if folds.shape != aliased.shape or (comps < 0).any():
+    sys.exit("compiled dealiasing kernel returned an unexpected result")
+print("compiled dealiasing kernel OK")
