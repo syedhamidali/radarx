@@ -108,3 +108,19 @@ ENV/
 # executed notebooks and notebook downloads
 docs/render/
 docs/notebooks/downloads/
+
+# written by setuptools-scm
+radarx/version.py
+
+# API pages written by docs/conf.py at build time
+docs/reference.rst
+docs/accessors.rst
+docs/core.rst
+docs/fundamentals.rst
+docs/grid.rst
+docs/io.rst
+docs/retrieve.rst
+docs/testing.rst
+docs/utils.rst
+docs/vis.rst
+docs/generated/

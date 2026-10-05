@@ -61,33 +61,30 @@ fallback_version = "9999"
 [project.optional-dependencies]
 plot = ["hvplot", "holoviews", "bokeh", "panel", "datashader"]
 uxarray = ["uxarray", "spatialpandas", "geopandas"]
-dev = ["coverage",  # testing
-        "mypy",  # linting
-        "pytest",  # testing
-        "ruff",  # linting
-        "pooch",  # data retrieval for testing
-        "pre-commit",
-        "black[jupyter]==24.2.0",
-        "blackdoc",
-        "codespell",
-        "pytest-cov",
-        "pytest-mock",
-        "pytest-check",
-        "pytest-sugar",
-        "pytest-watcher",
-        "deepdiff",
-        "pip-tools",
-        "bumpver",
-        "twine",
-        "wheel",
-        "build",
-        "setuptools>=61.0.0",
-        "sphinx",
-        "sphinx-gallery",
-        "sphinx-book-theme",
-        "myst-nb",
-        "jupytext",
-        "sphinx_mdinclude"]
+dev = [
+    # testing
+    "pytest",
+    "pytest-cov",
+    "pytest-mock",
+    "pytest-xdist",
+    "coverage",
+    "pooch",
+    "jupytext",
+    "nbclient",
+    # linting
+    "pre-commit",
+    "ruff",
+    "black[jupyter]==24.2.0",
+    # docs
+    "sphinx",
+    "myst-nb",
+    "pydata-sphinx-theme",
+    "sphinx-copybutton",
+    "sphinx-favicon",
+    # packaging
+    "build",
+    "twine",
+]
 
 [tool.black]
 target-version = ["py311"]

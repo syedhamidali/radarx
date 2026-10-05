@@ -19,7 +19,6 @@ html_theme.sidebar_secondary.remove: true
 
 installation
 usage
-modules
 contributing
 authors
 history

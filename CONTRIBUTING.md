@@ -61,14 +61,16 @@ local development.
     $ git clone git@github.com:your_name_here/radarx.git
     ```
 
-3.  Install your local copy into a virtualenv. Assuming you have
-    virtualenvwrapper installed, this is how you set up your fork for
-    local development:
+3.  Create the development environment and install your local copy in
+    editable mode (a C++ compiler builds the fast kernels; without one,
+    radarx falls back to NumPy):
 
     ```bash
-    $ mkvirtualenv radarx
     $ cd radarx/
-    $ python setup.py develop
+    $ mamba env create -f environment.yml
+    $ mamba activate radarx-dev
+    $ python -m pip install -e ".[dev]"
+    $ pre-commit install
     ```
 
 4.  Create a branch for local development:
@@ -80,17 +82,12 @@ local development.
     Now you can make your changes locally.
 
 5.  When you\'re done making changes, check that your changes pass
-    flake8 and the tests, including testing other Python versions with
-    tox:
+    ruff, black and the tests:
 
     ```bash
     $ make lint
     $ make test
-    Or
-    $ make test-all
     ```
-
-    To get flake8 and tox, just pip install them into your virtualenv.
 
 6.  Commit your changes and push your branch to GitHub:
 
@@ -109,27 +106,23 @@ Before you submit a pull request, check that it meets these guidelines:
 1.  The pull request should include tests.
 2.  If the pull request adds functionality, the docs should be updated.
     Put your new functionality into a function with a docstring, and add
-    the feature to the list in README.rst.
-3.  The pull request should work for Python 3.5, 3.6, 3.7 and 3.8, and
-    for PyPy. Check
-    <https://travis-ci.com/syedhamidali/radarx/pull_requests> and make
-    sure that the tests pass for all supported Python versions.
+    an entry under "Unreleased" in `docs/history.md`.
+3.  The pull request should work for all supported Python versions; the
+    GitHub Actions checks on the pull request must pass.
 
 ## Tips
 
 To run a subset of tests:
 
 ```bash
-$ pytest tests.test_radarx
+$ pytest tests/test_radarx.py
 ```
 
 ## Deploying
 
 A reminder for the maintainers on how to deploy. Make sure all your
-changes are committed (including an entry in HISTORY.rst). Then run:
-
-```bash
-$ bump2version patch # possible: major / minor / patch
-$ git push
-$ git push --tags
-```
+changes are committed (including the release section in
+`docs/history.md` and the version and date in `CITATION.cff`). Then
+publish a GitHub release with a new `vX.Y.Z` tag: the version comes from
+the tag (setuptools-scm), and the release workflow builds the wheels and
+uploads them to PyPI.
