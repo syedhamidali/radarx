@@ -20,7 +20,6 @@
 [![Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![CodeFactor](https://www.codefactor.io/repository/github/syedhamidali/radarx/badge)](https://www.codefactor.io/repository/github/syedhamidali/radarx)
-[![codebeat badge](https://codebeat.co/badges/9e6434e5-d40c-48d2-8f77-7e81241bd965)](https://codebeat.co/projects/github-com-syedhamidali-radarx-main)
 [![codecov](https://codecov.io/gh/syedhamidali/radarx/graph/badge.svg?token=59WL4GNQOP)](https://codecov.io/gh/syedhamidali/radarx)
 [![Codacy Badge](https://app.codacy.com/project/badge/Grade/092c74b48c0443aaa35cd292fa5aef54)](https://app.codacy.com/gh/syedhamidali/radarx/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
 
