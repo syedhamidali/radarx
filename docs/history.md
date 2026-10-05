@@ -6,6 +6,7 @@
 - **MNT:** Remove the empty ``ruff.toml`` so ruff uses the ``pyproject.toml`` config again, fix its findings and unpin ruff in CI. ({pull}`106`) by [@syedhamidali](https://github.com/syedhamidali)
 - **MNT:** Remove stale configuration (`tox.ini`, `rst2md.sh`, `requirements_dev.txt`), keep the development dependencies in the `dev` extra only, update the Makefile and contributing guide, and ignore the files written by the docs build and setuptools-scm. ({pull}`105`) by [@syedhamidali](https://github.com/syedhamidali)
 - **MNT:** Test on Python 3.11-3.14 (NumPy 1 on 3.11 and 3.12 only). fast-barnes-py (Python < 3.13 only) is now optional and imported only for ``grid_radar(method="barnes")``; the unit-test environment keeps only radarx's own dependencies, separate from the notebook and docs environments, and the environments are no longer capped at Python < 3.13. ({pull}`PRNUM`) by [@syedhamidali](https://github.com/syedhamidali)
+- **MNT:** Test on Python 3.11-3.14 (NumPy 1 on 3.11 and 3.12 only). fast-barnes-py (Python < 3.13 only) is now optional and imported only for ``grid_radar(method="barnes")``; the unit-test environment keeps only radarx's own dependencies, separate from the notebook and docs environments, and the environments are no longer capped at Python < 3.13. ({pull}`108`) by [@syedhamidali](https://github.com/syedhamidali)
 
 ## 0.4.0 (2026-10-05)
 
