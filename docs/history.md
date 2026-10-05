@@ -1,6 +1,7 @@
 # History
 
 ## Unreleased
+- **ADD:** Fast Doppler velocity dealiasing (``radarx.retrieve.dealias_velocity``, ``ds.radarx.dealias()``, ``dtree.radarx.dealias()``). Region-based unfolding on the polar sweep grid: union-find regions, integer least-squares folds over the region graph (region and block coordinate descent), absolute fold from the sweep below, a wind profile or an in-sweep VAD, and a final gate check. A multithreaded C++ kernel dealiases all sweeps of a volume in one call (NumPy fallback with identical results). On a strongly aliased NEXRAD volume (KGWX, 8.2 million gates) it matches Py-ART's region-based dealiasing on 99.9 % of gates in a fraction of a second, about 100 times faster. ({pull}`PRNUM`) by [@syedhamidali](https://github.com/syedhamidali)
 - **FIX:** Require ``xradar>=0.11``. Without a lower bound, the conda-forge test environment for 0.4.0 resolved to xradar 0.0.5, which needs the old xarray-datatree package and fails with current xarray. ({pull}`86`) by [@syedhamidali](https://github.com/syedhamidali)
 - **MNT:** Drop Python 3.10: radarx now requires Python >= 3.11 (conda-forge no longer builds compiled packages for 3.10). Wheels are built for Python 3.11-3.14. ({pull}`87`) by [@syedhamidali](https://github.com/syedhamidali)
 - **MNT:** Remove the empty ``ruff.toml`` so ruff uses the ``pyproject.toml`` config again, fix its findings and unpin ruff in CI. ({pull}`106`) by [@syedhamidali](https://github.com/syedhamidali)
