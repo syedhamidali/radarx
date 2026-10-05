@@ -31,6 +31,7 @@ from .grid import (
     to_uxarray,  # noqa
 )
 from .retrieve import create_cappi as retrieve_cappi  # noqa
+from .retrieve import shear as _shear
 from .vis import plot_cappi, plot_ppi, plot_rhi  # noqa
 from .vis.interactive import (
     RadarxDataArrayPlotAccessor,
@@ -83,6 +84,69 @@ class RadarxAccessor:
         self.xarray_obj = xarray_obj
 
 
+class _ShearMixin:
+    """Azimuthal shear and radial divergence (LLSD) for sweeps and volumes."""
+
+    def llsd(self, field="VRADH", window=(750.0, 2500.0), **kwargs):
+        """
+        Azimuthal shear and radial divergence by linear least-squares derivatives.
+
+        Parameters
+        ----------
+        field : str, optional
+            Dealiased radial velocity field. Default ``"VRADH"``.
+        window : tuple of float, optional
+            Window ``(range_m, azimuth_m)`` in metres. Default ``(750, 2500)``.
+        **kwargs
+            ``weights``, ``min_valid_fraction``, ``mask``, ``n_threads`` and
+            ``engine``, see :func:`radarx.retrieve.llsd`.
+
+        Returns
+        -------
+        xarray.Dataset or xarray.DataTree
+            ``azimuthal_shear`` and ``radial_divergence`` in s⁻¹.
+
+        See Also
+        --------
+        radarx.retrieve.llsd
+        """
+        return _shear.llsd(self.xarray_obj, field, window, **kwargs)
+
+    def azimuthal_shear(self, field="VRADH", window=(750.0, 2500.0), **kwargs):
+        """
+        Azimuthal shear (s⁻¹) of the radial velocity by LLSD.
+
+        Same parameters as :meth:`llsd`.
+
+        Returns
+        -------
+        xarray.DataArray or xarray.DataTree
+            Azimuthal shear on the sweep's coordinates.
+
+        See Also
+        --------
+        radarx.retrieve.azimuthal_shear
+        """
+        return _shear.azimuthal_shear(self.xarray_obj, field, window, **kwargs)
+
+    def radial_divergence(self, field="VRADH", window=(750.0, 2500.0), **kwargs):
+        """
+        Radial divergence (s⁻¹) of the radial velocity by LLSD.
+
+        Same parameters as :meth:`llsd`.
+
+        Returns
+        -------
+        xarray.DataArray or xarray.DataTree
+            Radial divergence on the sweep's coordinates.
+
+        See Also
+        --------
+        radarx.retrieve.radial_divergence
+        """
+        return _shear.radial_divergence(self.xarray_obj, field, window, **kwargs)
+
+
 @xr.register_dataarray_accessor("radarx")
 class RadarxDataArrayAccessor(RadarxAccessor):
     """DataArray-level radarx utilities."""
@@ -126,7 +190,7 @@ class RadarxDataArrayAccessor(RadarxAccessor):
 
 
 @xr.register_dataset_accessor("radarx")
-class RadarxDataSetAccessor(RadarxAccessor):
+class RadarxDataSetAccessor(_ShearMixin, RadarxAccessor):
     """Dataset-level radarx plotting utilities."""
 
     @property
@@ -307,7 +371,7 @@ class RadarxDataSetAccessor(RadarxAccessor):
 
 
 @register_datatree_accessor("radarx")
-class RadarxDataTreeAccessor(RadarxAccessor):
+class RadarxDataTreeAccessor(_ShearMixin, RadarxAccessor):
     """DataTree-level radarx retrieval and gridding utilities."""
 
     @property
