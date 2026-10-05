@@ -396,3 +396,111 @@ def test_nexrad_known_translation(nexrad_grid):
     both = a.notnull() & b.notnull()
     assert float(np.abs(a - b).where(both).max()) < 1.0
     assert float(both.sum()) > 0.95 * float(b.notnull().sum())
+
+
+# ---------------------------------------------------------------------------
+# input handling and edge cases
+# ---------------------------------------------------------------------------
+
+
+def test_time_step_types():
+    import pandas as pd
+
+    d0, d1 = _blobs(0, 10.0, 0.0), _blobs(300, 10.0, 0.0)
+    ref = advect(d0, 10.0, 0.0, dt=120.0)
+    for dt in (
+        np.timedelta64(120, "s"),
+        pd.Timedelta(seconds=120),
+        xr.DataArray(np.timedelta64(120, "s")),
+    ):
+        xr.testing.assert_identical(advect(d0, 10.0, 0.0, dt=dt), ref)
+    m = estimate_motion(d0, d1, dt=pd.Timedelta(seconds=300))
+    assert abs(float(m.u) - 10.0) < 0.07
+
+
+def test_non_datetime_time_is_left_alone():
+    d0 = _blobs(0, 0, 0).assign(time=xr.DataArray(5.0))
+    out = advect(d0, 10.0, 0.0, dt=100.0)
+    assert float(out.time) == 5.0
+
+
+def test_grid_errors():
+    d0, d1 = _blobs(0, 1, 1), _blobs(300, 1, 1)
+    motion = xr.Dataset({"u": 1.0, "v": 1.0})
+    with pytest.raises(ValueError, match="'x' coordinate"):
+        advect(d0.drop_vars("x"), 1.0, 1.0, dt=1.0)
+    with pytest.raises(ValueError, match="at least 2 points"):
+        advect(d0.isel(x=[0]), 1.0, 1.0, dt=1.0)
+    with pytest.raises(ValueError, match="dimensions"):
+        off_grid = d0.DBZH.rename(x="col").assign_coords(x=("col", X))
+        estimate_motion(off_grid, off_grid, dt=60)
+    with pytest.raises(ValueError, match="same grid"):
+        estimate_motion(d0, d1.isel(x=slice(1, None)))
+    with pytest.raises(ValueError, match="same grid"):
+        interpolate_time(d0, d1.isel(x=slice(1, None)), T0, motion=motion)
+    with pytest.raises(ValueError, match="lacks"):
+        interpolate_time(d0, d1.rename(DBZH="other"), T0, motion=motion)
+    with pytest.raises(ValueError, match="scalar 'time'"):
+        interpolate_time(d0.drop_vars("time"), d1, T0, motion=motion)
+
+
+def test_motion_argument_errors():
+    d0 = _blobs(0, 0, 0)
+    motion = xr.Dataset({"u": 1.0, "v": 1.0})
+    with pytest.raises(ValueError, match="either"):
+        advect(d0, motion, 1.0, dt=1.0)
+    bad = xr.DataArray(np.ones((3, 3)), dims=("y", "x"))
+    with pytest.raises(ValueError, match="spatially varying"):
+        advect(d0, bad, bad, dt=1.0)
+
+
+def test_estimate_motion_observed_mask_and_no_highpass():
+    u, v = 13.7, -8.3
+    d0, d1 = _blobs(0, u, v), _blobs(300, u, v)
+    observed = xr.ones_like(d0.DBZH, dtype=bool)
+    m = estimate_motion(d0, d1, observed=observed, highpass=None)
+    assert abs(float(m.u) - u) < 0.1 and abs(float(m.v) - v) < 0.1
+
+
+def test_estimate_motion_empty_and_too_fast():
+    d0 = _blobs(0, 0, 0)
+    empty = d0.assign(DBZH=xr.full_like(d0.DBZH, np.nan))
+    later = empty.assign(time=d0.time + np.timedelta64(60, "s"))
+    with pytest.warns(RuntimeWarning, match="no reliable motion"):
+        m = estimate_motion(empty, later)
+    assert np.isnan(float(m.u)) and float(m.quality) == 0.0
+    # faster than max_speed: the peak lies on the edge of the search window,
+    # and without a domain-wide first guess there is no tiled motion either
+    d1 = _blobs(300, 30.0, 0.0)
+    with pytest.warns(RuntimeWarning, match="no reliable motion"):
+        m = estimate_motion(d0, d1, max_speed=10.0, tile=40e3)
+    assert m.u.dims == ("y", "x") and bool(m.u.isnull().all())
+
+
+def test_track_keeps_estimate_when_refinement_fails():
+    a = np.zeros((40, 40))
+    a[18:22, 10:14] = 30.0
+    b = np.zeros((40, 40))
+    b[18:22, 13:17] = 30.0
+    mask = np.ones(a.shape, dtype=bool)
+    whole = slice(0, 40)
+
+    def no_echo(*args, **kwargs):  # an interpolation that loses all echo
+        return np.zeros((1, 1, 40, 40))
+
+    dy, dx, q = advection._track(
+        a, b, mask, 5.0, None, (8, 8), whole, whole, 3, no_echo
+    )
+    assert dy == pytest.approx(0.0, abs=0.2) and dx == pytest.approx(3.0, abs=0.2)
+    # no echo at all: NaN straight away
+    dy, dx, q = advection._track(
+        a * 0, b, mask, 5.0, None, (8, 8), whole, whole, 3, no_echo
+    )
+    assert np.isnan(dy) and q == 0.0
+
+
+def test_use_compiled_without_kernel(monkeypatch):
+    monkeypatch.setattr(advection, "HAS_COMPILED_KERNEL", False)
+    with pytest.raises(ImportError):
+        advection._use_compiled("compiled")
+    assert advection._use_compiled("auto") is False

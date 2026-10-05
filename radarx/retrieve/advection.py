@@ -117,8 +117,6 @@ def _seconds(dt):
         isinstance(dt, np.ndarray) and np.issubdtype(dt.dtype, np.timedelta64)
     ):
         return float(np.timedelta64(dt, "ns") / np.timedelta64(1, "s"))
-    if hasattr(dt, "to_timedelta64"):  # pandas.Timedelta
-        return float(dt.to_timedelta64() / np.timedelta64(1, "s"))
     return float(dt)
 
 
@@ -511,9 +509,9 @@ def estimate_motion(
     da0 = _field(obj_t0, field)
     da1 = _field(obj_t1, field)
     dx, dy = _step(da0, x), _step(da0, y)
-    if da1.sizes[x] != da0.sizes[x] or da1.sizes[y] != da0.sizes[y]:
-        raise ValueError("the two fields must be on the same grid")
     a, b = _plane(da0, x, y), _plane(da1, x, y)
+    if a.shape != b.shape:
+        raise ValueError("the two fields must be on the same grid")
     if observed is None:
         mask = np.isfinite(a) | np.isfinite(b)
     else:

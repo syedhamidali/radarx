@@ -62,42 +62,82 @@ struct Stencil {
     bool inside = false;  // the whole stencil lies inside the grid
 };
 
-// Value of plane p at one stencil (NaN if undefined). Bounds = false skips
-// the bounds checks for stencils that lie entirely inside the grid.
+// Fill the stencil of departure point (r, c) on an (ny, nx) grid.
+inline void make_stencil(double r, double c, int64_t ny, int64_t nx, int order, Stencil& s) {
+    s.valid = std::isfinite(r) && std::isfinite(c) && r > -2.0 && c > -2.0 && r < ny + 1.0 &&
+              c < nx + 1.0;
+    if (!s.valid) return;
+    const double fi = std::floor(r), fj = std::floor(c);
+    s.i0 = static_cast<int64_t>(fi);
+    s.j0 = static_cast<int64_t>(fj);
+    s.fr = r - fi;
+    s.fc = c - fj;
+    s.w[0] = (1 - s.fr) * (1 - s.fc);
+    s.w[1] = (1 - s.fr) * s.fc;
+    s.w[2] = s.fr * (1 - s.fc);
+    s.w[3] = s.fr * s.fc;
+    const int64_t m = order == 3 ? 1 : 0;  // the cubic stencil reaches one cell further
+    s.inside = s.i0 - m >= 0 && s.i0 + 1 + m < ny && s.j0 - m >= 0 && s.j0 + 1 + m < nx;
+    if (order == 3) {
+        keys_weights(s.fr, s.wy);
+        keys_weights(s.fc, s.wx);
+    }
+}
+
+// Value at (i, j) if inside the grid and not NaN. Bounds = false skips the
+// bounds check for stencils known to lie inside the grid.
 template <bool Bounds, typename T>
-inline double sample_impl(const T* p, int64_t ny, int64_t nx, const Stencil& s, int order,
-                          double min_weight) {
-    auto value_at = [&](int64_t i, int64_t j, double& v) -> bool {
-        if (Bounds && (i < 0 || i >= ny || j < 0 || j >= nx)) return false;
-        v = static_cast<double>(p[i * nx + j]);
-        return !std::isnan(v);
-    };
+inline bool value_at(const T* p, int64_t ny, int64_t nx, int64_t i, int64_t j, double& v) {
+    if (Bounds && (i < 0 || i >= ny || j < 0 || j >= nx)) return false;
+    v = static_cast<double>(p[i * nx + j]);
+    return !std::isnan(v);
+}
+
+// Masked bilinear value and the range [lo, hi] of the valid neighbours.
+template <bool Bounds, typename T>
+inline double bilinear(const T* p, int64_t ny, int64_t nx, const Stencil& s, double min_weight,
+                       double& lo, double& hi) {
     const int64_t di[4] = {0, 0, 1, 1}, dj[4] = {0, 1, 0, 1};
     double num = 0.0, den = 0.0;
-    double lo = std::numeric_limits<double>::infinity(), hi = -lo;
+    lo = std::numeric_limits<double>::infinity();
+    hi = -lo;
     for (int q = 0; q < 4; ++q) {
         double v;
-        if (!value_at(s.i0 + di[q], s.j0 + dj[q], v)) continue;
+        if (!value_at<Bounds>(p, ny, nx, s.i0 + di[q], s.j0 + dj[q], v)) continue;
         num += s.w[q] * v;
         den += s.w[q];
         lo = std::min(lo, v);
         hi = std::max(hi, v);
     }
-    if (!(den > 0.0) || den < min_weight) return kNaN;
-    const double linear = num / den;
-    if (order != 3) return linear;
-    double acc = 0.0;
+    return (den > 0.0 && den >= min_weight) ? num / den : kNaN;
+}
+
+// Cubic convolution value; false if a neighbour with non-zero weight is missing.
+template <bool Bounds, typename T>
+inline bool cubic(const T* p, int64_t ny, int64_t nx, const Stencil& s, double& acc) {
+    acc = 0.0;
     for (int a = 0; a < 4; ++a) {
         if (s.wy[a] == 0.0) continue;
         double row = 0.0;
         for (int b = 0; b < 4; ++b) {
             if (s.wx[b] == 0.0) continue;
             double v;
-            if (!value_at(s.i0 - 1 + a, s.j0 - 1 + b, v)) return linear;
+            if (!value_at<Bounds>(p, ny, nx, s.i0 - 1 + a, s.j0 - 1 + b, v)) return false;
             row += s.wx[b] * v;
         }
         acc += s.wy[a] * row;
     }
+    return true;
+}
+
+// Value of plane p at one stencil (NaN if undefined). The cubic value is
+// clipped to the range of the four nearest valid values.
+template <bool Bounds, typename T>
+inline double sample_impl(const T* p, int64_t ny, int64_t nx, const Stencil& s, int order,
+                          double min_weight) {
+    double lo, hi, acc;
+    const double linear = bilinear<Bounds>(p, ny, nx, s, min_weight, lo, hi);
+    if (order != 3 || std::isnan(linear) || !cubic<Bounds>(p, ny, nx, s, acc)) return linear;
     return std::min(hi, std::max(lo, acc));
 }
 
@@ -109,82 +149,84 @@ inline double sample(const T* p, int64_t ny, int64_t nx, const Stencil& s, int o
     return sample_impl<true>(p, ny, nx, s, order, min_weight);
 }
 
+// Shapes and pointers shared by all workers.
+template <typename T>
+struct Job {
+    const T* in;
+    T* out;
+    const double* src_row;
+    const double* src_col;
+    int64_t nk, ny, nx, oy, ox;
+    int order;
+    double min_weight;
+};
+
+// One output row of one set of departure points, for every plane.
+template <typename T>
+inline void advect_row(const Job<T>& job, int64_t w, std::vector<Stencil>& st) {
+    const int64_t g = w / job.oy, i = w % job.oy;
+    const double* rr = job.src_row + w * job.ox;
+    const double* cc = job.src_col + w * job.ox;
+    for (int64_t j = 0; j < job.ox; ++j)
+        make_stencil(rr[j], cc[j], job.ny, job.nx, job.order, st[j]);
+    for (int64_t k = 0; k < job.nk; ++k) {
+        const T* p = job.in + k * job.ny * job.nx;
+        T* o = job.out + ((g * job.nk + k) * job.oy + i) * job.ox;
+        for (int64_t j = 0; j < job.ox; ++j)
+            o[j] = static_cast<T>(sample(p, job.ny, job.nx, st[j], job.order, job.min_weight));
+    }
+}
+
+// Run fn(item) for items [0, n) on nt threads (atomic block scheduling).
+template <typename Fn>
+void parallel_rows(int64_t n, int n_threads, Fn&& fn) {
+    unsigned hw = std::max(1u, std::thread::hardware_concurrency());
+    int nt = n_threads > 0 ? n_threads : static_cast<int>(hw);
+    nt = static_cast<int>(std::max<int64_t>(1, std::min<int64_t>(nt, n)));
+    const int64_t block = std::max<int64_t>(1, std::min<int64_t>(16, n / (8 * nt)));
+    std::atomic<int64_t> next{0};
+    auto worker = [&]() {
+        for (;;) {
+            const int64_t w0 = next.fetch_add(block);
+            if (w0 >= n) break;
+            fn(w0, std::min(n, w0 + block));
+        }
+    };
+    std::vector<std::thread> pool;
+    for (int t = 1; t < nt; ++t) pool.emplace_back(worker);
+    worker();
+    for (auto& th : pool) th.join();
+}
+
+void check_shapes(const py::buffer_info& d, const DArray& src_row, const DArray& src_col,
+                  int order) {
+    if (d.ndim != 3) throw std::invalid_argument("data must be 3-D (plane, y, x)");
+    if (order != 1 && order != 3) throw std::invalid_argument("order must be 1 or 3");
+    if (src_row.ndim() != 3 || src_col.ndim() != 3)
+        throw std::invalid_argument("departure points must be 3-D (set, y, x)");
+    for (int k = 0; k < 3; ++k)
+        if (src_row.shape(k) != src_col.shape(k))
+            throw std::invalid_argument("src_row and src_col differ in shape");
+}
+
 template <typename T>
 py::array_t<T> advect(py::array_t<T, py::array::c_style | py::array::forcecast> data,
                       const DArray& src_row, const DArray& src_col, int order,
                       double min_weight, int n_threads) {
-    if (data.ndim() != 3) throw std::invalid_argument("data must be 3-D (plane, y, x)");
-    if (order != 1 && order != 3) throw std::invalid_argument("order must be 1 or 3");
-    if (src_row.ndim() != 3 || src_col.ndim() != 3)
-        throw std::invalid_argument("departure points must be 3-D (set, y, x)");
-    for (int d = 0; d < 3; ++d)
-        if (src_row.shape(d) != src_col.shape(d))
-            throw std::invalid_argument("src_row and src_col differ in shape");
-    const int64_t nk = data.shape(0), ny = data.shape(1), nx = data.shape(2);
-    const int64_t ng = src_row.shape(0), oy = src_row.shape(1), ox = src_row.shape(2);
-
-    py::array_t<T> result({ng, nk, oy, ox});
-    T* out = result.mutable_data();
-    const T* in = data.data();
-    const double* pr = src_row.data();
-    const double* pc = src_col.data();
-    const int64_t plane = ny * nx, oplane = oy * ox;
-    const int64_t nrows = ng * oy;  // independent work items
-
+    check_shapes(data.request(), src_row, src_col, order);
+    const int64_t ng = src_row.shape(0);
+    Job<T> job{data.data(), nullptr,          src_row.data(),   src_col.data(),
+               data.shape(0), data.shape(1),  data.shape(2),    src_row.shape(1),
+               src_row.shape(2), order,       min_weight};
+    py::array_t<T> result({ng, job.nk, job.oy, job.ox});
+    job.out = result.mutable_data();
     {
         py::gil_scoped_release release;
-        unsigned hw = std::max(1u, std::thread::hardware_concurrency());
-        int nt = n_threads > 0 ? n_threads : static_cast<int>(hw);
-        nt = static_cast<int>(std::max<int64_t>(1, std::min<int64_t>(nt, nrows)));
-        const int64_t block = std::max<int64_t>(1, std::min<int64_t>(16, nrows / (8 * nt)));
-        std::atomic<int64_t> next{0};
-
-        auto worker = [&]() {
-            std::vector<Stencil> st(ox);  // one allocation per thread
-            for (;;) {
-                const int64_t w0 = next.fetch_add(block);
-                if (w0 >= nrows) break;
-                const int64_t w1 = std::min(nrows, w0 + block);
-                for (int64_t w = w0; w < w1; ++w) {
-                    const int64_t g = w / oy, i = w % oy;
-                    const double* rr = pr + w * ox;
-                    const double* cc = pc + w * ox;
-                    for (int64_t j = 0; j < ox; ++j) {
-                        Stencil& s = st[j];
-                        const double r = rr[j], c = cc[j];
-                        s.valid = std::isfinite(r) && std::isfinite(c) && r > -2.0 &&
-                                  c > -2.0 && r < ny + 1.0 && c < nx + 1.0;
-                        if (!s.valid) continue;
-                        const double fi = std::floor(r), fj = std::floor(c);
-                        s.i0 = static_cast<int64_t>(fi);
-                        s.j0 = static_cast<int64_t>(fj);
-                        s.fr = r - fi;
-                        s.fc = c - fj;
-                        s.w[0] = (1 - s.fr) * (1 - s.fc);
-                        s.w[1] = (1 - s.fr) * s.fc;
-                        s.w[2] = s.fr * (1 - s.fc);
-                        s.w[3] = s.fr * s.fc;
-                        const int64_t m = order == 3 ? 1 : 0;  // cubic reaches one more
-                        s.inside = s.i0 - m >= 0 && s.i0 + 1 + m < ny && s.j0 - m >= 0 &&
-                                   s.j0 + 1 + m < nx;
-                        if (order == 3) {
-                            keys_weights(s.fr, s.wy);
-                            keys_weights(s.fc, s.wx);
-                        }
-                    }
-                    for (int64_t k = 0; k < nk; ++k) {
-                        const T* p = in + k * plane;
-                        T* o = out + (g * nk + k) * oplane + i * ox;
-                        for (int64_t j = 0; j < ox; ++j)
-                            o[j] = static_cast<T>(sample(p, ny, nx, st[j], order, min_weight));
-                    }
-                }
-            }
-        };
-        std::vector<std::thread> pool;
-        for (int t = 1; t < nt; ++t) pool.emplace_back(worker);
-        worker();
-        for (auto& th : pool) th.join();
+        parallel_rows(ng * job.oy, n_threads, [&](int64_t w0, int64_t w1) {
+            thread_local std::vector<Stencil> st;
+            st.resize(static_cast<size_t>(job.ox));  // grows once per thread
+            for (int64_t w = w0; w < w1; ++w) advect_row(job, w, st);
+        });
     }
     return result;
 }
