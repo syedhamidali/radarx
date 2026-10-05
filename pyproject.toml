@@ -37,6 +37,7 @@ documentation = "https://radarx.reathedocs.io"
 requires = ["setuptools>=64",
             "setuptools-scm>=8",
             "wheel",
+            "pybind11>=2.12",
             ]
 build-backend = "setuptools.build_meta"
 
