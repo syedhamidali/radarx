@@ -3,7 +3,7 @@
 ![Radarx Logo](https://github.com/syedhamidali/radarx/raw/main/docs/_static/Radarx_Logo_micro.png)
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.14699306.svg)](https://doi.org/10.5281/zenodo.14699306)
-[![Python Versions](https://img.shields.io/badge/Python-3.10%20|%203.11%20|%203.12%20|%203.13-blue)](https://www.python.org/downloads/)
+[![Python Versions](https://img.shields.io/badge/Python-3.11%20|%203.12%20|%203.13-blue)](https://www.python.org/downloads/)
 [![PyPI Version](https://img.shields.io/pypi/v/radarx.svg)](https://pypi.org/project/radarx/)
 [![PyPI Downloads](https://img.shields.io/pypi/dm/radarx.svg?label=PyPI%20downloads)](https://pypi.org/project/radarx/)
 

@@ -30,7 +30,7 @@ jobs:
       - name: Build wheels
         uses: pypa/cibuildwheel@9c00cb4f6b517705a3794b22395aedc36257242c  # v3.2.1
         env:
-          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"
+          CIBW_BUILD: "cp311-* cp312-* cp313-* cp314-*"
           CIBW_SKIP: "*-win32 *_i686 *-musllinux_*"
           # the compiled kernel must be in every wheel
           CIBW_TEST_COMMAND: python {project}/ci/check_compiled_kernel.py
