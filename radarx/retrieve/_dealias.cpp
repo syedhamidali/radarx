@@ -43,6 +43,9 @@
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
+#include <condition_variable>
+#include <functional>
+#include <mutex>
 #include <thread>
 #include <tuple>
 #include <utility>
@@ -104,6 +107,67 @@ int resolve_threads(int n_threads) {
     return std::max(1, n_threads > 0 ? n_threads : static_cast<int>(hw));
 }
 
+// Persistent worker threads for many short parallel passes (e.g. the
+// sweep-by-sweep continuity chain), so threads are not created for each pass.
+class Pool {
+  public:
+    explicit Pool(int n) {
+        for (int i = 1; i < n; ++i) threads_.emplace_back([this, i] { loop(i); });
+    }
+    ~Pool() {
+        {
+            std::lock_guard<std::mutex> lk(m_);
+            stop_ = true;
+        }
+        cv_.notify_all();
+        for (auto& t : threads_) t.join();
+    }
+    int size() const { return static_cast<int>(threads_.size()) + 1; }
+    // run f(tid) for tid in [0, nt) on the calling thread and nt - 1 workers
+    void run(int nt, const std::function<void(int)>& f) {
+        {
+            std::lock_guard<std::mutex> lk(m_);
+            job_ = &f;
+            active_ = nt;
+            remaining_ = nt - 1;
+            ++generation_;
+        }
+        cv_.notify_all();
+        f(0);
+        std::unique_lock<std::mutex> lk(m_);
+        done_.wait(lk, [&] { return remaining_ == 0; });
+        job_ = nullptr;
+    }
+
+  private:
+    void loop(int id) {
+        int64_t seen = 0;
+        std::unique_lock<std::mutex> lk(m_);
+        for (;;) {
+            cv_.wait(lk, [&] { return stop_ || generation_ != seen; });
+            if (stop_) return;
+            seen = generation_;
+            if (id >= active_) continue;
+            const std::function<void(int)>* f = job_;
+            lk.unlock();
+            (*f)(id);
+            lk.lock();
+            if (--remaining_ == 0) done_.notify_one();
+        }
+    }
+    std::vector<std::thread> threads_;
+    std::mutex m_;
+    std::condition_variable cv_, done_;
+    const std::function<void(int)>* job_ = nullptr;
+    int64_t generation_ = 0;
+    int active_ = 0, remaining_ = 0;
+    bool stop_ = false;
+};
+
+// Pool of the calling thread, if any (worker threads never have one, so
+// nested parallel passes start their own threads).
+thread_local Pool* tl_pool = nullptr;
+
 // Dynamic scheduling: workers take blocks [i0, i1) of [0, n) from an atomic counter.
 template <class F>
 void parallel_blocks(int64_t n, int64_t block, int nt, F&& body) {
@@ -116,6 +180,14 @@ void parallel_blocks(int64_t n, int64_t block, int nt, F&& body) {
         }
     };
     nt = static_cast<int>(std::min<int64_t>(nt, (n + block - 1) / block));
+    if (nt <= 1) {
+        worker(0);
+        return;
+    }
+    if (tl_pool && nt <= tl_pool->size()) {
+        tl_pool->run(nt, worker);
+        return;
+    }
     std::vector<std::thread> pool;
     for (int t = 1; t < nt; ++t) pool.emplace_back(worker, t);
     worker(0);
@@ -893,6 +965,11 @@ std::vector<py::array_t<int32_t>> absolute_folds(
         py::gil_scoped_release release;
         const int nt = resolve_threads(n_threads);
         if (chain) {
+            Pool pool(nt);  // reused by every pass of every sweep in the chain
+            struct Use {
+                explicit Use(Pool* p) { tl_pool = p; }
+                ~Use() { tl_pool = nullptr; }
+            } use(&pool);
             std::vector<double> refbuf;
             for (size_t i = 0; i < ns; ++i) {
                 AbsIn cur = in[i];
