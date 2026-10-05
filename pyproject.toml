@@ -43,6 +43,11 @@ requires = ["setuptools>=64",
             ]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages.find]
+# only the radarx package; build folders such as cibuildwheel's wheelhouse/
+# would otherwise be picked up by automatic discovery
+include = ["radarx*"]
+
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
 readme = {file = ["README.md", "docs/history.md"], content-type = "text/markdown"}
