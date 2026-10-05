@@ -185,7 +185,8 @@ jobs:
         run: |
           rm -f dist/radarx1.gz
           # platform wheels are built by cibuildwheel on release; upload the sdist
-          twine upload --repository testpypi dist/*.tar.gz
+          # a rerun or force push can rebuild a version already on TestPyPI
+          twine upload --skip-existing --repository testpypi dist/*.tar.gz
 
   test_build_distribution_pypi:
     name: test build distribution
