@@ -1,5 +1,6 @@
 import numpy as np
-from radarx.fundamentals import geometry, constants
+
+from radarx.fundamentals import constants, geometry
 
 
 def test_effective_radius_default():

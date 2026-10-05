@@ -6,16 +6,17 @@
 Tests for Radarx Utils
 ======================
 """
+import numpy as np
 import pytest
 import xarray as xr
-import numpy as np
 import xradar as xd
 from xarray import DataTree
+
 from radarx.utils import (
-    get_geocoords,
     cartesian_to_geographic_aeqd,
-    find_multidim_vars,
     combine_nexrad_sweeps,
+    find_multidim_vars,
+    get_geocoords,
 )
 
 

@@ -31,7 +31,8 @@ __all__ = [
 __doc__ = __doc__.format("\n   ".join(__all__))
 
 import numpy as np
-from .constants import C, K_BOLTZMANN
+
+from .constants import K_BOLTZMANN, C
 
 
 def _compute_numerator(transmit_power, gain, wavelength, rcs):

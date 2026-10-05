@@ -11,9 +11,11 @@ import types
 import warnings
 
 try:
-    from importlib.metadata import PackageNotFoundError, version as get_version
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as get_version
 except ImportError:  # pragma: no cover
-    from importlib_metadata import PackageNotFoundError, version as get_version
+    from importlib_metadata import PackageNotFoundError
+    from importlib_metadata import version as get_version
 
 sys.path.insert(0, os.path.abspath(".."))
 
