@@ -18,20 +18,26 @@ Author: Syed Hamid Ali (@syedhamidali)
 __all__ = ["plot_maxcappi"]
 __doc__ = __doc__.format("\n   ".join(__all__))
 
+import importlib.util
 import os
-import cmweather  # noqa
-import matplotlib.pyplot as plt
+
 import numpy as np
-from matplotlib.ticker import NullFormatter
 
-try:
-    import cartopy.crs as ccrs
-    import cartopy.feature as feat
-    from cartopy.mpl.gridliner import LATITUDE_FORMATTER, LONGITUDE_FORMATTER
+from ._lazy import LazyModule, register_radar_cmaps
 
-    _CARTOPY_AVAILABLE = True
-except ImportError:
-    _CARTOPY_AVAILABLE = False
+# matplotlib is imported on first use, which keeps ``import radarx`` fast
+plt = LazyModule("matplotlib.pyplot")
+
+
+def _cartopy_installed():
+    """Check for cartopy without importing it (importing it is slow)."""
+    try:
+        return importlib.util.find_spec("cartopy") is not None
+    except (ImportError, ValueError):  # e.g. a stub module without a spec
+        return False
+
+
+_CARTOPY_AVAILABLE = _cartopy_installed()
 
 # warnings.filterwarnings("ignore")
 
@@ -127,6 +133,9 @@ def plot_maxcappi(
             "cartopy is required for plot_maxcappi. "
             "Install it with: pip install cartopy"
         )
+    from matplotlib.ticker import NullFormatter
+
+    register_radar_cmaps()
 
     # Define default latitude and longitude lines if not provided
     if lon_lines is None:
@@ -354,6 +363,7 @@ def _get_projection(ds):  # pragma: no cover
         A Cartopy projection object centered on the extracted or
         calculated latitude and longitude.
     """
+    import cartopy.crs as ccrs
 
     def _get_coord_or_attr(ds, coord_name, attr_name):  # pragma: no cover
         """Helper function to get a coordinate or attribute, or
@@ -403,6 +413,10 @@ def _add_map_features(ax, lat_lines, lon_lines):  # pragma: no cover
     -------
     None
     """
+    import cartopy.crs as ccrs
+    import cartopy.feature as feat
+    from cartopy.mpl.gridliner import LATITUDE_FORMATTER, LONGITUDE_FORMATTER
+
     background_color = ax.get_facecolor()
     color = "k" if sum(background_color[:3]) / 3 > 0.5 else "w"
 
