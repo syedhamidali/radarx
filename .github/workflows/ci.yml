@@ -8,6 +8,10 @@ on:
 
   workflow_dispatch:
 
+# CI only reads the repository; Codecov and TestPyPI uploads use their own tokens.
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: lint and style checks

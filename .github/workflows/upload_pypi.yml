@@ -10,6 +10,10 @@ on:
       - created
   workflow_dispatch:
 
+# The jobs only read the repository; PyPI uploads use their own token.
+permissions:
+  contents: read
+
 jobs:
   build_wheels:
     name: Wheels on ${{ matrix.os }}
