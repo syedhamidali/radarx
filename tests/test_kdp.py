@@ -230,6 +230,19 @@ def test_errors():
             estimate_kdp(ds, phidp_sign=bad)
 
 
+def test_input_checks(monkeypatch):
+    ds, *_ = _sweep(nray=5, ng=50)
+    with pytest.raises(KeyError, match="RHOHV_X"):
+        estimate_kdp(ds, rhohv="RHOHV_X")
+    with pytest.raises(ValueError, match="two range gates"):
+        estimate_kdp(ds.isel(range=slice(0, 1)))
+    with pytest.raises(ValueError, match="2-D"):
+        estimate_kdp(ds.assign(PHIDP=ds.PHIDP.isel(azimuth=0)))
+    monkeypatch.setattr(kdpmod, "HAS_COMPILED_KERNEL", False)
+    with pytest.raises(ImportError, match="compiled KDP kernel"):
+        estimate_kdp(ds, engine="compiled")
+
+
 @pytest.mark.parametrize("engine", ENGINES)
 @pytest.mark.parametrize("method", METHODS)
 def test_reversed_sign_convention(method, engine):

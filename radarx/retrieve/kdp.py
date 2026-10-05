@@ -441,9 +441,7 @@ def _gate_spacing(rng):
 def _find(ds, name, candidates, required):
     if name is not None:
         if name not in ds:
-            if required:
-                raise KeyError(f"{name!r} is not in the dataset")
-            return None
+            raise KeyError(f"{name!r} is not in the dataset")
         return name
     for cand in candidates:
         if cand in ds:
