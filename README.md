@@ -2,8 +2,8 @@
 
 ![Radarx Logo](https://github.com/syedhamidali/radarx/raw/main/docs/_static/Radarx_Logo_micro.png)
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.14699312.svg)](https://doi.org/10.5281/zenodo.14699312)
-[![Python Versions](https://img.shields.io/badge/Python-3.9%20|%203.10%20|%203.11%20|%203.12-blue)](https://www.python.org/downloads/)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.14699306.svg)](https://doi.org/10.5281/zenodo.14699306)
+[![Python Versions](https://img.shields.io/badge/Python-3.10%20|%203.11%20|%203.12%20|%203.13-blue)](https://www.python.org/downloads/)
 [![PyPI Version](https://img.shields.io/pypi/v/radarx.svg)](https://pypi.org/project/radarx/)
 [![PyPI Downloads](https://img.shields.io/pypi/dm/radarx.svg?label=PyPI%20downloads)](https://pypi.org/project/radarx/)
 
@@ -12,11 +12,10 @@
 
 [![CI](https://github.com/syedhamidali/radarx/actions/workflows/ci.yml/badge.svg)](https://github.com/syedhamidali/radarx/actions/workflows/ci.yml)
 [![Build distribution](https://github.com/syedhamidali/radarx/actions/workflows/upload_pypi.yml/badge.svg)](https://github.com/syedhamidali/radarx/actions/workflows/upload_pypi.yml)
-[![RTD Version](https://readthedocs.org/projects/radarx/badge/?version=latest)](https://radarx.readthedocs.io/en/latest/?version=latest)
+[![Docs](https://readthedocs.org/projects/radarx/badge/?version=latest)](https://radarx.readthedocs.io/en/latest/)
 [![License](https://img.shields.io/github/license/syedhamidali/radarx)](https://github.com/syedhamidali/radarx/blob/main/LICENSE)
 ![pre-commit enabled](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)
 
-<!-- [![Docs](https://readthedocs.org/projects/radarx/badge/?version=latest)](https://radarx.readthedocs.io/en/latest/) -->
 [![Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![CodeFactor](https://www.codefactor.io/repository/github/syedhamidali/radarx/badge)](https://www.codefactor.io/repository/github/syedhamidali/radarx)
@@ -24,12 +23,8 @@
 [![Codacy Badge](https://app.codacy.com/project/badge/Grade/092c74b48c0443aaa35cd292fa5aef54)](https://app.codacy.com/gh/syedhamidali/radarx/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
 
 
-<!-- [![Linux](https://img.shields.io/github/actions/workflow/status/syedhamidali/radarx/.github/workflows/tests.yaml?label=Linux)](https://github.com/syedhamidali/radarx/actions/workflows/tests.yaml)
-[![macOS](https://img.shields.io/github/actions/workflow/status/syedhamidali/radarx/.github/workflows/tests.yaml?label=macOS)](https://github.com/syedhamidali/radarx/actions/workflows/tests.yaml)
-[![Windows](https://img.shields.io/github/actions/workflow/status/syedhamidali/radarx/.github/workflows/tests_windows.yaml?label=Windows)](https://github.com/syedhamidali/radarx/actions/workflows/tests_windows.yaml) -->
 
-
-Radarx is a Python library built for radar data processing and visualization. The library integrates tightly with [xradar](https://xradar.readthedocs.io/en/latest/) and leverages [xarray](http://xarray.pydata.org/) and [DataTree](https://xarray.pydata.org/en/stable/related-projects/datree.html) structures to enable easy and efficient manipulation of radar sweeps and volume data.
+Radarx is a Python library for weather radar data processing and visualization. It builds on [xradar](https://xradar.readthedocs.io/en/latest/), which reads radar data from many formats into [xarray](https://docs.xarray.dev/) [DataTree](https://docs.xarray.dev/en/stable/user-guide/hierarchical-data.html) structures, and adds gridding, retrievals and plotting through the `.radarx` accessor.
 
 [![Project Status: Beta](https://img.shields.io/badge/status-beta-blue.svg)](https://www.repostatus.org/#beta)
 
@@ -40,12 +35,12 @@ Radarx is a Python library built for radar data processing and visualization. Th
 
 ## Key Features
 
-- **Xradar Integration**: Uses [xradar](https://xradar.readthedocs.io/en/latest/) for reading radar data in different formats, providing a consistent interface for various radar types.
-- **Interactive Plotting**: Optional [hvplot](https://hvplot.holoviz.org/)-based PPI, RHI, CAPPI and Max-CAPPI views via `ds.radarx.plot`.
-- **Volume Scanning**: Utilities to process radar sweeps and group them into complete volume scans.
-- **Data Gridding**: Provides tools for converting radar data to regular Cartesian grids, supporting complex radar geometries.
-- **Xarray and DataTree Structured Data**: Radar data is returned as [xarray](http://xarray.pydata.org/) datasets, organized into [DataTree](https://xarray.pydata.org/en/stable/related-projects/datree.html) structures for easy navigation and analysis.
-
+- **Fast, accurate gridding**: Cone gridding interpolates within each sweep and then between sweeps, using the radar's own geometry. A compiled C++ kernel grids tens of millions of cells in a fraction of a second, with no smoothing radius to tune (`dtree.radarx.to_grid()`). Barnes interpolation is also available.
+- **CAPPI retrieval**: Constant-altitude PPIs with several methods (`dtree.radarx.create_cappi()`).
+- **Interactive plotting**: [hvplot](https://hvplot.holoviz.org/)-based range-azimuth, PPI, RHI, CAPPI and Max-CAPPI views on DataArrays, Datasets and DataTrees (`.radarx.plot`), plus matplotlib plots.
+- **Unstructured grids**: Convert a sweep into a [uxarray](https://uxarray.readthedocs.io/) dataset with one cell per gate, for true gate footprints, area-weighted statistics and remapping (`.radarx.to_uxarray()`).
+- **Radar fundamentals**: Functions for radar equations, beam geometry, Doppler, attenuation and more (`radarx.fundamentals`).
+- **Cloud data access**: List and download NEXRAD and MRMS data from AWS (`radarx.io`).
 
 ## Installation
 
@@ -61,6 +56,15 @@ You can also install `radarx` via pip from PyPI:
 python -m pip install radarx
 ```
 
+Optional features need extra packages:
+
+```bash
+python -m pip install "radarx[plot]"     # interactive hvplot plots
+python -m pip install "radarx[uxarray]"  # unstructured grids with uxarray
+```
+
+With conda, install them directly, e.g. `conda install -c conda-forge hvplot datashader` or `conda install -c conda-forge uxarray spatialpandas geopandas`.
+
 Alternatively, you can install it from source by cloning the repository
 and running:
 
@@ -70,47 +74,50 @@ cd radarx
 python -m pip install .
 ```
 
+Building from source compiles the C++ gridding kernel if a C++ compiler is available; otherwise radarx falls back to an equivalent NumPy implementation.
+
 ## Usage
 
-Here's a simple example of how to use Radarx with [xradar](https://xradar.readthedocs.io/en/latest/)
-to load radar data, grid it and plot it interactively:
+Read a radar volume with [xradar](https://xradar.readthedocs.io/en/latest/), then grid, retrieve and plot it with radarx:
 
 ```python
 import xradar as xd
-import radarx  # noqa: registers the ``.radarx`` accessors
+from open_radar_data import DATASETS
 
-# IMD radar data is read by xradar (releases after 0.12.0)
-dtree = xd.io.open_imd_datatree(["radar_file.nc", "radar_file.nc.1", "radar_file.nc.2"])
+import radarx  # noqa: F401  registers the .radarx accessors
 
-# Grid the volume and plot an interactive Max-CAPPI (requires hvplot)
-grid = dtree.radarx.to_grid(data_vars=["DBZH"])
+filename = DATASETS.fetch("KLBB20160601_150025_V06")
+dtree = xd.io.open_nexradlevel2_datatree(filename)
+
+# 3D grid with cone gridding (500 m spacing, 0.5 to 15 km height)
+grid = dtree.radarx.to_grid(
+    data_vars=["DBZH"],
+    x_lim=(-150e3, 150e3), y_lim=(-150e3, 150e3), z_lim=(500, 15e3),
+    x_step=500, y_step=500, z_step=500,
+)
+
+# interactive plots (requires radarx[plot])
+dtree.radarx.plot.ppi("DBZH", sweeps=0)
 grid.radarx.plot.max_cappi("DBZH")
 ```
 
+See the [documentation](https://radarx.readthedocs.io/) for more examples, including CAPPIs, IMD data and unstructured grids.
+
 > [!WARNING]
 > The radarx IMD reader (`rx.io.read_sweep`, `rx.io.read_volume`, `rx.io.to_cfradial2`,
-> `rx.io.to_cfradial2_volumes`) is **deprecated** and will be removed in the next release.
+> `rx.io.to_cfradial2_volumes`) is **deprecated** and will be removed in a future release.
 > IMD data is read natively by xradar (releases after 0.12.0): use
 > `xr.open_dataset(file, engine="imd")` or `xd.io.open_imd_datatree(files)` instead.
-
-Radarx leverages [xradar](https://xradar.readthedocs.io/en/latest/) to handle radar file formats and
-integrates smoothly with [xarray](http://xarray.pydata.org/) and [DataTree](https://xarray.pydata.org/en/stable/related-projects/datree.html) for organizing and analyzing radar data.
-
-
-## Xradar Integration
-
-Radarx makes use of the powerful [xradar](https://xradar.readthedocs.io/en/latest/) library for radar data ingestion and format handling. This ensures that the package is flexible and can handle a variety of radar data formats, including ODIM_H5, Sigmet, and others. For more advanced users, [xradar](https://xradar.readthedocs.io/en/latest/) functionality can be directly accessed to extend Radarx\'s capabilities.
 
 
 ## Documentation
 
-For full documentation, please visit the [Radarx
-Documentation](https://github.com/syedhamidali/radarx).
+For full documentation, see [radarx.readthedocs.io](https://radarx.readthedocs.io/).
 
 
 ## Contributing
 
-Contributions are welcome! If you\'d like to contribute, please follow
+Contributions are welcome! If you'd like to contribute, please follow
 the steps below:
 
 1.  Fork the repository.
@@ -135,25 +142,16 @@ for more details.
 
 ## Citation
 
->Syed, H. A. (2025). Radarx: An Xarray-based Python package for radar data processing (v0.2). Zenodo. https://doi.org/10.5281/zenodo.14699312
+If you use radarx, please cite it via Zenodo. The DOI below always points to the latest version; Zenodo also lists a DOI for each release.
 
-```python
-@software{syed_2025_14699312,
-  author       = {Syed, Hamid Ali},
-  title        = {Radarx: An Xarray-based Python package for radar
-                   data processing
-                  },
-  month        = jan,
-  year         = 2025,
-  publisher    = {Zenodo},
-  version      = {v0.2},
-  doi          = {10.5281/zenodo.14699312},
-  url          = {https://doi.org/10.5281/zenodo.14699312},
-  swhid        = {swh:1:dir:eb4e11846680cf6416be5940f36b363f74e1a3ec
-                   ;origin=https://doi.org/10.5281/zenodo.14699306;vi
-                   sit=swh:1:snp:f6755852f0e71678ed579651ec997ac4496f
-                   3b30;anchor=swh:1:rel:ebd79cd3cf49a7e8a5e9b9576fb7
-                   7f7c8bd0227e;path=syedhamidali-radarx-ec92870
-                  },
+> Syed, H. A. Radarx: An Xarray-based Python package for radar data processing. Zenodo. https://doi.org/10.5281/zenodo.14699306
+
+```bibtex
+@software{syed_radarx,
+  author    = {Syed, Hamid Ali},
+  title     = {Radarx: An Xarray-based Python package for radar data processing},
+  publisher = {Zenodo},
+  doi       = {10.5281/zenodo.14699306},
+  url       = {https://doi.org/10.5281/zenodo.14699306},
 }
 ```
