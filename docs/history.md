@@ -1,5 +1,8 @@
 # History
 
+## Unreleased
+- **FIX:** Require ``xradar>=0.11``. Without a lower bound, the conda-forge test environment for 0.4.0 resolved to xradar 0.0.5, which needs the old xarray-datatree package and fails with current xarray. by [@syedhamidali](https://github.com/syedhamidali)
+
 ## 0.4.0 (2026-10-05)
 
 This release makes cone gridding the default: a new gridder built for radar
