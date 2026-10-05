@@ -2,6 +2,7 @@
 
 ## Unreleased
 - **FIX:** Require ``xradar>=0.11``. Without a lower bound, the conda-forge test environment for 0.4.0 resolved to xradar 0.0.5, which needs the old xarray-datatree package and fails with current xarray. by [@syedhamidali](https://github.com/syedhamidali)
+- **MNT:** Drop Python 3.10: radarx now requires Python >= 3.11 (conda-forge no longer builds compiled packages for 3.10). Wheels are built for Python 3.11-3.14. by [@syedhamidali](https://github.com/syedhamidali)
 
 ## 0.4.0 (2026-10-05)
 
