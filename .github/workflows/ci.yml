@@ -148,7 +148,7 @@ jobs:
     # coverage is measured on the radarx source tree, as in the unit-test job
     - name: Test optional-dependency paths with pytest
       run: |
-        pytest --verbose --cov=radarx --cov-report=xml:coverage_optional.xml tests/grid/test_grid.py tests/grid/test_ugrid.py tests/vis/test_interactive.py
+        pytest -n auto --dist loadfile --verbose --cov=radarx --cov-report=xml:coverage_optional.xml --cov-fail-under=0 tests/grid/test_grid.py tests/grid/test_ugrid.py tests/vis/test_interactive.py
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v5
       with:
