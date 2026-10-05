@@ -717,11 +717,48 @@ bool vad_fit(const AbsIn& in, const int32_t* f, int32_t anchor, int64_t window,
 // closest to the neighbours' mean. Jacobi passes over ray blocks in parallel.
 constexpr int kMinNeighbours = 3;
 
+// The ray itself and its linked neighbours (-1: none) for the gate check.
+inline void neighbour_rays(const AbsIn& in, int64_t r, int64_t* rays) {
+    const int64_t nray = in.nray;
+    rays[0] = r;
+    rays[1] = rays[2] = -1;
+    if (nray < 2) return;
+    const int64_t rp = (r + nray - 1) % nray, rn = (r + 1) % nray;
+    if (in.link[rp] && rp != r) rays[1] = rp;
+    if (in.link[r] && rn != r && rn != rays[1]) rays[2] = rn;
+}
+
+constexpr int64_t kNoGate = std::numeric_limits<int64_t>::min();
+
+// Fold change of gate g (ray rays[0], gate j) from its unfolded neighbours
+// ``uq``: nonzero only if all (>= kMinNeighbours) of them are more than Vn away.
+inline int64_t gate_shift(const int64_t* uq, const int64_t* rays, int64_t ngate, int64_t j,
+                          int64_t g, int64_t vn_q, int64_t twovn_q) {
+    const int64_t u = uq[g];
+    if (u == kNoGate) return 0;
+    const int64_t j0 = std::max<int64_t>(0, j - 1);
+    const int64_t j1 = std::min<int64_t>(ngate - 1, j + 1);
+    int64_t cnt = 0, sum = 0;
+    for (int q = 0; q < 3; ++q) {
+        if (rays[q] < 0) continue;
+        for (int64_t jj = j0; jj <= j1; ++jj) {
+            const int64_t h = rays[q] * ngate + jj;
+            const int64_t w = uq[h];
+            if (h == g || w == kNoGate) continue;
+            if (std::llabs(w - u) <= vn_q) return 0;  // a close neighbour: keep
+            ++cnt;
+            sum += w;
+        }
+    }
+    if (cnt < kMinNeighbours) return 0;
+    return round_div(sum - cnt * u, cnt * twovn_q);
+}
+
 int64_t gate_check(const AbsIn& in, std::vector<int32_t>& f, int passes, int nt) {
     const int64_t nray = in.nray, ngate = in.ngate, N = nray * ngate;
     const int64_t twovn_q = quant(2.0 * in.nyquist, kVelQ);
     const int64_t vn_q = quant(in.nyquist, kVelQ);
-    constexpr int64_t kNone = std::numeric_limits<int64_t>::min();
+    constexpr int64_t kNone = kNoGate;
     std::vector<int64_t> vq(N), uq(N);
     std::vector<int32_t> next(N);
     const int64_t block = 16;
@@ -739,43 +776,13 @@ int64_t gate_check(const AbsIn& in, std::vector<int32_t>& f, int passes, int nt)
         parallel_blocks(nray, block, nt, [&](int, int64_t r0, int64_t r1) {
             int64_t local = 0;
             for (int64_t r = r0; r < r1; ++r) {
-                int64_t rays[3] = {r, -1, -1};
-                if (nray > 1) {
-                    const int64_t rp = (r + nray - 1) % nray, rn = (r + 1) % nray;
-                    if (in.link[rp] && rp != r) rays[1] = rp;
-                    if (in.link[r] && rn != r && rn != rays[1]) rays[2] = rn;
-                }
+                int64_t rays[3];
+                neighbour_rays(in, r, rays);
                 for (int64_t j = 0; j < ngate; ++j) {
                     const int64_t g = r * ngate + j;
-                    next[g] = f[g];
-                    const int64_t u = uq[g];
-                    if (u == kNone) continue;
-                    const int64_t j0 = std::max<int64_t>(0, j - 1);
-                    const int64_t j1 = std::min<int64_t>(ngate - 1, j + 1);
-                    // most gates have a close neighbour: stop at the first one
-                    bool all_far = true;
-                    int64_t cnt = 0, sum = 0;
-                    for (int64_t rr : rays) {
-                        if (rr < 0) continue;
-                        for (int64_t jj = j0; jj <= j1; ++jj) {
-                            const int64_t h = rr * ngate + jj;
-                            const int64_t w = uq[h];
-                            if (h == g || w == kNone) continue;
-                            if (std::llabs(w - u) <= vn_q) {
-                                all_far = false;
-                                break;
-                            }
-                            ++cnt;
-                            sum += w;
-                        }
-                        if (!all_far) break;
-                    }
-                    if (!all_far || cnt < kMinNeighbours) continue;
-                    const int64_t d = round_div(sum - cnt * u, cnt * twovn_q);
-                    if (d != 0) {
-                        next[g] = static_cast<int32_t>(f[g] + d);
-                        ++local;
-                    }
+                    const int64_t d = gate_shift(uq.data(), rays, ngate, j, g, vn_q, twovn_q);
+                    next[g] = static_cast<int32_t>(f[g] + d);
+                    local += d != 0;
                 }
             }
             changed += local;
