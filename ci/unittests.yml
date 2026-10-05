@@ -2,7 +2,8 @@ name: radarx-unittests
 channels:
   - conda-forge
 dependencies:
-  - python>=3.9
+  # fast-barnes-py (installed below) supports Python < 3.13 only
+  - python>=3.11,<3.13
   - codecov
   - cmweather
   - coverage

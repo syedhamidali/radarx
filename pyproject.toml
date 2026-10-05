@@ -17,7 +17,6 @@ classifiers = [
     "Natural Language :: English",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -25,7 +24,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Atmospheric Science"
 ]
 
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = {text = "MIT license"}
 dynamic = ["version", "dependencies"]
 
@@ -91,11 +90,11 @@ dev = ["coverage",  # testing
         "sphinx_mdinclude"]
 
 [tool.black]
-target-version = ["py39"]
+target-version = ["py311"]
 line-length = 88
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py311"
 builtins = ["ellipsis"]
 exclude = [
     ".eggs",

@@ -3,7 +3,8 @@ channels:
   - conda-forge
   - nodefaults
 dependencies:
-  - python >=3.9,<3.13
+  # fast-barnes-py (installed below) supports Python < 3.13 only
+  - python >=3.11,<3.13
   - pydata-sphinx-theme
   - myst-nb
   - jupytext
