@@ -32,5 +32,6 @@ out = cone._cone.grid_cones(
     0.0,
     fill_below=True,
 )
-assert out.shape == (1, 2, 2) and np.isfinite(out).any(), out
+if out.shape != (1, 2, 2) or not np.isfinite(out).any():
+    sys.exit(f"compiled kernel returned an unexpected result: {out}")
 print("compiled cone-gridding kernel OK")

@@ -292,70 +292,104 @@ def grid_cones(
     >>> z = np.arange(500.0, 15e3 + 1, 500.0)  # doctest: +SKIP
     >>> grid = radarx.grid.grid_cones(dtree, "DBZH", x, y, z)  # doctest: +SKIP
     """
+    use_compiled = _use_compiled(engine)
     if x is None or y is None or z is None:
         raise ValueError("x, y and z target coordinates are required.")
-    if engine not in ("auto", "compiled", "numpy"):
-        raise ValueError(
-            f"engine must be 'auto', 'compiled' or 'numpy', not {engine!r}"
-        )
-    if engine == "compiled" and not HAS_COMPILED_KERNEL:
-        raise ImportError("the compiled cone-gridding kernel is not available")
-    use_compiled = HAS_COMPILED_KERNEL and engine != "numpy"
-
-    x = np.asarray(x, dtype=np.float64)
-    y = np.asarray(y, dtype=np.float64)
-    z = np.asarray(z, dtype=np.float64)
-    names = _sweep_names(dtree)
-    if not names:
-        raise ValueError("No sweep groups found in DataTree.")
-    sweeps = [_sweep_dataset(dtree, name) for name in names]
-    first = sweeps[0]
-    site = {
-        key: float(first[key])
-        for key in ("latitude", "longitude", "altitude")
-        if key in first
-    }
-    if "latitude" not in site or "longitude" not in site:
-        raise ValueError("The volume needs the radar site 'latitude' and 'longitude'.")
-    site_altitude = site.get("altitude", 0.0)
-
+    x, y, z = (np.asarray(a, dtype=np.float64) for a in (x, y, z))
+    sweeps, site, site_coords = _load_volume(dtree)
     if data_vars is None:
         data_vars = [
-            name for name, da in first.data_vars.items() if {"range"} < set(da.dims)
+            name for name, da in sweeps[0].data_vars.items() if {"range"} < set(da.dims)
         ]
     elif isinstance(data_vars, str):
         data_vars = [data_vars]
 
+    options = dict(max_gap=max_gap, min_weight=min_weight, fill_below=fill_below)
     gridded = {}
     for variable in data_vars:
         selected = _select_sweeps(sweeps, variable)
         if not selected:
             raise ValueError(f"No sweep contains {variable!r}.")
         arrays = [_sweep_arrays(ds, variable) for ds in selected]
+        site_altitude = site.get("altitude", 0.0)
         if use_compiled:
-            data, azimuth, elevation, rng = (list(a) for a in zip(*arrays))
-            field = _cone.grid_cones(
-                x,
-                y,
-                z,
-                data,
-                azimuth,
-                elevation,
-                rng,
-                site_altitude,
-                earth_radius=EARTH_RADIUS,
-                max_gap=max_gap,
-                min_weight=min_weight,
-                fill_below=fill_below,
-                n_threads=int(n_threads or 0),
-            )
+            field = _grid_compiled(x, y, z, arrays, site_altitude, n_threads, **options)
         else:
-            field = _grid_numpy(
-                x, y, z, arrays, site_altitude, max_gap, min_weight, fill_below
-            )
-        attrs = dict(selected[0][variable].attrs)
-        gridded[variable] = (("z", "y", "x"), field, attrs)
+            field = _grid_numpy(x, y, z, arrays, site_altitude, **options)
+        gridded[variable] = (("z", "y", "x"), field, dict(selected[0][variable].attrs))
+    out = _to_dataset(gridded, x, y, z, sweeps, site, dtree.attrs)
+    return out.assign_coords(site_coords)
 
+
+def _use_compiled(engine):
+    """Whether to run the compiled kernel for the requested ``engine``."""
+    if engine not in ("auto", "compiled", "numpy"):
+        raise ValueError(
+            f"engine must be 'auto', 'compiled' or 'numpy', not {engine!r}"
+        )
+    if engine == "compiled" and not HAS_COMPILED_KERNEL:
+        raise ImportError("the compiled cone-gridding kernel is not available")
+    return HAS_COMPILED_KERNEL and engine != "numpy"
+
+
+def _load_volume(dtree):
+    """
+    Sweep datasets of ``dtree`` and the radar site location.
+
+    Returns
+    -------
+    sweeps : list of xarray.Dataset
+    site : dict
+        ``latitude``, ``longitude`` (and ``altitude``) as floats.
+    site_coords : dict
+        The same as scalar DataArrays with their attributes.
+    """
+    names = _sweep_names(dtree)
+    if not names:
+        raise ValueError("No sweep groups found in DataTree.")
+    sweeps = [_sweep_dataset(dtree, name) for name in names]
+    first = sweeps[0]
+    site_coords = {
+        key: first[key].reset_coords(drop=True)
+        for key in ("latitude", "longitude", "altitude")
+        if key in first
+    }
+    if "latitude" not in site_coords or "longitude" not in site_coords:
+        raise ValueError("The volume needs the radar site 'latitude' and 'longitude'.")
+    site = {key: float(value) for key, value in site_coords.items()}
+    return sweeps, site, site_coords
+
+
+def _grid_compiled(x, y, z, arrays, site_altitude, n_threads, **options):
+    """Run the C++ kernel on per-sweep (data, azimuth, elevation, range) arrays."""
+    data, azimuth, elevation, rng = (list(a) for a in zip(*arrays))
+    return _cone.grid_cones(
+        x,
+        y,
+        z,
+        data,
+        azimuth,
+        elevation,
+        rng,
+        site_altitude,
+        earth_radius=EARTH_RADIUS,
+        n_threads=int(n_threads or 0),
+        **options,
+    )
+
+
+def _crs_wkt(latitude, longitude):
+    """The grid's azimuthal equidistant CRS as a CF ``crs_wkt`` coordinate."""
+    import pyproj
+
+    crs = pyproj.CRS.from_dict(
+        {"proj": "aeqd", "lat_0": latitude, "lon_0": longitude, "datum": "WGS84"}
+    )
+    return xr.DataArray(0, attrs=crs.to_cf())
+
+
+def _to_dataset(gridded, x, y, z, sweeps, site, attrs):
+    """Wrap gridded fields with coordinates, site, CRS, time and attributes."""
     lon, lat = _lonlat_axes(x, y, site["latitude"], site["longitude"])
     out = xr.Dataset(
         gridded,
@@ -365,19 +399,15 @@ def grid_cones(
             "x": ("x", x, {"units": "m", "long_name": "distance east of the radar"}),
             "lat": ("y", lat, {"units": "degrees_north"}),
             "lon": ("x", lon, {"units": "degrees_east"}),
+            "crs_wkt": _crs_wkt(site["latitude"], site["longitude"]),
         },
     )
-    out = out.assign_coords({key: first[key].reset_coords(drop=True) for key in site})
-    try:  # the AEQD projection of the grid, as written by xradar georeferencing
-        out = out.assign_coords(crs_wkt=first.xradar.georeference()["crs_wkt"])
-    except Exception:  # pragma: no cover - georeferencing needs a complete sweep
-        pass
-    times = [ds["time"].values for ds in sweeps if "time" in ds]
+    times = [np.ravel(ds["time"].values) for ds in sweeps if "time" in ds]
     if times:
         out["time"] = xr.DataArray(
-            np.concatenate([np.ravel(t) for t in times]).astype("datetime64[ns]")
+            np.concatenate(times).astype("datetime64[ns]")
         ).mean()
-    out.attrs = dict(dtree.attrs)
+    out.attrs = dict(attrs)
     out.attrs["radar_name"] = out.attrs.get("instrument_name", "")
     out.attrs["gridding_method"] = "cone"
     return out

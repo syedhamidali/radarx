@@ -70,10 +70,52 @@ inline int64_t bisect(const double* a, int64_t n, double x) {
     return lo;
 }
 
+// Per-ray sin(elevation), and each gate's ground distance at the median elevation.
+void set_geometry(Sweep& sw, const double* elevation, double R, double sr) {
+    std::vector<double> el(elevation, elevation + sw.nray);
+    sw.sin_el.resize(sw.nray);
+    for (int64_t q = 0; q < sw.nray; ++q) sw.sin_el[q] = std::sin(el[q] * kDeg);
+    const double el_med = median(el) * kDeg;
+    const double sin_m = std::sin(el_med), cos_m = std::cos(el_med);
+    sw.ground.resize(sw.ngate);
+    for (int64_t g = 0; g < sw.ngate; ++g) {
+        const double r = sw.range[g];
+        sw.ground[g] = R * std::asin(r * cos_m / (R + beam_height(r, sin_m, R, sr)));
+    }
+}
+
+// Rays sorted by azimuth, duplicates dropped, wrapped at both ends.
+void set_azimuth_order(Sweep& sw, const double* azimuth) {
+    std::vector<std::pair<double, int64_t>> rays(sw.nray);
+    for (int64_t q = 0; q < sw.nray; ++q) {
+        double a = std::fmod(azimuth[q], 360.0);
+        rays[q] = {a < 0 ? a + 360.0 : a, q};
+    }
+    std::stable_sort(rays.begin(), rays.end(),
+                     [](const auto& p, const auto& q) { return p.first < q.first; });
+    std::vector<double> az;
+    std::vector<int64_t> idx;
+    for (const auto& p : rays) {
+        if (!az.empty() && p.first - az.back() <= 1e-6) continue;
+        az.push_back(p.first);
+        idx.push_back(p.second);
+    }
+    if (az.size() < 3) throw std::invalid_argument("sweep needs at least 3 distinct azimuths");
+    std::vector<double> steps(az.size() - 1);
+    for (size_t q = 0; q + 1 < az.size(); ++q) steps[q] = az[q + 1] - az[q];
+    sw.spacing = median(steps);
+    sw.az_ext.assign(1, az.back() - 360.0);
+    sw.az_ext.insert(sw.az_ext.end(), az.begin(), az.end());
+    sw.az_ext.push_back(az.front() + 360.0);
+    sw.ray_ext.assign(1, idx.back());
+    sw.ray_ext.insert(sw.ray_ext.end(), idx.begin(), idx.end());
+    sw.ray_ext.push_back(idx.front());
+}
+
 Sweep prepare(const DArray& data, const DArray& azimuth, const DArray& elevation,
               const DArray& range, double R, double sr) {
-    Sweep sw;
     if (data.ndim() != 2) throw std::invalid_argument("sweep data must be 2-D (ray, gate)");
+    Sweep sw;
     sw.nray = data.shape(0);
     sw.ngate = data.shape(1);
     if (azimuth.size() != sw.nray || elevation.size() != sw.nray || range.size() != sw.ngate)
@@ -81,51 +123,8 @@ Sweep prepare(const DArray& data, const DArray& azimuth, const DArray& elevation
     if (sw.nray < 3 || sw.ngate < 2) throw std::invalid_argument("sweep too small");
     sw.data = data.data();
     sw.range.assign(range.data(), range.data() + sw.ngate);
-
-    // per-ray elevation, and the median elevation for the ground-distance axis
-    std::vector<double> el(elevation.data(), elevation.data() + sw.nray);
-    sw.sin_el.resize(sw.nray);
-    for (int64_t q = 0; q < sw.nray; ++q) sw.sin_el[q] = std::sin(el[q] * kDeg);
-    double el_med = median(el) * kDeg;
-    double sin_m = std::sin(el_med), cos_m = std::cos(el_med);
-    sw.ground.resize(sw.ngate);
-    for (int64_t g = 0; g < sw.ngate; ++g) {
-        double r = sw.range[g];
-        double h = beam_height(r, sin_m, R, sr);
-        sw.ground[g] = R * std::asin(r * cos_m / (R + h));
-    }
-
-    // rays sorted by azimuth, duplicates dropped, wrapped at both ends
-    std::vector<std::pair<double, int64_t>> rays(sw.nray);
-    const double* az = azimuth.data();
-    for (int64_t q = 0; q < sw.nray; ++q) {
-        double a = std::fmod(az[q], 360.0);
-        if (a < 0) a += 360.0;
-        rays[q] = {a, q};
-    }
-    std::stable_sort(rays.begin(), rays.end(),
-                     [](const auto& p, const auto& q) { return p.first < q.first; });
-    std::vector<double> a_sorted;
-    std::vector<int64_t> idx_sorted;
-    for (const auto& p : rays) {
-        if (!a_sorted.empty() && p.first - a_sorted.back() <= 1e-6) continue;
-        a_sorted.push_back(p.first);
-        idx_sorted.push_back(p.second);
-    }
-    int64_t m = static_cast<int64_t>(a_sorted.size());
-    std::vector<double> steps(m - 1);
-    for (int64_t q = 0; q + 1 < m; ++q) steps[q] = a_sorted[q + 1] - a_sorted[q];
-    sw.spacing = median(steps);
-    sw.az_ext.reserve(m + 2);
-    sw.ray_ext.reserve(m + 2);
-    sw.az_ext.push_back(a_sorted.back() - 360.0);
-    sw.ray_ext.push_back(idx_sorted.back());
-    for (int64_t q = 0; q < m; ++q) {
-        sw.az_ext.push_back(a_sorted[q]);
-        sw.ray_ext.push_back(idx_sorted[q]);
-    }
-    sw.az_ext.push_back(a_sorted.front() + 360.0);
-    sw.ray_ext.push_back(idx_sorted.front());
+    set_geometry(sw, elevation.data(), R, sr);
+    set_azimuth_order(sw, azimuth.data());
     return sw;
 }
 
