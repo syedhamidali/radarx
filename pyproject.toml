@@ -20,10 +20,12 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering",
     "Topic :: Scientific/Engineering :: Atmospheric Science"
 ]
 
+requires-python = ">=3.10"
 license = {text = "MIT license"}
 dynamic = ["version", "dependencies"]
 
