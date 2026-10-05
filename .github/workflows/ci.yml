@@ -46,8 +46,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
         numpy-version: ["1", "2"]
+        # NumPy 1 has no builds for Python >= 3.13
+        exclude:
+          - python-version: "3.13"
+            numpy-version: "1"
+          - python-version: "3.14"
+            numpy-version: "1"
     steps:
     - uses: actions/checkout@v4
       with:
@@ -105,7 +111,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12"]
+        python-version: ["3.12", "3.14"]
         numpy-version: ["2"]
     steps:
     - uses: actions/checkout@v4
@@ -137,10 +143,16 @@ jobs:
     - name: Test with pytest
       run: |
         pytest --verbose --durations=15 --cov=radarx --cov-report=xml:coverage_notebook.xml --cov-report=term-missing --cov-fail-under=0 docs/notebooks
+    # unit tests for optional packages that the unit-test environment leaves
+    # out (fast-barnes-py, uxarray, datashader); "python -m" puts the source
+    # tree on sys.path, so coverage is measured on it as in the unit-test job
+    - name: Test optional-dependency paths with pytest
+      run: |
+        python -m pytest --verbose --cov=radarx --cov-report=xml:coverage_optional.xml --cov-fail-under=0 tests/grid/test_grid.py tests/grid/test_ugrid.py tests/vis/test_interactive.py
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v5
       with:
-        files: ./coverage_notebook.xml
+        files: ./coverage_notebook.xml,./coverage_optional.xml
         flags: notebooktests
         env_vars: RUNNER_OS,PYTHON_VERSION
         name: codecov-gha

@@ -15,7 +15,7 @@ kernelspec:
 
 +++
 
-We are using [fast-barnes-py](https://github.com/MeteoSwiss/fast-barnes-py.git) to grid the radar data. Please cite if you use it in your research.
+`dtree.radarx.to_grid()` grids the volume with cone gridding (the default `method="cone"`): it interpolates within each sweep and then between sweeps, so it needs no smoothing parameters. Barnes interpolation (`method="barnes"`) is also available if the optional [fast-barnes-py](https://github.com/MeteoSwiss/fast-barnes-py.git) package is installed (Python < 3.13 only); please cite it if you use it in your research.
 
 ```{code-cell} ipython3
 import fsspec
@@ -87,9 +87,6 @@ ds = dtree.radarx.to_grid(
     x_step=1000,
     y_step=1000,
     z_step=250,
-    x_smth=0.2,
-    y_smth=0.2,
-    z_smth=1,
 )
 
 ds.radarx.plot_max_cappi("DBZH", cmap="ChaseSpectral", add_slogan=True);
@@ -106,9 +103,6 @@ ds2 = dtree.radarx.to_grid(
     x_step=1000,
     y_step=1000,
     z_step=250,
-    x_smth=0.2,
-    y_smth=0.2,
-    z_smth=1,
 )
 
 ds2.radarx.plot_max_cappi("DBZH", cmap="ChaseSpectral", add_slogan=True);

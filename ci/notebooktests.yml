@@ -2,8 +2,7 @@ name: radarx-notebookstests
 channels:
   - conda-forge
 dependencies:
-  # fast-barnes-py (installed below) supports Python < 3.13 only
-  - python>=3.11,<3.13
+  - python>=3.11
   - cartopy
   - cmweather
   - codecov
@@ -49,6 +48,7 @@ dependencies:
   - itables
   - pip
   - pip:
-    - git+https://github.com/MeteoSwiss/fast-barnes-py.git
+    # for the Barnes test in tests/grid/test_grid.py; supports Python < 3.13 only
+    - fast-barnes-py @ git+https://github.com/MeteoSwiss/fast-barnes-py.git ; python_version < "3.13"
     # IMD backend is only on xradar main until the next release
     - git+https://github.com/openradar/xradar.git@main

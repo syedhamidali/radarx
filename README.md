@@ -3,7 +3,7 @@
 ![Radarx Logo](https://github.com/syedhamidali/radarx/raw/main/docs/_static/Radarx_Logo_micro.png)
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.14699306.svg)](https://doi.org/10.5281/zenodo.14699306)
-[![Python Versions](https://img.shields.io/badge/Python-3.11%20|%203.12%20|%203.13-blue)](https://www.python.org/downloads/)
+[![Python Versions](https://img.shields.io/badge/Python-3.11%20|%203.12%20|%203.13%20|%203.14-blue)](https://www.python.org/downloads/)
 [![PyPI Version](https://img.shields.io/pypi/v/radarx.svg)](https://pypi.org/project/radarx/)
 [![PyPI Downloads](https://img.shields.io/pypi/dm/radarx.svg?label=PyPI%20downloads)](https://pypi.org/project/radarx/)
 
@@ -64,6 +64,8 @@ python -m pip install "radarx[uxarray]"  # unstructured grids with uxarray
 ```
 
 With conda, install them directly, e.g. `conda install -c conda-forge hvplot datashader` or `conda install -c conda-forge uxarray spatialpandas geopandas`.
+
+Barnes gridding (`method="barnes"`) needs [fast-barnes-py](https://github.com/MeteoSwiss/fast-barnes-py), which supports Python < 3.13 only: `python -m pip install fast-barnes-py`. The default cone gridding needs no extra packages.
 
 Alternatively, you can install it from source by cloning the repository
 and running:
