@@ -23,6 +23,7 @@ notebooks/IMD_Radar_Data
 notebooks/Grid_Radar
 notebooks/Interactive_Plots
 notebooks/Radar_UGRID_uxarray
+notebooks/Azimuthal_Shear
 notebooks/aws_data
 ```
 
