@@ -142,7 +142,7 @@ for more details.
 
 ## Citation
 
-If you use radarx, please cite it via Zenodo. The DOI below always points to the latest version; Zenodo also lists a DOI for each release.
+If you use radarx, please cite this DOI. It covers all versions of radarx and always points to the latest release, so citations of every version are counted together. To record the exact version you used, add it to the citation (e.g. `version = {0.3.1}` in BibTeX).
 
 > Syed, H. A. Radarx: An Xarray-based Python package for radar data processing. Zenodo. https://doi.org/10.5281/zenodo.14699306
 
