@@ -67,3 +67,35 @@ if moved.shape != (1, 1, 3, 4) or not np.allclose(
 ):
     sys.exit(f"compiled advection kernel returned an unexpected result: {moved}")
 print("compiled advection kernel OK")
+from radarx.retrieve import kdp  # noqa: E402
+
+if not kdp.HAS_COMPILED_KERNEL:
+    sys.exit("radarx.retrieve._kdp was not built: the compiled kernel is missing")
+gates = np.arange(200)
+phi = np.tile(30.0 + 0.5 * gates, (3, 1))
+phi_out, kdp_out, offset, sign = kdp._kdp.process_phidp(
+    [phi],
+    [None],
+    [None],
+    [0.25],
+    [4],
+    [4],
+    [4],
+    [12],
+    0,
+    0.85,
+    0.9,
+    10,
+    0,
+    0.0,
+    10,
+    4.0,
+    40.0,
+    -2.0,
+    20.0,
+)
+if not np.allclose(kdp_out[0][:, 20:-20], 1.0) or not np.allclose(
+    offset[0], 32.25, atol=0.01
+):
+    sys.exit("compiled KDP kernel returned an unexpected result")
+print("compiled KDP kernel OK")
