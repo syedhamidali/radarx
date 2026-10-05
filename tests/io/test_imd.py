@@ -1,26 +1,27 @@
-import pytest
 from unittest import mock
 from unittest.mock import patch
 
+import numpy as np
+import pytest
+import xarray as xr
+
 from radarx.io.imd import (
-    read_sweep,
-    read_volume,
-    _merge_file_lists,
+    _angle_resolution,
+    _assign_metadata,
+    _compute_range,
     _determine_nsweeps,
     _determine_volumes,
-    create_volume,
-    _compute_range,
-    _angle_resolution,
+    _merge_file_lists,
     _scantype,
-    _time_coverage,
     _sweep_number,
-    _assign_metadata,
+    _time_coverage,
+    create_volume,
+    read_sweep,
+    read_volume,
     to_cfradial2,
     to_cfradial2_volumes,
 )
 from radarx.testing.test_data_imd import fetch_imd_test_data
-import xarray as xr
-import numpy as np
 
 
 @pytest.fixture(scope="module")
@@ -410,7 +411,7 @@ def test_determine_volumes_fallback_to_open_dataset(
     """
     # Simulate read_sweep failure for the first file
     mock_read_sweep.side_effect = [
-        IOError("read_sweep failed"),
+        OSError("read_sweep failed"),
         xr.Dataset({"DBZ": (("time", "range"), [[1, 2], [3, 4]])}),
     ]
 
@@ -439,8 +440,8 @@ def test_determine_volumes_fallback_fail(
     Test for failure in both `read_sweep` and `xr.open_dataset`.
     """
     # Simulate failure for both `read_sweep` and `xr.open_dataset`
-    mock_read_sweep.side_effect = IOError("read_sweep failed")
-    mock_open_dataset.side_effect = IOError("open_dataset failed")
+    mock_read_sweep.side_effect = OSError("read_sweep failed")
+    mock_open_dataset.side_effect = OSError("open_dataset failed")
 
     with pytest.raises(IOError, match="open_dataset failed"):
         _determine_volumes(radar_test_files)

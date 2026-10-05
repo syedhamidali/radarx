@@ -7,9 +7,10 @@ Tests for Radarx Max-Cappi
 ==========================
 """
 import pytest
-from radarx.vis.maxcappi import plot_maxcappi
-from open_radar_data import DATASETS
 import xradar as xd
+from open_radar_data import DATASETS
+
+from radarx.vis.maxcappi import plot_maxcappi
 
 
 @pytest.fixture

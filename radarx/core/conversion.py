@@ -64,10 +64,10 @@ __all__ = [
 
 __doc__ = __doc__.format("\n   ".join(__all__))
 
-from typing import Union
+
 import numpy as np
 
-Number = Union[float, int, np.ndarray]
+Number = float | int | np.ndarray
 
 
 # Length Conversions

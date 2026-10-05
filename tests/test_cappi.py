@@ -5,12 +5,10 @@
 import warnings
 
 import matplotlib
-
+import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 import xarray as xr
-
-import matplotlib.pyplot as plt
 
 import radarx  # noqa: F401
 from radarx.retrieve import create_cappi

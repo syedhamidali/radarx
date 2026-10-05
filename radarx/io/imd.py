@@ -48,7 +48,6 @@ from xradar.io.backends.cfradial1 import (
     _get_subgroup,
     _get_sweep_groups,
 )
-
 from xradar.model import (
     georeferencing_correction_subgroup,
     radar_parameters_subgroup,

@@ -2,9 +2,11 @@
 
 """Tests for `radarx` package."""
 
-import radarx
-import pytest
 from unittest import mock
+
+import pytest
+
+import radarx
 
 
 @pytest.fixture

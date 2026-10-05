@@ -25,8 +25,11 @@ __all__ = ["create_radarx_dataarray_accessor"]
 __doc__ = __doc__.format("\n   ".join(__all__))
 
 import xarray as xr
-from .grid import grid_radar  # noqa
-from .grid import to_uxarray  # noqa
+
+from .grid import (
+    grid_radar,  # noqa
+    to_uxarray,  # noqa
+)
 from .retrieve import create_cappi as retrieve_cappi  # noqa
 from .vis import plot_cappi, plot_ppi, plot_rhi  # noqa
 from .vis.interactive import (

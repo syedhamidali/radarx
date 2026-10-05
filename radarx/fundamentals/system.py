@@ -33,6 +33,7 @@ __all__ = [
 __doc__ = __doc__.format("\n   ".join(__all__))
 
 import numpy as np
+
 from .constants import C
 
 

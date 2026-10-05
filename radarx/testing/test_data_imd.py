@@ -1,4 +1,5 @@
 import logging
+
 import pooch
 
 # Set up logging

@@ -2,13 +2,14 @@
 # Copyright (c) 2024-2025, Radarx developers.
 # Distributed under the MIT License. See LICENSE for more info.
 
+import numpy as np
 import pytest
 import xarray as xr
-import numpy as np
 import xradar as xd
-from radarx.grid import stack_data, make_3d_grid, grid_radar
-from radarx.grid.grid import _sweep_dataset
 from open_radar_data import DATASETS
+
+from radarx.grid import grid_radar, make_3d_grid, stack_data
+from radarx.grid.grid import _sweep_dataset
 
 
 @pytest.fixture

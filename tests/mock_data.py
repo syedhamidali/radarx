@@ -24,8 +24,8 @@ for i, ds in enumerate(ds_mock_list):
 """
 
 import numpy as np
-import xarray as xr
 import pandas as pd
+import xarray as xr
 
 
 def mock_imd_radar_dataset(

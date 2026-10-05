@@ -1,6 +1,8 @@
-import pytest
 import os
-from radarx.io.aws_data import AWS_BUCKETS, list_available_files, download_file
+
+import pytest
+
+from radarx.io.aws_data import AWS_BUCKETS, download_file, list_available_files
 
 
 # Fixture for creating temporary directories for file downloads
