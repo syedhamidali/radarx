@@ -2,8 +2,7 @@ name: radarx-examples
 channels:
   - conda-forge
 dependencies:
-  # fast-barnes-py (installed below) supports Python < 3.13 only
-  - python>=3.11,<3.13
+  - python>=3.11
   - matplotlib
   - numpy
   - pandas
@@ -29,4 +28,5 @@ dependencies:
   - open-radar-data
   - pip
   - pip:
-    - git+https://github.com/MeteoSwiss/fast-barnes-py.git
+    # optional, for grid_radar(method="barnes"); supports Python < 3.13 only
+    - fast-barnes-py @ git+https://github.com/MeteoSwiss/fast-barnes-py.git ; python_version < "3.13"

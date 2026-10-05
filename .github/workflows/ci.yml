@@ -46,8 +46,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
         numpy-version: ["1", "2"]
+        # NumPy 1 has no builds for Python >= 3.13
+        exclude:
+          - python-version: "3.13"
+            numpy-version: "1"
+          - python-version: "3.14"
+            numpy-version: "1"
     steps:
     - uses: actions/checkout@v4
       with:
@@ -105,7 +111,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12"]
+        python-version: ["3.12", "3.14"]
         numpy-version: ["2"]
     steps:
     - uses: actions/checkout@v4
@@ -136,7 +142,7 @@ jobs:
         python -c "import radarx; print(radarx.version.version)"
     - name: Test with pytest
       run: |
-        pytest --verbose --durations=15 --cov=radarx --cov-report=xml:coverage_notebook.xml --cov-report=term-missing --cov-fail-under=0 docs/notebooks
+        pytest --verbose --durations=15 --cov=radarx --cov-report=xml:coverage_notebook.xml --cov-report=term-missing --cov-fail-under=0 docs/notebooks tests/grid/test_ugrid.py tests/vis/test_interactive.py
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v5
       with:

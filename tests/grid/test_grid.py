@@ -76,6 +76,16 @@ def test_grid_radar_barnes(mock_dtree, pseudo_cappi):
     assert "gridding_method" not in gridded_ds.attrs
 
 
+def test_grid_radar_barnes_missing(mock_dtree, monkeypatch):
+    """method="barnes" raises a clear ImportError without fast-barnes-py."""
+    import sys
+
+    monkeypatch.setitem(sys.modules, "fastbarnes", None)
+    monkeypatch.setitem(sys.modules, "fastbarnes.interpolation", None)
+    with pytest.raises(ImportError, match="fast-barnes-py"):
+        grid_radar(mock_dtree, data_vars=["DBZH"], method="barnes")
+
+
 def test_grid_radar(mock_dtree):
     """Test `grid_radar` function."""
     gridded_ds = grid_radar(

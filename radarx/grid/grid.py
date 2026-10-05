@@ -26,14 +26,6 @@ __doc__ = __doc__.format("\n   ".join(__all__))
 import numpy as np
 import xarray as xr
 
-try:  # pragma: no cover
-    from fastbarnes import interpolation
-    from fastbarnes.interpolation import get_half_kernel_size
-
-    FASTBARNES_AVAILABLE = True
-except ImportError:  # pragma: no cover
-    FASTBARNES_AVAILABLE = False
-
 from ..utils import get_geocoords, find_multidim_vars  #  noqa
 
 
@@ -232,7 +224,8 @@ def grid_radar(
     Two methods are available. ``"cone"`` (default) interpolates within each
     sweep and then between sweeps (see :func:`radarx.grid.grid_cones`): it
     needs no smoothing parameters, keeps the native resolution and is much
-    faster. ``"barnes"`` uses Barnes objective analysis via fast-barnes-py.
+    faster. ``"barnes"`` uses Barnes objective analysis via the optional
+    fast-barnes-py package (Python < 3.13 only).
 
     Parameters
     ----------
@@ -298,11 +291,17 @@ def grid_radar(
         )
     if method != "barnes":
         raise ValueError(f"method must be 'cone' or 'barnes', not {method!r}")
-    if not FASTBARNES_AVAILABLE:  # pragma: no cover
+    # fast-barnes-py is optional (it supports Python < 3.13 only), so import it
+    # only when the Barnes method is requested
+    try:
+        from fastbarnes import interpolation
+        from fastbarnes.interpolation import get_half_kernel_size
+    except ImportError as err:
         raise ImportError(
-            "The 'fastbarnes' package is required for this function. "
-            "Install it via 'pip install fast-barnes-py'."
-        )  # pragma: no cover
+            "grid_radar(method='barnes') needs the optional 'fast-barnes-py' "
+            "package (Python < 3.13 only): 'pip install fast-barnes-py'. "
+            "The default method='cone' has no extra dependencies."
+        ) from err
     ds = stack_data(dtree, data_vars=data_vars, geo=True)
     lat, lon, trgx, trgy, z, trg_crs = make_3d_grid(
         _sweep_dataset(dtree, "sweep_0"),

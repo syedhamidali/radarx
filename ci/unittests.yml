@@ -2,40 +2,32 @@ name: radarx-unittests
 channels:
   - conda-forge
 dependencies:
-  # fast-barnes-py (installed below) supports Python < 3.13 only
-  - python>=3.11,<3.13
-  - codecov
+  # radarx runtime dependencies (requirements.txt)
+  - python>=3.11
+  - boto3
+  - cartopy
   - cmweather
-  - coverage
-  - dask
-  - fsspec
-  - h5netcdf
-  - h5py
   - lat_lon_parser
+  - matplotlib-base
   - netCDF4
   - numpy
-  - open-radar-data>=0.3.0
+  - pooch
   - pyproj
+  - scipy
+  - xarray>=2024.10.0
+  - xmltodict
+  - xradar>=0.11
+  # optional radarx[plot] extra (pure Python); datashader, uxarray and the
+  # notebook-only packages are tested in the notebook job (ci/notebooktests.yml)
+  - bokeh
+  - holoviews>=1.20
+  - hvplot>=0.11
+  - panel
+  # testing
+  - coverage
+  - open-radar-data>=0.3.0
   - pytest
   - pytest-cov
-  - pytest-doctestplus
-  - pytest-sugar
+  - pytest-mock
   - pytest-xdist
-  - scipy
   - setuptools
-  - xarray>=2024.10.0
-  - xradar
-  - hvplot>=0.11
-  - holoviews>=1.20
-  - bokeh
-  - panel
-  - datashader
-  - uxarray
-  - xmltodict
-  - pooch
-  - cartopy
-  - arm_pyart
-  - boto3
-  - pip
-  - pip:
-    - git+https://github.com/MeteoSwiss/fast-barnes-py.git
