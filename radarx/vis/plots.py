@@ -21,9 +21,13 @@ __doc__ = __doc__.format("\n   ".join(__all__))
 
 import os
 
-import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
+
+from ._lazy import LazyModule, register_radar_cmaps
+
+# matplotlib is imported on first use, which keeps ``import radarx`` fast
+plt = LazyModule("matplotlib.pyplot")
 
 
 def _get_dataarray(ds, data_var):
@@ -35,6 +39,7 @@ def _get_dataarray(ds, data_var):
 
 
 def _get_figure_and_axis(ax=None, figsize=(7, 6)):
+    register_radar_cmaps()
     if ax is not None:
         return ax.figure, ax
     return plt.subplots(figsize=figsize)

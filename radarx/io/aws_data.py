@@ -51,8 +51,6 @@ __all__ = [
 
 __doc__ = __doc__.format("\n   ".join(__all__))
 
-import boto3
-import botocore
 import os
 
 # AWS Buckets for different radar data
@@ -88,6 +86,10 @@ def get_s3_client(anonymous=True):
 
         >>> s3 = get_s3_client(anonymous=False)
     """
+    # boto3 is imported here, not at module level, to keep ``import radarx`` fast
+    import boto3
+    import botocore
+
     if anonymous:
         session = boto3.session.Session()
         return session.client(
@@ -130,6 +132,8 @@ def list_available_files(bucket, prefix, anonymous=True):
             "CONUS/ReflectivityAtLowestAltitude_00.50/")
         >>> print(files)
     """
+    import botocore
+
     s3 = get_s3_client(anonymous=anonymous)
     try:  # pragma: no cover
         response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
@@ -181,6 +185,8 @@ def download_file(bucket, file_key, save_dir, anonymous=True):
         ... )
         >>> print(f"File downloaded to: {file_path}")
     """
+    import botocore
+
     s3 = get_s3_client(anonymous=anonymous)
     os.makedirs(save_dir, exist_ok=True)
     local_file = os.path.join(save_dir, os.path.basename(file_key))
