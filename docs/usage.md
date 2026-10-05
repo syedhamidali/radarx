@@ -22,6 +22,7 @@ import radarx
 notebooks/IMD_Radar_Data
 notebooks/Grid_Radar
 notebooks/Dealiasing
+notebooks/Advection_Correction
 notebooks/Interactive_Plots
 notebooks/Radar_UGRID_uxarray
 notebooks/Azimuthal_Shear
