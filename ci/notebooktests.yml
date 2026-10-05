@@ -2,7 +2,8 @@ name: radarx-notebookstests
 channels:
   - conda-forge
 dependencies:
-  - python>=3.11
+  # fast-barnes-py (installed below) supports Python < 3.13 only
+  - python>=3.11,<3.13
   - cartopy
   - cmweather
   - codecov
