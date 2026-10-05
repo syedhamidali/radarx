@@ -64,6 +64,7 @@ It is not needed for quick-look plots or for processing along rays; the native
 polar sweep and `.radarx.plot` cover those with less memory.
 
 ```{code-cell} ipython3
+import cmweather  # noqa: F401  radar colormaps such as ChaseSpectral
 import holoviews as hv
 import hvplot.xarray  # noqa: F401
 import numpy as np
