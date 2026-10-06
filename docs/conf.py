@@ -259,12 +259,9 @@ def _seed_notebook_cache(path=nb_execution_cache_path):
             data = response.read()
         os.makedirs(path, exist_ok=True)
         with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
-            if hasattr(tarfile, "data_filter"):
-                tar.extractall(path, filter="data")
-            else:  # pragma: no cover - Python < 3.11.4
-                tar.extractall(path)
+            tar.extractall(path, filter="data")
         print(f"radarx docs: notebook outputs seeded from {url}")
-    except Exception as err:  # the build continues and executes them
+    except (OSError, tarfile.TarError) as err:  # the notebooks run here instead
         warnings.warn(f"could not seed the notebook cache from {url}: {err}")
 
 
