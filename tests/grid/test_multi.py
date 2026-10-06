@@ -480,6 +480,19 @@ def test_accessors(network):
     assert merged.DBZH.dims == ("z", "y", "x")
     again = network[0].radarx.grid_radars(network[1:], **GRID, data_vars="DBZH")
     assert list(again.radar.values) == ["AAA", "BBB", "CCC"]
+    pair = network[0].radarx.grid_radars(network[1], **GRID, data_vars="DBZH")
+    assert list(pair.radar.values) == ["AAA", "BBB"]
+
+
+def test_integer_fields_and_fields_no_radar_has():
+    dtree = _volume(*ORIGIN, fields=("DBZH",))
+    for name in [n for n in dtree.children if n.startswith("sweep")]:
+        ds = dtree[name].to_dataset()
+        ds["CLASS"] = ds["DBZH"].round().astype(np.int16)
+        dtree[name] = ds
+    out = multi.grid_radars(dtree, **GRID, data_vars=["CLASS", "KDP"])
+    assert "KDP" not in out and out["CLASS"].dtype == np.float32
+    assert np.isfinite(out["CLASS"].values).any()
 
 
 @pytest.fixture(scope="module")
