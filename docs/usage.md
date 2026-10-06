@@ -30,6 +30,7 @@ notebooks/KDP
 notebooks/QVP
 notebooks/aws_data
 notebooks/Soundings_and_ERA5
+notebooks/Multi_Doppler
 ```
 
 ```{toctree}

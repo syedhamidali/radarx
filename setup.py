@@ -68,6 +68,13 @@ setup(
             extra_compile_args=extra_compile_args,
             optional=True,
         ),
+        Pybind11Extension(
+            "radarx.retrieve._multidoppler",
+            ["radarx/retrieve/_multidoppler.cpp"],
+            cxx_std=17,
+            extra_compile_args=extra_compile_args,
+            optional=True,
+        ),
     ],
     cmdclass={"build_ext": build_ext},
 )

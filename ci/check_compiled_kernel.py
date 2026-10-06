@@ -124,3 +124,39 @@ out = sounding._sounding.interp_vertical(
 if out.shape != (1, 1, 1) or not np.isclose(out[0, 0, 0], 275.0):
     sys.exit(f"compiled sounding kernel returned an unexpected result: {out}")
 print("compiled sounding kernel OK")
+
+from radarx.retrieve import multidoppler  # noqa: E402
+
+if not multidoppler.HAS_COMPILED_KERNEL:
+    sys.exit(
+        "radarx.retrieve._multidoppler was not built: the compiled kernel is missing"
+    )
+shape = (3, 4, 5)
+state = np.ones((3,) + shape)
+terms, grad = multidoppler._multidoppler.cost_gradient(
+    state,
+    np.ones((3,) + shape),
+    np.zeros((1,) + shape),
+    np.ones((1,) + shape),
+    np.ones(shape),
+    np.zeros((3,) + shape),
+    np.zeros((3,) + shape),
+    np.zeros(shape),
+    1000.0,
+    1000.0,
+    500.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1000.0,
+    1e5,
+)
+# uniform wind: only the observation term (u + v + w - 0)**2 = 9 per cell
+if not np.allclose(terms, [9.0 * 60, 0, 0, 0, 0]) or not np.allclose(grad, 6.0):
+    sys.exit(f"compiled multi-Doppler kernel returned an unexpected result: {terms}")
+print("compiled multi-Doppler kernel OK")
