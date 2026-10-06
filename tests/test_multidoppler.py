@@ -306,7 +306,9 @@ def test_engines_agree_end_to_end(beltrami_case):
     a = multi_doppler(ds, bg, fall_speed_correction=False, engine="compiled")
     b = multi_doppler(ds, bg, fall_speed_correction=False, engine="numpy")
     for c in "uvw":
-        np.testing.assert_allclose(a[c], b[c], atol=1e-3)
+        # rounding differences (summation order) change the CG iterates slightly
+        np.testing.assert_allclose(a[c], b[c], atol=1e-2)
+    np.testing.assert_allclose(float(a.cost.sum()), float(b.cost.sum()), rtol=1e-6)
 
 
 def test_lbfgsb_and_cg_reach_the_same_minimum(beltrami_case):

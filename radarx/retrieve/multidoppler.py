@@ -1014,7 +1014,7 @@ def multi_doppler(
     w_boundary="bottom",
     storm_motion=(0.0, 0.0),
     first_guess=None,
-    levels=2,
+    levels=3,
     max_iterations=500,
     tolerance=None,
     solver="auto",
@@ -1110,12 +1110,12 @@ def multi_doppler(
     levels : int, optional
         Number of grid levels of the coarse-to-fine minimisation; each
         coarser level halves the horizontal resolution (only while the grid
-        keeps at least 12 points). Default 2.
+        keeps at least 12 points). Default 3.
     max_iterations : int, optional
         Maximum iterations per level. Default 500.
     tolerance : float, optional
         Stopping tolerance. For ``"cg"``: the preconditioned gradient norm
-        relative to that of the cost at zero wind (default 1e-3); for
+        relative to that of the cost at zero wind (default 3e-4); for
         ``"lbfgsb"``: the relative reduction of the cost (``ftol``, default
         1e-7).
     solver : {"auto", "cg", "lbfgsb"}, optional
@@ -1180,7 +1180,7 @@ def multi_doppler(
         raise ValueError("the vorticity term is not quadratic: use solver='lbfgsb'")
     solve = _solve_cg if solver == "cg" else _solve
     if tolerance is None:
-        tolerance = 1e-3 if solver == "cg" else 1e-7
+        tolerance = 3e-4 if solver == "cg" else 1e-7
     if int(levels) < 1:
         raise ValueError("levels must be at least 1")
     if background is None and w_["background"] != 0.0:
