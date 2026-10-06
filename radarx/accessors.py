@@ -31,6 +31,7 @@ from .grid import (
     to_uxarray,  # noqa
 )
 from .retrieve import advect as retrieve_advect  # noqa
+from .retrieve import apply_mask as retrieve_apply_mask  # noqa
 from .retrieve import create_cappi as retrieve_cappi  # noqa
 from .retrieve import (  # noqa
     dealias_velocity,
@@ -38,6 +39,7 @@ from .retrieve import (  # noqa
     melting_layer,
     qvp,
 )
+from .retrieve import echo_mask as retrieve_echo_mask  # noqa
 from .retrieve import estimate_motion as retrieve_estimate_motion  # noqa
 from .retrieve import interpolate_time as retrieve_interpolate_time  # noqa
 from .retrieve import shear as _shear
@@ -461,6 +463,52 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         radarx.retrieve.estimate_kdp
         """
         return estimate_kdp(self.xarray_obj, phidp, rhohv, dbzh, **kwargs)
+
+    def echo_mask(self, **kwargs):
+        """
+        Classify the gates of this sweep as meteorological or not.
+
+        Parameters
+        ----------
+        **kwargs
+            Field names and options of :func:`radarx.retrieve.echo_mask`.
+
+        Returns
+        -------
+        xarray.Dataset
+            ``ECHO_CLASS``, ``METEO_SCORE`` and ``METEO_MASK``.
+
+        See Also
+        --------
+        radarx.retrieve.echo_mask, radarx.retrieve.apply_mask
+        """
+        return retrieve_echo_mask(self.xarray_obj, **kwargs)
+
+    def apply_mask(self, mask=None, fields=None, **kwargs):
+        """
+        Set the non-meteorological gates of this sweep to NaN.
+
+        Parameters
+        ----------
+        mask : xarray.Dataset or xarray.DataArray, optional
+            Output of :func:`radarx.retrieve.echo_mask`; computed if not
+            given.
+        fields : str or list of str, optional
+            Fields to mask. Default: all floating point gate fields.
+        **kwargs
+            Options of :func:`radarx.retrieve.apply_mask` and, without
+            ``mask``, of :func:`radarx.retrieve.echo_mask`.
+
+        Returns
+        -------
+        xarray.Dataset
+            Copy of the sweep with the masked fields.
+
+        See Also
+        --------
+        radarx.retrieve.apply_mask, radarx.retrieve.echo_mask
+        """
+        return retrieve_apply_mask(self.xarray_obj, mask, fields, **kwargs)
 
     def qvp(self, data_vars=None, **kwargs):
         """
@@ -931,6 +979,53 @@ class RadarxDataTreeAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         radarx.retrieve.estimate_kdp
         """
         return estimate_kdp(self.xarray_obj, phidp, rhohv, dbzh, **kwargs)
+
+    def echo_mask(self, **kwargs):
+        """
+        Classify the gates of every sweep as meteorological or not.
+
+        Parameters
+        ----------
+        **kwargs
+            Field names and options of :func:`radarx.retrieve.echo_mask`.
+
+        Returns
+        -------
+        xarray.DataTree
+            One node per sweep with ``ECHO_CLASS``, ``METEO_SCORE`` and
+            ``METEO_MASK``; all sweeps are classified in one kernel call.
+
+        See Also
+        --------
+        radarx.retrieve.echo_mask, radarx.retrieve.apply_mask
+        """
+        return retrieve_echo_mask(self.xarray_obj, **kwargs)
+
+    def apply_mask(self, mask=None, fields=None, **kwargs):
+        """
+        Set the non-meteorological gates of every sweep to NaN.
+
+        Parameters
+        ----------
+        mask : xarray.DataTree, optional
+            Output of :func:`radarx.retrieve.echo_mask`; computed if not
+            given.
+        fields : str or list of str, optional
+            Fields to mask. Default: all floating point gate fields.
+        **kwargs
+            Options of :func:`radarx.retrieve.apply_mask` and, without
+            ``mask``, of :func:`radarx.retrieve.echo_mask`.
+
+        Returns
+        -------
+        xarray.Dataset
+            Copy of the volume with the masked fields.
+
+        See Also
+        --------
+        radarx.retrieve.apply_mask, radarx.retrieve.echo_mask
+        """
+        return retrieve_apply_mask(self.xarray_obj, mask, fields, **kwargs)
 
     def qvp(self, data_vars=None, **kwargs):
         """
