@@ -504,3 +504,13 @@ def test_use_compiled_without_kernel(monkeypatch):
     with pytest.raises(ImportError):
         advection._use_compiled("compiled")
     assert advection._use_compiled("auto") is False
+
+
+def test_dataarray_accessors():
+    da0 = _blobs(0.0, 10.0, 5.0).set_coords("time")["DBZH"]
+    da1 = _blobs(300.0, 10.0, 5.0).set_coords("time")["DBZH"]
+    motion = da0.radarx.estimate_motion(da1)
+    np.testing.assert_allclose([motion.u, motion.v], [10.0, 5.0], atol=0.1)
+    mid = T0 + np.timedelta64(150, "s")
+    frames = da0.radarx.interpolate_time(da1, [mid], motion=motion)
+    assert frames.sizes["time"] == 1

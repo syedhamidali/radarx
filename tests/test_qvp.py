@@ -241,6 +241,20 @@ def test_errors():
         melting_layer(ds)
 
 
+def test_explicit_fields_and_input_checks(monkeypatch):
+    ds, *_ = _sweep()
+    xr.testing.assert_allclose(qvp(ds, rhohv="RHOHV", dbz="DBZH"), qvp(ds))
+    nat = np.full(ds.sizes["azimuth"], np.datetime64("NaT"), "datetime64[ns]")
+    out = qvp(ds.assign_coords(time=("azimuth", nat)))
+    assert np.isnat(out["time"].values)
+    other = ds["DBZH"].rename(azimuth="ray").drop_vars(["elevation", "time"])
+    with pytest.raises(ValueError, match="same rays"):
+        qvp(ds.assign(OTHER=other), ["DBZH", "OTHER"])
+    monkeypatch.setattr(vp, "HAS_COMPILED_KERNEL", False)
+    with pytest.raises(ImportError, match="compiled QVP kernel"):
+        qvp(ds, engine="compiled")
+
+
 # ---------------------------------------------------------------------------
 # melting layer
 # ---------------------------------------------------------------------------
