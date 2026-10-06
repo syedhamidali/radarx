@@ -208,19 +208,101 @@ copybutton_prompt_text = r">>> |\.\.\. |\$ |In \[\d*\]: | {2,5}\.\.\.: | {5,8}: 
 copybutton_prompt_is_regexp = True
 
 # -- myst_nb specifics --
-# Notebooks are MyST markdown (jupytext) without outputs; they are executed at
-# build time.
-nb_execution_mode = "auto"
+# Notebooks are MyST markdown (jupytext) without outputs, so the .md files stay
+# the only source. Their outputs come from a jupyter-cache keyed on the code
+# cells (prose edits keep the cached outputs): the "docs" GitHub Actions
+# workflow executes every notebook on each push to main and publishes the
+# cache on the ``docs-cache`` branch. Read the Docs downloads it, renders the
+# cached outputs and executes only the notebooks whose code is new or changed,
+# so the build time no longer grows with the number of notebooks.
+nb_execution_mode = "cache"
+nb_execution_cache_path = os.environ.get(
+    "RADARX_DOCS_JUPYTER_CACHE",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "_build", "jupyter_cache"),
+)
 nb_execution_kernel_name = "python3"
 nb_execution_in_temp = True
 nb_execution_timeout = 600
-# The end-to-end workflow notebook processes several full NEXRAD volumes and
-# exceeds the Read the Docs build resources; it is executed and tested in the
-# GitHub Actions notebook jobs instead and shown without outputs here.
-if os.environ.get("READTHEDOCS"):
-    nb_execution_excludepatterns = ["notebooks/Radar_Workflow.md"]
 # fail the build instead of publishing a traceback
 nb_execution_raise_on_error = True
+# notebooks too heavy for the Read the Docs builder: there they only take
+# their outputs from the cache and are never executed (they are executed in
+# GitHub Actions); a pull request that changes their code shows them without
+# outputs in its preview until the change is merged
+_RTD_CACHE_ONLY = ["notebooks/Radar_Workflow.md"]
+
+_DOCS_CACHE_URL = (
+    "https://raw.githubusercontent.com/syedhamidali/radarx/"
+    "docs-cache/jupyter_cache.tar.gz"
+)
+
+
+def _seed_notebook_cache(path=nb_execution_cache_path):
+    """Download the notebook outputs executed in GitHub Actions.
+
+    Runs on Read the Docs, or anywhere ``RADARX_DOCS_CACHE_URL`` is set
+    (``none`` disables it). An existing local cache is kept. Any failure
+    only means that the notebooks are executed here instead.
+    """
+    url = os.environ.get(
+        "RADARX_DOCS_CACHE_URL",
+        _DOCS_CACHE_URL if os.environ.get("READTHEDOCS") else "",
+    )
+    if not url or url == "none" or os.path.exists(os.path.join(path, "global.db")):
+        return
+    import io
+    import tarfile
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(url, timeout=120) as response:
+            data = response.read()
+        os.makedirs(path, exist_ok=True)
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
+            if hasattr(tarfile, "data_filter"):
+                tar.extractall(path, filter="data")
+            else:  # pragma: no cover - Python < 3.11.4
+                tar.extractall(path)
+        print(f"radarx docs: notebook outputs seeded from {url}")
+    except Exception as err:  # the build continues and executes them
+        warnings.warn(f"could not seed the notebook cache from {url}: {err}")
+
+
+_seed_notebook_cache()
+
+
+def _exclude_uncached_heavy_notebooks(app, config):
+    """On Read the Docs, never execute the notebooks in ``_RTD_CACHE_ONLY``.
+
+    A notebook found in the cache still shows its cached outputs; one that is
+    not is excluded from execution and rendered without outputs.
+    """
+    if not os.environ.get("READTHEDOCS"):
+        return
+    from jupyter_cache import get_cache
+    from myst_nb.core.read import read_myst_markdown_notebook
+    from myst_parser.config.main import MdParserConfig
+
+    cache = get_cache(config.nb_execution_cache_path)
+    excluded = list(config.nb_execution_excludepatterns)
+    for docname in _RTD_CACHE_ONLY:
+        if not os.path.isfile(os.path.join(app.srcdir, docname)):
+            continue
+        with open(os.path.join(app.srcdir, docname), encoding="utf-8") as f:
+            notebook = read_myst_markdown_notebook(f.read(), MdParserConfig())
+        try:
+            cache.match_cache_notebook(notebook)
+        except KeyError:
+            warnings.warn(f"{docname} has no cached outputs and is not executed here")
+            excluded.append(docname)
+    config.nb_execution_excludepatterns = excluded
+
+
+def setup(app):
+    # before myst-nb reads its configuration (builder-inited)
+    app.connect("config-inited", _exclude_uncached_heavy_notebooks)
+
+
 # HoloViews also emits a comm payload for live kernels; static docs use the
 # HTML output, so the unknown mime type is expected.
 suppress_warnings = ["mystnb.unknown_mime_type"]

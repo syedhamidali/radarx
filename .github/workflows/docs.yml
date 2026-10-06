@@ -1,0 +1,123 @@
+name: Docs
+
+# Executes every example notebook once in a full documentation build and
+# publishes the outputs (a jupyter-cache keyed on the notebooks' code cells)
+# on the orphan branch "docs-cache". Read the Docs downloads that cache, shows
+# the stored outputs and executes only the notebooks whose code is new or
+# changed, which keeps its build well inside the 15-minute limit however many
+# notebooks there are. The .md notebooks stay the only source.
+
+on:
+  push:
+    branches: [ main ]
+  # refresh the outputs with the latest upstream packages and data
+  schedule:
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+  # pull requests only check the build when they change how it works
+  pull_request:
+    branches: [ main ]
+    paths:
+      - docs/conf.py
+      - environment.yml
+      - .readthedocs.yaml
+      - .github/workflows/docs.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build docs and execute notebooks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -l {0}
+    env:
+      # start from an empty cache, so that every notebook runs on this commit
+      RADARX_DOCS_CACHE_URL: none
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Get date for the environment cache key
+        id: date
+        run: echo "today=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+      - name: Install micromamba environment
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          # the Read the Docs environment
+          environment-name: radarx-docs
+          environment-file: environment.yml
+          cache-environment: true
+          cache-environment-key: "${{runner.os}}-${{runner.arch}}-docs-${{steps.date.outputs.today}}-${{hashFiles('environment.yml')}}"
+      - name: Install radarx
+        run: |
+          python -m pip install .
+      - name: Build the documentation
+        working-directory: docs
+        run: |
+          python -m sphinx -T -b html -d _build/doctrees . _build/html
+      - name: Pack the notebook outputs
+        run: |
+          tar -C docs/_build/jupyter_cache -czf jupyter_cache.tar.gz .
+          ls -lh jupyter_cache.tar.gz
+      - name: Upload the notebook outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: jupyter-cache
+          path: jupyter_cache.tar.gz
+          retention-days: 7
+      - name: Upload the HTML documentation
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-html
+          path: docs/_build/html
+          retention-days: 7
+
+  publish:
+    name: publish notebook outputs
+    needs: [build]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      # push the docs-cache branch
+      contents: write
+    env:
+      # optional: a Read the Docs API token to rebuild "latest" with the new
+      # outputs right away instead of at the next push
+      RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
+    steps:
+      - name: Download the notebook outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: jupyter-cache
+          path: docs-cache
+      - name: Push the docs-cache branch
+        working-directory: docs-cache
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > README.md <<EOF
+          Executed outputs of the radarx example notebooks, written by the
+          "Docs" workflow for ${GITHUB_SHA} and read by the Read the Docs build
+          (docs/conf.py). This branch is replaced on every push to main; do not
+          edit it.
+          EOF
+          git init -q -b docs-cache
+          git add jupyter_cache.tar.gz README.md
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -q -m "Notebook outputs for ${GITHUB_SHA}"
+          git push -q --force \
+              "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+              docs-cache
+      - name: Rebuild the latest documentation on Read the Docs
+        if: env.RTD_TOKEN != ''
+        run: |
+          curl -fsS -X POST -H "Authorization: Token ${RTD_TOKEN}" \
+              https://readthedocs.org/api/v3/projects/radarx/versions/latest/builds/
