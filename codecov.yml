@@ -1,0 +1,15 @@
+# Codecov waits for all coverage uploads of a CI run before it reports:
+# 6 unit-test jobs + 2 notebook-test jobs. Update when the CI matrix changes.
+codecov:
+  notify:
+    after_n_builds: 8
+
+comment:
+  after_n_builds: 8
+
+coverage:
+  status:
+    project:
+      default:
+        # tolerate rounding noise between runs
+        threshold: 0.1%
