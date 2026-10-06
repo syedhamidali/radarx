@@ -849,7 +849,7 @@ def test_era5_arco_request(tmp_path, monkeypatch):
 
     monkeypatch.setattr(sounding, "_cds_retrieve", fake_retrieve)
     monkeypatch.setattr(sounding, "_cds_available", lambda: True)
-    prof = sounding.era5_profile(33.9, -88.33, "2022-03-30T23:46")  # auto -> arco
+    prof = sounding.era5_profile(33.9, -88.33, "2022-03-30T23:46", source="arco")
     assert seen["dataset"] == "reanalysis-era5-pressure-levels-timeseries"
     assert seen["request"]["location"] == {"latitude": 33.9, "longitude": -88.33}
     assert seen["request"]["date"] == ["2022-03-30/2022-03-31"]
@@ -911,6 +911,10 @@ def test_cds_available(monkeypatch, tmp_path):
     monkeypatch.setattr(sounding.Path, "home", lambda: tmp_path)
     assert not sounding._cds_available()
     assert sounding._resolve_source("auto", True) == "gcs"
+    monkeypatch.setattr(sounding, "_cds_available", lambda: True)
+    assert sounding._resolve_source("auto", True) == "cds"
+    assert sounding._resolve_source("auto", False) == "cds"
+    assert sounding._resolve_source("arco", True) == "arco"
 
 
 def test_resolve_source_errors():

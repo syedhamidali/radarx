@@ -76,9 +76,10 @@ ERA5 (:func:`era5_profile`, :func:`era5_column`):
   HTTP, no Google credentials or gcsfs). Opened lazily with xarray; each field is
   stored as one global chunk per hour (about 100 MB), so a point profile
   reads a few hundred MB per hour.
-- ``"auto"`` (default): ECMWF when CDS credentials are configured (``"arco"``
-  for a point profile, ``"cds"`` for grid columns, which are larger than the
-  ARCO area limit), otherwise ``"gcs"``.
+- ``"auto"`` (default): hourly ERA5 on 37 levels, from the CDS (``"cds"``)
+  when CDS credentials are configured, otherwise from Google's ARCO-ERA5
+  (``"gcs"``). The 6-hourly ECMWF ARCO time series is used only when asked
+  for with ``source="arco"``.
 
 Downloads are cached under ``pooch.os_cache("radarx")/soundings`` (or the
 ``RADARX_CACHE_DIR`` environment variable).
@@ -1423,9 +1424,7 @@ def _cds_available():
 
 def _resolve_source(source, point):
     if source == "auto":
-        if _cds_available():
-            return "arco" if point else "cds"
-        return "gcs"
+        return "cds" if _cds_available() else "gcs"
     if source not in ("arco", "cds", "gcs"):
         raise ValueError(
             f"unknown ERA5 source {source!r}; use 'auto', 'arco', 'cds' or 'gcs'"
@@ -1747,8 +1746,9 @@ def era5_profile(
         Valid time (UTC).
     source : {"auto", "arco", "cds", "gcs"}, optional
         ERA5 provider (see :mod:`radarx.io.sounding`). ``"auto"`` (default)
-        uses the ECMWF ARCO time series when CDS credentials are configured,
-        otherwise the anonymous Google ARCO-ERA5 Zarr store.
+        uses hourly ERA5 on 37 levels: the full CDS dataset when CDS
+        credentials are configured, otherwise the anonymous Google ARCO-ERA5
+        Zarr store. ``"arco"`` selects the 6-hourly ECMWF ARCO time series.
     time_interpolation : {"linear", "nearest"}, optional
         Interpolate linearly between the two ERA5 times bracketing ``time``
         (default) or take the nearest. ERA5 is hourly; the ECMWF ARCO time

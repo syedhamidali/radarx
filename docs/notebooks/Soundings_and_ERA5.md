@@ -84,7 +84,9 @@ bmx
 ARCO time series (`source="arco"`, 13 levels, 6-hourly) and the full ERA5 on
 the Copernicus CDS (`source="cds"`) need a CDS account. Geopotential is
 converted to geometric height, ERA5 is interpolated bilinearly to the point
-and linearly in time to the radar volume time.
+and linearly in time to the radar volume time. The default (`source="auto"`) is hourly ERA5 on
+37 levels: from the CDS when a CDS key is configured, otherwise from Google's
+ARCO-ERA5.
 
 ```{code-cell} ipython3
 t0 = time.perf_counter()
