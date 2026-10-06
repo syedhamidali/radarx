@@ -11,6 +11,7 @@ import importlib
 import numpy as np
 import pytest
 import xarray as xr
+from scipy.integrate import trapezoid
 
 import radarx  # noqa: F401
 from radarx.retrieve import (
@@ -142,10 +143,10 @@ def test_closed_form_moments_match_integration():
     d = np.linspace(1e-4, 30.0, 300001)
     for i in range(0, mu.size, 7):
         nd = n0[i] * d ** mu[i] * np.exp(-lam[i] * d)
-        m3 = np.trapezoid(nd * d**3, d)
-        m4 = np.trapezoid(nd * d**4, d)
+        m3 = trapezoid(nd * d**3, d)
+        m4 = trapezoid(nd * d**4, d)
         v = 9.65 - 10.3 * np.exp(-0.6 * d)
-        rate = 6e-4 * np.pi * np.trapezoid(v * nd * d**3, d)
+        rate = 6e-4 * np.pi * trapezoid(v * nd * d**3, d)
         assert np.isclose(out.LWC[i], np.pi / 6 * 1e-3 * m3, rtol=1e-3)
         assert np.isclose(out.RAIN_RATE[i], rate, rtol=1e-3)
         assert np.isclose(out.DM[i], m4 / m3, rtol=1e-3)
