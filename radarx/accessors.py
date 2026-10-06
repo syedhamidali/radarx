@@ -1055,3 +1055,22 @@ class RadarxDataTreeAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
     def to_cappi(self, *args, **kwargs):
         """Convenience alias for :meth:`create_cappi`."""
         return self.create_cappi(*args, **kwargs)
+
+
+def _attach_registered_methods():
+    """Add the methods that feature modules registered (see ``radarx._registry``)."""
+    from . import grid, io, retrieve, vis  # noqa: F401  feature modules register here
+    from ._registry import registered
+
+    for kind, cls in (
+        ("dataarray", RadarxDataArrayAccessor),
+        ("dataset", RadarxDataSetAccessor),
+        ("datatree", RadarxDataTreeAccessor),
+    ):
+        for name, func in registered(kind).items():
+            if hasattr(cls, name) and getattr(cls, name) is not func:
+                raise ValueError(f"{cls.__name__} already defines {name!r}")
+            setattr(cls, name, func)
+
+
+_attach_registered_methods()

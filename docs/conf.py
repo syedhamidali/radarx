@@ -19,6 +19,22 @@ except ImportError:  # pragma: no cover
 
 sys.path.insert(0, os.path.abspath(".."))
 
+
+def _write_unreleased_changes():
+    """Collect the changelog fragments ``changes/<PR>.md`` for history.md."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    fragments = glob.glob(os.path.join(here, "changes", "[0-9]*.md"))
+    fragments.sort(key=lambda path: int(os.path.basename(path).split(".")[0]))
+    lines = []
+    for path in fragments:
+        with open(path) as f:
+            lines += [line.rstrip() for line in f if line.strip()]
+    with open(os.path.join(here, "changes", "unreleased.md"), "w") as f:
+        f.write("\n".join(lines) + "\n" if lines else "No changes yet.\n")
+
+
+_write_unreleased_changes()
+
 # The notebooks read ERA5 from Google's ARCO-ERA5 store, which keeps every
 # field as one global chunk per hour, so a cold read takes minutes. The docs
 # build seeds radarx's cache with a small pre-extracted subset (KGWX region,
@@ -151,6 +167,7 @@ exclude_patterns = [
     "**.ipynb_checkpoints",
     "notebooks/conftest.py",
     "notebooks/downloads",
+    "changes",
 ]
 
 pygments_style = "sphinx"

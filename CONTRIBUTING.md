@@ -106,9 +106,27 @@ Before you submit a pull request, check that it meets these guidelines:
 1.  The pull request should include tests.
 2.  If the pull request adds functionality, the docs should be updated.
     Put your new functionality into a function with a docstring, and add
-    an entry under "Unreleased" in `docs/history.md`.
+    a changelog fragment `docs/changes/<PR number>.md` (see
+    `docs/changes/README.md`).
 3.  The pull request should work for all supported Python versions; the
     GitHub Actions checks on the pull request must pass.
+
+## Adding a feature without touching shared files
+
+New features plug in without editing shared files, so pull requests don't
+conflict with each other:
+
+- **Compiled kernels:** every `radarx/**/_*.cpp` file is built as the extension
+  module of the same name (`setup.py` discovers them) and checked by
+  `ci/check_compiled_kernel.py`. Keep an identical NumPy implementation as the
+  fallback and test oracle.
+- **Retrieval modules:** every public module in `radarx/retrieve/` is imported
+  and its `__all__` re-exported by `radarx.retrieve` automatically.
+- **Accessor methods:** register them in your module with
+  `radarx._registry.accessor_method` instead of editing `radarx/accessors.py`.
+- **Notebooks:** example notebooks named `docs/notebooks/<Capitalised_Name>.md`
+  are listed in the user guide automatically.
+- **Changelog:** add `docs/changes/<PR number>.md`.
 
 ## Tips
 
