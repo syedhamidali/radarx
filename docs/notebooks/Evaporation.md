@@ -107,7 +107,8 @@ def open_volume(key):
     for name in [n for n in dtree.children if n.startswith("sweep")]:
         ds = dtree[name].to_dataset(inherit=False)
         for var, lim in (("DBZH", -32.0), ("ZDR", -12.9), ("RHOHV", 0.21)):
-            ds[var] = ds[var].where(ds[var] > lim)
+            if var in ds:  # Doppler sweeps have no ZDR and RHOHV
+                ds[var] = ds[var].where(ds[var] > lim)
         dtree[name] = ds
     return dtree
 
