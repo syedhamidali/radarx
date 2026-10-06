@@ -206,6 +206,64 @@ def _first(ds, names):
     return None
 
 
+def _doppler_velocity(dop, velocity, dealias, nyquist_velocity, angle):
+    """Velocity of a Doppler sweep (flags removed, dealiased) and folded gates."""
+    from .dealias import dealias_velocity
+
+    vel, folded = _clean(dop[velocity])
+    width_name = _first(dop, ("WRADH", "WRAD", "spectrum_width"))
+    width = None
+    if width_name:
+        width, width_folded = _clean(dop[width_name])
+        folded = folded | width_folded
+    if dealias:
+        nyq = _nyquist(dop, velocity, nyquist_velocity, angle)
+        if nyq is None:
+            raise ValueError(
+                f"no Nyquist velocity at {angle}°: pass nyquist_velocity=, "
+                "add a 'nyquist_velocity' coordinate, or dealias=False"
+            )
+        vel = dealias_velocity(
+            dop.assign({velocity: vel}), velocity, nyquist_velocity=nyq
+        )
+    return vel, width, folded
+
+
+def _tilt_fields(sweeps, angle, velocity, dealias, nyquist_velocity, kdp, tolerance):
+    """The six TorNet variables of one tilt, its range-folded gates, its Doppler cut."""
+    from .kdp import estimate_kdp
+
+    _, dop = _pick(sweeps, angle, tolerance, [(velocity,)])
+    _, surv = _pick(sweeps, angle, tolerance, [("RHOHV",), ("ZDR",)])
+    if dop is None or surv is None:
+        raise ValueError(
+            f"no sweeps with {velocity!r} and RHOHV/ZDR within "
+            f"{tolerance}° of {angle}°"
+        )
+    vel, width, folded = _doppler_velocity(
+        dop, velocity, dealias, nyquist_velocity, angle
+    )
+    surv = surv.assign(
+        {n: _clean(v)[0] for n, v in surv.data_vars.items() if v.ndim == 2}
+    )
+    dbz_name = _first(surv, ("DBZH", "DBZ", "reflectivity"))
+    kdp_name = _first(surv, tuple(k for k in (kdp, "KDP") if k))
+    kdp_da = surv[kdp_name] if kdp_name else estimate_kdp(surv)["KDP"]
+    zdr = surv.get("ZDR")
+    if zdr is not None:
+        # TorNet holds -8 dB (the lowest coded ZDR) at gates without ZDR
+        zdr = zdr.fillna(_ZDR_FILL)
+    fields = {
+        "DBZ": surv[dbz_name] if dbz_name else None,
+        "VEL": vel,
+        "KDP": kdp_da,
+        "RHOHV": surv.get("RHOHV"),
+        "ZDR": zdr,
+        "WIDTH": width,
+    }
+    return fields, folded, dop
+
+
 def tornet_inputs(
     volume,
     *,
@@ -270,57 +328,14 @@ def tornet_inputs(
     data. *Artif. Intell. Earth Syst.*, **4** (1),
     https://doi.org/10.1175/AIES-D-24-0006.1
     """
-    from .dealias import dealias_velocity
-    from .kdp import estimate_kdp
-
     if not hasattr(volume, "children"):
         raise TypeError("tornet_inputs needs an xarray.DataTree volume")
     sweeps = _sweeps(volume)
     azimuth = np.arange(_AZ_STEP / 2, 360.0, _AZ_STEP)
     tilts, rf_tilts, angles, times, ranges = [], [], [], [], []
+    options = (velocity, dealias, nyquist_velocity, kdp, tolerance)
     for angle in elevations:
-        dname, dop = _pick(sweeps, angle, tolerance, [(velocity,)])
-        sname, surv = _pick(sweeps, angle, tolerance, [("RHOHV",), ("ZDR",)])
-        if dop is None or surv is None:
-            raise ValueError(
-                f"no sweeps with {velocity!r} and RHOHV/ZDR within "
-                f"{tolerance}° of {angle}°"
-            )
-        dop = dop.copy()
-        vel, folded = _clean(dop[velocity])
-        width_name = _first(dop, ("WRADH", "WRAD", "spectrum_width"))
-        dop[velocity] = vel
-        if dealias:
-            nyq = _nyquist(dop, velocity, nyquist_velocity, angle)
-            if nyq is None:
-                raise ValueError(
-                    f"no Nyquist velocity for {dname}: pass nyquist_velocity=, "
-                    "add a 'nyquist_velocity' coordinate, or dealias=False"
-                )
-            vel = dealias_velocity(dop, velocity, nyquist_velocity=nyq)
-        surv = surv.copy()
-        for name in list(surv.data_vars):
-            if surv[name].ndim == 2:
-                surv[name] = _clean(surv[name])[0]
-        dbz_name = _first(surv, ("DBZH", "DBZ", "reflectivity"))
-        if kdp is not None and kdp in surv:
-            kdp_da = surv[kdp]
-        elif "KDP" in surv:
-            kdp_da = surv["KDP"]
-        else:
-            kdp_da = estimate_kdp(surv)["KDP"]
-        zdr = surv.get("ZDR")
-        if zdr is not None:
-            # TorNet holds -8 dB (the lowest coded ZDR) at gates without ZDR
-            zdr = zdr.fillna(_ZDR_FILL)
-        fields = {
-            "DBZ": surv[dbz_name] if dbz_name else None,
-            "VEL": vel,
-            "KDP": kdp_da,
-            "RHOHV": surv.get("RHOHV"),
-            "ZDR": zdr,
-            "WIDTH": _clean(dop[width_name])[0] if width_name else None,
-        }
+        fields, rf, dop = _tilt_fields(sweeps, angle, *options)
         stop = max_range or float(dop["range"].values[-1])
         rng = np.arange(_FIRST_GATE, stop + _GATE / 2, _GATE)
         ranges.append(rng)
@@ -334,9 +349,6 @@ def tornet_inputs(
                 for k, v in fields.items()
             }
         )
-        rf = folded
-        if width_name:
-            rf = rf | _clean(dop[width_name])[1]
         rf_tilts.append(np.nan_to_num(_regrid(rf.astype(np.float32), azimuth, rng)))
         angles.append(angle)
         times.append(dop["time"].values.min() if "time" in dop.coords else None)
@@ -578,9 +590,41 @@ def tornado_probability(
 # --------------------------------------------------------------------------
 
 
-def _couplets_sweep(ds, field, threshold, window, min_area, diameter, min_reflectivity):
+def _label_regions(candidate, az):
+    """8-connected regions of ``candidate``; regions touching across north merge."""
     from scipy import ndimage
 
+    labels, n = ndimage.label(candidate, structure=np.ones((3, 3)))
+    order = np.argsort(np.mod(az, 360.0))
+    first, last = order[0], order[-1]
+    step = np.median(np.diff(az[order]))
+    if n and abs(np.mod(az[first] - az[last], 360.0)) < 2 * step:
+        for a, b in zip(labels[first], labels[last]):
+            if a and b and a != b:
+                labels[labels == b] = a
+    return labels
+
+
+def _delta_v(vel, az, rng, peak, diameter):
+    """Largest velocity difference within ``diameter / 2`` of the peak gate."""
+    ia, ir = peak
+    r0, a0 = rng[ir], np.radians(az[ia])
+    dtheta = np.radians(np.median(np.diff(np.sort(np.mod(az, 360.0)))))
+    dr = rng[1] - rng[0] if rng.size > 1 else _GATE
+    half_rays = int(np.ceil(diameter / 2 / max(r0 * dtheta, 1.0)))
+    half_gates = int(np.ceil(diameter / 2 / dr))
+    rays = np.mod(np.arange(ia - half_rays, ia + half_rays + 1), az.size)
+    g0, g1 = max(ir - half_gates, 0), min(ir + half_gates + 1, rng.size)
+    rr = rng[g0:g1][None, :]
+    aa = np.radians(az[rays])[:, None]
+    dist = np.hypot(
+        rr * np.sin(aa) - r0 * np.sin(a0), rr * np.cos(aa) - r0 * np.cos(a0)
+    )
+    v = np.where(dist <= diameter / 2, vel[rays, g0:g1], np.nan)
+    return np.nanmax(v) - np.nanmin(v) if np.isfinite(v).any() else np.nan
+
+
+def _couplets_sweep(ds, field, threshold, window, min_area, diameter, min_reflectivity):
     from .shear import llsd
 
     da = ds[field]
@@ -599,16 +643,7 @@ def _couplets_sweep(ds, field, threshold, window, min_area, diameter, min_reflec
         if dbz_name is not None:
             dbz = ds[dbz_name].transpose(ray_dim, "range").values
             candidate &= np.nan_to_num(dbz, nan=-99.0) >= min_reflectivity
-    labels, n = ndimage.label(candidate, structure=np.ones((3, 3)))
-    # regions that touch across north are one region
-    order = np.argsort(np.mod(az, 360.0))
-    first, last = order[0], order[-1]
-    if n and abs(np.mod(az[first] - az[last], 360.0)) < 2 * np.median(
-        np.diff(az[order])
-    ):
-        for a, b in zip(labels[first], labels[last]):
-            if a and b and a != b:
-                labels[labels == b] = a
+    labels = _label_regions(candidate, az)
     dr = rng[1] - rng[0] if rng.size > 1 else _GATE
     dtheta = np.radians(np.median(np.diff(np.sort(np.mod(az, 360.0)))))
     gate_area = (rng * dtheta * dr)[None, :] * np.ones_like(shear)
@@ -623,23 +658,11 @@ def _couplets_sweep(ds, field, threshold, window, min_area, diameter, min_reflec
             continue
         flat = np.where(sel, shear, -np.inf)
         ia, ir = np.unravel_index(np.argmax(flat), flat.shape)
-        r0, a0 = rng[ir], np.radians(az[ia])
-        # gates within diameter/2 of the peak
-        half_rays = int(np.ceil(diameter / 2 / max(r0 * dtheta, 1.0)))
-        half_gates = int(np.ceil(diameter / 2 / dr))
-        ray_idx = np.mod(np.arange(ia - half_rays, ia + half_rays + 1), az.size)
-        g0, g1 = max(ir - half_gates, 0), min(ir + half_gates + 1, rng.size)
-        rr = rng[g0:g1][None, :]
-        aa = np.radians(az[ray_idx])[:, None]
-        dist = np.hypot(
-            rr * np.sin(aa) - r0 * np.sin(a0), rr * np.cos(aa) - r0 * np.cos(a0)
-        )
-        v = np.where(dist <= diameter / 2, vel[ray_idx, g0:g1], np.nan)
-        dv = np.nanmax(v) - np.nanmin(v) if np.isfinite(v).any() else np.nan
+        dv = _delta_v(vel, az, rng, (ia, ir), diameter)
         rows.append(
             (
                 az[ia],
-                r0,
+                rng[ir],
                 shear[ia, ir],
                 dv,
                 area,

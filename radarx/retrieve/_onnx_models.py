@@ -27,6 +27,7 @@ with Keras and PyTorch.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import io
 import json
@@ -480,10 +481,8 @@ def onnx_path(name):
     tmp = out.with_suffix(".onnx.part")
     tmp.write_bytes(model.SerializeToString())
     tmp.replace(out)
-    try:
+    with contextlib.suppress(OSError):
         os.remove(source)
-    except OSError:  # pragma: no cover
-        pass
     return out
 
 
