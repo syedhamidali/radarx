@@ -18,18 +18,10 @@ import radarx
 ```{toctree}
 :maxdepth: 2
 :caption: Examples
+:glob:
 
-notebooks/IMD_Radar_Data
-notebooks/Grid_Radar
-notebooks/Dealiasing
-notebooks/Advection_Correction
-notebooks/Interactive_Plots
-notebooks/Radar_UGRID_uxarray
-notebooks/Azimuthal_Shear
-notebooks/KDP
-notebooks/QVP
+notebooks/[A-Z]*
 notebooks/aws_data
-notebooks/Soundings_and_ERA5
 ```
 
 ```{toctree}

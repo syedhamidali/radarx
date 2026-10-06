@@ -31,6 +31,7 @@ from .grid import (
     to_uxarray,  # noqa
 )
 from .retrieve import advect as retrieve_advect  # noqa
+from .retrieve import apply_mask as retrieve_apply_mask  # noqa
 from .retrieve import create_cappi as retrieve_cappi  # noqa
 from .retrieve import (  # noqa
     dealias_velocity,
@@ -38,6 +39,7 @@ from .retrieve import (  # noqa
     melting_layer,
     qvp,
 )
+from .retrieve import echo_mask as retrieve_echo_mask  # noqa
 from .retrieve import estimate_motion as retrieve_estimate_motion  # noqa
 from .retrieve import interpolate_time as retrieve_interpolate_time  # noqa
 from .retrieve import shear as _shear
@@ -462,6 +464,52 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         """
         return estimate_kdp(self.xarray_obj, phidp, rhohv, dbzh, **kwargs)
 
+    def echo_mask(self, **kwargs):
+        """
+        Classify the gates of this sweep as meteorological or not.
+
+        Parameters
+        ----------
+        **kwargs
+            Field names and options of :func:`radarx.retrieve.echo_mask`.
+
+        Returns
+        -------
+        xarray.Dataset
+            ``ECHO_CLASS``, ``METEO_SCORE`` and ``METEO_MASK``.
+
+        See Also
+        --------
+        radarx.retrieve.echo_mask, radarx.retrieve.apply_mask
+        """
+        return retrieve_echo_mask(self.xarray_obj, **kwargs)
+
+    def apply_mask(self, mask=None, fields=None, **kwargs):
+        """
+        Set the non-meteorological gates of this sweep to NaN.
+
+        Parameters
+        ----------
+        mask : xarray.Dataset or xarray.DataArray, optional
+            Output of :func:`radarx.retrieve.echo_mask`; computed if not
+            given.
+        fields : str or list of str, optional
+            Fields to mask. Default: all floating point gate fields.
+        **kwargs
+            Options of :func:`radarx.retrieve.apply_mask` and, without
+            ``mask``, of :func:`radarx.retrieve.echo_mask`.
+
+        Returns
+        -------
+        xarray.Dataset
+            Copy of the sweep with the masked fields.
+
+        See Also
+        --------
+        radarx.retrieve.apply_mask, radarx.retrieve.echo_mask
+        """
+        return retrieve_apply_mask(self.xarray_obj, mask, fields, **kwargs)
+
     def qvp(self, data_vars=None, **kwargs):
         """
         Quasi-vertical profile of this sweep.
@@ -498,7 +546,9 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         -------
         xarray.Dataset
             ``melting_layer_top``, ``melting_layer_bottom`` and
-            ``melting_layer_peak`` heights.
+            ``melting_layer_peak`` heights (by default where the ρhv
+            signature begins and ends) and, with an ``environment``, the
+            0 °C and wet-bulb 0 °C heights and the offsets of the top.
 
         See Also
         --------
@@ -643,6 +693,30 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
             engine=engine,
             n_threads=n_threads,
         )
+
+    def multi_doppler(self, background=None, **kwargs):
+        """
+        Retrieve the 3D wind from the radial velocities of several radars.
+
+        Parameters
+        ----------
+        background : xarray.Dataset, optional
+            Background on the grid (``grid.radarx.background()``).
+        **kwargs
+            Options of :func:`radarx.retrieve.multi_doppler`.
+
+        Returns
+        -------
+        xarray.Dataset
+            ``u``, ``v``, ``w`` and diagnostics on the grid.
+
+        See Also
+        --------
+        radarx.retrieve.multi_doppler, radarx.retrieve.multi_doppler_input
+        """
+        from .retrieve.multidoppler import multi_doppler
+
+        return multi_doppler(self.xarray_obj, background, **kwargs)
 
     def plot_max_cappi(
         self,
@@ -932,6 +1006,53 @@ class RadarxDataTreeAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         """
         return estimate_kdp(self.xarray_obj, phidp, rhohv, dbzh, **kwargs)
 
+    def echo_mask(self, **kwargs):
+        """
+        Classify the gates of every sweep as meteorological or not.
+
+        Parameters
+        ----------
+        **kwargs
+            Field names and options of :func:`radarx.retrieve.echo_mask`.
+
+        Returns
+        -------
+        xarray.DataTree
+            One node per sweep with ``ECHO_CLASS``, ``METEO_SCORE`` and
+            ``METEO_MASK``; all sweeps are classified in one kernel call.
+
+        See Also
+        --------
+        radarx.retrieve.echo_mask, radarx.retrieve.apply_mask
+        """
+        return retrieve_echo_mask(self.xarray_obj, **kwargs)
+
+    def apply_mask(self, mask=None, fields=None, **kwargs):
+        """
+        Set the non-meteorological gates of every sweep to NaN.
+
+        Parameters
+        ----------
+        mask : xarray.DataTree, optional
+            Output of :func:`radarx.retrieve.echo_mask`; computed if not
+            given.
+        fields : str or list of str, optional
+            Fields to mask. Default: all floating point gate fields.
+        **kwargs
+            Options of :func:`radarx.retrieve.apply_mask` and, without
+            ``mask``, of :func:`radarx.retrieve.echo_mask`.
+
+        Returns
+        -------
+        xarray.Dataset
+            Copy of the volume with the masked fields.
+
+        See Also
+        --------
+        radarx.retrieve.apply_mask, radarx.retrieve.echo_mask
+        """
+        return retrieve_apply_mask(self.xarray_obj, mask, fields, **kwargs)
+
     def qvp(self, data_vars=None, **kwargs):
         """
         Quasi-vertical profile of one sweep of the volume.
@@ -1055,3 +1176,22 @@ class RadarxDataTreeAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
     def to_cappi(self, *args, **kwargs):
         """Convenience alias for :meth:`create_cappi`."""
         return self.create_cappi(*args, **kwargs)
+
+
+def _attach_registered_methods():
+    """Add the methods that feature modules registered (see ``radarx._registry``)."""
+    from . import grid, io, retrieve, vis  # noqa: F401  feature modules register here
+    from ._registry import registered
+
+    for kind, cls in (
+        ("dataarray", RadarxDataArrayAccessor),
+        ("dataset", RadarxDataSetAccessor),
+        ("datatree", RadarxDataTreeAccessor),
+    ):
+        for name, func in registered(kind).items():
+            if hasattr(cls, name) and getattr(cls, name) is not func:
+                raise ValueError(f"{cls.__name__} already defines {name!r}")
+            setattr(cls, name, func)
+
+
+_attach_registered_methods()

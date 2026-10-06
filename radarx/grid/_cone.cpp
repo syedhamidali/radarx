@@ -11,6 +11,11 @@
 // Levels below the lowest or above the highest cone, or between cones where
 // one has no value, stay NaN (optionally the lowest cone fills below itself).
 //
+// grid_cones grids one field of one radar on a regular (x, y) grid centred on
+// the radar; grid_columns grids many fields of many radars in one call onto
+// columns given by their ground distance and azimuth from each radar
+// (multi-radar gridding on a shared grid).
+//
 // Beam geometry follows xradar.georeference.antenna_to_cartesian (4/3 Earth).
 
 #include <pybind11/numpy.h>
@@ -24,10 +29,12 @@
 #include <limits>
 #include <stdexcept>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
 namespace py = pybind11;
 using DArray = py::array_t<double, py::array::c_style | py::array::forcecast>;
+using FArray = py::array_t<float, py::array::c_style | py::array::forcecast>;
 
 namespace {
 
@@ -36,8 +43,12 @@ constexpr double kPi = 3.14159265358979323846;  // M_PI is not standard (MSVC)
 constexpr double kDeg = kPi / 180.0;
 
 struct Sweep {
-    const double* data = nullptr;  // (nray, ngate), row-major
+    const double* data = nullptr;  // (nray, ngate), row-major, float64 input
+    const float* data32 = nullptr; // or float32 input (multi-radar gridding)
     int64_t nray = 0, ngate = 0;
+    double value(int64_t k) const {
+        return data ? data[k] : static_cast<double>(data32[k]);
+    }
     std::vector<double> range;     // gate ranges [m]
     std::vector<double> ground;    // ground distance of each gate [m]
     std::vector<double> sin_el;    // per ray
@@ -113,7 +124,8 @@ void set_azimuth_order(Sweep& sw, const double* azimuth) {
     sw.ray_ext.push_back(idx.front());
 }
 
-Sweep prepare(const DArray& data, const DArray& azimuth, const DArray& elevation,
+template <class Array>
+Sweep prepare(const Array& data, const DArray& azimuth, const DArray& elevation,
               const DArray& range, double R, double sr) {
     if (data.ndim() != 2) throw std::invalid_argument("sweep data must be 2-D (ray, gate)");
     Sweep sw;
@@ -122,11 +134,124 @@ Sweep prepare(const DArray& data, const DArray& azimuth, const DArray& elevation
     if (azimuth.size() != sw.nray || elevation.size() != sw.nray || range.size() != sw.ngate)
         throw std::invalid_argument("azimuth/elevation/range do not match sweep data shape");
     if (sw.nray < 3 || sw.ngate < 2) throw std::invalid_argument("sweep too small");
-    sw.data = data.data();
+    if constexpr (std::is_same_v<typename Array::value_type, float>)
+        sw.data32 = data.data();
+    else
+        sw.data = data.data();
     sw.range.assign(range.data(), range.data() + sw.ngate);
     set_geometry(sw, elevation.data(), R, sr);
     set_azimuth_order(sw, azimuth.data());
     return sw;
+}
+
+// Value and beam height of every sweep at ground distance sc, azimuth ac (deg),
+// then the column's levels interpolated in height between bracketing cones.
+// vals/hts are scratch buffers of at least sweeps.size(); out has stride ncol.
+void grid_column(const std::vector<Sweep>& sweeps, double sc, double ac, const double* pz,
+                 int64_t nz, double R, double sr, double max_gap, double min_weight,
+                 bool fill_below, std::vector<double>& vals, std::vector<double>& hts,
+                 float* out, int64_t stride) {
+    const size_t nk = sweeps.size();
+    for (size_t k = 0; k < nk; ++k) {
+        vals[k] = kNaN;
+        hts[k] = kNaN;
+        const Sweep& sw = sweeps[k];
+        const int64_t ng = sw.ngate;
+        if (!(sc >= sw.ground[0] && sc <= sw.ground[ng - 1])) continue;  // also NaN
+        const int64_t i = bisect(sw.ground.data(), ng, sc);
+        const double fr = (sc - sw.ground[i]) / (sw.ground[i + 1] - sw.ground[i]);
+        const int64_t na = static_cast<int64_t>(sw.az_ext.size());
+        const int64_t j = bisect(sw.az_ext.data(), na, ac);
+        const double da = sw.az_ext[j + 1] - sw.az_ext[j];
+        if (da > max_gap * sw.spacing) continue;  // do not bridge missing rays
+        const double fa = (ac - sw.az_ext[j]) / da;
+        const int64_t r0 = sw.ray_ext[j], r1 = sw.ray_ext[j + 1];
+        const int64_t o0 = r0 * ng + i, o1 = r1 * ng + i;
+        const double w[4] = {(1 - fa) * (1 - fr), (1 - fa) * fr, fa * (1 - fr), fa * fr};
+        const double v[4] = {sw.value(o0), sw.value(o0 + 1), sw.value(o1), sw.value(o1 + 1)};
+        const double rg[4] = {sw.range[i], sw.range[i + 1], sw.range[i], sw.range[i + 1]};
+        const double se[4] = {sw.sin_el[r0], sw.sin_el[r0], sw.sin_el[r1], sw.sin_el[r1]};
+        double num = 0.0, den = 0.0, h = 0.0;
+        for (int q = 0; q < 4; ++q) {
+            h += w[q] * beam_height(rg[q], se[q], R, sr);
+            if (!std::isnan(v[q])) {
+                num += w[q] * v[q];
+                den += w[q];
+            }
+        }
+        hts[k] = h;  // already above sea level (sr includes the site)
+        if (den >= min_weight) vals[k] = num / den;
+    }
+
+    // Only cones that reach this column take part; low tilts can start
+    // farther out than high ones, so compact them first.
+    int64_t nc = 0;
+    for (size_t k = 0; k < nk; ++k) {
+        if (std::isnan(hts[k])) continue;
+        hts[nc] = hts[k];
+        vals[nc] = vals[k];
+        ++nc;
+    }
+    int64_t lo = -1;
+    for (int64_t iz = 0; iz < nz; ++iz) {
+        const double zz = pz[iz];
+        double res = kNaN;
+        while (lo + 1 < nc && hts[lo + 1] <= zz) ++lo;
+        if (lo == -1) {
+            if (fill_below && nc > 0) res = vals[0];
+        } else if (lo + 1 < nc) {
+            const double t = (zz - hts[lo]) / (hts[lo + 1] - hts[lo]);
+            res = vals[lo] + t * (vals[lo + 1] - vals[lo]);
+        }
+        out[iz * stride] = static_cast<float>(res);
+    }
+}
+
+int thread_count(int n_threads) {
+    unsigned hw = std::max(1u, std::thread::hardware_concurrency());
+    return n_threads > 0 ? n_threads : static_cast<int>(hw);
+}
+
+template <class Array>
+std::vector<Sweep> prepare_all(const std::vector<Array>& data, const std::vector<DArray>& azimuth,
+                               const std::vector<DArray>& elevation,
+                               const std::vector<DArray>& range, double R, double sr) {
+    const size_t nk = data.size();
+    if (nk < 1 || azimuth.size() != nk || elevation.size() != nk || range.size() != nk)
+        throw std::invalid_argument("need the same number of data/azimuth/elevation/range arrays");
+    std::vector<Sweep> sweeps;
+    sweeps.reserve(nk);
+    for (size_t k = 0; k < nk; ++k)
+        sweeps.push_back(prepare(data[k], azimuth[k], elevation[k], range[k], R, sr));
+    return sweeps;
+}
+
+// Sweeps from float32 or float64 data without copying (other dtypes are
+// converted to float64); the arrays used are appended to keep (alive).
+std::vector<Sweep> prepare_any(const std::vector<py::array>& data,
+                               const std::vector<DArray>& azimuth,
+                               const std::vector<DArray>& elevation,
+                               const std::vector<DArray>& range, double R, double sr,
+                               std::vector<py::array>& keep) {
+    const size_t nk = data.size();
+    if (nk < 1 || azimuth.size() != nk || elevation.size() != nk || range.size() != nk)
+        throw std::invalid_argument("need the same number of data/azimuth/elevation/range arrays");
+    std::vector<Sweep> sweeps;
+    sweeps.reserve(nk);
+    for (size_t k = 0; k < nk; ++k) {
+        if (data[k].dtype().is(py::dtype::of<float>())) {
+            FArray a = FArray::ensure(data[k]);
+            if (!a) throw std::invalid_argument("could not read sweep data");
+            keep.push_back(a);
+            sweeps.push_back(prepare(a, azimuth[k], elevation[k], range[k], R, sr));
+        } else {
+            DArray a = DArray::ensure(data[k]);
+            if (!a) throw std::invalid_argument("could not read sweep data");
+            keep.push_back(a);
+            sweeps.push_back(prepare(a, azimuth[k], elevation[k], range[k], R, sr));
+        }
+    }
+    return sweeps;
 }
 
 }  // namespace
@@ -139,16 +264,10 @@ py::array_t<float> grid_cones(const DArray& x, const DArray& y, const DArray& z,
                                const std::vector<DArray>& range, double site_altitude,
                                double earth_radius, double max_gap, double min_weight,
                                bool fill_below, int n_threads) {
-    const size_t nk = data.size();
-    if (nk < 1 || azimuth.size() != nk || elevation.size() != nk || range.size() != nk)
-        throw std::invalid_argument("need the same number of data/azimuth/elevation/range arrays");
     const double R = earth_radius * 4.0 / 3.0;
     const double sr = R + site_altitude;
-
-    std::vector<Sweep> sweeps;
-    sweeps.reserve(nk);
-    for (size_t k = 0; k < nk; ++k)
-        sweeps.push_back(prepare(data[k], azimuth[k], elevation[k], range[k], R, sr));
+    const std::vector<Sweep> sweeps = prepare_all(data, azimuth, elevation, range, R, sr);
+    const size_t nk = sweeps.size();
 
     const int64_t nx = x.size(), ny = y.size(), nz = z.size();
     const int64_t ncol = nx * ny;
@@ -160,8 +279,7 @@ py::array_t<float> grid_cones(const DArray& x, const DArray& y, const DArray& z,
 
     {
         py::gil_scoped_release release;
-        unsigned hw = std::max(1u, std::thread::hardware_concurrency());
-        int nt = n_threads > 0 ? n_threads : static_cast<int>(hw);
+        const int nt = thread_count(n_threads);
         const int64_t block = 2048;
         std::atomic<int64_t> next{0};
 
@@ -176,61 +294,8 @@ py::array_t<float> grid_cones(const DArray& x, const DArray& y, const DArray& z,
                     const double sc = std::hypot(xc, yc);
                     double ac = std::atan2(xc, yc) / kDeg;
                     if (ac < 0) ac += 360.0;
-
-                    for (size_t k = 0; k < nk; ++k) {
-                        vals[k] = kNaN;
-                        hts[k] = kNaN;
-                        const Sweep& sw = sweeps[k];
-                        const int64_t ng = sw.ngate;
-                        if (sc < sw.ground[0] || sc > sw.ground[ng - 1]) continue;
-                        const int64_t i = bisect(sw.ground.data(), ng, sc);
-                        const double fr = (sc - sw.ground[i]) / (sw.ground[i + 1] - sw.ground[i]);
-                        const int64_t na = static_cast<int64_t>(sw.az_ext.size());
-                        const int64_t j = bisect(sw.az_ext.data(), na, ac);
-                        const double da = sw.az_ext[j + 1] - sw.az_ext[j];
-                        if (da > max_gap * sw.spacing) continue;  // do not bridge missing rays
-                        const double fa = (ac - sw.az_ext[j]) / da;
-                        const int64_t r0 = sw.ray_ext[j], r1 = sw.ray_ext[j + 1];
-                        const double* d0 = sw.data + r0 * ng;
-                        const double* d1 = sw.data + r1 * ng;
-                        const double w[4] = {(1 - fa) * (1 - fr), (1 - fa) * fr, fa * (1 - fr), fa * fr};
-                        const double v[4] = {d0[i], d0[i + 1], d1[i], d1[i + 1]};
-                        const double rg[4] = {sw.range[i], sw.range[i + 1], sw.range[i], sw.range[i + 1]};
-                        const double se[4] = {sw.sin_el[r0], sw.sin_el[r0], sw.sin_el[r1], sw.sin_el[r1]};
-                        double num = 0.0, den = 0.0, h = 0.0;
-                        for (int q = 0; q < 4; ++q) {
-                            h += w[q] * beam_height(rg[q], se[q], R, sr);
-                            if (!std::isnan(v[q])) {
-                                num += w[q] * v[q];
-                                den += w[q];
-                            }
-                        }
-                        hts[k] = h;  // already above sea level (sr includes the site)
-                        if (den >= min_weight) vals[k] = num / den;
-                    }
-
-                    // Only cones that reach this column take part; low tilts can
-                    // start farther out than high ones, so compact them first.
-                    int64_t nc = 0;
-                    for (size_t k = 0; k < nk; ++k) {
-                        if (std::isnan(hts[k])) continue;
-                        hts[nc] = hts[k];
-                        vals[nc] = vals[k];
-                        ++nc;
-                    }
-                    int64_t lo = -1;
-                    for (int64_t iz = 0; iz < nz; ++iz) {
-                        const double zz = pz[iz];
-                        double res = kNaN;
-                        while (lo + 1 < nc && hts[lo + 1] <= zz) ++lo;
-                        if (lo == -1) {
-                            if (fill_below && nc > 0) res = vals[0];
-                        } else if (lo + 1 < nc) {
-                            const double t = (zz - hts[lo]) / (hts[lo + 1] - hts[lo]);
-                            res = vals[lo] + t * (vals[lo + 1] - vals[lo]);
-                        }
-                        out[iz * ncol + c] = static_cast<float>(res);
-                    }
+                    grid_column(sweeps, sc, ac, pz, nz, R, sr, max_gap, min_weight, fill_below,
+                                vals, hts, out + c, ncol);
                 }
             }
         };
@@ -242,6 +307,92 @@ py::array_t<float> grid_cones(const DArray& x, const DArray& y, const DArray& z,
     return result;
 }
 
+// Grid many fields of many radars in one call onto columns given by their
+// ground distance and azimuth from each radar. Task t grids the sweeps data[t]
+// (sorted by elevation, lowest first) of radar radar[t]; ground[r] and
+// column_azimuth[r] hold radar r's (ny, nx) column geometry. The threads share
+// (task, block of columns) work items.
+std::vector<py::array_t<float>> grid_columns(
+    const std::vector<DArray>& ground, const std::vector<DArray>& column_azimuth,
+    const DArray& z, const std::vector<int64_t>& radar,
+    const std::vector<std::vector<py::array>>& data,
+    const std::vector<std::vector<DArray>>& azimuth,
+    const std::vector<std::vector<DArray>>& elevation,
+    const std::vector<std::vector<DArray>>& range, const std::vector<double>& site_altitude,
+    double earth_radius, double max_gap, double min_weight, bool fill_below, int n_threads) {
+    const size_t nr = ground.size();
+    const size_t ntask = radar.size();
+    if (nr == 0) throw std::invalid_argument("need at least one radar");
+    if (column_azimuth.size() != nr || site_altitude.size() != nr)
+        throw std::invalid_argument("need one ground/azimuth array and site altitude per radar");
+    if (data.size() != ntask || azimuth.size() != ntask || elevation.size() != ntask ||
+        range.size() != ntask)
+        throw std::invalid_argument("need data/azimuth/elevation/range for every task");
+    const int64_t ncol = ground[0].size();
+    for (size_t r = 0; r < nr; ++r)
+        if (ground[r].size() != ncol || column_azimuth[r].size() != ncol)
+            throw std::invalid_argument("every radar needs the same number of columns");
+    const double R = earth_radius * 4.0 / 3.0;
+    std::vector<std::vector<Sweep>> sweeps(ntask);
+    std::vector<py::array> keep;  // converted inputs stay alive during the call
+    std::vector<double> srs(ntask);
+    size_t nk_max = 1;
+    for (size_t t = 0; t < ntask; ++t) {
+        if (radar[t] < 0 || static_cast<size_t>(radar[t]) >= nr)
+            throw std::invalid_argument("task radar index out of range");
+        srs[t] = R + site_altitude[radar[t]];
+        sweeps[t] = prepare_any(data[t], azimuth[t], elevation[t], range[t], R, srs[t], keep);
+        nk_max = std::max(nk_max, sweeps[t].size());
+    }
+    const int64_t nz = z.size();
+    std::vector<py::ssize_t> shape(ground[0].shape(), ground[0].shape() + ground[0].ndim());
+    shape.insert(shape.begin(), static_cast<py::ssize_t>(nz));
+    std::vector<py::array_t<float>> results;
+    std::vector<float*> outs;
+    for (size_t t = 0; t < ntask; ++t) {
+        results.emplace_back(shape);
+        outs.push_back(results.back().mutable_data());
+    }
+    std::vector<const double*> pg(nr), pa(nr);
+    for (size_t r = 0; r < nr; ++r) {
+        pg[r] = ground[r].data();
+        pa[r] = column_azimuth[r].data();
+    }
+    const double* pz = z.data();
+
+    {
+        py::gil_scoped_release release;
+        const int nt = thread_count(n_threads);
+        const int64_t block = 2048;
+        const int64_t nblock = (ncol + block - 1) / block;
+        const int64_t nwork = nblock * static_cast<int64_t>(ntask);
+        std::atomic<int64_t> next{0};
+
+        auto worker = [&]() {
+            std::vector<double> vals(nk_max), hts(nk_max);
+            for (;;) {
+                const int64_t w = next.fetch_add(1);
+                if (w >= nwork) break;
+                const int64_t t = w / nblock;
+                const int64_t c0 = (w % nblock) * block;
+                const int64_t c1 = std::min(ncol, c0 + block);
+                const int64_t r = radar[t];
+                for (int64_t c = c0; c < c1; ++c) {
+                    double ac = std::fmod(pa[r][c], 360.0);
+                    if (ac < 0) ac += 360.0;
+                    grid_column(sweeps[t], pg[r][c], ac, pz, nz, R, srs[t], max_gap,
+                                min_weight, fill_below, vals, hts, outs[t] + c, ncol);
+                }
+            }
+        };
+        std::vector<std::thread> pool;
+        for (int t = 1; t < nt; ++t) pool.emplace_back(worker);
+        worker();
+        for (auto& th : pool) th.join();
+    }
+    return results;
+}
+
 PYBIND11_MODULE(_cone, m) {
     m.doc() = "Compiled cone gridding kernel for radarx.";
     m.def("grid_cones", &grid_cones, py::arg("x"), py::arg("y"), py::arg("z"), py::arg("data"),
@@ -249,4 +400,9 @@ PYBIND11_MODULE(_cone, m) {
           py::arg("site_altitude"), py::arg("earth_radius") = 6371000.0,
           py::arg("max_gap") = 2.0, py::arg("min_weight") = 0.5, py::arg("fill_below") = false,
           py::arg("n_threads") = 0);
+    m.def("grid_columns", &grid_columns, py::arg("ground"), py::arg("column_azimuth"),
+          py::arg("z"), py::arg("radar"), py::arg("data"), py::arg("azimuth"),
+          py::arg("elevation"), py::arg("range"), py::arg("site_altitude"),
+          py::arg("earth_radius") = 6371000.0, py::arg("max_gap") = 2.0,
+          py::arg("min_weight") = 0.5, py::arg("fill_below") = false, py::arg("n_threads") = 0);
 }

@@ -12,7 +12,10 @@
 //
 // melting_layer: melting-layer detection in QVPs from the co-located rhohv
 // minimum and ZDR / Z maxima (after Giangrande et al. 2008), one profile per
-// work item.
+// work item. Top and bottom are where rhohv departs from its background
+// above and below the minimum (onset of the signature, after Griffin et al.
+// 2020) or, alternatively, the half-prominence edges of the ZDR / rhohv
+// anomalies.
 
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
@@ -243,7 +246,12 @@ struct MeltingLayerParams {
     double window;          // co-location distance [m]
     double depth;           // search distance for the layer edges [m]
     double fraction;        // edge where the anomaly has fallen by this fraction
+    int boundaries;         // 0: half prominence, 1: onset of the rhohv signature
+    double rho_onset;       // optional absolute background (Griffin et al. 2020: 0.97), or inf
+    double onset_fraction;  // or within this fraction of the dip below the background
 };
+
+enum Boundaries : int { kHalfProminence = 0, kOnset = 1 };
 
 // Edge of a peak (sign = +1) or dip (sign = -1) of x at gate i0: walking away
 // from i0 in direction step, the last gate before the anomaly sign * x has
@@ -265,6 +273,33 @@ int64_t layer_edge(const double* x, const double* H, int64_t nh, int64_t i0, int
         last = j;
     }
     return -1;
+}
+
+// Onset of the rhohv dip at gate i0: walking away from i0 in direction step,
+// the height where rhohv first reaches the background threshold
+//     t = min(rho_onset, bg - onset_fraction * (bg - x[i0])),
+// i.e. where rhohv departs from its background bg (the largest rhohv within
+// `depth` metres) by onset_fraction of the dip, or reaches an absolute
+// background rho_onset if that comes first; interpolated linearly between
+// the last gate below t and the first at or above it. Missing gates are
+// skipped. NaN if rhohv does not rise above the minimum on that side.
+double onset_edge(const double* x, const double* H, int64_t nh, int64_t i0, int step,
+                  double depth, double rho_onset, double onset_fraction) {
+    double bg = x[i0];
+    for (int64_t j = i0 + step; j >= 0 && j < nh && std::fabs(H[j] - H[i0]) <= depth; j += step)
+        if (!std::isnan(x[j])) bg = std::max(bg, x[j]);
+    const double t = std::min(rho_onset, bg - onset_fraction * (bg - x[i0]));
+    if (!(t > x[i0])) return kNaN;
+    int64_t prev = i0;
+    for (int64_t j = i0 + step; j >= 0 && j < nh && std::fabs(H[j] - H[i0]) <= depth; j += step) {
+        if (std::isnan(x[j])) continue;
+        if (x[j] >= t) {
+            const double w = (t - x[prev]) / (x[j] - x[prev]);
+            return H[prev] + w * (H[j] - H[prev]);
+        }
+        prev = j;
+    }
+    return kNaN;  // not reached: bg >= t is inside the window
 }
 
 // Highest height with a reflectivity value (echo top), or +inf.
@@ -322,11 +357,19 @@ void detect_profile(const double* z, const double* r, const double* d, const dou
     const int64_t up = layer_edge(d, H, nh, best, +1, c.depth, 1.0, c.fraction);
     const int64_t dn = layer_edge(d, H, nh, best, -1, c.depth, 1.0, c.fraction);
     if (up < 0 || dn < 0) return;  // ZDR anomaly not bounded: no layer
+    out[2] = H[best];
+    if (c.boundaries == kOnset) {
+        // onset of the rhohv signature; the ZDR edge if rhohv never recovers
+        const double t = onset_edge(r, H, nh, dip, +1, c.depth, c.rho_onset, c.onset_fraction);
+        const double b = onset_edge(r, H, nh, dip, -1, c.depth, c.rho_onset, c.onset_fraction);
+        out[0] = std::isnan(t) ? H[up] : t;
+        out[1] = std::isnan(b) ? H[dn] : b;
+        return;
+    }
     const int64_t rup = layer_edge(r, H, nh, dip, +1, c.depth, -1.0, c.fraction);
     const int64_t rdn = layer_edge(r, H, nh, dip, -1, c.depth, -1.0, c.fraction);
     out[0] = rup >= 0 ? std::max(H[up], H[rup]) : H[up];
     out[1] = rdn >= 0 ? std::min(H[dn], H[rdn]) : H[dn];
-    out[2] = H[best];
 }
 
 }  // namespace
@@ -337,7 +380,8 @@ void detect_profile(const double* z, const double* r, const double* d, const dou
 py::tuple melting_layer(const DArray& zh, const DArray& rhohv, const DArray& zdr,
                         const DArray& height, const DArray& hmin, const DArray& hmax,
                         double rho_lo, double rho_hi, double zdr_min, double dbz_min,
-                        double window, double depth, double fraction, int n_threads) {
+                        double window, double depth, double fraction, int boundaries,
+                        double rho_onset, double onset_fraction, int n_threads) {
     if (zh.ndim() != 2 || rhohv.ndim() != 2 || zdr.ndim() != 2 || height.ndim() != 1)
         throw std::invalid_argument("profiles must be 2-D (profile, height)");
     const int64_t np_ = zh.shape(0), nh = zh.shape(1);
@@ -346,7 +390,10 @@ py::tuple melting_layer(const DArray& zh, const DArray& rhohv, const DArray& zdr
             throw std::invalid_argument("zh, rhohv and zdr shapes do not match");
     if (height.shape(0) != nh || hmin.size() != np_ || hmax.size() != np_)
         throw std::invalid_argument("height, hmin or hmax shape does not match");
-    const MeltingLayerParams params{rho_lo, rho_hi, zdr_min, dbz_min, window, depth, fraction};
+    if (boundaries != kHalfProminence && boundaries != kOnset)
+        throw std::invalid_argument("unknown boundary definition");
+    const MeltingLayerParams params{rho_lo, rho_hi,   zdr_min,    dbz_min,   window,
+                                    depth,  fraction, boundaries, rho_onset, onset_fraction};
     py::array_t<double> top(np_), bottom(np_), peak(np_);
     double *pt = top.mutable_data(), *pb = bottom.mutable_data(), *pk = peak.mutable_data();
     const double *Z = zh.data(), *R = rhohv.data(), *D = zdr.data(), *H = height.data();
@@ -378,5 +425,7 @@ PYBIND11_MODULE(_qvp, m) {
           py::arg("height"), py::arg("hmin"), py::arg("hmax"), py::arg("rho_lo") = 0.80,
           py::arg("rho_hi") = 0.97, py::arg("zdr_min") = 0.5, py::arg("dbz_min") = 20.0,
           py::arg("window") = 500.0, py::arg("depth") = 1000.0, py::arg("fraction") = 0.5,
-          py::arg("n_threads") = 0);
+          py::arg("boundaries") = 1,
+          py::arg("rho_onset") = std::numeric_limits<double>::infinity(),
+          py::arg("onset_fraction") = 0.1, py::arg("n_threads") = 0);
 }

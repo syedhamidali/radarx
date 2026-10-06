@@ -144,16 +144,17 @@ for more details.
 
 ## Citation
 
-If you use radarx, please cite this DOI. It covers all versions of radarx and always points to the latest release, so citations of every version are counted together. To record the exact version you used, add it to the citation (e.g. `version = {0.3.1}` in BibTeX).
+If you use radarx, please cite it with its Zenodo DOI,
+[10.5281/zenodo.14699306](https://doi.org/10.5281/zenodo.14699306). The DOI covers
+all versions and always resolves to the latest release, so citations of every
+version are counted together; add the version you used to the citation.
 
-> Syed, H. A. Radarx: An Xarray-based Python package for radar data processing. Zenodo. https://doi.org/10.5281/zenodo.14699306
+GitHub's **"Cite this repository"** button (top right of the
+[repository page](https://github.com/syedhamidali/radarx)) gives the citation in
+APA and BibTeX. Both, and the text below in the
+[rendered documentation](https://radarx.readthedocs.io/), are generated from
+[`CITATION.cff`](CITATION.cff), so they always match the latest release.
 
-```bibtex
-@software{syed_radarx,
-  author    = {Syed, Hamid Ali},
-  title     = {Radarx: An Xarray-based Python package for radar data processing},
-  publisher = {Zenodo},
-  doi       = {10.5281/zenodo.14699306},
-  url       = {https://doi.org/10.5281/zenodo.14699306},
-}
-```
+> **Cite radarx as:**
+>
+> {{ apa_citation }}

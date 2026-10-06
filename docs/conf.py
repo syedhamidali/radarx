@@ -19,6 +19,22 @@ except ImportError:  # pragma: no cover
 
 sys.path.insert(0, os.path.abspath(".."))
 
+
+def _write_unreleased_changes():
+    """Collect the changelog fragments ``changes/<PR>.md`` for history.md."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    fragments = glob.glob(os.path.join(here, "changes", "[0-9]*.md"))
+    fragments.sort(key=lambda path: int(os.path.basename(path).split(".")[0]))
+    lines = []
+    for path in fragments:
+        with open(path) as f:
+            lines += [line.rstrip() for line in f if line.strip()]
+    with open(os.path.join(here, "changes", "unreleased.md"), "w") as f:
+        f.write("\n".join(lines) + "\n" if lines else "No changes yet.\n")
+
+
+_write_unreleased_changes()
+
 # The notebooks read ERA5 from Google's ARCO-ERA5 store, which keeps every
 # field as one global chunk per hour, so a cold read takes minutes. The docs
 # build seeds radarx's cache with a small pre-extracted subset (KGWX region,
@@ -135,9 +151,39 @@ if os.environ.get("READTHEDOCS_VERSION_TYPE") == "tag":
     version = os.environ.get("READTHEDOCS_GIT_IDENTIFIER", version).lstrip("v")
 release = version
 
+
+def _apa_citation(path=os.path.join("..", "CITATION.cff")):
+    """APA-style citation built from CITATION.cff (the single source of truth)."""
+    import yaml
+
+    try:
+        with open(path) as f:
+            cff = yaml.safe_load(f)
+    except (OSError, yaml.YAMLError) as err:
+        warnings.warn(f"could not read {path}: {err}")
+        return "See CITATION.cff."
+    authors = []
+    for person in cff.get("authors", []):
+        initials = " ".join(
+            f"{name[0]}." for name in person.get("given-names", "").split() if name
+        )
+        authors.append(f"{person.get('family-names', '')}, {initials}".strip(", "))
+    names = (
+        authors[0]
+        if len(authors) == 1
+        else ", ".join(authors[:-1]) + ", & " + authors[-1]
+    )
+    year = str(cff.get("date-released", ""))[:4]
+    return (
+        f"{names} ({year}). *{cff['title']}* (Version {cff.get('version', release)}) "
+        f"[Computer software]. Zenodo. https://doi.org/{cff['doi']}"
+    )
+
+
 myst_substitutions = {
     "today": dt.datetime.utcnow().strftime("%Y-%m-%d"),
     "release": release,
+    "apa_citation": _apa_citation(),
 }
 myst_heading_anchors = 3
 
@@ -151,6 +197,7 @@ exclude_patterns = [
     "**.ipynb_checkpoints",
     "notebooks/conftest.py",
     "notebooks/downloads",
+    "changes",
 ]
 
 pygments_style = "sphinx"
@@ -167,6 +214,11 @@ nb_execution_mode = "auto"
 nb_execution_kernel_name = "python3"
 nb_execution_in_temp = True
 nb_execution_timeout = 600
+# The end-to-end workflow notebook processes several full NEXRAD volumes and
+# exceeds the Read the Docs build resources; it is executed and tested in the
+# GitHub Actions notebook jobs instead and shown without outputs here.
+if os.environ.get("READTHEDOCS"):
+    nb_execution_excludepatterns = ["notebooks/Radar_Workflow.md"]
 # fail the build instead of publishing a traceback
 nb_execution_raise_on_error = True
 # HoloViews also emits a comm payload for live kernels; static docs use the

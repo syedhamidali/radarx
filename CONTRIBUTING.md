@@ -106,9 +106,27 @@ Before you submit a pull request, check that it meets these guidelines:
 1.  The pull request should include tests.
 2.  If the pull request adds functionality, the docs should be updated.
     Put your new functionality into a function with a docstring, and add
-    an entry under "Unreleased" in `docs/history.md`.
+    a changelog fragment `docs/changes/<PR number>.md` (see
+    `docs/changes/README.md`).
 3.  The pull request should work for all supported Python versions; the
     GitHub Actions checks on the pull request must pass.
+
+## Adding a feature without touching shared files
+
+New features plug in without editing shared files, so pull requests don't
+conflict with each other:
+
+- **Compiled kernels:** every `radarx/**/_*.cpp` file is built as the extension
+  module of the same name (`setup.py` discovers them) and checked by
+  `ci/check_compiled_kernel.py`. Keep an identical NumPy implementation as the
+  fallback and test oracle.
+- **Retrieval modules:** every public module in `radarx/retrieve/` is imported
+  and its `__all__` re-exported by `radarx.retrieve` automatically.
+- **Accessor methods:** register them in your module with
+  `radarx._registry.accessor_method` instead of editing `radarx/accessors.py`.
+- **Notebooks:** example notebooks named `docs/notebooks/<Capitalised_Name>.md`
+  are listed in the user guide automatically.
+- **Changelog:** add `docs/changes/<PR number>.md`.
 
 ## Tips
 
@@ -120,9 +138,18 @@ $ pytest tests/test_radarx.py
 
 ## Deploying
 
-A reminder for the maintainers on how to deploy. Make sure all your
-changes are committed (including the release section in
-`docs/history.md` and the version and date in `CITATION.cff`). Then
-publish a GitHub release with a new `vX.Y.Z` tag: the version comes from
-the tag (setuptools-scm), and the release workflow builds the wheels and
-uploads them to PyPI.
+A reminder for the maintainers on how to release:
+
+1. In a pull request titled `REL: X.Y.Z`, run
+   `python ci/release_changelog.py X.Y.Z`. It moves the changelog fragments
+   from `docs/changes/` into a new section of `docs/history.md` (add a short
+   summary paragraph there if you like) and sets `version` and
+   `date-released` in `CITATION.cff`. The README, the documentation and
+   GitHub's "Cite this repository" button all take the citation from
+   `CITATION.cff`.
+2. After merging, publish a GitHub release with the tag `vX.Y.Z`. The version
+   comes from the tag (setuptools-scm); the release workflow builds the wheels
+   and uploads them to PyPI, and Zenodo archives the release under the same
+   concept DOI.
+3. Merge the conda-forge bot's version update on the radarx feedstock (check
+   for new runtime dependencies).
