@@ -50,6 +50,7 @@ include = ["radarx*"]
 
 [tool.setuptools.package-data]
 "radarx.io" = ["data/*.csv"]
+"radarx.retrieve" = ["data/*.csv"]
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}

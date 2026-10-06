@@ -38,6 +38,7 @@ from .retrieve import (  # noqa
     melting_layer,
     qvp,
 )
+from .retrieve import dsd as retrieve_dsd  # noqa
 from .retrieve import estimate_motion as retrieve_estimate_motion  # noqa
 from .retrieve import interpolate_time as retrieve_interpolate_time  # noqa
 from .retrieve import shear as _shear
@@ -417,6 +418,30 @@ class RadarxDataSetAccessor(_ShearMixin, RadarxAccessor):
         radarx.retrieve.estimate_kdp
         """
         return estimate_kdp(self.xarray_obj, phidp, rhohv, dbzh, **kwargs)
+
+    def dsd(self, method="constrained", **kwargs):
+        """
+        Retrieve gamma raindrop size distribution parameters.
+
+        Parameters
+        ----------
+        method : {"constrained", "normalized"}, optional
+            Retrieval method. Default ``"constrained"``.
+        **kwargs
+            Options of :func:`radarx.retrieve.dsd`, e.g. ``mask``, ``kdp``,
+            ``band``.
+
+        Returns
+        -------
+        xarray.Dataset
+            ``N0``, ``NW``, ``D0``, ``DM``, ``MU``, ``LAMBDA``, ``RAIN_RATE``
+            and ``LWC``.
+
+        See Also
+        --------
+        radarx.retrieve.dsd
+        """
+        return retrieve_dsd(self.xarray_obj, method, **kwargs)
 
     def qvp(self, data_vars=None, **kwargs):
         """
@@ -884,6 +909,34 @@ class RadarxDataTreeAccessor(_ShearMixin, RadarxAccessor):
         radarx.retrieve.estimate_kdp
         """
         return estimate_kdp(self.xarray_obj, phidp, rhohv, dbzh, **kwargs)
+
+    def dsd(self, method="constrained", **kwargs):
+        """
+        Retrieve gamma raindrop size distribution parameters for every sweep.
+
+        All gates of all sweeps are processed in one call of the compiled
+        kernel.
+
+        Parameters
+        ----------
+        method : {"constrained", "normalized"}, optional
+            Retrieval method. Default ``"constrained"``.
+        **kwargs
+            Options of :func:`radarx.retrieve.dsd`, e.g. ``mask``, ``kdp``,
+            ``band``.
+
+        Returns
+        -------
+        xarray.DataTree
+            The root of the volume and one node per sweep with ``N0``,
+            ``NW``, ``D0``, ``DM``, ``MU``, ``LAMBDA``, ``RAIN_RATE`` and
+            ``LWC``.
+
+        See Also
+        --------
+        radarx.retrieve.dsd
+        """
+        return retrieve_dsd(self.xarray_obj, method, **kwargs)
 
     def qvp(self, data_vars=None, **kwargs):
         """

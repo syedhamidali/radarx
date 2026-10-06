@@ -124,3 +124,24 @@ out = sounding._sounding.interp_vertical(
 if out.shape != (1, 1, 1) or not np.isclose(out[0, 0, 0], 275.0):
     sys.exit(f"compiled sounding kernel returned an unexpected result: {out}")
 print("compiled sounding kernel OK")
+
+import importlib  # noqa: E402
+
+dsdmod = importlib.import_module("radarx.retrieve.dsd")
+
+if not dsdmod.HAS_COMPILED_KERNEL:
+    sys.exit("radarx.retrieve._dsd was not built: the compiled kernel is missing")
+table = dsdmod._lookup_table(
+    "S", 20.0, "constrained", dsdmod.MU_LAMBDA["cao2008"], None
+)
+(out,) = dsdmod._dsd.retrieve(
+    [np.array([40.0])],
+    [np.array([1.5])],
+    [None],
+    [None],
+    *(table[k] for k in dsdmod._TABLE_KEYS),
+)
+ref = dsdmod._retrieve_numpy(np.array([40.0]), np.array([1.5]), None, None, table, 0.0)
+if out.shape != (8, 1) or not np.allclose(out, ref, rtol=1e-10):
+    sys.exit(f"compiled DSD kernel returned an unexpected result: {out}")
+print("compiled DSD kernel OK")
