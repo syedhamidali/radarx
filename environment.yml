@@ -30,6 +30,8 @@ dependencies:
   - arm_pyart
   - ffmpeg
   - zarr
+  - aiohttp
+  - cdsapi
   - pooch
   - xradar
   - fsspec

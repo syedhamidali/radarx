@@ -41,6 +41,9 @@ dependencies:
   - arm_pyart
   - ffmpeg
   - zarr
+  - aiohttp
+  - fsspec
+  - cdsapi
   - jupytext
   - nbclient
   - nbformat

@@ -490,6 +490,114 @@ class RadarxDataSetAccessor(_ShearMixin, RadarxAccessor):
             self.xarray_obj, field, nyquist_velocity=nyquist_velocity, **kwargs
         )
 
+    def interpolate_profile(
+        self,
+        profile,
+        variables=None,
+        *,
+        extrapolate=False,
+        engine="auto",
+        n_threads=None,
+    ):
+        """
+        Add profile variables (temperature, pressure, wind, ...) at every gate or level.
+
+        Parameters
+        ----------
+        profile : xarray.Dataset
+            Profile on ``height``, e.g. from
+            :func:`radarx.io.sounding.read_sounding`,
+            :func:`radarx.io.sounding.era5_profile` or
+            ``dtree.radarx.sounding()``.
+        variables : list of str, optional
+            Profile variables to add. Default: all.
+        extrapolate : bool, optional
+            Hold the end values beyond the profile. Default False (NaN).
+        engine : {"auto", "compiled", "numpy"}, optional
+            Kernel implementation.
+        n_threads : int, optional
+            Threads for the compiled kernel. Default: all cores.
+
+        Returns
+        -------
+        xarray.Dataset
+            The sweep or grid with the profile variables on the dimensions
+            of its ``z`` (gate heights of a georeferenced sweep, or grid
+            levels).
+
+        See Also
+        --------
+        radarx.io.sounding.interpolate_profile
+        """
+        from .io.sounding import interpolate_profile
+
+        ds = self.xarray_obj
+        if "z" not in ds:
+            raise ValueError(
+                "the dataset needs 'z' heights; georeference the sweep first"
+            )
+        env = interpolate_profile(
+            profile,
+            ds["z"],
+            variables,
+            extrapolate=extrapolate,
+            engine=engine,
+            n_threads=n_threads,
+        )
+        return ds.assign({name: env[name] for name in env.data_vars})
+
+    def background(
+        self,
+        profile=None,
+        *,
+        source="auto",
+        time=None,
+        time_interpolation="linear",
+        engine="auto",
+        n_threads=None,
+    ):
+        """
+        Thermodynamic and wind background on a radarx grid.
+
+        Parameters
+        ----------
+        profile : xarray.Dataset, optional
+            A sounding to spread uniformly over the grid. By default the ERA5
+            columns at every grid cell are used.
+        source : {"auto", "arco", "cds", "gcs"}, optional
+            ERA5 provider when ``profile`` is not given.
+        time : str or datetime-like, optional
+            ERA5 valid time. Default: the grid's ``time``.
+        time_interpolation : {"linear", "nearest"}, optional
+            ERA5 time interpolation.
+        engine : {"auto", "compiled", "numpy"}, optional
+            Kernel implementation.
+        n_threads : int, optional
+            Threads for the compiled kernel. Default: all cores.
+
+        Returns
+        -------
+        xarray.Dataset
+            See :func:`radarx.io.sounding.era5_column`.
+
+        See Also
+        --------
+        radarx.io.sounding.era5_column, radarx.io.sounding.profile_to_grid
+        """
+        from .io.sounding import era5_column, profile_to_grid
+
+        grid = self.xarray_obj
+        if profile is not None:
+            return profile_to_grid(profile, grid, engine=engine, n_threads=n_threads)
+        return era5_column(
+            grid,
+            time,
+            source=source,
+            time_interpolation=time_interpolation,
+            engine=engine,
+            n_threads=n_threads,
+        )
+
     def plot_max_cappi(
         self,
         data_var,
@@ -649,6 +757,45 @@ class RadarxDataTreeAccessor(_ShearMixin, RadarxAccessor):
         radarx.vis.interactive
         """
         return RadarxDataTreePlotAccessor(self.xarray_obj)
+
+    def sounding(self, source="era5", station=None, time=None, **kwargs):
+        """
+        Sounding or ERA5 profile for this radar volume.
+
+        Uses the radar's ``latitude`` and ``longitude`` and the volume start
+        time.
+
+        Parameters
+        ----------
+        source : {"era5", "iem", "uwyo", "igra2"}, optional
+            ``"era5"`` (default) for the ERA5 profile at the radar
+            (:func:`radarx.io.sounding.era5_profile`; choose the provider with
+            ``era5_source="arco"|"cds"|"gcs"``), otherwise the observed
+            sounding from that archive at the nearest 00/12 UTC launch
+            (:func:`radarx.io.sounding.read_sounding`).
+        station : str, optional
+            Radiosonde station. Default: the nearest station in that archive.
+        time : str or datetime-like, optional
+            Time to use instead of the volume start time.
+        **kwargs
+            Passed on to the reader.
+
+        Returns
+        -------
+        xarray.Dataset
+            Profile on ``height`` (m above sea level).
+
+        See Also
+        --------
+        radarx.io.sounding
+        """
+        from .io.sounding import _sounding_for_volume
+
+        if "era5_source" in kwargs:
+            kwargs["source"] = kwargs.pop("era5_source")
+        return _sounding_for_volume(
+            self.xarray_obj, kind=source, station=station, time=time, **kwargs
+        )
 
     def to_grid(
         self,
