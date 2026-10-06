@@ -917,6 +917,54 @@ def _reference_height(value, template, other):
     return ref.transpose(*other).reset_coords(drop=True)
 
 
+_REFERENCE_LABELS = {
+    "freezing_level": ("0 degC", "height of the 0 degC level above sea level"),
+    "wet_bulb_zero_height": (
+        "wet-bulb 0 degC",
+        "height of the 0 degC wet-bulb temperature above sea level",
+    ),
+    "reference": ("reference", "reference height above sea level"),
+}
+
+
+def _reference_heights(environment, freezing_level, template, other, engine, n_threads):
+    """Reference heights to report, the height the search is centred on, and
+    whether the reported ``freezing_level`` is the user's own."""
+    env_fl, env_wbz = _environment_levels(environment, engine, n_threads)
+    given = environment is None and freezing_level is not None
+    refs = {
+        key: _reference_height(value, template, other)
+        for key, value in (
+            ("freezing_level", freezing_level if given else env_fl),
+            ("wet_bulb_zero_height", env_wbz),
+        )
+        if value is not None
+    }
+    if freezing_level is not None:
+        return refs, _reference_height(freezing_level, template, other), given
+    search = refs.get("wet_bulb_zero_height", refs.get("freezing_level"))
+    if search is not None and "freezing_level" in refs:
+        # the 0 °C height where the wet-bulb 0 °C height is missing
+        search = search.fillna(refs["freezing_level"])
+    return refs, search, given
+
+
+def _ml_method(boundaries, onset_fraction, rhohv_onset):
+    """``method`` attribute of the melting-layer heights."""
+    method = "co-located rhohv minimum and ZDR/Z maximum (after Giangrande et al. 2008)"
+    if boundaries == "half_prominence":
+        return (
+            method + "; top and bottom at half the prominence of the ZDR/rhohv anomaly"
+        )
+    method += (
+        "; top and bottom where rhohv departs from its background by "
+        f"{float(onset_fraction):g} of the dip"
+    )
+    if rhohv_onset is not None:
+        method += f" or reaches {float(rhohv_onset):g}"
+    return method + " (after Griffin et al. 2020)"
+
+
 def _search_range(reference, height_range, window, n_prof):
     """Per-profile (hmin, hmax) for the ZDR peak: ``window`` around the
     reference height, else (and where it is missing) ``height_range``."""
@@ -1181,23 +1229,9 @@ def melting_layer(
             f"boundaries must be 'onset' or 'half_prominence', not {boundaries!r}"
         )
     zh, rho, zd = (as2d(names[k]) for k in ("dbz", "rhohv", "zdr"))
-    env_fl, env_wbz = _environment_levels(environment, engine, n_threads)
-    given = environment is None and freezing_level is not None
-    refs = {
-        key: _reference_height(value, template, other)
-        for key, value in (
-            ("freezing_level", freezing_level if given else env_fl),
-            ("wet_bulb_zero_height", env_wbz),
-        )
-        if value is not None
-    }
-    if freezing_level is not None:
-        search = _reference_height(freezing_level, template, other)
-    else:
-        search = refs.get("wet_bulb_zero_height", refs.get("freezing_level"))
-        if search is not None and "freezing_level" in refs:
-            # the 0 °C height where the wet-bulb 0 °C height is missing
-            search = search.fillna(refs["freezing_level"])
+    refs, search, given = _reference_heights(
+        environment, freezing_level, template, other, engine, n_threads
+    )
     hmin, hmax = _search_range(search, height_range, freezing_level_window, len(zh))
     params = (
         *(float(v) for v in (*rhohv_range, zdr_min, dbz_min, window, depth)),
@@ -1227,17 +1261,7 @@ def melting_layer(
             max_fill=int(max_fill),
         )
     coords = {name: c for name, c in template.coords.items() if "height" not in c.dims}
-    method = "co-located rhohv minimum and ZDR/Z maximum (after Giangrande et al. 2008)"
-    if boundaries == "onset":
-        method += (
-            "; top and bottom where rhohv departs from its background by "
-            f"{float(onset_fraction):g} of the dip"
-        )
-        if rhohv_onset is not None:
-            method += f" or reaches {float(rhohv_onset):g}"
-        method += " (after Griffin et al. 2020)"
-    else:
-        method += "; top and bottom at half the prominence of the ZDR/rhohv anomaly"
+    method = _ml_method(boundaries, onset_fraction, rhohv_onset)
 
     def wrap(values, long_name):
         return xr.DataArray(
@@ -1274,21 +1298,8 @@ def melting_layer(
         },
     )
     out.attrs["melting_layer_boundaries"] = boundaries
-    labels = {
-        "freezing_level": ("0 degC", "height of the 0 degC level above sea level"),
-        "wet_bulb_zero_height": (
-            "wet-bulb 0 degC",
-            "height of the 0 degC wet-bulb temperature above sea level",
-        ),
-    }
-    if given:
-        labels["freezing_level"] = ("reference", "reference height above sea level")
-    suffix = {
-        "freezing_level": "freezing_level",
-        "wet_bulb_zero_height": "wet_bulb_zero",
-    }
     for key, ref in refs.items():
-        what, long_name = labels[key]
+        what, long_name = _REFERENCE_LABELS["reference" if given else key]
         values = np.asarray(ref.values, np.float64).reshape(shape)
         out[key] = xr.DataArray(
             values,
@@ -1296,7 +1307,8 @@ def melting_layer(
             coords=coords,
             attrs={"standard_name": "altitude", "long_name": long_name, "units": "m"},
         )
-        out[f"melting_layer_top_offset_{suffix[key]}"] = xr.DataArray(
+        suffix = "wet_bulb_zero" if key == "wet_bulb_zero_height" else key
+        out[f"melting_layer_top_offset_{suffix}"] = xr.DataArray(
             np.asarray(top, np.float64) - values,
             dims=other,
             coords=coords,
