@@ -141,7 +141,7 @@ def test_build_end_to_end(tmp_path, offline):
     assert saved["skipped_pairs"][0]["pair"]["radars"] == ["KTST", "KNONE"]
     assert saved["pairs"][0]["error"] is None
     assert not (tmp_path / "out" / "_parts").exists()
-    # the same seed gives the same samples
+    # the same seed gives the same samples; small batches give the same store
     cfg["tasks"] = {"inpaint": cfg["tasks"]["inpaint"]}
     again = bd.build(
         cfg,
@@ -150,8 +150,16 @@ def test_build_end_to_end(tmp_path, offline):
         workers=1,
         lister=_lister,
         log=lambda m: None,
+        keep_parts=True,
     )
     assert again["samples"]["inpaint"] == manifest["samples"]["inpaint"]
+    counts = bd.consolidate(tmp_path / "out2" / "_parts", tmp_path / "out3", {}, 1)
+    assert counts == again["samples"]
+    c = open_dataset(tmp_path / "out3", "inpaint", "train")
+    np.testing.assert_array_equal(
+        c.BLOCKAGE.values,
+        open_dataset(tmp_path / "out2", "inpaint", "train").BLOCKAGE.values,
+    )
     a = open_dataset(tmp_path / "out", "inpaint", "train").sortby("time")
     b = open_dataset(tmp_path / "out2", "inpaint", "train").sortby("time")
     np.testing.assert_array_equal(a.BLOCKAGE.values, b.BLOCKAGE.values)

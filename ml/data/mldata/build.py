@@ -7,7 +7,7 @@ Stages
    run radarx's ``echo_mask``, ``estimate_kdp``, ``hid`` and
    ``dealias_velocity`` on the whole volume (each one compiled, multithreaded
    kernel call), build the polar samples of every task and the composite
-   frame for nowcasting, and write them as per-volume Zarr parts.
+   frame for nowcasting, and write them as per-volume parts (temporary pickles).
 2. **Nowcasting** (:func:`nowcast_parts`): consecutive frames of each case
    become sequences; motion and extrapolation come from radarx.
 3. **Multi-Doppler** (:func:`process_pair`, one process per radar pair).
@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import pickle
 import shutil
 import subprocess
 import time
@@ -108,18 +109,17 @@ def _finish(task, ds, coords):
 
 
 def _write_part(ds, path):
-    path = Path(path)
+    """Write a temporary part (a pickled in-memory Dataset; fast, uncompressed)."""
+    path = Path(path).with_suffix(".pkl")
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists():
-        shutil.rmtree(path)
-    ds.to_zarr(
-        path,
-        mode="w",
-        zarr_format=2,
-        consolidated=False,
-        write_empty_chunks=True,
-        encoding=_encoding(ds),
-    )
+    with open(path, "wb") as f:
+        pickle.dump(ds.load(), f, protocol=pickle.HIGHEST_PROTOCOL)
+    return path
+
+
+def _read_part(path):
+    with open(path, "rb") as f:
+        return pickle.load(f)  # noqa: S301 - parts are written by this build
 
 
 def _site(dtree):
@@ -293,8 +293,7 @@ def process_volume(job):
         frame.attrs.update(
             {k: rec[k] for k in ("volume_id", "radar", "case", "split", "event")}
         )
-        fpath = parts / "_frames" / f"{rec['volume_id']}.zarr"
-        _write_part(frame, fpath)
+        fpath = _write_part(frame, parts / "_frames" / f"{rec['volume_id']}.pkl")
         summary["frame"] = str(fpath)
         t = tick("composite", t)
     summary["samples"] = counts
@@ -327,7 +326,7 @@ def _safe(func, job):
 
 
 def _frames(frame_paths):
-    frames = [xr.open_zarr(p, consolidated=False).load() for p in frame_paths]
+    frames = [_read_part(p) for p in frame_paths]
     return sorted(frames, key=lambda f: f["time"].values)
 
 
@@ -529,9 +528,11 @@ def _encoding(ds):
     return enc
 
 
-def consolidate(parts_dir, out_dir, provenance):
+def consolidate(parts_dir, out_dir, provenance, batch_bytes=2**30):
     """
     Append the parts of every task and split into ``<task>/<split>.zarr``.
+
+    Parts are written in batches of about ``batch_bytes`` (in memory).
 
     Returns
     -------
@@ -544,7 +545,7 @@ def consolidate(parts_dir, out_dir, provenance):
     counts = {}
     for task in SCHEMAS:
         for split in SPLITS:
-            files = sorted((parts_dir / task / split).glob("*.zarr"))
+            files = sorted((parts_dir / task / split).glob("*.pkl"))
             if not files:
                 continue
             target = out_dir / task / f"{split}.zarr"
@@ -553,21 +554,31 @@ def consolidate(parts_dir, out_dir, provenance):
             target.parent.mkdir(parents=True, exist_ok=True)
             n = 0
             cases = set()
-            for i, f in enumerate(files):
-                ds = xr.open_zarr(f, consolidated=False).load()
-                cases.update(str(c) for c in np.atleast_1d(ds["case"].values))
-                n += ds.sizes["sample"]
-                opts = {
-                    "zarr_format": 2,
-                    "consolidated": False,
-                    "write_empty_chunks": True,
-                }
-                if i == 0:
+            batch, size = [], 0
+
+            def flush(batch, first):
+                ds = xr.concat(batch, dim="sample") if len(batch) > 1 else batch[0]
+                opts = {"zarr_format": 2, "consolidated": False}
+                if first:
                     ds.attrs = {}
                     ds.to_zarr(target, mode="w", encoding=_encoding(ds), **opts)
                 else:
                     fixed = [v for v in ds.variables if "sample" not in ds[v].dims]
                     ds.drop_vars(fixed).to_zarr(target, append_dim="sample", **opts)
+
+            # parts are gathered in memory up to ``batch_bytes`` and written
+            # in one call: each Zarr append has a fixed cost
+            for f in files:
+                ds = _read_part(f)
+                cases.update(str(c) for c in np.atleast_1d(ds["case"].values))
+                n += ds.sizes["sample"]
+                batch.append(ds)
+                size += ds.nbytes
+                if size >= batch_bytes:
+                    flush(batch, first=n == sum(b.sizes["sample"] for b in batch))
+                    batch, size = [], 0
+            if batch:
+                flush(batch, first=n == sum(b.sizes["sample"] for b in batch))
             attrs = dict(provenance)
             attrs.update(
                 {
