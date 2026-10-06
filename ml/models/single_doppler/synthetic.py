@@ -97,8 +97,10 @@ def beltrami(X, Y, Z_, z0, ztop, rng, wmax):
 def potential_flow(rng, shape, z, wmax):
     """Anelastic mass flux from a random vector potential, tapered in z."""
     nz, ny, nx = shape
-    length = rng.uniform(3e3, 15e3)
-    lz = rng.uniform(1500.0, 4000.0)
+    # horizontal scale of the cells; a vertical scale of the same order keeps
+    # the horizontal perturbation comparable to w, as in convective cells
+    length = rng.uniform(4e3, 15e3)
+    lz = float(np.clip(length * rng.uniform(0.6, 1.2), 2500.0, 8000.0))
     # pad in z so the field is not periodic there, then taper
     a = [
         _random_field(rng, (2 * nz, ny, nx), (lz, length, length), (DZ, DX, DX))[:nz]

@@ -147,17 +147,27 @@ def _resolve_model(model, providers):
     """A model object with ``run`` and its metadata dictionary."""
     if hasattr(model, "run"):
         m = model
-    elif isinstance(model, (str, os.PathLike)) and os.path.isfile(model):
-        m = _OnnxFile(model, providers)
     else:
-        from .. import ml  # radarx[ml] model registry
-
-        m = ml.load_model(model, providers=providers)
-    info = {}
+        try:
+            from .. import ml  # radarx[ml]: model registry and ONNX Runtime
+        except ImportError:
+            ml = None
+        if ml is not None:
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message=".*not in the model registry")
+                m = ml.load_model(model, providers=providers)
+        elif isinstance(model, (str, os.PathLike)) and os.path.isfile(model):
+            m = _OnnxFile(model, providers)
+        else:
+            raise ImportError(
+                f"cannot load {model!r}: the radarx.ml model registry is not "
+                "available; pass a local ONNX file or a model object"
+            )
+    info = {k: v for k, v in dict(getattr(m, "info", None) or {}).items() if v}
     session = getattr(m, "session", None)
     if session is not None and hasattr(session, "get_modelmeta"):
-        info.update(session.get_modelmeta().custom_metadata_map)
-    info.update({k: v for k, v in dict(getattr(m, "info", None) or {}).items()})
+        for k, v in session.get_modelmeta().custom_metadata_map.items():
+            info.setdefault(k, v)
     return m, info
 
 

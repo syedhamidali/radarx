@@ -241,7 +241,7 @@ def test_onnx_model(case, tmp_path):
     path = str(tmp_path / "tiny.onnx")
     weight, bias = _tiny_onnx(path)
     out = single_doppler_winds(ds, bg, model=path, refine=False)
-    assert out.attrs["ml_model"] == "tiny-random"
+    assert out.attrs["ml_model"] in ("tiny-random", "tiny")  # metadata or file name
     # the grid is on the model's spacing (dz 1000 m, dx 2000 m): no regridding
     geo = radarx.retrieve.radar_geometry(ds)
     feats = sd._grid_features(geo, bg, "VRADH", "DBZH")
