@@ -5,6 +5,9 @@ build:
   os: "ubuntu-24.04"
   tools:
     python: "miniforge3-latest"
+# Notebook outputs come from the "Docs" GitHub Actions workflow (docs-cache
+# branch); this build only executes notebooks whose code changed, see the
+# myst_nb section of docs/conf.py.
 sphinx:
   configuration: docs/conf.py
 # notebooks run in a separate kernel, so radarx must be installed (not just
