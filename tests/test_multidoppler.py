@@ -479,7 +479,8 @@ def _nexrad(path):
         if "DBZH" in ds:
             ds["DBZH"] = ds.DBZH.where(ds.DBZH > -32)
         dtree[name] = ds.assign_coords(nyquist_velocity=nyquist[i])
-    return dtree.radarx.dealias("VRADH")
+    # dealias returns products only; put the dealiased velocity back as VRADH
+    return dtree.radarx.assign(dtree.radarx.dealias("VRADH", name="VRADH"))
 
 
 @pytest.fixture(scope="module")

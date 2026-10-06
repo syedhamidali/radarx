@@ -190,8 +190,14 @@ def nexrad_volume(key):
     return dtree
 
 
-kgwx = nexrad_volume("KGWX/KGWX20220330_235959_V06").radarx.dealias("VRADH")
-kbmx = nexrad_volume("KBMX/KBMX20220330_235713_V06").radarx.dealias("VRADH")
+def dealiased(key):
+    """Volume with its radial velocity dealiased in place (as ``VRADH``)."""
+    vol = nexrad_volume(key)
+    return vol.radarx.assign(vol.radarx.dealias("VRADH", name="VRADH"))
+
+
+kgwx = dealiased("KGWX/KGWX20220330_235959_V06")
+kbmx = dealiased("KBMX/KBMX20220330_235713_V06")
 ```
 
 The radars scanned at different times, so we estimate the storm motion from
