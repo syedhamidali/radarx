@@ -138,7 +138,7 @@ sweep = dtree["sweep_0"].to_dataset()
 res = out["sweep_0"].to_dataset()
 x, y = sweep.x / 1000, sweep.y / 1000
 fig, axs = plt.subplots(1, 3, figsize=(17, 5), sharex=True, sharey=True)
-m = axs[0].pcolormesh(x, y, sweep.DBZH, cmap="ChaseSpectral", vmin=-10, vmax=70, shading="auto")
+m = axs[0].pcolormesh(x, y, sweep.DBZH, cmap="turbo", vmin=-10, vmax=70, shading="auto")
 plt.colorbar(m, ax=axs[0], label="$Z_H$ (dBZ)", shrink=0.85)
 m = axs[1].pcolormesh(x, y, res.HID.where(res.HID > 0), cmap=cmap, norm=norm, shading="auto")
 class_colorbar(m, axs[1], classes)
@@ -193,7 +193,7 @@ def hid_field(name):
 
 fig, axs = plt.subplots(2, 1, figsize=(11, 7), sharex=True)
 m = cross_section(axs[0], 215, lambda n: dtree[n]["DBZH"].values,
-                  cmap="ChaseSpectral", vmin=-10, vmax=70)  # fmt: skip
+                  cmap="turbo", vmin=-10, vmax=70)  # fmt: skip
 plt.colorbar(m, ax=axs[0], label="$Z_H$ (dBZ)")
 m = cross_section(axs[1], 215, hid_field, cmap=cmap, norm=norm)
 class_colorbar(m, axs[1], classes)
@@ -268,7 +268,7 @@ cmap_c, norm_c = class_colors(classes_c)
 
 fig, axs = plt.subplots(1, 2, figsize=(13, 5.5), sharex=True, sharey=True)
 m = axs[0].pcolormesh(sw.x / 1000, sw.y / 1000, sw.attenuation_corrected_reflectivity_h.where(sw.met),
-                      cmap="ChaseSpectral", vmin=-10, vmax=70, shading="auto")  # fmt: skip
+                      cmap="turbo", vmin=-10, vmax=70, shading="auto")  # fmt: skip
 plt.colorbar(m, ax=axs[0], label="$Z_H$ (dBZ)", shrink=0.85)
 m = axs[1].pcolormesh(sw.x / 1000, sw.y / 1000, res_c.HID.where(res_c.HID > 0), cmap=cmap_c, norm=norm_c, shading="auto")
 class_colorbar(m, axs[1], classes_c)
