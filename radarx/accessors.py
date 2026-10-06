@@ -694,6 +694,30 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
             n_threads=n_threads,
         )
 
+    def multi_doppler(self, background=None, **kwargs):
+        """
+        Retrieve the 3D wind from the radial velocities of several radars.
+
+        Parameters
+        ----------
+        background : xarray.Dataset, optional
+            Background on the grid (``grid.radarx.background()``).
+        **kwargs
+            Options of :func:`radarx.retrieve.multi_doppler`.
+
+        Returns
+        -------
+        xarray.Dataset
+            ``u``, ``v``, ``w`` and diagnostics on the grid.
+
+        See Also
+        --------
+        radarx.retrieve.multi_doppler, radarx.retrieve.multi_doppler_input
+        """
+        from .retrieve.multidoppler import multi_doppler
+
+        return multi_doppler(self.xarray_obj, background, **kwargs)
+
     def plot_max_cappi(
         self,
         data_var,
