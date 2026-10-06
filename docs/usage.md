@@ -29,6 +29,7 @@ notebooks/Azimuthal_Shear
 notebooks/KDP
 notebooks/QVP
 notebooks/aws_data
+notebooks/Soundings_and_ERA5
 ```
 
 ```{toctree}

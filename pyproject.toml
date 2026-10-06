@@ -48,6 +48,9 @@ build-backend = "setuptools.build_meta"
 # would otherwise be picked up by automatic discovery
 include = ["radarx*"]
 
+[tool.setuptools.package-data]
+"radarx.io" = ["data/*.csv"]
+
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
 readme = {file = ["README.md", "docs/history.md"], content-type = "text/markdown"}
@@ -62,6 +65,9 @@ fallback_version = "9999"
 [project.optional-dependencies]
 plot = ["hvplot", "holoviews", "bokeh", "panel", "datashader"]
 uxarray = ["uxarray", "spatialpandas", "geopandas"]
+# ERA5 profiles: anonymous Google ARCO-ERA5 Zarr over HTTPS (zarr, fsspec,
+# aiohttp) and the Copernicus CDS (cdsapi, needs an account)
+sounding = ["zarr", "fsspec", "aiohttp", "cdsapi"]
 dev = [
     # testing
     "pytest",

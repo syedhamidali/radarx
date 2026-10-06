@@ -111,3 +111,16 @@ values, counts = qvp._qvp.azimuthal_reduce(
 if values[0].shape != (1, rng.size) or not np.allclose(values[0], 1.0):
     sys.exit(f"compiled QVP kernel returned an unexpected result: {values[0]}")
 print("compiled QVP kernel OK")
+
+from radarx.io import sounding  # noqa: E402
+
+if not sounding.HAS_COMPILED_KERNEL:
+    sys.exit("radarx.io._sounding was not built: the compiled kernel is missing")
+z = np.array([[0.0, 1000.0, 2000.0]])
+values = np.array([[[280.0, 270.0, 260.0]]])
+out = sounding._sounding.interp_vertical(
+    z, values, np.array([[500.0]]), np.array([False]), False, 0
+)
+if out.shape != (1, 1, 1) or not np.isclose(out[0, 0, 0], 275.0):
+    sys.exit(f"compiled sounding kernel returned an unexpected result: {out}")
+print("compiled sounding kernel OK")
