@@ -121,6 +121,7 @@ def test_output_layout_and_metadata():
     assert out["DBZH"].attrs["units"] == "dBZ"
     for name in ("lat", "lon", "latitude", "longitude", "altitude", "time"):
         assert name in out.variables
+    assert "time" in out.coords and out["time"].ndim == 0
     assert out.lat.dims == ("y",) and out.lon.dims == ("x",)
     np.testing.assert_allclose(float(out.lat.sel(y=0.0)), 45.0)
     assert out.attrs["gridding_method"] == "cone"

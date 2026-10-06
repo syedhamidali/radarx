@@ -182,9 +182,13 @@ def test_xarray_interface():
     xr.testing.assert_identical(shear, azimuthal_shear(ds))
     xr.testing.assert_identical(div, ds.radarx.llsd()["radial_divergence"])
 
-    tree = xr.DataTree.from_dict({"/": xr.Dataset(), "sweep_0": ds, "sweep_1": ds})
+    root = xr.Dataset({"site": 1.0})
+    tree = xr.DataTree.from_dict({"/": root, "sweep_0": ds, "sweep_1": ds})
     out = tree.radarx.llsd()
     assert set(out.children) == {"sweep_0", "sweep_1"}
+    assert float(out["site"]) == 1.0  # the input root is kept
+    merged = tree.radarx.assign(out)
+    assert {"VRADH", "azimuthal_shear"} <= set(merged["sweep_1"].data_vars)
     xr.testing.assert_allclose(out["sweep_1"].to_dataset()["azimuthal_shear"], shear)
     only = tree.radarx.azimuthal_shear()
     assert list(only["sweep_0"].data_vars) == ["azimuthal_shear"]

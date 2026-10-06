@@ -163,7 +163,9 @@ def test_engines_identical(nyquist, noise):
         a = dealias_velocity(tree, engine="compiled", sweep_continuity=continuity)
         b = dealias_velocity(tree, engine="numpy", sweep_continuity=continuity)
         for n in ("sweep_0", "sweep_1", "sweep_2"):
-            np.testing.assert_array_equal(a[n]["VRADH"].values, b[n]["VRADH"].values)
+            np.testing.assert_array_equal(
+                a[n]["VRADH_dealiased"].values, b[n]["VRADH_dealiased"].values
+            )
 
 
 @pytest.mark.skipif(not dealias.HAS_COMPILED_KERNEL, reason="compiled kernel not built")
@@ -172,7 +174,9 @@ def test_thread_count_does_not_change_result():
     a = dealias_velocity(tree, n_threads=1)
     b = dealias_velocity(tree, n_threads=0)
     for n in ("sweep_0", "sweep_1", "sweep_2"):
-        np.testing.assert_array_equal(a[n]["VRADH"].values, b[n]["VRADH"].values)
+        np.testing.assert_array_equal(
+            a[n]["VRADH_dealiased"].values, b[n]["VRADH_dealiased"].values
+        )
 
 
 @pytest.mark.parametrize("engine", ENGINES)
@@ -195,12 +199,57 @@ def test_reference_fixes_absolute_fold(engine):
 @pytest.mark.parametrize("engine", ENGINES)
 def test_volume_continuity(engine):
     tree, truths = volume(nyquist=8.0, noise=1.0)
-    out = dealias_velocity(tree, engine=engine, name="VRADH_dealiased")
+    out = dealias_velocity(tree, engine=engine)
     for n, truth in truths.items():
         ds = tree[n].to_dataset()
-        assert "VRADH_dealiased" in out[n].data_vars
-        np.testing.assert_array_equal(out[n]["VRADH"].values, ds["VRADH"].values)
+        # products only: the dealiased velocity, never the measured field
+        assert list(out[n].data_vars) == ["VRADH_dealiased"]
         assert correct_fraction(out[n]["VRADH_dealiased"], ds, truth) == 1.0
+    xr.testing.assert_identical(out.to_dataset(), tree.to_dataset())
+    named = dealias_velocity(tree, engine=engine, name="VR")
+    assert list(named["sweep_0"].data_vars) == ["VR"]
+
+
+def test_products_merge_into_the_volume():
+    tree, _ = volume()
+    products = tree.radarx.dealias()
+    merged = tree.radarx.assign(products)
+    for n in ("sweep_0", "sweep_1", "sweep_2"):
+        assert {"VRADH", "VRADH_dealiased"} <= set(merged[n].data_vars)
+        xr.testing.assert_identical(merged[n]["VRADH"], tree[n]["VRADH"])
+        np.testing.assert_array_equal(
+            merged[n]["VRADH_dealiased"].values, products[n]["VRADH_dealiased"].values
+        )
+    assert "VRADH_dealiased" not in tree["sweep_0"].data_vars  # input unchanged
+    ds, _ = synthetic_sweep()
+    vr = dealias_velocity(ds)
+    assert vr.name == "VRADH_dealiased"
+    merged = ds.radarx.assign(vr)
+    xr.testing.assert_identical(merged["VRADH"], ds["VRADH"])
+    np.testing.assert_array_equal(merged["VRADH_dealiased"].values, vr.values)
+
+
+def test_old_return_style_warns():
+    ds, _ = synthetic_sweep()
+    with pytest.warns(FutureWarning, match="products_only"):
+        old = dealias_velocity(ds, products_only=False)
+    assert old.name == "VRADH"
+    np.testing.assert_array_equal(old.values, dealias_velocity(ds).values)
+    tree, _ = volume()
+    with pytest.warns(FutureWarning, match="products_only"):
+        old = dealias_velocity(tree, products_only=False)
+    new = dealias_velocity(tree)
+    for n in ("sweep_0", "sweep_1", "sweep_2"):
+        # the whole sweep, with the measured field replaced
+        assert set(old[n].data_vars) == set(tree[n].data_vars)
+        np.testing.assert_array_equal(
+            old[n]["VRADH"].values, new[n]["VRADH_dealiased"].values
+        )
+    with pytest.warns(FutureWarning):
+        kept = tree.radarx.dealias(products_only=False, name="VRADH_dealiased")
+    np.testing.assert_array_equal(
+        kept["sweep_0"]["VRADH"].values, tree["sweep_0"]["VRADH"].values
+    )
 
 
 def test_output_attributes_coords_and_dims():
@@ -270,7 +319,7 @@ def test_accessors():
     expected = dealias_velocity(tree, sweep_continuity=False)
     for n in ("sweep_0", "sweep_1", "sweep_2"):
         np.testing.assert_array_equal(
-            out[n]["VRADH"].values, expected[n]["VRADH"].values
+            out[n]["VRADH_dealiased"].values, expected[n]["VRADH_dealiased"].values
         )
 
 
@@ -313,7 +362,7 @@ def compare_with_pyart(path, dtree, out):
         sl = radar.get_slice(i)
         order = np.argsort(radar.azimuth["data"][sl])
         theirs = np.ma.filled(corrected[sl], np.nan)[order]
-        ours = ds["VRADH"].values[np.argsort(ds["azimuth"].values)]
+        ours = ds["VRADH_dealiased"].values[np.argsort(ds["azimuth"].values)]
         ng = min(theirs.shape[1], ours.shape[1])
         theirs, ours = theirs[:, :ng], ours[:, :ng]
         both = np.isfinite(theirs) & np.isfinite(ours)
@@ -360,7 +409,7 @@ def test_nexrad_engines_and_jumps(case, request):
         nyquist = float(dtree[name]["nyquist_velocity"])
         raw = dtree[name]["VRADH"].values
         raw = np.where(np.abs(raw) <= 1.01 * nyquist, raw, np.nan)
-        ours = out[name]["VRADH"].values
+        ours = out[name]["VRADH_dealiased"].values
         assert residual_jumps(ours, nyquist) <= residual_jumps(raw, nyquist)
         assert residual_jumps(ours, nyquist) < 0.005
     if dealias.HAS_COMPILED_KERNEL and case == "klbb":
@@ -368,7 +417,8 @@ def test_nexrad_engines_and_jumps(case, request):
         for name in dtree.children:
             if "VRADH" in dtree[name].data_vars:
                 np.testing.assert_array_equal(
-                    out[name]["VRADH"].values, ref[name]["VRADH"].values
+                    out[name]["VRADH_dealiased"].values,
+                    ref[name]["VRADH_dealiased"].values,
                 )
 
 

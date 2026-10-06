@@ -205,6 +205,10 @@ def test_accessors():
         out["sweep_1"].to_dataset(inherit=False),
         estimate_kdp(dtree["sweep_1"].to_dataset(inherit=False), method="vulpiani"),
     )
+    merged = dtree.radarx.assign(out)
+    for name in out.children:
+        assert {"PHIDP", "PHIDP_processed", "KDP"} <= set(merged[name].data_vars)
+    assert "KDP" not in dtree["sweep_0"].data_vars
 
 
 def test_errors():

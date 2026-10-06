@@ -78,10 +78,13 @@ __all__ = ["dealias_velocity"]
 
 __doc__ = __doc__.format("\n   ".join(__all__))
 
+import warnings
 from itertools import pairwise
 
 import numpy as np
 import xarray as xr
+
+from ._products import product_tree
 
 try:
     from . import _dealias
@@ -119,6 +122,7 @@ def dealias_velocity(
     max_iterations=100,
     n_threads=None,
     engine="auto",
+    products_only=True,
 ):
     """
     Dealias (unfold) Doppler radial velocities.
@@ -157,8 +161,10 @@ def dealias_velocity(
         use the dealiased sweep below as the reference for the next one
         (gaps are filled from ``wind_profile``). Default True.
     name : str, optional
-        For a DataTree, the name of the dealiased field in each sweep.
-        Default: replace ``field``.
+        Name of the dealiased velocity. Default ``f"{field}_dealiased"``
+        (e.g. ``"VRADH_dealiased"``), so that it never replaces the measured
+        field when the products are merged into the sweep or volume with
+        ``.radarx.assign(products)``.
     max_iterations : int, optional
         Maximum passes of the fold optimisation. Default 100.
     n_threads : int, optional
@@ -166,14 +172,23 @@ def dealias_velocity(
     engine : {"auto", "compiled", "numpy"}, optional
         Implementation to use. ``"auto"`` (default) prefers the compiled
         kernel and falls back to NumPy; both give identical folds.
+    products_only : bool, optional
+        ``True`` (default) returns the products only. ``False`` keeps the
+        earlier behaviour for one more release and emits a
+        ``FutureWarning``: a sweep gives the dealiased DataArray named
+        ``field``, and a volume gives a copy of the input tree with the
+        dealiased field (by default replacing ``field``) in every sweep.
+        Use ``dtree.radarx.assign(dealias_velocity(dtree))`` instead.
 
     Returns
     -------
     xarray.DataArray or xarray.DataTree
-        For a sweep, the dealiased velocity with the input's coordinates and
-        dtype. For a volume, a copy of the tree with the dealiased field in
-        every sweep that has ``field``. Gates with no data, or with values
-        beyond the Nyquist velocity (flag values), are NaN.
+        For a sweep, the dealiased velocity ``name`` with the input's
+        coordinates and dtype. For a volume, a DataTree with the input's
+        root and one node per sweep that has ``field``, holding the
+        dealiased velocity ``name`` on the sweep's coordinates. Gates with
+        no data, or with values beyond the Nyquist velocity (flag values),
+        are NaN.
 
     Raises
     ------
@@ -211,8 +226,24 @@ def dealias_velocity(
     Examples
     --------
     >>> vr = radarx.retrieve.dealias_velocity(ds, "VRADH", 26.0)  # doctest: +SKIP
-    >>> dtree = dtree.radarx.dealias("VRADH")  # doctest: +SKIP
+    >>> vr.name  # doctest: +SKIP
+    'VRADH_dealiased'
+    >>> products = dtree.radarx.dealias("VRADH")  # doctest: +SKIP
+    >>> dtree = dtree.radarx.assign(products)  # doctest: +SKIP
     """
+    if products_only:
+        name = name or f"{field}_dealiased"
+    else:
+        warnings.warn(
+            "dealias_velocity(..., products_only=False) returns the input with "
+            "the dealiased field added and will be removed in the next "
+            "release. Use the default products_only=True and merge the "
+            "products with ds.radarx.assign(products) or "
+            "dtree.radarx.assign(products).",
+            FutureWarning,
+            stacklevel=2,
+        )
+        name = name or field
     compiled = _use_compiled(engine)
     options = {
         "threshold": float(threshold),
@@ -231,7 +262,7 @@ def dealias_velocity(
             ref = _fill(ref, _wind_reference(radar, sweep, wind_profile))
         (solved,) = _region_folds([sweep], **options)
         (folds,) = _absolute_folds([sweep], [solved], [ref], **options)
-        return sweep.wrap(folds)
+        return sweep.wrap(folds).rename(name)
     if reference is not None:
         raise ValueError("reference is only supported for a single sweep.")
     return _dealias_tree(
@@ -241,6 +272,7 @@ def dealias_velocity(
         wind_profile=wind_profile,
         sweep_continuity=sweep_continuity,
         name=name,
+        products_only=products_only,
         **options,
     )
 
@@ -477,7 +509,14 @@ def _chained_reference(source, folds, iray, igate):
 
 
 def _dealias_tree(
-    dtree, field, nyquist_velocity, wind_profile, sweep_continuity, name, **options
+    dtree,
+    field,
+    nyquist_velocity,
+    wind_profile,
+    sweep_continuity,
+    name,
+    products_only,
+    **options,
 ):
     """Dealias every sweep of a volume that contains ``field``."""
     from ..grid.cone import _sweep_dataset, _sweep_names
@@ -509,9 +548,13 @@ def _dealias_tree(
         sweeps, solved, winds, previous=previous, mapping=mapping, **options
     )
     results = [s.wrap(f) for s, f in zip(sweeps, folds)]
+    if products_only:
+        return product_tree(
+            dtree, {n: r.rename(name).to_dataset() for n, r in zip(names, results)}
+        )
     out = dtree.copy()
     for n, result in zip(names, results):
-        out[f"{n}/{name or field}"] = result.variable
+        out[f"{n}/{name}"] = result.variable
     return out
 
 

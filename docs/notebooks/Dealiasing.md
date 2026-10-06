@@ -79,10 +79,17 @@ dtree = dtree.xradar.georeference()
 
 ## Dealias the volume
 
+Like every radarx retrieval, `dealias` returns its products only: a DataTree
+with the root of the volume and, for each sweep, the dealiased velocity
+`VRADH_dealiased` (the name never replaces the measured `VRADH`).
+`dtree.radarx.assign` adds the products to the matching sweeps of the volume.
+
 ```{code-cell} ipython3
 start = time.perf_counter()
-dealiased = dtree.radarx.dealias("VRADH", name="VRADH_dealiased")
+products = dtree.radarx.dealias("VRADH")
 print(f"dealiased the volume in {time.perf_counter() - start:.2f} s")
+dealiased = dtree.radarx.assign(products)
+dealiased["sweep_1"]
 ```
 
 ```{code-cell} ipython3

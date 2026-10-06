@@ -156,6 +156,50 @@ class _ShearMixin:
         return _shear.radial_divergence(self.xarray_obj, field, window, **kwargs)
 
 
+class _AssignMixin:
+    """Merge retrieval products into the sweep or volume they came from."""
+
+    def assign(self, products):
+        """
+        Add retrieval products to this sweep or volume.
+
+        The retrievals (``dealias``, ``kdp``, ``llsd``, ...) return their
+        products only. ``assign`` puts them back next to the measured fields:
+        product variables are added to the matching sweep, aligned to the
+        sweep's coordinates (gates the products do not cover are NaN), and
+        coordinates the sweep already has are kept from the sweep.
+
+        Parameters
+        ----------
+        products : xarray.Dataset, xarray.DataArray or xarray.DataTree
+            For a sweep, a Dataset or named DataArray of products. For a
+            volume, a DataTree of products per sweep as returned by the
+            retrievals; its root is not merged.
+
+        Returns
+        -------
+        xarray.Dataset or xarray.DataTree
+            A copy with the product variables added. Variables of the same
+            name are replaced.
+
+        Raises
+        ------
+        KeyError
+            If a product sweep is not in the volume.
+        TypeError
+            If ``products`` does not fit this object.
+
+        Examples
+        --------
+        >>> dtree = dtree.radarx.assign(dtree.radarx.dealias())  # doctest: +SKIP
+        >>> dtree = dtree.radarx.assign(dtree.radarx.kdp())  # doctest: +SKIP
+        >>> sweep = sweep.radarx.assign(sweep.radarx.llsd("VRADH_dealiased"))  # doctest: +SKIP
+        """
+        from .retrieve._products import assign_products
+
+        return assign_products(self.xarray_obj, products)
+
+
 @xr.register_dataarray_accessor("radarx")
 class RadarxDataArrayAccessor(RadarxAccessor):
     """DataArray-level radarx utilities."""
@@ -277,7 +321,7 @@ class RadarxDataArrayAccessor(RadarxAccessor):
 
 
 @xr.register_dataset_accessor("radarx")
-class RadarxDataSetAccessor(_ShearMixin, RadarxAccessor):
+class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
     """Dataset-level radarx plotting utilities."""
 
     @property
@@ -480,7 +524,9 @@ class RadarxDataSetAccessor(_ShearMixin, RadarxAccessor):
         Returns
         -------
         xarray.DataArray
-            Dealiased velocity with the input's coordinates.
+            Dealiased velocity ``f"{field}_dealiased"`` (or ``name``) with
+            the input's coordinates. Add it to the sweep with
+            :meth:`assign`.
 
         See Also
         --------
@@ -739,7 +785,7 @@ class RadarxDataSetAccessor(_ShearMixin, RadarxAccessor):
 
 
 @register_datatree_accessor("radarx")
-class RadarxDataTreeAccessor(_ShearMixin, RadarxAccessor):
+class RadarxDataTreeAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
     """DataTree-level radarx retrieval and gridding utilities."""
 
     @property
@@ -836,7 +882,8 @@ class RadarxDataTreeAccessor(_ShearMixin, RadarxAccessor):
         Returns
         -------
         xarray.Dataset
-            Gridded fields on ``(z, y, x)``.
+            Gridded fields on ``(z, y, x)`` with the volume's mean time as a
+            scalar ``time`` coordinate.
 
         See Also
         --------
@@ -927,7 +974,9 @@ class RadarxDataTreeAccessor(_ShearMixin, RadarxAccessor):
         Returns
         -------
         xarray.DataTree
-            Copy of the volume with the dealiased field in every sweep.
+            The root of the volume and one node per sweep with the dealiased
+            velocity ``f"{field}_dealiased"`` (or ``name``). Add it to the
+            volume with :meth:`assign`.
 
         See Also
         --------

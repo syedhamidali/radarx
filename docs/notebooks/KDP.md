@@ -201,6 +201,15 @@ vol = dtree.radarx.kdp(**fields)
 vol
 ```
 
+The result holds the products only (and the root of the volume).
+`dtree.radarx.assign` adds them to the matching sweeps, next to the measured
+fields:
+
+```{code-cell} ipython3
+merged = dtree.radarx.assign(vol)
+merged["sweep_0"].to_dataset()[["KDP", "PHIDP_processed", fields["phidp"]]]
+```
+
 ## References
 
 - Hubbert, J., and V. N. Bringi, 1995: An iterative filtering technique for

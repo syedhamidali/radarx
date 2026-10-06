@@ -268,7 +268,9 @@ def grid_radar(
     -------
     xarray.Dataset
         Interpolated dataset with the specified variables and 3D grid.
-        Includes longitude and latitude coordinates for the grid.
+        Includes longitude and latitude coordinates for the grid and the
+        mean time of the volume as a scalar ``time`` coordinate, so grids of
+        several volumes stack with ``xr.concat(grids, "time")``.
 
     Notes
     -----
@@ -388,7 +390,7 @@ def grid_radar(
         else:  # pragma: no cover
             ds_out_fast[var] = (("z", "y", "x"), field)
     # Assign metadata
-    ds_out_fast["time"] = ds.time.mean()
+    ds_out_fast = ds_out_fast.assign_coords(time=ds["time"].mean().variable)
     ds_out_fast = ds_out_fast.rename({"x": "lon", "y": "lat"})
     ds_out_fast["x"] = xr.DataArray(trgx, dims="lon")
     ds_out_fast["y"] = xr.DataArray(trgy, dims="lat")
