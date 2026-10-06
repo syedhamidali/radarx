@@ -328,7 +328,7 @@ def _parse_telegrams(telegrams):
         serial = serial or parts[0].strip()
         clock[i] = _parsivel_clock(parts[9], parts[10])
         valid[i] = True
-    return valid, fields, clock, counts.reshape(n, N_CLASSES, N_CLASSES), serial
+    return valid, fields, clock, counts.reshape((n, N_CLASSES, N_CLASSES)), serial
 
 
 def _parsivel_clock(hms, dmy):

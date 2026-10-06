@@ -258,7 +258,7 @@ inline int solve_truncated(const Fit& f, double mi, double mj, double mk, double
     return -1;
 }
 
-void check(const DArray& a, std::vector<py::ssize_t> shape, const char* name) {
+void check(const DArray& a, const std::vector<py::ssize_t>& shape, const char* name) {
     if (a.ndim() != static_cast<py::ssize_t>(shape.size()))
         throw std::invalid_argument(std::string(name) + " has the wrong number of dimensions");
     for (size_t d = 0; d < shape.size(); ++d)
