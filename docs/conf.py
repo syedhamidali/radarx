@@ -248,14 +248,17 @@ def _seed_notebook_cache(path=nb_execution_cache_path):
         "RADARX_DOCS_CACHE_URL",
         _DOCS_CACHE_URL if os.environ.get("READTHEDOCS") else "",
     )
-    if not url or url == "none" or os.path.exists(os.path.join(path, "global.db")):
+    # only https downloads (no file: or custom schemes); "none" disables it
+    if not url.startswith("https://") or os.path.exists(
+        os.path.join(path, "global.db")
+    ):
         return
     import io
     import tarfile
     import urllib.request
 
     try:
-        with urllib.request.urlopen(url, timeout=120) as response:
+        with urllib.request.urlopen(url, timeout=120) as response:  # nosec B310
             data = response.read()
         os.makedirs(path, exist_ok=True)
         with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
