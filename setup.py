@@ -4,12 +4,16 @@
 
 """Build the optional compiled kernels.
 
-Project metadata lives in pyproject.toml. The extensions are optional: if they
-cannot be compiled, radarx still installs and uses a NumPy implementation.
+Project metadata lives in pyproject.toml. Every ``radarx/**/_*.cpp`` file is a
+pybind11 kernel and is built as the extension module of the same name (e.g.
+``radarx/retrieve/_kdp.cpp`` -> ``radarx.retrieve._kdp``), so new kernels need
+no change here. The extensions are optional: if they cannot be compiled,
+radarx still installs and uses a NumPy implementation.
 """
 
 import os
 import sys
+from pathlib import Path
 
 from pybind11.setup_helpers import Pybind11Extension, build_ext
 from setuptools import setup
@@ -30,57 +34,18 @@ extra_compile_args = []
 if sys.platform != "win32":
     extra_compile_args = ["-O3"]
 
+kernels = sorted(Path("radarx").rglob("_*.cpp"))
+
 setup(
     ext_modules=[
         Pybind11Extension(
-            "radarx.grid._cone",
-            ["radarx/grid/_cone.cpp"],
+            ".".join(source.with_suffix("").parts),
+            [source.as_posix()],
             cxx_std=17,
             extra_compile_args=extra_compile_args,
             optional=True,
-        ),
-        Pybind11Extension(
-            "radarx.retrieve._shear",
-            ["radarx/retrieve/_shear.cpp"],
-            cxx_std=17,
-            extra_compile_args=extra_compile_args,
-            optional=True,
-        ),
-        Pybind11Extension(
-            "radarx.retrieve._dealias",
-            ["radarx/retrieve/_dealias.cpp"],
-            cxx_std=17,
-            extra_compile_args=extra_compile_args,
-            optional=True,
-        ),
-        Pybind11Extension(
-            "radarx.retrieve._advection",
-            ["radarx/retrieve/_advection.cpp"],
-            cxx_std=17,
-            extra_compile_args=extra_compile_args,
-            optional=True,
-        ),
-        Pybind11Extension(
-            "radarx.retrieve._kdp",
-            ["radarx/retrieve/_kdp.cpp"],
-            cxx_std=17,
-            extra_compile_args=extra_compile_args,
-            optional=True,
-        ),
-        Pybind11Extension(
-            "radarx.retrieve._qvp",
-            ["radarx/retrieve/_qvp.cpp"],
-            cxx_std=17,
-            extra_compile_args=extra_compile_args,
-            optional=True,
-        ),
-        Pybind11Extension(
-            "radarx.io._sounding",
-            ["radarx/io/_sounding.cpp"],
-            cxx_std=17,
-            extra_compile_args=extra_compile_args,
-            optional=True,
-        ),
+        )
+        for source in kernels
     ],
     cmdclass={"build_ext": ParallelBuildExt},
 )
