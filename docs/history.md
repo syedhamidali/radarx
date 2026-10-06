@@ -15,6 +15,7 @@
 - **FIX:** ``estimate_kdp`` on a volume with an explicit ``phidp=`` field name skips the sweeps without that field again (e.g. NEXRAD Doppler-only cuts) instead of failing. ({pull}`117`) by [@syedhamidali](https://github.com/syedhamidali)
 - **MNT:** Codecov waits for all eight coverage uploads of a CI run before it reports, so it no longer posts an early failure while the notebook jobs are still running. ({pull}`117`) by [@syedhamidali](https://github.com/syedhamidali)
 - **MNT:** Faster builds: the compiled kernels are built in parallel (``RADARX_BUILD_JOBS`` sets the number of jobs), and the documentation build starts from a small ERA5 subset for the example case, so the docs fit the Read the Docs time limit again. ({pull}`124`) by [@syedhamidali](https://github.com/syedhamidali)
+- **MNT:** A TestPyPI outage no longer fails CI on ``main``: the preview upload of the sdist is allowed to fail. ({pull}`121`) by [@syedhamidali](https://github.com/syedhamidali)
 
 ## 0.4.0 (2026-10-05)
 
