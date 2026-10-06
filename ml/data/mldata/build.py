@@ -7,7 +7,7 @@ Stages
    run radarx's ``echo_mask``, ``estimate_kdp``, ``hid`` and
    ``dealias_velocity`` on the whole volume (each one compiled, multithreaded
    kernel call), build the polar samples of every task and the composite
-   frame for nowcasting, and write them as per-volume parts (temporary pickles).
+   frame for nowcasting, and write them as per-volume parts (temporary netCDF files).
 2. **Nowcasting** (:func:`nowcast_parts`): consecutive frames of each case
    become sequences; motion and extrapolation come from radarx.
 3. **Multi-Doppler** (:func:`process_pair`, one process per radar pair).
@@ -21,9 +21,7 @@ from __future__ import annotations
 
 import json
 import os
-import pickle
 import shutil
-import subprocess
 import time
 import traceback
 import warnings
@@ -58,20 +56,43 @@ _DATETIME_ENCODING = {"units": "milliseconds since 1970-01-01", "dtype": "int64"
 
 
 def git_sha(path=None):
-    """Commit of the radarx checkout the builder runs from (or "unknown")."""
-    here = Path(path or __file__).resolve().parent
-    try:
-        out = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=here,
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=True,
-        )
-        return out.stdout.strip()
-    except (OSError, subprocess.SubprocessError):
+    """
+    Commit of the radarx checkout the builder runs from (or "unknown").
+
+    Read from the ``.git`` metadata (also of linked worktrees and packed
+    refs), without running git.
+    """
+    here = Path(path or __file__).resolve()
+    for folder in [here, *here.parents]:
+        dot = folder / ".git"
+        if dot.exists():
+            break
+    else:
         return "unknown"
+    try:
+        gitdir = dot
+        if dot.is_file():  # linked worktree: "gitdir: <path>"
+            gitdir = Path(dot.read_text().split(":", 1)[1].strip())
+            if not gitdir.is_absolute():
+                gitdir = (folder / gitdir).resolve()
+        common = gitdir
+        if (gitdir / "commondir").exists():
+            common = (gitdir / (gitdir / "commondir").read_text().strip()).resolve()
+        head = (gitdir / "HEAD").read_text().strip()
+        if not head.startswith("ref:"):
+            return head
+        ref = head.split(":", 1)[1].strip()
+        for base in (gitdir, common):
+            if (base / ref).exists():
+                return (base / ref).read_text().strip()
+        packed = common / "packed-refs"
+        if packed.exists():
+            for line in packed.read_text().splitlines():
+                if line.endswith(" " + ref):
+                    return line.split()[0]
+    except (OSError, IndexError):
+        pass
+    return "unknown"
 
 
 def _sweep_time(ds):
@@ -109,17 +130,30 @@ def _finish(task, ds, coords):
 
 
 def _write_part(ds, path):
-    """Write a temporary part (a pickled in-memory Dataset; fast, uncompressed)."""
-    path = Path(path).with_suffix(".pkl")
+    """Write a temporary part (uncompressed netCDF-4: fast, keeps dtypes)."""
+    path = Path(path).with_suffix(".nc")
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "wb") as f:
-        pickle.dump(ds.load(), f, protocol=pickle.HIGHEST_PROTOCOL)
+    ds.to_netcdf(path, engine="netcdf4", encoding=_encoding(ds, chunks=False))
     return path
 
 
+#: Fixed-width string dtypes of the schemas (netCDF returns variable-length
+#: strings, the stores keep the schema widths).
+_STRINGS = {
+    name: spec["dtype"]
+    for task in SCHEMAS.values()
+    for name, spec in task["coords"].items()
+    if np.dtype(spec["dtype"]).kind == "U"
+}
+
+
 def _read_part(path):
-    with open(path, "rb") as f:
-        return pickle.load(f)  # noqa: S301 - parts are written by this build
+    with xr.open_dataset(path, engine="netcdf4") as ds:
+        ds = ds.load()
+    for name in ds.variables:
+        if ds[name].dtype.kind in "OU" and name in _STRINGS:
+            ds[name] = ds[name].astype(_STRINGS[name])
+    return ds
 
 
 def _site(dtree):
@@ -293,7 +327,7 @@ def process_volume(job):
         frame.attrs.update(
             {k: rec[k] for k in ("volume_id", "radar", "case", "split", "event")}
         )
-        fpath = _write_part(frame, parts / "_frames" / f"{rec['volume_id']}.pkl")
+        fpath = _write_part(frame, parts / "_frames" / f"{rec['volume_id']}.nc")
         summary["frame"] = str(fpath)
         t = tick("composite", t)
     summary["samples"] = counts
@@ -513,7 +547,8 @@ def pair_jobs(cfg, records, ok_ids):
 # --------------------------------------------------------------------------
 
 
-def _encoding(ds):
+def _encoding(ds, chunks=True):
+    """Datetime encoding and one chunk per sample of every sample variable."""
     enc = {}
     for name, var in ds.variables.items():
         if "sample" not in var.dims:
@@ -521,7 +556,7 @@ def _encoding(ds):
         e = {}
         if var.dtype.kind == "M":
             e.update(_DATETIME_ENCODING)
-        if name in ds.data_vars:
+        if chunks and name in ds.data_vars:
             e["chunks"] = tuple(1 if d == "sample" else ds.sizes[d] for d in var.dims)
         if e:
             enc[name] = e
@@ -545,7 +580,7 @@ def consolidate(parts_dir, out_dir, provenance, batch_bytes=2**30):
     counts = {}
     for task in SCHEMAS:
         for split in SPLITS:
-            files = sorted((parts_dir / task / split).glob("*.pkl"))
+            files = sorted((parts_dir / task / split).glob("*.nc"))
             if not files:
                 continue
             target = out_dir / task / f"{split}.zarr"

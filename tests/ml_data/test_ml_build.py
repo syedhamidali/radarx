@@ -232,7 +232,39 @@ def test_sequences_and_git_sha():
     assert bd.sequences(t, 3, 600.0) == [0]
     assert bd.sequences(t, 2, 600.0) == [0, 1, 3]
     assert isinstance(bd.git_sha(), str)
-    assert bd.git_sha("/") in ("unknown",) or len(bd.git_sha("/")) == 40
+
+
+def test_git_sha_from_metadata(tmp_path):
+    sha, other = "a" * 40, "b" * 40
+    # detached HEAD
+    repo = tmp_path / "detached"
+    (repo / ".git").mkdir(parents=True)
+    (repo / ".git" / "HEAD").write_text(sha + "\n")
+    (repo / "ml").mkdir()
+    assert bd.git_sha(repo / "ml" / "x.py") == sha
+    # branch ref, loose and packed
+    repo = tmp_path / "main"
+    (repo / ".git" / "refs" / "heads").mkdir(parents=True)
+    (repo / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+    (repo / ".git" / "refs" / "heads" / "main").write_text(sha)
+    assert bd.git_sha(repo) == sha
+    (repo / ".git" / "refs" / "heads" / "main").unlink()
+    (repo / ".git" / "packed-refs").write_text(f"# pack\n{other} refs/heads/main\n")
+    assert bd.git_sha(repo) == other
+    # linked worktree: .git file pointing to a gitdir with a commondir
+    wt = tmp_path / "wt"
+    gitdir = repo / ".git" / "worktrees" / "wt"
+    gitdir.mkdir(parents=True)
+    (gitdir / "HEAD").write_text("ref: refs/heads/main\n")
+    (gitdir / "commondir").write_text("../..\n")
+    wt.mkdir()
+    (wt / ".git").write_text(f"gitdir: {gitdir}\n")
+    assert bd.git_sha(wt) == other
+    # unknown ref, broken metadata, no repository
+    (gitdir / "HEAD").write_text("ref: refs/heads/none\n")
+    assert bd.git_sha(wt) == "unknown"
+    (wt / ".git").write_text("nonsense")
+    assert bd.git_sha(wt) == "unknown"
 
 
 def test_unique_sweeps_and_kind():
