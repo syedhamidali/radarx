@@ -19,7 +19,9 @@ reflectivity) are averaged in linear units and converted back; the other
 variables are averaged as they are. A median is available as a robust
 alternative. The melting layer can be detected in the profiles from the
 co-located rhohv minimum and ZDR / Z maxima (after Giangrande et al. 2008),
-with a consistency check along the time series.
+its top and bottom placed where rhohv returns to its background (Griffin et
+al. 2020), compared with the 0 °C and wet-bulb 0 °C heights of a sounding or
+ERA5 profile, and checked for consistency along the time series.
 
 The reductions over (time, azimuth, range) are done by a compiled C++ kernel
 in a single multithreaded pass; if it is not available, an equivalent NumPy
@@ -46,6 +48,11 @@ Giangrande, S. E., J. M. Krause, and A. V. Ryzhkov, 2008: Automatic
 designation of the melting layer with a polarimetric prototype of the WSR-88D
 radar. *J. Appl. Meteor. Climatol.*, **47**, 1354–1364,
 https://doi.org/10.1175/2007JAMC1634.1
+
+Griffin, E. M., T. J. Schuur, and A. V. Ryzhkov, 2020: A polarimetric radar
+analysis of ice microphysical processes in melting layers of winter storms
+using S-band quasi-vertical profiles. *J. Appl. Meteor. Climatol.*, **59**,
+751–767, https://doi.org/10.1175/JAMC-D-19-0128.1
 """
 
 from __future__ import annotations
@@ -741,9 +748,44 @@ def _ml_anchor(z, r, d, h, lo, hi, hmin, hmax, rho_lo, rho_hi, zdr_min, dbz_min)
     return best, best_rho
 
 
+def _onset_edge(x, h, i0, step, depth, rho_onset, onset_fraction):
+    """NumPy twin of the kernel's ``onset_edge``: height where rhohv, walking
+    away from its minimum at ``i0``, first reaches the background threshold
+    ``min(rho_onset, bg - onset_fraction * (bg - x[i0]))``, or NaN."""
+    n = h.size
+    gates = []
+    j = i0 + step
+    while 0 <= j < n and abs(h[j] - h[i0]) <= depth:
+        if not np.isnan(x[j]):
+            gates.append(j)
+        j += step
+    bg = max([x[i0]] + [x[j] for j in gates])
+    t = min(rho_onset, bg - onset_fraction * (bg - x[i0]))
+    if not t > x[i0]:
+        return np.nan
+    prev = i0
+    for j in gates:
+        if x[j] >= t:
+            w = (t - x[prev]) / (x[j] - x[prev])
+            return h[prev] + w * (h[j] - h[prev])
+        prev = j
+    return np.nan  # pragma: no cover - bg >= t lies inside the window
+
+
 def _melting_layer_numpy(zh, rho, zdr, h, hmin, hmax, *params):
     """NumPy implementation of the compiled ``melting_layer`` (same results)."""
-    rho_lo, rho_hi, zdr_min, dbz_min, window, depth, fraction = params
+    (
+        rho_lo,
+        rho_hi,
+        zdr_min,
+        dbz_min,
+        window,
+        depth,
+        fraction,
+        boundaries,
+        rho_onset,
+        onset_fraction,
+    ) = params
     out = np.full((3, zh.shape[0]), np.nan)
     # co-location windows [lo, hi) around every gate
     lo = np.searchsorted(h, h - window, side="left")
@@ -762,6 +804,13 @@ def _melting_layer_numpy(zh, rho, zdr, h, hmin, hmax, *params):
         dn = _layer_edge(d, h, best, -1, depth, 1.0, fraction)
         if up < 0 or dn < 0:
             continue
+        if boundaries == _BOUNDARIES["onset"]:
+            top = _onset_edge(r, h, best_rho, 1, depth, rho_onset, onset_fraction)
+            bottom = _onset_edge(r, h, best_rho, -1, depth, rho_onset, onset_fraction)
+            top = h[up] if np.isnan(top) else top
+            bottom = h[dn] if np.isnan(bottom) else bottom
+            out[:, i] = top, bottom, h[best]
+            continue
         top, bottom = h[up], h[dn]
         rup = _layer_edge(r, h, best_rho, 1, depth, -1.0, fraction)
         rdn = _layer_edge(r, h, best_rho, -1, depth, -1.0, fraction)
@@ -774,6 +823,7 @@ def _melting_layer_numpy(zh, rho, zdr, h, hmin, hmax, *params):
 
 
 _ML_FLAGS = {"none": 0, "detected": 1, "rejected": 2, "filled": 3}
+_BOUNDARIES = {"half_prominence": 0, "onset": 1}
 
 
 def _running_median(x, size):
@@ -813,19 +863,72 @@ def _time_consistency(top, bottom, peak, time, median_window, max_jump, max_fill
     return top, bottom, peak, flag
 
 
-def _search_range(freezing_level, height_range, window, template, other, n_prof):
-    """Per-profile (hmin, hmax) for the ZDR peak."""
-    if freezing_level is None:
-        return (
-            np.full(n_prof, float(height_range[0])),
-            np.full(n_prof, float(height_range[1])),
-        )
-    fl = freezing_level
-    if not isinstance(fl, xr.DataArray):
-        fl = xr.DataArray(np.asarray(fl, dtype=np.float64))
-    fl = xr.broadcast(fl, template.isel(height=0, drop=True))[0]
-    fl = np.asarray(fl.transpose(*other).values, np.float64).reshape(-1)
-    return fl + float(window[0]), fl + float(window[1])
+def _environment_levels(environment, engine, n_threads):
+    """0 °C and wet-bulb 0 °C heights from a sounding or ERA5 profile, or from
+    a mapping with ``freezing_level`` and ``wet_bulb_zero_height``."""
+    if environment is None:
+        return None, None
+    if isinstance(environment, xr.Dataset) and "height" in environment.dims:
+        from ..io.sounding import isotherm_height, wet_bulb_zero_height
+
+        if "temperature" not in environment:
+            raise ValueError("the environment profile needs a 'temperature'.")
+        fl = isotherm_height(environment, engine=engine, n_threads=n_threads)
+        wbz = None
+        if {"pressure", "dewpoint"} <= set(environment.data_vars):
+            wbz = wet_bulb_zero_height(environment, engine=engine, n_threads=n_threads)
+        return fl, wbz
+    if isinstance(environment, (xr.Dataset, dict)):
+        fl = environment.get("freezing_level")
+        wbz = environment.get("wet_bulb_zero_height")
+        if fl is None and wbz is None:
+            raise ValueError(
+                "environment needs 'freezing_level' or 'wet_bulb_zero_height'."
+            )
+        return fl, wbz
+    raise TypeError(
+        "environment must be a profile Dataset on 'height' (radarx.io.sounding) "
+        f"or a mapping of reference heights, not {type(environment)}"
+    )
+
+
+def _reference_height(value, template, other):
+    """A scalar or DataArray height broadcast to the profiles' non-height
+    dimensions; a ``time`` dimension is interpolated linearly to the profile
+    times (nearest value outside its range)."""
+    da = value if isinstance(value, xr.DataArray) else xr.DataArray(value)
+    da = da.astype(np.float64).reset_coords(drop=True)
+    if "time" in da.dims and "time" not in da.coords:
+        da = da.isel(time=0, drop=True) if da.sizes["time"] == 1 else da
+    elif "time" in da.dims:
+        if "time" in template.coords and da.sizes["time"] > 1:
+            t = template["time"].values
+            near = da.sel(time=t, method="nearest").drop_vars("time")
+            da = da.interp(time=t).drop_vars("time").fillna(near)
+            if np.ndim(t):
+                da = da.assign_coords(time=t)
+        elif da.sizes["time"] == 1:
+            da = da.isel(time=0, drop=True)
+        else:
+            raise ValueError(
+                "a reference height on several times needs profiles with a time."
+            )
+    ref = xr.broadcast(da, template.isel(height=0, drop=True))[0]
+    return ref.transpose(*other).reset_coords(drop=True)
+
+
+def _search_range(reference, height_range, window, n_prof):
+    """Per-profile (hmin, hmax) for the ZDR peak: ``window`` around the
+    reference height, else (and where it is missing) ``height_range``."""
+    hmin = np.full(n_prof, float(height_range[0]))
+    hmax = np.full(n_prof, float(height_range[1]))
+    if reference is None:
+        return hmin, hmax
+    ref = np.asarray(reference.values, np.float64).reshape(-1)
+    ok = np.isfinite(ref)
+    hmin[ok] = ref[ok] + float(window[0])
+    hmax[ok] = ref[ok] + float(window[1])
+    return hmin, hmax
 
 
 def _apply_time_consistency(top, bottom, peak, flag, template, other, **kwargs):
@@ -848,6 +951,8 @@ def melting_layer(
     dbz="auto",
     rhohv="auto",
     zdr="auto",
+    boundaries="onset",
+    environment=None,
     height_range=(1000.0, 6000.0),
     freezing_level=None,
     freezing_level_window=(-1000.0, 500.0),
@@ -856,6 +961,8 @@ def melting_layer(
     dbz_min=20.0,
     window=500.0,
     depth=1000.0,
+    rhohv_onset=None,
+    onset_fraction=0.1,
     edge_fraction=0.5,
     median_window=5,
     max_jump=500.0,
@@ -873,17 +980,36 @@ def melting_layer(
     consistency along a time series:
 
     1. **Signature.** Within the search range (``height_range``, or
-       ``freezing_level_window`` around ``freezing_level``, and always below
-       the echo top), the anchor is the largest ZDR value ``>= zdr_min`` that
-       has, within ``window`` metres, a ρhv minimum inside ``rhohv_range`` and
-       a Z maximum ``>= dbz_min``. ρhv dips without a ZDR and Z enhancement
-       (e.g. near the echo top or in noisy data aloft) are not taken.
-    2. **Top and bottom.** Going up and down from the ZDR peak and from the
-       ρhv minimum, each edge is the last gate before the anomaly has fallen
-       by ``edge_fraction`` of its prominence over the background within
-       ``depth`` metres (0.5: the half-prominence width). The layer spans the
-       union of the ZDR and ρhv anomalies. A ZDR peak that does not fall off
-       within ``depth`` on both sides is not taken as a melting layer.
+       ``freezing_level_window`` around the reference height, and always
+       below the echo top), the anchor is the largest ZDR value
+       ``>= zdr_min`` that has, within ``window`` metres, a ρhv minimum inside
+       ``rhohv_range`` and a Z maximum ``>= dbz_min``. ρhv dips without a ZDR
+       and Z enhancement (e.g. near the echo top or in noisy data aloft) are
+       not taken, nor is a ZDR peak that does not fall to half its prominence
+       within ``depth`` on both sides.
+    2. **Top and bottom.** ``boundaries`` selects the definition:
+
+       - ``"onset"`` (default): where the signature begins and ends. The ρhv
+         dip is the most objective marker of melting: its top is at the
+         0 °C wet-bulb level, where melting starts, and its bottom where the
+         snow has melted (Ryzhkov and Krause 2022). Going up and down from
+         the ρhv minimum, as Griffin et al. (2020) do, the edge is the first
+         height where ρhv is back at its background: within
+         ``onset_fraction`` (10 %) of the dip depth from the background,
+         the largest ρhv within ``depth`` on that side. Griffin et al. (2020)
+         use a fixed background, ρhv ``>= 0.97`` in S-band QVPs; pass
+         ``rhohv_onset=0.97`` for their definition (the edge is then
+         wherever either test is met first). Heights are interpolated
+         linearly between gates. If ρhv does not rise on one side, the ZDR
+         half-prominence edge is used.
+       - ``"half_prominence"``: going up and down from the ZDR peak and from
+         the ρhv minimum, each edge is the last gate before the anomaly has
+         fallen by ``edge_fraction`` of its prominence over the background
+         within ``depth`` metres; the layer spans the union of the ZDR and
+         ρhv anomalies. This is the width at half height of the anomaly, so
+         the layer is shallower than with ``"onset"`` and its top lies below
+         the level where melting starts.
+
     3. **Time consistency** (profiles with a ``time`` dimension). Detections
        whose mid-height differs by more than ``max_jump`` from the running
        median over ``median_window`` profiles are rejected, and gaps of up to
@@ -900,17 +1026,34 @@ def melting_layer(
     dbz, rhohv, zdr : str, optional
         Variable names; ``"auto"`` (default) looks for common names and CF
         standard names.
+    boundaries : {"onset", "half_prominence"}, optional
+        Definition of the top and bottom (step 2). Default ``"onset"``.
+    environment : xarray.Dataset or dict, optional
+        The thermodynamic environment: a sounding or ERA5 profile from
+        :mod:`radarx.io.sounding` (:func:`~radarx.io.sounding.read_sounding`,
+        :func:`~radarx.io.sounding.era5_profile`, ``dtree.radarx.sounding()``;
+        several profiles concatenated on ``time`` are interpolated to the
+        profile times), or a mapping or Dataset with ``freezing_level`` and/or
+        ``wet_bulb_zero_height`` (m above sea level, scalars or DataArrays).
+        Its 0 °C height (:func:`~radarx.io.sounding.isotherm_height`) and
+        wet-bulb 0 °C height (:func:`~radarx.io.sounding.wet_bulb_zero_height`,
+        if the profile has ``pressure`` and ``dewpoint``) are returned with
+        the offsets of the layer top from them, and, unless
+        ``freezing_level`` is given, the search is constrained to
+        ``freezing_level_window`` around the wet-bulb 0 °C height (the
+        0 °C height if there is none).
     height_range : tuple of float, optional
-        Heights (m above sea level) searched for the ZDR peak when no
-        ``freezing_level`` is given. Default 1–6 km (Giangrande et al. 2008
-        only flag gates below 6 km).
+        Heights (m above sea level) searched for the ZDR peak without a
+        reference height (and where the reference height is missing).
+        Default 1–6 km (Giangrande et al. 2008 only flag gates below 6 km).
     freezing_level : float or xarray.DataArray, optional
-        Height of the 0 °C level (m above sea level), a scalar or one value
-        per profile (e.g. on ``time``), from a sounding or a model. If given,
-        the ZDR peak is searched within ``freezing_level_window`` of it.
+        Reference height for the search (m above sea level), e.g. the 0 °C
+        level, a scalar or one value per profile (e.g. on ``time``). If
+        given, the ZDR peak is searched within ``freezing_level_window`` of
+        it; it overrides the reference height from ``environment``.
     freezing_level_window : tuple of float, optional
-        Search range relative to ``freezing_level``, default −1000 to +500 m
-        (melting happens below the 0 °C level).
+        Search range for the ZDR peak relative to the reference height,
+        default −1000 to +500 m (melting happens below the 0 °C level).
     rhohv_range : tuple of float, optional
         Range for the ρhv minimum near the ZDR peak, default (0.80, 0.97).
     zdr_min : float, optional
@@ -923,9 +1066,15 @@ def melting_layer(
     depth : float, optional
         How far above and below the peak the background is sought, default
         1000 m.
+    rhohv_onset : float, optional
+        A fixed background ρhv for ``boundaries="onset"``, e.g. 0.97 as in
+        Griffin et al. (2020). Default None: only ``onset_fraction``.
+    onset_fraction : float, optional
+        With ``boundaries="onset"``, the edge is where ρhv is within this
+        fraction of the dip depth from the background, default 0.1.
     edge_fraction : float, optional
-        Fraction of the prominence the anomaly must fall by at the edges,
-        default 0.5.
+        Fraction of the prominence the anomaly must fall by at the edges with
+        ``boundaries="half_prominence"``, default 0.5.
     median_window : int, optional
         Profiles in the running median, default 5. 1 disables the check.
     max_jump : float, optional
@@ -945,7 +1094,12 @@ def melting_layer(
         ``melting_layer_peak`` (height of the ZDR peak), in m above sea level,
         and ``melting_layer_flag`` (0 none, 1 detected, 2 rejected as
         inconsistent in time, 3 filled in time), on the non-height dimensions
-        of ``profiles``.
+        of ``profiles``. With a reference height (``environment`` or
+        ``freezing_level``) also ``freezing_level`` (0 °C height, or the
+        given ``freezing_level``), ``wet_bulb_zero_height`` (if the
+        environment has it) and ``melting_layer_top_offset_freezing_level`` /
+        ``melting_layer_top_offset_wet_bulb_zero``, the height of the layer
+        top above those levels.
 
     Notes
     -----
@@ -954,6 +1108,21 @@ def melting_layer(
     averaging in a QVP smooths and weakens these extremes (Z is averaged over
     the whole circle, including weaker echo), so the defaults here are lower.
     Tune them for other radars and elevations.
+
+    Griffin et al. (2020) define the top and bottom of the melting layer in
+    S-band QVPs by searching upward and downward from the ρhv minimum for the
+    first ρhv ``>= 0.97``; the reflectivity-curvature method of Fabry and
+    Zawadzki (1995) gave tops about 200 m higher and bottoms within about
+    50 m. Where the background is close to 1, as at S band, a fixed 0.97 is
+    reached well inside the dip; the default relative test finds where ρhv
+    first departs from its background, wherever that background lies (it is
+    lower at C and X band and in noisy data). On the KGWX QVPs of 30–31
+    March 2022 the default top is about 190 m above the 0.97 top, the
+    difference Griffin et al. (2020) report against the curvature method.
+    Ryzhkov and Krause (2022) place the top of the ρhv dip at the 0 °C
+    wet-bulb level and its bottom near +3 °C and estimate both from QVPs to
+    about 0.1 km, so the ``"onset"`` top is expected near the wet-bulb 0 °C
+    height of the environment; the returned offsets quantify the difference.
 
     References
     ----------
@@ -965,6 +1134,19 @@ def melting_layer(
        S. Trömel, and C. Simmer, 2016: Quasi-vertical profiles—A new way to
        look at polarimetric radar data. *J. Atmos. Oceanic Technol.*, **33**,
        551–562, https://doi.org/10.1175/JTECH-D-15-0020.1
+    .. [3] Griffin, E. M., T. J. Schuur, and A. V. Ryzhkov, 2020: A
+       polarimetric radar analysis of ice microphysical processes in melting
+       layers of winter storms using S-band quasi-vertical profiles. *J.
+       Appl. Meteor. Climatol.*, **59**, 751–767,
+       https://doi.org/10.1175/JAMC-D-19-0128.1
+    .. [4] Ryzhkov, A., and J. Krause, 2022: New polarimetric radar algorithm
+       for melting-layer detection and determination of its height. *J.
+       Atmos. Oceanic Technol.*, **39**, 529–543,
+       https://doi.org/10.1175/JTECH-D-21-0130.1
+    .. [5] Fabry, F., and I. Zawadzki, 1995: Long-term radar observations of
+       the melting layer of precipitation and their interpretation. *J.
+       Atmos. Sci.*, **52**, 838–851,
+       https://doi.org/10.1175/1520-0469(1995)052<0838:LTROOT>2.0.CO;2
 
     Examples
     --------
@@ -994,12 +1176,35 @@ def melting_layer(
         da = profiles[name].transpose(*other, "height")
         return np.ascontiguousarray(da.values.reshape(-1, h.size), np.float64)
 
+    if boundaries not in _BOUNDARIES:
+        raise ValueError(
+            f"boundaries must be 'onset' or 'half_prominence', not {boundaries!r}"
+        )
     zh, rho, zd = (as2d(names[k]) for k in ("dbz", "rhohv", "zdr"))
-    hmin, hmax = _search_range(
-        freezing_level, height_range, freezing_level_window, template, other, len(zh)
-    )
-    params = tuple(
-        float(v) for v in (*rhohv_range, zdr_min, dbz_min, window, depth, edge_fraction)
+    env_fl, env_wbz = _environment_levels(environment, engine, n_threads)
+    given = environment is None and freezing_level is not None
+    refs = {
+        key: _reference_height(value, template, other)
+        for key, value in (
+            ("freezing_level", freezing_level if given else env_fl),
+            ("wet_bulb_zero_height", env_wbz),
+        )
+        if value is not None
+    }
+    if freezing_level is not None:
+        search = _reference_height(freezing_level, template, other)
+    else:
+        search = refs.get("wet_bulb_zero_height", refs.get("freezing_level"))
+        if search is not None and "freezing_level" in refs:
+            # the 0 °C height where the wet-bulb 0 °C height is missing
+            search = search.fillna(refs["freezing_level"])
+    hmin, hmax = _search_range(search, height_range, freezing_level_window, len(zh))
+    params = (
+        *(float(v) for v in (*rhohv_range, zdr_min, dbz_min, window, depth)),
+        float(edge_fraction),
+        _BOUNDARIES[boundaries],
+        np.inf if rhohv_onset is None else float(rhohv_onset),
+        float(onset_fraction),
     )
     if use_compiled:
         top, bottom, peak = _qvp.melting_layer(
@@ -1023,6 +1228,16 @@ def melting_layer(
         )
     coords = {name: c for name, c in template.coords.items() if "height" not in c.dims}
     method = "co-located rhohv minimum and ZDR/Z maximum (after Giangrande et al. 2008)"
+    if boundaries == "onset":
+        method += (
+            "; top and bottom where rhohv departs from its background by "
+            f"{float(onset_fraction):g} of the dip"
+        )
+        if rhohv_onset is not None:
+            method += f" or reaches {float(rhohv_onset):g}"
+        method += " (after Griffin et al. 2020)"
+    else:
+        method += "; top and bottom at half the prominence of the ZDR/rhohv anomaly"
 
     def wrap(values, long_name):
         return xr.DataArray(
@@ -1058,4 +1273,36 @@ def melting_layer(
             "flag_meanings": " ".join(_ML_FLAGS),
         },
     )
+    out.attrs["melting_layer_boundaries"] = boundaries
+    labels = {
+        "freezing_level": ("0 degC", "height of the 0 degC level above sea level"),
+        "wet_bulb_zero_height": (
+            "wet-bulb 0 degC",
+            "height of the 0 degC wet-bulb temperature above sea level",
+        ),
+    }
+    if given:
+        labels["freezing_level"] = ("reference", "reference height above sea level")
+    suffix = {
+        "freezing_level": "freezing_level",
+        "wet_bulb_zero_height": "wet_bulb_zero",
+    }
+    for key, ref in refs.items():
+        what, long_name = labels[key]
+        values = np.asarray(ref.values, np.float64).reshape(shape)
+        out[key] = xr.DataArray(
+            values,
+            dims=other,
+            coords=coords,
+            attrs={"standard_name": "altitude", "long_name": long_name, "units": "m"},
+        )
+        out[f"melting_layer_top_offset_{suffix[key]}"] = xr.DataArray(
+            np.asarray(top, np.float64) - values,
+            dims=other,
+            coords=coords,
+            attrs={
+                "long_name": f"melting layer top minus the {what} height",
+                "units": "m",
+            },
+        )
     return out

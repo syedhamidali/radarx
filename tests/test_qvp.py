@@ -11,8 +11,10 @@ harmonic in azimuth averages to zero over evenly spaced rays). The compiled
 kernel and the NumPy implementation must agree to float32 rounding (the
 input and output type): rtol 1e-6 for means in native units, which only
 differ in summation order, and 2e-5 dB for means in linear units, where the
-kernel converts dB to linear in single precision. Medians and melting-layer
-heights agree exactly.
+kernel converts dB to linear in single precision. Medians, the melting-layer
+anchors and flags agree exactly, and melting-layer heights to 1e-9 m (the
+onset heights are interpolated between gates, where the compiler may fuse a
+multiply and an add).
 """
 import numpy as np
 import pytest
@@ -357,6 +359,197 @@ def test_melting_layer_search_range(engine):
     assert float(ml["melting_layer_top"][0]) == pytest.approx(3100.0, abs=100)
 
 
+def _gaussian_layer(centre=3000.0, sigma=200.0, background=0.99, dip=0.06):
+    """Melting layer whose rhohv dip, ZDR and Z peaks are Gaussians of width
+    ``sigma`` centred at ``centre`` (known onset and half-prominence heights)."""
+    h = np.arange(300.0, 7000.0, 20.0)
+    g = np.exp(-0.5 * ((h - centre) / sigma) ** 2)
+    rho = background - dip * g
+    zdr = 0.3 + 1.2 * g
+    z = 25.0 + 10.0 * g
+    z[h > 6000] = np.nan
+    return h, z, rho, zdr
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_melting_layer_onset_known_heights(engine):
+    # ramps: rhohv = 0.99 - 0.06 * layer is within 10 % of the dip from the
+    # background (0.984) where layer = 0.1, i.e. 0.4 ramp widths outside the
+    # nominal boundaries
+    prof = _profiles_dataset([_melting_profile()])
+    ml = melting_layer(prof, engine=engine)
+    assert ml.attrs["melting_layer_boundaries"] == "onset"
+    assert "Griffin" in ml["melting_layer_top"].attrs["method"]
+    assert float(ml["melting_layer_top"][0]) == pytest.approx(3140.0, abs=1)
+    assert float(ml["melting_layer_bottom"][0]) == pytest.approx(2460.0, abs=1)
+    # Gaussian dip of rhohv, ZDR and Z: the onset (10 % of the dip, exp =
+    # 0.1) lies at sqrt(2 ln 10) sigma from the centre, the half prominence
+    # at sqrt(2 ln 2) sigma, and rhohv = 0.97 (exp = 1/3) at sqrt(2 ln 3)
+    sigma, centre = 200.0, 3000.0
+    prof = _profiles_dataset([_gaussian_layer(centre, sigma)])
+    onset = melting_layer(prof, engine=engine)
+    half = melting_layer(prof, boundaries="half_prominence", engine=engine)
+    griffin = melting_layer(prof, rhohv_onset=0.97, engine=engine)
+    d_onset = sigma * np.sqrt(2 * np.log(10))
+    d_half = sigma * np.sqrt(2 * np.log(2))
+    d_griffin = sigma * np.sqrt(2 * np.log(3))
+    for ml, d in ((onset, d_onset), (griffin, d_griffin)):
+        assert float(ml["melting_layer_top"][0]) == pytest.approx(centre + d, abs=2)
+        assert float(ml["melting_layer_bottom"][0]) == pytest.approx(centre - d, abs=2)
+    assert "or reaches 0.97" in griffin["melting_layer_top"].attrs["method"]
+    # half prominence: last gate above half height (20 m gates)
+    assert float(half["melting_layer_top"][0]) == pytest.approx(centre + d_half, abs=20)
+    assert float(half["melting_layer_bottom"][0]) == pytest.approx(
+        centre - d_half, abs=20
+    )
+    assert "half the prominence" in half["melting_layer_top"].attrs["method"]
+    # a lower background (0.96, dip to 0.90): the relative onset is unchanged,
+    # and a fixed rhohv_onset above the background falls back to it
+    prof = _profiles_dataset([_gaussian_layer(centre, sigma, background=0.96)])
+    for kwargs in ({}, {"rhohv_onset": 0.97}):
+        low = melting_layer(prof, engine=engine, **kwargs)
+        top = float(low["melting_layer_top"][0])
+        assert top == pytest.approx(centre + d_onset, abs=2)
+    # onset_fraction is honoured: 50 % of the dip is the half-prominence
+    prof = _profiles_dataset([_gaussian_layer(centre, sigma)])
+    custom = melting_layer(prof, onset_fraction=0.5, engine=engine)
+    assert float(custom["melting_layer_top"][0]) == pytest.approx(
+        centre + d_half, abs=2
+    )
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_melting_layer_onset_falls_back_to_zdr(engine):
+    # rhohv stays at its minimum above the layer: no onset above, so the top
+    # is the ZDR half-prominence edge; the bottom is still the rhohv onset
+    h, z, rho, zdr = _gaussian_layer()
+    rho = np.where(h > 3000.0, rho.min(), rho)
+    ml = melting_layer(_profiles_dataset([(h, z, rho, zdr)]), engine=engine)
+    half = melting_layer(
+        _profiles_dataset([_gaussian_layer()]),
+        boundaries="half_prominence",
+        engine=engine,
+    )
+    assert float(ml["melting_layer_top"][0]) == float(half["melting_layer_top"][0])
+    d_onset = 200.0 * np.sqrt(2 * np.log(10))
+    assert float(ml["melting_layer_bottom"][0]) == pytest.approx(3000 - d_onset, abs=2)
+
+
+def _environment(freezing_level=3300.0, time=None):
+    """Sounding with a 6.5 K/km lapse rate and its 0 degC level at
+    ``freezing_level``; dewpoint 2 K below the temperature."""
+    height = np.arange(0.0, 12000.0, 100.0)
+    temperature = 273.15 - 0.0065 * (height - freezing_level)
+    pressure = 101325.0 * np.exp(-height / 8000.0)
+    ds = xr.Dataset(
+        {
+            "temperature": ("height", temperature, {"units": "K"}),
+            "dewpoint": ("height", temperature - 2.0, {"units": "K"}),
+            "pressure": ("height", pressure, {"units": "Pa"}),
+        },
+        coords={"height": height},
+    )
+    if time is not None:
+        ds = ds.assign_coords(time=np.datetime64(time, "ns"))
+    return ds
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_melting_layer_environment(engine):
+    from radarx.io.sounding import wet_bulb_zero_height
+
+    # (the wet-bulb kernels of the two engines agree to about 1e-5 m)
+
+    # a stronger layer-like signature at 4.5-5 km above the real one
+    h, z, rho, zdr = _melting_profile(spurious=False)
+    upper = _ramp(h, 4500.0, 5000.0)
+    rho2, zdr2, z2 = rho - 0.05 * upper, zdr + 1.5 * upper, z + 10 * upper
+    prof = _profiles_dataset([(h, z2, rho2, zdr2)] * 2)
+    env = _environment(3300.0, "2026-01-01T00:00")
+    wbz = float(wet_bulb_zero_height(env))
+    assert 2800.0 < wbz < 3300.0
+    ml = melting_layer(prof, environment=env, engine=engine)
+    top = ml["melting_layer_top"].values
+    np.testing.assert_allclose(top, 3140.0, atol=1)
+    np.testing.assert_allclose(ml["freezing_level"], 3300.0, atol=1e-6)
+    np.testing.assert_allclose(ml["wet_bulb_zero_height"], wbz, atol=1e-3)
+    np.testing.assert_allclose(
+        ml["melting_layer_top_offset_freezing_level"], top - 3300
+    )
+    np.testing.assert_allclose(
+        ml["melting_layer_top_offset_wet_bulb_zero"], top - wbz, atol=1e-3
+    )
+    assert ml["freezing_level"].dims == ("time",)
+    assert ml["wet_bulb_zero_height"].attrs["units"] == "m"
+    # the same from a mapping of reference heights
+    same = melting_layer(
+        prof,
+        environment={"freezing_level": 3300.0, "wet_bulb_zero_height": wbz},
+        engine=engine,
+    )
+    xr.testing.assert_allclose(ml, same)
+    # temperature only: 0 degC height, no wet-bulb
+    dry = melting_layer(
+        prof, environment=env.drop_vars(["dewpoint", "pressure"]), engine=engine
+    )
+    assert "wet_bulb_zero_height" not in dry
+    np.testing.assert_allclose(dry["melting_layer_top"], top)
+    # an explicit freezing_level overrides the search range, not the output
+    high = melting_layer(prof, environment=env, freezing_level=5000.0, engine=engine)
+    np.testing.assert_allclose(high["melting_layer_top"], 5040.0, atol=1)
+    np.testing.assert_allclose(high["freezing_level"], 3300.0, atol=1e-6)
+    # a given freezing_level alone is reported as the reference
+    ref = melting_layer(prof, freezing_level=3300.0, engine=engine)
+    assert ref["freezing_level"].attrs["long_name"].startswith("reference")
+    assert "wet_bulb_zero_height" not in ref
+    # several soundings on time are interpolated to the profile times
+    envs = xr.concat(
+        [
+            _environment(3300.0, "2025-12-31T23:00"),
+            _environment(3500.0, "2026-01-01T00:10"),
+        ],
+        dim="time",
+    )
+    ts = melting_layer(prof, environment=envs, engine=engine)
+    np.testing.assert_allclose(
+        ts["freezing_level"], [3300 + 200 * 6 / 7, 3300 + 200 * 13 / 14]
+    )
+    # a missing reference height falls back to height_range
+    nan = melting_layer(prof, environment={"freezing_level": np.nan}, engine=engine)
+    np.testing.assert_allclose(nan["melting_layer_top"], 5040.0, atol=1)
+    assert np.isnan(nan["melting_layer_top_offset_freezing_level"]).all()
+    # environments for a single profile
+    one = melting_layer(prof.isel(time=0), environment=envs, engine=engine)
+    assert one["freezing_level"].dims == ()
+    assert float(one["freezing_level"]) == pytest.approx(3300 + 200 * 6 / 7)
+    single = melting_layer(prof, environment=env.expand_dims("time"), engine=engine)
+    xr.testing.assert_allclose(single, ml)
+    unindexed = xr.DataArray([3300.0, 3400.0], dims="time")
+    pos = melting_layer(prof, freezing_level=unindexed, engine=engine)
+    np.testing.assert_allclose(pos["freezing_level"], [3300.0, 3400.0])
+    with pytest.raises(ValueError, match="several times"):
+        melting_layer(
+            prof.isel(time=0).drop_vars("time"), freezing_level=envs.temperature[:, 0]
+        )
+
+
+def test_melting_layer_environment_errors():
+    prof = _profiles_dataset([_melting_profile()])
+    with pytest.raises(ValueError, match="boundaries"):
+        melting_layer(prof, boundaries="peak")
+    with pytest.raises(TypeError, match="environment"):
+        melting_layer(prof, environment=3300.0)
+    with pytest.raises(ValueError, match="needs 'freezing_level'"):
+        melting_layer(prof, environment={"height": 1.0})
+    with pytest.raises(ValueError, match="temperature"):
+        melting_layer(prof, environment=_environment().drop_vars("temperature"))
+    if vp.HAS_COMPILED_KERNEL:
+        h = prof["height"].values
+        a = np.zeros((1, h.size))
+        with pytest.raises(ValueError, match="boundary"):
+            vp._qvp.melting_layer(a, a, a, h, [0.0], [1.0], boundaries=7)
+
+
 def test_melting_layer_time_consistency():
     good = _melting_profile()
     h = good[0]
@@ -396,10 +589,18 @@ def test_melting_layer_engines_agree():
             x[rnd.random(h.size) < 0.05] = np.nan
         profiles.append((h, z, rho, zdr))
     prof = _profiles_dataset(profiles)
-    for kwargs in ({}, {"freezing_level": 3000.0}, {"edge_fraction": 0.8}):
+    for kwargs in (
+        {},
+        {"freezing_level": 3000.0},
+        {"boundaries": "half_prominence"},
+        {"boundaries": "half_prominence", "edge_fraction": 0.8},
+        {"rhohv_onset": 0.95, "onset_fraction": 0.3},
+    ):
         c = melting_layer(prof, engine="compiled", **kwargs)
         n = melting_layer(prof, engine="numpy", **kwargs)
-        xr.testing.assert_identical(c, n)
+        xr.testing.assert_allclose(c, n, rtol=0, atol=1e-9)
+        for name in ("melting_layer_peak", "melting_layer_flag"):
+            xr.testing.assert_identical(c[name], n[name])
     assert (c["melting_layer_flag"] > 0).sum() > 150
     xr.testing.assert_identical(prof.radarx.melting_layer(), melting_layer(prof))
     single = melting_layer(prof, engine="compiled", n_threads=1)
@@ -440,21 +641,36 @@ def test_real_volume(armor_volume, reduction):
 
 
 def test_real_timeseries_melting_layer():
-    """ARMOR, 11 April 2008: a bright band near 3 km in every volume."""
+    """
+    ARMOR, 11 April 2008: a melting-layer signature between about 2.5 and
+    4.5 km in every volume. The BMX radiosonde of 00 UTC 12 April 2008 has
+    its 0 °C level at 3859 m and its wet-bulb 0 °C level at 3588 m (IEM
+    archive, :func:`radarx.io.sounding.isotherm_height` and
+    :func:`radarx.io.sounding.wet_bulb_zero_height`).
+    """
     xd = pytest.importorskip("xradar")
     from open_radar_data import DATASETS
 
     names = sorted(n for n in DATASETS.registry if n.startswith("RAW_NA_000_125_"))
     volumes = [xd.io.open_iris_datatree(DATASETS.fetch(n)) for n in names[::4]]
     tqvp = qvp_timeseries(volumes, ["DBZH", "ZDR", "RHOHV"], elevation=12.0)
-    ml = melting_layer(tqvp)
-    assert (ml["melting_layer_flag"] > 0).all()
-    for name in ("melting_layer_top", "melting_layer_bottom"):
-        values = ml[name].values
-        assert np.isfinite(values).all()
-        assert ((values > 1500) & (values < 5000)).all()
-    depth = ml["melting_layer_top"] - ml["melting_layer_bottom"]
-    assert ((depth >= 200) & (depth <= 1500)).all()
+    env = {"freezing_level": 3859.0, "wet_bulb_zero_height": 3588.0}
+    ml = melting_layer(tqvp, environment=env)
+    half = melting_layer(tqvp, boundaries="half_prominence")
+    for out in (ml, half):
+        ok = out["melting_layer_flag"].isin([1, 3]).values
+        assert ok.sum() >= 6
+        for name in ("melting_layer_top", "melting_layer_bottom"):
+            values = out[name].values[ok]
+            assert ((values > 2000) & (values < 5000)).all()
+        depth = (out["melting_layer_top"] - out["melting_layer_bottom"])[ok]
+        assert ((depth >= 200) & (depth <= 2000)).all()
+    # the onset top lies above the half-prominence top, close to 0 degC
+    top = float(ml["melting_layer_top"].median())
+    assert top > float(half["melting_layer_top"].median()) + 100
+    assert abs(top - 3859.0) < 400
+    offset = ml["melting_layer_top_offset_freezing_level"]
+    np.testing.assert_allclose(offset, ml["melting_layer_top"] - 3859.0)
 
 
 def test_edge_cases():

@@ -454,7 +454,9 @@ class RadarxDataSetAccessor(_ShearMixin, RadarxAccessor):
         -------
         xarray.Dataset
             ``melting_layer_top``, ``melting_layer_bottom`` and
-            ``melting_layer_peak`` heights.
+            ``melting_layer_peak`` heights (by default where the ρhv
+            signature begins and ends) and, with an ``environment``, the
+            0 °C and wet-bulb 0 °C heights and the offsets of the top.
 
         See Also
         --------
