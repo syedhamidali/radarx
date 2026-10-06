@@ -230,6 +230,18 @@ def test_errors():
             estimate_kdp(ds, phidp_sign=bad)
 
 
+def test_datatree_named_field_skips_sweeps_without_it():
+    ds, *_ = _sweep(nray=5, ng=50)
+    dtree = xr.DataTree.from_dict(
+        {"sweep_0": ds, "sweep_1": ds.drop_vars("PHIDP"), "sweep_2": ds}
+    )
+    out = estimate_kdp(dtree, phidp="PHIDP")
+    assert sorted(out.children) == ["sweep_0", "sweep_2"]
+    xr.testing.assert_allclose(out["sweep_0"].to_dataset(), estimate_kdp(ds))
+    with pytest.raises(KeyError, match="no sweep"):
+        estimate_kdp(dtree, phidp="UPHIDP")
+
+
 def test_input_checks(monkeypatch):
     ds, *_ = _sweep(nray=5, ng=50)
     with pytest.raises(KeyError, match="RHOHV_X"):
