@@ -238,21 +238,24 @@ good = (wind.beam_crossing_angle > 30) & (wind.n_radars >= 2)
 dbz = grids.DBZH.max("radar")
 km = dict(x=grids.x / 1e3, y=grids.y / 1e3)
 
-fig, axes = plt.subplots(1, 2, figsize=(14, 6.5), layout="constrained")
-for ax, height in zip(axes, (3000.0, 6000.0)):
-    im = ax.pcolormesh(km["x"], km["y"], dbz.sel(z=height), cmap="ChaseSpectral", vmin=-10, vmax=70)
-    sub = wind.sel(z=height).where(good.sel(z=height)).isel(x=slice(None, None, 3), y=slice(None, None, 3))
+height = 5000.0
+level = wind.sel(z=height).where(good.sel(z=height))
+sub = level.isel(x=slice(None, None, 3), y=slice(None, None, 3))
+fig, axes = plt.subplots(1, 2, figsize=(14, 6.5), layout="constrained", sharey=True)
+im0 = axes[0].pcolormesh(km["x"], km["y"], dbz.sel(z=height), cmap="ChaseSpectral", vmin=-10, vmax=70)
+im1 = axes[1].pcolormesh(km["x"], km["y"], level.w, cmap="RdBu_r", vmin=-8, vmax=8)
+axes[1].contour(km["x"], km["y"], dbz.sel(z=height).fillna(-30), levels=[35, 50], colors="k", linewidths=0.6)
+for ax, title in zip(axes, ["reflectivity and wind", "w (contours: 35 and 50 dBZ)"]):
     ax.quiver(sub.x / 1e3, sub.y / 1e3, sub.u, sub.v, scale=700, width=0.002)
-    ax.contour(km["x"], km["y"], wind.w.sel(z=height).where(good.sel(z=height)).fillna(0),
-               levels=[-4, 4], colors=["b", "k"], linewidths=1)
     ax.plot(grids.radar_x / 1e3, grids.radar_y / 1e3, "k^")
-    ax.set_title(f"{height / 1e3:.0f} km: reflectivity, wind, w = +4 (black) and -4 m/s (blue)")
+    ax.set_title(f"{height / 1e3:.0f} km: {title}")
     ax.set_xlim(-120, 60)
     ax.set_ylim(-120, 100)
     ax.set_aspect("equal")
     ax.set_xlabel("x (km east of KGWX)")
 axes[0].set_ylabel("y (km north of KGWX)")
-fig.colorbar(im, ax=axes, label="reflectivity (dBZ)", shrink=0.8)
+fig.colorbar(im0, ax=axes[0], label="reflectivity (dBZ)", shrink=0.8)
+fig.colorbar(im1, ax=axes[1], label="w (m/s)", shrink=0.8)
 plt.show()
 ```
 

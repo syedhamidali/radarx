@@ -513,5 +513,5 @@ def test_real_dual_doppler(nexrad_pair):
     assert float(np.sqrt(np.nanmean(out.vr_residual.values[:, good] ** 2))) < 2.5
     assert float(np.abs(out.w.values[good]).max()) < 30.0
     # deep south-westerly flow ahead of the line at mid levels
-    mid = out.sel(z=5000.0).where(good[4])
-    assert float(mid.v.mean()) > 10.0
+    mid = out.v.sel(z=5000.0).values[good[4]]
+    assert mid.mean() > 10.0
