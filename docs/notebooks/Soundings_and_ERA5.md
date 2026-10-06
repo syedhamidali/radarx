@@ -88,6 +88,12 @@ and linearly in time to the radar volume time. The default (`source="auto"`) is 
 37 levels: from the CDS when a CDS key is configured, otherwise from Google's
 ARCO-ERA5.
 
+Google's store keeps every field as one global chunk per hour, so a first read
+takes a few minutes; radarx caches a region around the request, and later
+reads nearby are instant. The documentation build starts from a small
+pre-extracted copy of these ERA5 fields (`docs/notebooks/data/era5`) to stay
+within the build time limit.
+
 ```{code-cell} ipython3
 t0 = time.perf_counter()
 era5_kgwx = dtree.radarx.sounding(era5_source="gcs")  # at 23:46:39 UTC

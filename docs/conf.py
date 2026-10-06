@@ -19,6 +19,22 @@ except ImportError:  # pragma: no cover
 
 sys.path.insert(0, os.path.abspath(".."))
 
+# The notebooks read ERA5 from Google's ARCO-ERA5 store, which keeps every
+# field as one global chunk per hour, so a cold read takes minutes. The docs
+# build seeds radarx's cache with a small pre-extracted subset (KGWX region,
+# 30-31 March 2022, 23 and 00 UTC) so the build fits the Read the Docs time
+# limit; outside the docs build the notebooks read the store directly.
+if "RADARX_CACHE_DIR" not in os.environ:
+    import shutil
+    import tempfile
+
+    _cache = tempfile.mkdtemp(prefix="radarx-docs-cache-")
+    shutil.copytree(
+        os.path.join(os.path.dirname(__file__), "notebooks", "data", "era5"),
+        os.path.join(_cache, "soundings", "era5"),
+    )
+    os.environ["RADARX_CACHE_DIR"] = _cache
+
 # -- General configuration ---------------------------------------------------
 
 extensions = [
