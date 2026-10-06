@@ -49,6 +49,7 @@ import hashlib
 import time
 from pathlib import Path
 
+import cmweather  # noqa: F401  registers the radar colormaps
 import matplotlib.pyplot as plt
 import numpy as np
 import onnx
@@ -72,13 +73,11 @@ file = download_file(
 
 
 def mask_no_data(ds):
-    for name, lowest in (("DBZH", -32.0), ("ZDR", -12.9)):
-        if name in ds:
-            ds[name] = ds[name].where(ds[name] > lowest)
-    return ds
+    lowest = {"DBZH": -32.0, "ZDR": -12.9}
+    return ds.assign({v: ds[v].where(ds[v] > x) for v, x in lowest.items() if v in ds})
 
 
-dtree = xd.io.open_nexradlevel2_datatree(file).map_over_datasets(mask_no_data)
+dtree = xd.io.open_nexradlevel2_datatree(file).map_over_datasets(mask_no_data).load()
 sweep = dtree["sweep_0"].to_dataset(inherit="all_coords").xradar.georeference()
 print(float(sweep.sweep_fixed_angle), "deg;", dict(sweep.DBZH.sizes))
 print("first ray at", float(sweep.azimuth[0]), "deg")
@@ -199,10 +198,12 @@ The convolution pads each patch with zeros, so it is wrong within two gates
 of a patch border. With patches that do not overlap and a plain mean
 (`blend="mean"`), those errors stay as seams; the cosine blending of
 overlapping patches gives the borders almost no weight. The reference is the
-same network run on the whole sweep at once.
+same network run on the whole sweep at once, with the rays continued
+periodically across north as the patches do.
 
 ```{code-cell} ipython3
-whole = model.run(dbz.values[None, None])["y"][0, 0] * 60.0
+periodic = np.concatenate([dbz.values[-2:], dbz.values, dbz.values[:2]])
+whole = model.run(periodic[None, None])["y"][0, 0, 2:-2] * 60.0
 tiles, tiles_index = ml.polar_patches(dbz, (64, 128), stride=(64, 128))
 seams = ml.reassemble(model.run(tiles[:, None])["y"][:, 0], tiles_index, blend="mean")
 blended = smoothed.values
