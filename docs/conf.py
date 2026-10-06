@@ -151,9 +151,39 @@ if os.environ.get("READTHEDOCS_VERSION_TYPE") == "tag":
     version = os.environ.get("READTHEDOCS_GIT_IDENTIFIER", version).lstrip("v")
 release = version
 
+
+def _apa_citation(path=os.path.join("..", "CITATION.cff")):
+    """APA-style citation built from CITATION.cff (the single source of truth)."""
+    import yaml
+
+    try:
+        with open(path) as f:
+            cff = yaml.safe_load(f)
+    except (OSError, yaml.YAMLError) as err:
+        warnings.warn(f"could not read {path}: {err}")
+        return "See CITATION.cff."
+    authors = []
+    for person in cff.get("authors", []):
+        initials = " ".join(
+            f"{name[0]}." for name in person.get("given-names", "").split() if name
+        )
+        authors.append(f"{person.get('family-names', '')}, {initials}".strip(", "))
+    names = (
+        authors[0]
+        if len(authors) == 1
+        else ", ".join(authors[:-1]) + ", & " + authors[-1]
+    )
+    year = str(cff.get("date-released", ""))[:4]
+    return (
+        f"{names} ({year}). *{cff['title']}* (Version {cff.get('version', release)}) "
+        f"[Computer software]. Zenodo. https://doi.org/{cff['doi']}"
+    )
+
+
 myst_substitutions = {
     "today": dt.datetime.utcnow().strftime("%Y-%m-%d"),
     "release": release,
+    "apa_citation": _apa_citation(),
 }
 myst_heading_anchors = 3
 

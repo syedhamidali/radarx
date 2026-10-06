@@ -48,6 +48,7 @@ dependencies:
   - geoviews
   - nbclassic
   - itables
+  - pyyaml
   - pip
   - pip:
     # optional, for grid_radar(method="barnes"); supports Python < 3.13 only

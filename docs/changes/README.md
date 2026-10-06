@@ -11,5 +11,5 @@ Use the prefix of the PR title (`ADD`, `ENH`, `FIX`, `MNT`, `DOC`, `DEP`, `REL`)
 Because each PR writes its own file, changelog entries never conflict between
 pull requests. The documentation build collects the fragments into the
 "Unreleased" section of `history.md`; at a release,
-`python ci/release_changelog.py X.Y.Z` moves them into a new version section
-and deletes the fragments.
+`python ci/release_changelog.py X.Y.Z` moves them into a new version section,
+deletes the fragments and updates the version and date in `CITATION.cff`.

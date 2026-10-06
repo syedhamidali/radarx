@@ -138,9 +138,18 @@ $ pytest tests/test_radarx.py
 
 ## Deploying
 
-A reminder for the maintainers on how to deploy. Make sure all your
-changes are committed (including the release section in
-`docs/history.md` and the version and date in `CITATION.cff`). Then
-publish a GitHub release with a new `vX.Y.Z` tag: the version comes from
-the tag (setuptools-scm), and the release workflow builds the wheels and
-uploads them to PyPI.
+A reminder for the maintainers on how to release:
+
+1. In a pull request titled `REL: X.Y.Z`, run
+   `python ci/release_changelog.py X.Y.Z`. It moves the changelog fragments
+   from `docs/changes/` into a new section of `docs/history.md` (add a short
+   summary paragraph there if you like) and sets `version` and
+   `date-released` in `CITATION.cff`. The README, the documentation and
+   GitHub's "Cite this repository" button all take the citation from
+   `CITATION.cff`.
+2. After merging, publish a GitHub release with the tag `vX.Y.Z`. The version
+   comes from the tag (setuptools-scm); the release workflow builds the wheels
+   and uploads them to PyPI, and Zenodo archives the release under the same
+   concept DOI.
+3. Merge the conda-forge bot's version update on the radarx feedstock (check
+   for new runtime dependencies).
