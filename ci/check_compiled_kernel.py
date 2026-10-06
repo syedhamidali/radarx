@@ -124,3 +124,49 @@ out = sounding._sounding.interp_vertical(
 if out.shape != (1, 1, 1) or not np.isclose(out[0, 0, 0], 275.0):
     sys.exit(f"compiled sounding kernel returned an unexpected result: {out}")
 print("compiled sounding kernel OK")
+
+import importlib  # noqa: E402
+
+hid_module = importlib.import_module("radarx.retrieve.hid")
+
+if not hid_module.HAS_COMPILED_KERNEL:
+    sys.exit("radarx.retrieve._hid was not built: the compiled kernel is missing")
+classes, table = hid_module._scheme("dolan", "C")
+zh = np.array([[39.0, 62.3]])  # rain and hail centres of Dolan et al. (2013)
+no_rules = np.zeros(0, np.int64)
+cls, conf, scores, info = hid_module._hid.classify(
+    [zh],
+    [np.array([[2.3, 0.14]])],
+    [np.array([[5.5, 0.6]])],
+    [np.array([[1.0, 0.97]])],
+    [np.array([[20.0, 0.0]])],
+    *([[None]] * 7),
+    table["kind"],
+    table["par"],
+    table["fsel"],
+    table["weight"],
+    table["group"],
+    no_rules,
+    no_rules,
+    no_rules,
+    no_rules,
+    np.zeros(0),
+    None,
+    table["mode"],
+    False,
+    False,
+    0.0,
+    -1,
+    -1,
+    0,
+    0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    1,
+)
+codes = cls[0]
+if codes.tolist() != [[2, 8]]:
+    sys.exit(f"compiled HID kernel returned an unexpected result: {codes}")
+print("compiled HID kernel OK")

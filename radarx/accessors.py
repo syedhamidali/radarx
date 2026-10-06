@@ -418,6 +418,34 @@ class RadarxDataSetAccessor(_ShearMixin, RadarxAccessor):
         """
         return estimate_kdp(self.xarray_obj, phidp, rhohv, dbzh, **kwargs)
 
+    def hid(self, temperature=None, *, band="S", **kwargs):
+        """
+        Classify hydrometeors with fuzzy logic for this sweep or grid.
+
+        Parameters
+        ----------
+        temperature : xarray.Dataset, xarray.DataArray or str, optional
+            Temperature profile on ``height`` (e.g. ``dtree.radarx.sounding()``),
+            a temperature field or its name. Default: none.
+        band : {"S", "C", "X"}, optional
+            Radar band. Default ``"S"``.
+        **kwargs
+            Options of :func:`radarx.retrieve.hid`, e.g. ``method``, ``mask``
+            or the field names.
+
+        Returns
+        -------
+        xarray.Dataset
+            ``HID`` (class code), ``HID_confidence`` and ``HID_scores``.
+
+        See Also
+        --------
+        radarx.retrieve.hid
+        """
+        from .retrieve.hid import hid
+
+        return hid(self.xarray_obj, temperature, band=band, **kwargs)
+
     def qvp(self, data_vars=None, **kwargs):
         """
         Quasi-vertical profile of this sweep.
@@ -884,6 +912,39 @@ class RadarxDataTreeAccessor(_ShearMixin, RadarxAccessor):
         radarx.retrieve.estimate_kdp
         """
         return estimate_kdp(self.xarray_obj, phidp, rhohv, dbzh, **kwargs)
+
+    def hid(self, temperature=None, *, band="S", **kwargs):
+        """
+        Classify hydrometeors with fuzzy logic for every sweep.
+
+        All gates of all sweeps are classified in one call of the compiled
+        kernel; sweeps without reflectivity or differential reflectivity are
+        skipped.
+
+        Parameters
+        ----------
+        temperature : xarray.Dataset, xarray.DataArray or str, optional
+            Temperature profile on ``height`` (e.g. ``dtree.radarx.sounding()``)
+            or the name of a temperature field in each sweep. Default: none.
+        band : {"S", "C", "X"}, optional
+            Radar band. Default ``"S"``.
+        **kwargs
+            Options of :func:`radarx.retrieve.hid`, e.g. ``method``, ``mask``
+            or the field names.
+
+        Returns
+        -------
+        xarray.DataTree
+            The root of the volume and one node per classified sweep with
+            ``HID``, ``HID_confidence`` and ``HID_scores``.
+
+        See Also
+        --------
+        radarx.retrieve.hid
+        """
+        from .retrieve.hid import hid
+
+        return hid(self.xarray_obj, temperature, band=band, **kwargs)
 
     def qvp(self, data_vars=None, **kwargs):
         """
