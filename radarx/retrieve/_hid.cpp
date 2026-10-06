@@ -267,6 +267,26 @@ inline bool load(const Table& t, const Block& b, int64_t i, Gate& g) {
     return true;
 }
 
+// One membership function: kind, 4 parameters (beta: m, a, b; trapezoid:
+// x1-x4) and the Park function added to each of them.
+Term make_term(int v, int64_t kind, double w, const double* par, const int64_t* fsel) {
+    Term m;
+    m.v = v;
+    m.kind = static_cast<int>(kind);
+    m.w = w;
+    for (int j = 0; j < 4; ++j) {
+        if (fsel[j] < 0 || fsel[j] >= kNFunc) throw std::invalid_argument("bad function selector");
+        m.p[j] = par[j];
+        m.sel[j] = static_cast<int>(fsel[j]);
+    }
+    if (kind == kBeta) {
+        if (!(m.p[1] != 0.0)) throw std::invalid_argument("beta half-width must not be 0");
+        const double b = m.p[2];
+        if (b >= 0.0 && b <= 64.0 && b == std::floor(b)) m.n = static_cast<int>(b);
+    }
+    return m;
+}
+
 // Membership functions of the table (n_class, 5) and their weights. In the
 // additive modes variables with zero weight are dropped.
 void fill_terms(Table& t, const IArray& kind, const DArray& par, const IArray& fsel,
@@ -281,25 +301,14 @@ void fill_terms(Table& t, const IArray& kind, const DArray& par, const IArray& f
     for (int c = 0; c < t.nc; ++c) {
         t.group[c] = static_cast<int>(group.data()[c]);
         for (int v = 0; v < kNVar; ++v) {
-            const int64_t k = kind.data()[c * kNVar + v];
-            const double w = weight.data()[c * kNVar + v];
+            const int64_t at = c * kNVar + v;
+            const int64_t k = kind.data()[at];
+            const double w = weight.data()[at];
             if (k < kNone || k > kTrap) throw std::invalid_argument("unknown membership kind");
-            if (k == kNone || (t.mode != kHybrid && !(w > 0.0))) continue;
-            Term& m = t.term[c][t.nterm[c]++];
-            m.v = v;
-            m.kind = static_cast<int>(k);
-            m.w = w;
-            for (int j = 0; j < 4; ++j) {
-                m.p[j] = par.data()[(c * kNVar + v) * 4 + j];
-                const int64_t sel = fsel.data()[(c * kNVar + v) * 4 + j];
-                if (sel < 0 || sel >= kNFunc) throw std::invalid_argument("bad function selector");
-                m.sel[j] = static_cast<int>(sel);
-            }
-            if (k == kBeta) {
-                if (!(m.p[1] != 0.0)) throw std::invalid_argument("beta half-width must not be 0");
-                const double b = m.p[2];
-                if (b >= 0.0 && b <= 64.0 && b == std::floor(b)) m.n = static_cast<int>(b);
-            }
+            const bool used = k != kNone && (t.mode == kHybrid || w > 0.0);
+            if (used)
+                t.term[c][t.nterm[c]++] =
+                    make_term(v, k, w, par.data() + at * 4, fsel.data() + at * 4);
         }
     }
 }
