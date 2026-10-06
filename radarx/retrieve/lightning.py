@@ -521,7 +521,7 @@ def _cells_numpy(
     s = (cell >= 0) & (it >= 0) & (iz >= 0)
     source_keys = (cell[s] * nt + it[s]) * nz + iz[s]
     sources = np.bincount(source_keys, minlength=ncell * nt * nz)
-    sources = sources.reshape(ncell, nt, nz)
+    sources = sources.reshape((ncell, nt, nz))
     nflash = first.size
     good = flash_ok.astype(bool) & (first >= 0)
     fbin = np.full(nflash, -1, dtype=np.int64)
@@ -540,7 +540,7 @@ def _cells_numpy(
             keys = pairs[use, 1] * nt + fbin[pairs[use, 0]]
         else:
             keys = np.zeros(0, dtype=np.int64)
-    flashes = np.bincount(keys, minlength=ncell * nt).reshape(ncell, nt)
+    flashes = np.bincount(keys, minlength=ncell * nt).reshape((ncell, nt))
     return flashes.astype(np.int64), sources.astype(np.int64)
 
 
