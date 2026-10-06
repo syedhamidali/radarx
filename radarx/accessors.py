@@ -30,6 +30,7 @@ from .grid import (
     grid_radar,  # noqa
     to_uxarray,  # noqa
 )
+from .grid import multi as _multi
 from .retrieve import advect as retrieve_advect  # noqa
 from .retrieve import create_cappi as retrieve_cappi  # noqa
 from .retrieve import (  # noqa
@@ -737,6 +738,52 @@ class RadarxDataSetAccessor(_ShearMixin, RadarxAccessor):
             **kwargs,
         )
 
+    def network_bias(self, field="DBZH", reference=0, **kwargs):
+        """
+        Relative calibration biases of the radars of a multi-radar grid.
+
+        Parameters
+        ----------
+        field : str, optional
+            Field to compare. Default ``"DBZH"``.
+        reference : int or str, optional
+            Reference radar. Default: the first.
+        **kwargs
+            See :func:`radarx.grid.network_bias`.
+
+        Returns
+        -------
+        xarray.Dataset
+            ``bias`` on ``radar`` and the pair statistics.
+
+        See Also
+        --------
+        radarx.grid.network_bias
+        """
+        return _multi.network_bias(self.xarray_obj, field, reference, **kwargs)
+
+    def merge_radars(self, data_vars="DBZH", **kwargs):
+        """
+        Weighted merge of the radars of a multi-radar grid.
+
+        Parameters
+        ----------
+        data_vars : str or list of str, optional
+            Fields to merge. Default ``"DBZH"``.
+        **kwargs
+            See :func:`radarx.grid.merge_radars`.
+
+        Returns
+        -------
+        xarray.Dataset
+            Merged fields on ``(z, y, x)``.
+
+        See Also
+        --------
+        radarx.grid.merge_radars
+        """
+        return _multi.merge_radars(self.xarray_obj, data_vars, **kwargs)
+
 
 @register_datatree_accessor("radarx")
 class RadarxDataTreeAccessor(_ShearMixin, RadarxAccessor):
@@ -1006,3 +1053,30 @@ class RadarxDataTreeAccessor(_ShearMixin, RadarxAccessor):
     def to_cappi(self, *args, **kwargs):
         """Convenience alias for :meth:`create_cappi`."""
         return self.create_cappi(*args, **kwargs)
+
+    def grid_radars(self, others=(), x=None, y=None, z=None, **kwargs):
+        """
+        Grid this radar together with ``others`` onto one shared grid.
+
+        Parameters
+        ----------
+        others : xarray.DataTree or list of xarray.DataTree, optional
+            The other radar volumes.
+        x, y, z : array-like
+            Grid coordinates (m); ``z`` above sea level.
+        **kwargs
+            See :func:`radarx.grid.grid_radars`. The default origin is this
+            radar's site.
+
+        Returns
+        -------
+        xarray.Dataset
+            Multi-radar grid with a ``radar`` dimension, this radar first.
+
+        See Also
+        --------
+        radarx.grid.grid_radars
+        """
+        if isinstance(others, RadarxDataTreeType):
+            others = [others]
+        return _multi.grid_radars([self.xarray_obj, *others], x, y, z, **kwargs)

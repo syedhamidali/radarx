@@ -180,6 +180,18 @@ def _grid_numpy(x, y, z, arrays, site_altitude, max_gap, min_weight, fill_below)
     X, Y = np.meshgrid(x, y)
     s = np.hypot(X, Y)
     az = np.mod(np.degrees(np.arctan2(X, Y)), 360.0)
+    return _columns_numpy(
+        s, az, z, arrays, site_altitude, max_gap, min_weight, fill_below
+    )
+
+
+def _columns_numpy(s, az, z, arrays, site_altitude, max_gap, min_weight, fill_below):
+    """
+    Cone gridding of columns at ground distance ``s`` and azimuth ``az``.
+
+    ``s`` and ``az`` (degrees) have the shape of the output columns; the
+    result is float32 on ``(z,) + s.shape``.
+    """
     values, heights = zip(
         *(
             _cone_numpy(*sweep, s, az, site_altitude, max_gap, min_weight)

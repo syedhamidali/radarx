@@ -124,3 +124,21 @@ out = sounding._sounding.interp_vertical(
 if out.shape != (1, 1, 1) or not np.isclose(out[0, 0, 0], 275.0):
     sys.exit(f"compiled sounding kernel returned an unexpected result: {out}")
 print("compiled sounding kernel OK")
+
+from radarx.grid import multi  # noqa: E402
+
+if not multi.HAS_COMPILED_KERNEL:
+    sys.exit("radarx.grid._multi was not built: the compiled kernel is missing")
+cols = multi._column_geometry(
+    np.array([0.0, 10e3]),
+    np.array([0.0]),
+    (45.0, 10.0),
+    [{"latitude": 45.0, "longitude": 10.0}],
+    True,
+)
+rng, el = multi._multi.beam_geometry(cols["ground"], np.array([100.0]), [100.0])
+if not np.isclose(cols["ground"][0][0, 1], 10e3, atol=1e-3) or not np.isclose(
+    rng[0, 0, 0, 1], 10e3, rtol=1e-3
+):
+    sys.exit(f"compiled multi-radar kernel returned an unexpected result: {rng}")
+print("compiled multi-radar kernel OK")
