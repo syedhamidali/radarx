@@ -191,6 +191,8 @@ jobs:
           path: dist/radarx1.gz
       - name: Upload to TestPyPI
         if: ${{ github.event_name == 'push' }}
+        # a preview upload only: TestPyPI outages must not fail main
+        continue-on-error: true
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.TESTPYPI_API_TOKEN }}
