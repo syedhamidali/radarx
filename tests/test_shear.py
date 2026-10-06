@@ -174,6 +174,7 @@ def test_xarray_interface():
     ds = sweep(vel, az, RANGE).transpose("range", "azimuth")
     shear = ds.radarx.azimuthal_shear("VRADH", window=(750.0, 2500.0))
     div = radial_divergence(ds)
+    xr.testing.assert_identical(ds.radarx.radial_divergence("VRADH"), div)
     assert shear.dims == ("range", "azimuth")
     assert shear.attrs["units"] == "s-1"
     assert shear.attrs["window_azimuth_m"] == 2500.0

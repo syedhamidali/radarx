@@ -32,9 +32,11 @@ from .grid import (
 )
 from .retrieve import advect as retrieve_advect  # noqa
 from .retrieve import create_cappi as retrieve_cappi  # noqa
-from .retrieve import (
+from .retrieve import (  # noqa
     dealias_velocity,
     estimate_kdp,  # noqa
+    melting_layer,
+    qvp,
 )
 from .retrieve import estimate_motion as retrieve_estimate_motion  # noqa
 from .retrieve import interpolate_time as retrieve_interpolate_time  # noqa
@@ -416,6 +418,50 @@ class RadarxDataSetAccessor(_ShearMixin, RadarxAccessor):
         """
         return estimate_kdp(self.xarray_obj, phidp, rhohv, dbzh, **kwargs)
 
+    def qvp(self, data_vars=None, **kwargs):
+        """
+        Quasi-vertical profile of this sweep.
+
+        Parameters
+        ----------
+        data_vars : str or list of str, optional
+            Variables to profile. By default all ``(azimuth, range)`` fields.
+        **kwargs
+            Options of :func:`radarx.retrieve.qvp` (``min_rhohv``,
+            ``min_dbz``, ``min_count``, ``reduction``, ...).
+
+        Returns
+        -------
+        xarray.Dataset
+            Profiles on the ``height`` dimension.
+
+        See Also
+        --------
+        radarx.retrieve.qvp
+        """
+        return qvp(self.xarray_obj, data_vars, **kwargs)
+
+    def melting_layer(self, **kwargs):
+        """
+        Melting-layer top and bottom from quasi-vertical profiles.
+
+        Parameters
+        ----------
+        **kwargs
+            Options of :func:`radarx.retrieve.melting_layer`.
+
+        Returns
+        -------
+        xarray.Dataset
+            ``melting_layer_top``, ``melting_layer_bottom`` and
+            ``melting_layer_peak`` heights.
+
+        See Also
+        --------
+        radarx.retrieve.melting_layer
+        """
+        return melting_layer(self.xarray_obj, **kwargs)
+
     def dealias(self, field="VRADH", nyquist_velocity=None, **kwargs):
         """
         Dealias (unfold) the Doppler velocity of this sweep.
@@ -691,6 +737,30 @@ class RadarxDataTreeAccessor(_ShearMixin, RadarxAccessor):
         radarx.retrieve.estimate_kdp
         """
         return estimate_kdp(self.xarray_obj, phidp, rhohv, dbzh, **kwargs)
+
+    def qvp(self, data_vars=None, **kwargs):
+        """
+        Quasi-vertical profile of one sweep of the volume.
+
+        Parameters
+        ----------
+        data_vars : str or list of str, optional
+            Variables to profile. By default all ``(azimuth, range)`` fields.
+        **kwargs
+            Options of :func:`radarx.retrieve.qvp`, e.g. ``sweep`` or
+            ``elevation`` (default: the highest sweep), ``min_rhohv``,
+            ``min_dbz``, ``min_count``, ``reduction``.
+
+        Returns
+        -------
+        xarray.Dataset
+            Profiles on the ``height`` dimension.
+
+        See Also
+        --------
+        radarx.retrieve.qvp, radarx.retrieve.qvp_timeseries
+        """
+        return qvp(self.xarray_obj, data_vars, **kwargs)
 
     def dealias(self, field="VRADH", nyquist_velocity=None, **kwargs):
         """

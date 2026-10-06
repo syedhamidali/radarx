@@ -99,3 +99,15 @@ if not np.allclose(kdp_out[0][:, 20:-20], 1.0) or not np.allclose(
 ):
     sys.exit("compiled KDP kernel returned an unexpected result")
 print("compiled KDP kernel OK")
+
+from radarx.retrieve import vertical_profiles as qvp  # noqa: E402
+
+if not qvp.HAS_COMPILED_KERNEL:
+    sys.exit("radarx.retrieve._qvp was not built: the compiled kernel is missing")
+
+values, counts = qvp._qvp.azimuthal_reduce(
+    [[np.ones((azimuth.size, rng.size), dtype=np.float32)]], [[]], [], [1], [1]
+)
+if values[0].shape != (1, rng.size) or not np.allclose(values[0], 1.0):
+    sys.exit(f"compiled QVP kernel returned an unexpected result: {values[0]}")
+print("compiled QVP kernel OK")

@@ -4,7 +4,7 @@
 
 """Build the optional compiled kernels (cone gridding, advection).
 
-Project metadata lives in pyproject.toml. The extension is optional: if it
+Project metadata lives in pyproject.toml. The extensions are optional: if they
 cannot be compiled, radarx still installs and uses a NumPy implementation.
 """
 
@@ -50,6 +50,13 @@ setup(
         Pybind11Extension(
             "radarx.retrieve._kdp",
             ["radarx/retrieve/_kdp.cpp"],
+            cxx_std=17,
+            extra_compile_args=extra_compile_args,
+            optional=True,
+        ),
+        Pybind11Extension(
+            "radarx.retrieve._qvp",
+            ["radarx/retrieve/_qvp.cpp"],
             cxx_std=17,
             extra_compile_args=extra_compile_args,
             optional=True,
