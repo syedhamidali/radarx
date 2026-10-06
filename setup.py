@@ -20,7 +20,8 @@ class ParallelBuildExt(build_ext):
 
     def finalize_options(self):
         super().finalize_options()
-        if self.parallel is None:
+        # ``parallel`` is the -j option of setuptools' build_ext
+        if getattr(self, "parallel", None) is None:
             jobs = os.environ.get("RADARX_BUILD_JOBS")
             self.parallel = int(jobs) if jobs else os.cpu_count() or 1
 
