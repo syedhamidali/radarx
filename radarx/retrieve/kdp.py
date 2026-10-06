@@ -107,6 +107,8 @@ __all__ = ["estimate_kdp"]
 import numpy as np
 import xarray as xr
 
+from ._products import product_tree
+
 try:
     from . import _kdp
 
@@ -671,8 +673,10 @@ def estimate_kdp(
         bridged and gates beyond the first and last valid gate hold the end
         values), ``KDP`` (degrees/km; NaN at non-meteorological gates) and
         the system offset ``PHIDP_OFFSET`` per ray (in the convention of the
-        input phase), on the input coordinates. For a volume, a DataTree with one such node per sweep
-        that has the differential phase, and the root of the input.
+        input phase), on the input coordinates. For a volume, a DataTree
+        with one such node per sweep that has the differential phase, and the
+        root of the input. Merge the products into the input with
+        ``ds.radarx.assign(products)`` or ``dtree.radarx.assign(products)``.
 
     Raises
     ------
@@ -764,6 +768,4 @@ def estimate_kdp(
         raise KeyError("no sweep contains a differential phase field")
     datasets = [obj[name].to_dataset(inherit=False) for name in names]
     results = _run(datasets, fields, params, n_threads, use_compiled)
-    nodes = {"/": obj.root.to_dataset(inherit=False)}
-    nodes.update(zip(names, results))
-    return xr.DataTree.from_dict(nodes)
+    return product_tree(obj, dict(zip(names, results)))

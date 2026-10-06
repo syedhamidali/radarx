@@ -46,6 +46,8 @@ __doc__ = __doc__.format("\n   ".join(__all__))
 import numpy as np
 import xarray as xr
 
+from ._products import product_tree
+
 try:
     from . import _shear
 
@@ -307,7 +309,8 @@ def llsd(
     xarray.Dataset or xarray.DataTree
         ``azimuthal_shear`` and ``radial_divergence`` in s⁻¹ (float32) on the
         sweep's dimensions and coordinates; a DataTree with one such node per
-        sweep that has ``field`` if a DataTree was given.
+        sweep that has ``field`` and the root of the input if a DataTree was
+        given. Merge them into the input with ``.radarx.assign(products)``.
 
     Notes
     -----
@@ -356,7 +359,7 @@ def llsd(
         if not sweeps:
             raise ValueError(f"No sweep contains {field!r}.")
         results = _llsd_sweeps(sweeps, field, **options)
-        return type(obj).from_dict(dict(zip(names, results)))
+        return product_tree(obj, dict(zip(names, results)))
     raise TypeError("llsd needs an xarray.Dataset sweep or an xarray.DataTree")
 
 
@@ -373,7 +376,7 @@ def azimuthal_shear(obj, field="VRADH", window=(750.0, 2500.0), **kwargs):
     -------
     xarray.DataArray or xarray.DataTree
         ``azimuthal_shear`` on the sweep's dimensions and coordinates (a
-        DataTree of sweeps if a DataTree was given).
+        DataTree of sweeps and the input root if a DataTree was given).
 
     See Also
     --------
@@ -392,7 +395,7 @@ def radial_divergence(obj, field="VRADH", window=(750.0, 2500.0), **kwargs):
     -------
     xarray.DataArray or xarray.DataTree
         ``radial_divergence`` on the sweep's dimensions and coordinates (a
-        DataTree of sweeps if a DataTree was given).
+        DataTree of sweeps and the input root if a DataTree was given).
 
     See Also
     --------
