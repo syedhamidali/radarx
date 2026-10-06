@@ -519,9 +519,9 @@ def _cells_numpy(
     cell[(cell < 0) | (cell >= ncell)] = -1
     it, iz = _bins(te, t), _bins(ze, z)
     s = (cell >= 0) & (it >= 0) & (iz >= 0)
-    sources = np.bincount(
-        (cell[s] * nt + it[s]) * nz + iz[s], minlength=ncell * nt * nz
-    ).reshape(ncell, nt, nz)
+    source_keys = (cell[s] * nt + it[s]) * nz + iz[s]
+    sources = np.bincount(source_keys, minlength=ncell * nt * nz)
+    sources = sources.reshape(ncell, nt, nz)
     nflash = first.size
     good = flash_ok.astype(bool) & (first >= 0)
     fbin = np.full(nflash, -1, dtype=np.int64)
@@ -1031,6 +1031,36 @@ def vertical_source_distribution(
 # --------------------------------------------------------------------------
 
 
+def _cell_index(values, background):
+    """Cell labels of a mask and the cell index (or -1) of every mask point."""
+    valid = (
+        np.isfinite(values) if values.dtype.kind == "f" else np.ones(values.shape, bool)
+    )
+    filled = np.where(valid, values, background).astype(np.int64)
+    valid &= (filled != background) & (filled >= 0)
+    cells = np.unique(filled[valid])
+    index = np.where(valid, np.searchsorted(cells, filled), -1).astype(np.int32)
+    return cells, np.ascontiguousarray(index)
+
+
+def _mask_frames(times, mtimes, max_offset):
+    """Nearest mask frame of every source time (-1 if too far) and the offset."""
+    if mtimes.size > 1 and np.any(np.diff(mtimes) <= np.timedelta64(0, "ns")):
+        raise ValueError("mask times must increase")
+    if max_offset is not None:
+        max_off = _interval(max_offset, "max_offset")
+    elif mtimes.size > 1:
+        max_off = (np.median(np.diff(mtimes)) // 2).astype("timedelta64[ns]")
+    else:
+        max_off = np.timedelta64(150, "s").astype("timedelta64[ns]")
+    if not times.size:
+        return np.zeros(0, dtype=np.int64), max_off
+    mid = mtimes[:-1] + (mtimes[1:] - mtimes[:-1]) // 2
+    frame = np.searchsorted(mid, times, side="right").astype(np.int64)
+    frame[np.abs(times - mtimes[frame]) > max_off] = -1
+    return frame, max_off
+
+
 def cell_flash_rate(
     ds,
     mask,
@@ -1101,35 +1131,14 @@ def cell_flash_rate(
     nt = int(n_threads or 0)
     mask = mask.transpose("time", "y", "x")
     lat0, lon0 = _origin(mask, latitude, longitude)
-    values = mask.values
-    valid = (
-        np.isfinite(values) if values.dtype.kind == "f" else np.ones(values.shape, bool)
-    )
-    filled = np.where(valid, values, background).astype(np.int64)
-    valid &= (filled != background) & (filled >= 0)
-    cells = np.unique(filled[valid])
-    index = np.where(valid, np.searchsorted(cells, filled), -1).astype(np.int32)
+    cells, index = _cell_index(mask.values, background)
 
     ds = _with_flashes(ds, use_compiled, nt, distance, time)
     labels, first, fcount = _flash_arrays(ds, use_compiled, nt)
     ok = _flash_ok(fcount, min_sources)
     times = ds["event_time"].values
     mtimes = mask["time"].values.astype("datetime64[ns]")
-    if mtimes.size > 1 and np.any(np.diff(mtimes) <= np.timedelta64(0, "ns")):
-        raise ValueError("mask times must increase")
-    if max_offset is None:
-        spacing = (
-            np.median(np.diff(mtimes)) if mtimes.size > 1 else np.timedelta64(5, "m")
-        )
-        max_off = (spacing // 2).astype("timedelta64[ns]")
-    else:
-        max_off = _interval(max_offset, "max_offset")
-    if times.size:
-        mid = mtimes[:-1] + (mtimes[1:] - mtimes[:-1]) // 2
-        frame = np.searchsorted(mid, times, side="right").astype(np.int64)
-        frame[np.abs(times - mtimes[frame]) > max_off] = -1
-    else:
-        frame = np.zeros(0, dtype=np.int64)
+    frame, max_off = _mask_frames(times, mtimes, max_offset)
     if time_edges is None:
         step = _interval(interval)
         span = np.array(
@@ -1145,7 +1154,7 @@ def cell_flash_rate(
     zc = None if z is None else np.asarray(z, dtype=float)
     ze = np.array([-np.inf, np.inf]) if zc is None else _edges(zc, "z")
     args = [
-        np.ascontiguousarray(index),
+        index,
         int(cells.size),
         _f64(_edges(mask["x"].values, "x")),
         _f64(_edges(mask["y"].values, "y")),
@@ -1200,36 +1209,38 @@ def cell_flash_rate(
 # --------------------------------------------------------------------------
 
 
-def _jump_series(rate, period_min, sigma, min_rate, history, group, ddof):
-    n = rate.size
-    dfrdt = np.full(n, np.nan)
-    dfrdt[1:] = (rate[1:] - rate[:-1]) / period_min
+def _sigma_level(dfrdt, history, ddof):
+    """DFRDT over the standard deviation of the ``history`` previous values."""
+    n = dfrdt.size
     level = np.full(n, np.nan)
-    jump = np.zeros(n, dtype=bool)
-    start = np.zeros(n, dtype=bool)
-    active = False
-    last_start = -np.inf
-    for k in range(history + 1, n):
-        prev = dfrdt[k - history : k]
-        if np.all(np.isfinite(prev)) and np.isfinite(dfrdt[k]):
-            sd = np.std(prev, ddof=ddof)
-            if sd > 0:
-                level[k] = dfrdt[k] / sd
-            elif dfrdt[k] != 0:
-                level[k] = np.inf * np.sign(dfrdt[k])
-        lv = level[k]
-        if active:
-            if np.isnan(lv) or lv < 0:
-                active = False
-            else:
-                jump[k] = True
-                continue
-        if lv >= sigma and rate[k] >= min_rate:
+    if n <= history + 1:
+        return level
+    prev = np.lib.stride_tricks.sliding_window_view(dfrdt[:-1], history)[1:]
+    cur = dfrdt[history + 1 :]
+    with np.errstate(invalid="ignore", divide="ignore"):
+        sd = np.std(prev, axis=-1, ddof=ddof)
+        lv = np.where(sd > 0, cur / sd, np.inf * np.sign(cur))
+    ok = np.all(np.isfinite(prev), axis=-1) & np.isfinite(cur)
+    level[history + 1 :] = np.where(ok & ((sd > 0) | (cur != 0)), lv, np.nan)
+    return level
+
+
+def _jump_series(rate, period_min, sigma, min_rate, history, group, ddof):
+    dfrdt = np.full(rate.size, np.nan)
+    dfrdt[1:] = (rate[1:] - rate[:-1]) / period_min
+    level = _sigma_level(dfrdt, history, ddof)
+    trigger = (level >= sigma) & (rate >= min_rate)
+    jump = np.zeros(rate.size, dtype=bool)
+    start = np.zeros(rate.size, dtype=bool)
+    active, last_start = False, -np.inf
+    for k in range(rate.size):
+        # a jump continues until the sigma level drops below zero
+        active = active and level[k] >= 0
+        if not active and trigger[k]:
             active = True
-            jump[k] = True
-            if k - last_start > group:
-                start[k] = True
+            start[k] = k - last_start > group
             last_start = k
+        jump[k] = active
     return dfrdt, level, jump, start
 
 
