@@ -19,6 +19,7 @@ import radarx
 :maxdepth: 2
 :caption: Examples
 
+notebooks/Radar_Workflow
 notebooks/IMD_Radar_Data
 notebooks/Grid_Radar
 notebooks/Dealiasing
