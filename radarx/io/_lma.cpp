@@ -39,46 +39,53 @@ const double kPow10[] = {1e0,  1e1,  1e2,  1e3,  1e4,  1e5,  1e6,  1e7,  1e8,
 
 inline bool is_space(char c) { return c == ' ' || c == '\t' || c == '\r'; }
 
-// Parse a decimal number in [p, end); returns NaN if it is not one.
-double parse_double(const char* p, const char* end) {
-    const char* s = p;
-    bool neg = false;
-    if (p < end && (*p == '-' || *p == '+')) neg = *p++ == '-';
-    uint64_t mant = 0;
-    int digits = 0, frac = 0;
+// Decimal digits read so far: the first 18 significant ones as an integer.
+struct Mantissa {
+    uint64_t value = 0;
+    int digits = 0;  // significant digits (all of them in the integer part)
+    int frac = 0;    // kept digits after the decimal point
     bool any = false;
-    while (p < end && *p >= '0' && *p <= '9') {
-        if (digits < 18) {
-            mant = mant * 10 + static_cast<uint64_t>(*p - '0');
-            if (mant) ++digits;
-        } else {
-            ++digits;
+};
+
+inline bool is_digit(char c) { return c >= '0' && c <= '9'; }
+
+// Accumulate the digits starting at p; returns the position after them.
+const char* read_digits(const char* p, const char* end, Mantissa& m, bool fraction) {
+    for (; p < end && is_digit(*p); ++p) {
+        m.any = true;
+        if (m.digits >= 18) {
+            if (!fraction) ++m.digits;
+            continue;
         }
-        ++p;
-        any = true;
+        m.value = m.value * 10 + static_cast<uint64_t>(*p - '0');
+        if (m.value) ++m.digits;
+        if (fraction) ++m.frac;
     }
-    if (p < end && *p == '.') {
-        ++p;
-        while (p < end && *p >= '0' && *p <= '9') {
-            if (digits < 18) {
-                mant = mant * 10 + static_cast<uint64_t>(*p - '0');
-                if (mant) ++digits;
-                ++frac;
-            }
-            ++p;
-            any = true;
-        }
-    }
-    if (!any) return kNaN;
-    if (p == end && digits <= 15 && frac <= 22) {
-        const double v = static_cast<double>(mant) / kPow10[frac];
-        return neg ? -v : v;
-    }
-    // exponents, long mantissas, nan/inf: the C library
+    return p;
+}
+
+// Exponents, long mantissas, nan/inf: the C library.
+double parse_with_strtod(const char* s, const char* end) {
     std::string tmp(s, end);
     char* stop = nullptr;
     const double v = std::strtod(tmp.c_str(), &stop);
     return stop == tmp.c_str() + tmp.size() ? v : kNaN;
+}
+
+// Parse a decimal number in [p, end); returns NaN if it is not one.
+double parse_double(const char* p, const char* end) {
+    const char* s = p;
+    const bool neg = p < end && *p == '-';
+    if (p < end && (*p == '-' || *p == '+')) ++p;
+    Mantissa m;
+    p = read_digits(p, end, m, false);
+    if (p < end && *p == '.') p = read_digits(p + 1, end, m, true);
+    if (!m.any) return kNaN;
+    if (p == end && m.digits <= 15 && m.frac <= 22) {
+        const double v = static_cast<double>(m.value) / kPow10[m.frac];
+        return neg ? -v : v;
+    }
+    return parse_with_strtod(s, end);
 }
 
 // Parse a hexadecimal number (with or without 0x) in [p, end); -1 if invalid.
