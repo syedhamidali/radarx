@@ -130,29 +130,55 @@ inline bool valid(const double* x, int64_t i, double floor) {
     return x != nullptr && std::isfinite(x[i]) && x[i] > floor;
 }
 
-// Step 1: features, memberships and the raw score of one ray.
-void features_ray(const Params& P, const Sweep& sw, int64_t r, RayScratch& s) {
-    const int64_t ng = sw.ngate, off = r * ng, h = sw.h;
-    const double* z = sw.z + off;
-    const double* zdr = sw.zdr ? sw.zdr + off : nullptr;
-    const double* rho = sw.rho ? sw.rho + off : nullptr;
-    const double* phi = sw.phi ? sw.phi + off : nullptr;
-    const double* snr = sw.snr ? sw.snr + off : nullptr;
+// The fields of one ray (nullptr where a field is missing).
+struct Ray {
+    const double *z, *zdr, *rho, *phi, *snr;
+    int64_t ng;
+};
+
+// Echo flags and the reflectivity difference to the next gate.
+void mark_echo(const Params& P, const Ray& ray, RayScratch& s) {
     uint8_t* echo = s.echo.data();
-    double* dz = s.dz.data();
-    for (int64_t g = 0; g < ng; ++g) {
-        bool e = std::isfinite(z[g]) && z[g] > P.floor_z;
-        if (snr != nullptr) e = e && snr[g] >= P.snr_min;
+    for (int64_t g = 0; g < ray.ng; ++g) {
+        bool e = std::isfinite(ray.z[g]) && ray.z[g] > P.floor_z;
+        if (ray.snr != nullptr) e = e && ray.snr[g] >= P.snr_min;
         echo[g] = e ? 1 : 0;
     }
-    for (int64_t g = 0; g < ng; ++g) {
-        dz[g] = (g + 1 < ng) ? (echo[g + 1] ? z[g + 1] : 0.0) - (echo[g] ? z[g] : 0.0) : 0.0;
+    for (int64_t g = 0; g < ray.ng; ++g) {
+        s.dz[g] = (g + 1 < ray.ng)
+                      ? (echo[g + 1] ? ray.z[g + 1] : 0.0) - (echo[g] ? ray.z[g] : 0.0)
+                      : 0.0;
     }
+}
+
+// Prefix sums of the reflectivity quantities: echo, pairs of adjacent echo
+// gates and their squared difference, triples and spin changes.
+void reflectivity_prefixes(const Params& P, const Ray& ray, RayScratch& s) {
+    const uint8_t* echo = s.echo.data();
+    const double* dz = s.dz.data();
     double* pe = s.p(RayScratch::kEcho);
     double* pp = s.p(RayScratch::kPair);
     double* pd = s.p(RayScratch::kDz2);
     double* pt = s.p(RayScratch::kTrip);
     double* pf = s.p(RayScratch::kFlip);
+    const double t = P.spin_thr;
+    for (int64_t g = 0; g < ray.ng; ++g) {
+        const bool e = echo[g] != 0;
+        const bool pair = e && g + 1 < ray.ng && echo[g + 1];
+        const bool trip = pair && g >= 1 && echo[g - 1];
+        const double d1 = trip ? dz[g - 1] : 0.0, d2 = dz[g];
+        const bool flip = trip && d1 * d2 < 0.0 && std::fabs(d1) >= t && std::fabs(d2) >= t;
+        pe[g + 1] = pe[g] + (e ? 1.0 : 0.0);
+        pp[g + 1] = pp[g] + (pair ? 1.0 : 0.0);
+        pd[g + 1] = pd[g] + (pair ? dz[g] * dz[g] : 0.0);
+        pt[g + 1] = pt[g] + (trip ? 1.0 : 0.0);
+        pf[g + 1] = pf[g] + (flip ? 1.0 : 0.0);
+    }
+}
+
+// Prefix sums of the polarimetric quantities at echo gates with data.
+void polarimetric_prefixes(const Params& P, const Ray& ray, RayScratch& s) {
+    const uint8_t* echo = s.echo.data();
     double* zn = s.p(RayScratch::kZn);
     double* z1 = s.p(RayScratch::kZ1);
     double* z2 = s.p(RayScratch::kZ2);
@@ -161,44 +187,90 @@ void features_ray(const Params& P, const Sweep& sw, int64_t r, RayScratch& s) {
     double* pn = s.p(RayScratch::kPn);
     double* pc = s.p(RayScratch::kPc);
     double* ps = s.p(RayScratch::kPs);
-    for (int k = 0; k < RayScratch::kN; ++k) s.p(k)[0] = 0.0;
-    const double t = P.spin_thr;
-    // one fused pass building every prefix sum
-    for (int64_t g = 0; g < ng; ++g) {
+    for (int64_t g = 0; g < ray.ng; ++g) {
         const bool e = echo[g] != 0;
-        const bool pair = e && g + 1 < ng && echo[g + 1];
-        const bool pair_prev = g >= 1 && echo[g - 1] && e;
-        const bool trip = g >= 1 && g + 1 < ng && pair_prev && pair;
-        bool flip = false;
-        if (trip) {
-            const double d1 = dz[g - 1], d2 = dz[g];
-            flip = d1 * d2 < 0.0 && std::fabs(d1) >= t && std::fabs(d2) >= t;
-        }
-        pe[g + 1] = pe[g] + (e ? 1.0 : 0.0);
-        pp[g + 1] = pp[g] + (pair ? 1.0 : 0.0);
-        pd[g + 1] = pd[g] + (pair ? dz[g] * dz[g] : 0.0);
-        pt[g + 1] = pt[g] + (trip ? 1.0 : 0.0);
-        pf[g + 1] = pf[g] + (flip ? 1.0 : 0.0);
-        const bool okd = e && valid(zdr, g, P.floor_zdr);
-        const double vd = okd ? zdr[g] : 0.0;
+        const bool okd = e && valid(ray.zdr, g, P.floor_zdr);
+        const double vd = okd ? ray.zdr[g] : 0.0;
         zn[g + 1] = zn[g] + (okd ? 1.0 : 0.0);
         z1[g + 1] = z1[g] + vd;
         z2[g + 1] = z2[g] + vd * vd;
-        const bool okr = e && valid(rho, g, P.floor_rho);
-        double vr = okr ? rho[g] : 0.0;
-        if (vr > 1.0) vr = 2.0 - vr;
+        const bool okr = e && valid(ray.rho, g, P.floor_rho);
+        double vr = okr ? ray.rho[g] : 0.0;
+        if (vr > 1.0) vr = 2.0 - vr;  // values above 1 only occur at low SNR
         rn[g + 1] = rn[g] + (okr ? 1.0 : 0.0);
         r1[g + 1] = r1[g] + vr;
-        const bool okp = e && valid(phi, g, P.floor_phi);
-        const double rad = (okp ? phi[g] : 0.0) * kDegToRad;
+        const bool okp = e && valid(ray.phi, g, P.floor_phi);
+        const double rad = (okp ? ray.phi[g] : 0.0) * kDegToRad;
         pn[g + 1] = pn[g] + (okp ? 1.0 : 0.0);
         pc[g + 1] = pc[g] + (okp ? std::cos(rad) : 0.0);
         ps[g + 1] = ps[g] + (okp ? std::sin(rad) : 0.0);
     }
+}
+
+// Weighted sum of memberships (num) and of weights (den) over the window
+// [lo, hi), in the order of FEATURES in qc.py.
+struct Score {
+    const Params& P;
+    double num = 0.0, den = 0.0;
+    explicit Score(const Params& params) : P(params) {}
+    void add(int k, double x) {
+        if (P.w[k] <= 0.0) return;
+        num = num + P.w[k] * trapezoid(x, P.lim[k]);
+        den = den + P.w[k];
+    }
+};
+
+void polarimetric_features(const Ray& ray, RayScratch& s, int64_t lo, int64_t hi,
+                           Score& sc) {
+    if (ray.rho != nullptr) {
+        const double n = span(s.p(RayScratch::kRn), lo, hi);
+        if (n >= 1) sc.add(0, span(s.p(RayScratch::kR1), lo, hi) / n);
+    }
+    if (ray.zdr != nullptr) {
+        const double n = span(s.p(RayScratch::kZn), lo, hi);
+        const double mean = span(s.p(RayScratch::kZ1), lo, hi) / n;
+        if (n >= 1) sc.add(1, mean);
+        if (n >= 3) {
+            const double var = span(s.p(RayScratch::kZ2), lo, hi) / n - mean * mean;
+            sc.add(2, std::sqrt(std::max(var, 0.0)));
+        }
+    }
+    if (ray.phi != nullptr) {
+        const double n = span(s.p(RayScratch::kPn), lo, hi);
+        if (n >= 3) {
+            const double c = span(s.p(RayScratch::kPc), lo, hi);
+            const double sn = span(s.p(RayScratch::kPs), lo, hi);
+            const double r2 = std::min(std::max((c * c + sn * sn) / (n * n), 1e-300), 1.0);
+            sc.add(3, std::sqrt(-std::log(r2)) * kRadToDeg);
+        }
+    }
+}
+
+void reflectivity_features(RayScratch& s, int64_t lo, int64_t hi, Score& sc) {
+    const double npair = span(s.p(RayScratch::kPair), lo, hi - 1);
+    if (npair >= 1) sc.add(4, span(s.p(RayScratch::kDz2), lo, hi - 1) / npair);
+    const double ntrip = span(s.p(RayScratch::kTrip), lo + 1, hi - 1);
+    if (ntrip >= 1) sc.add(5, 100.0 * span(s.p(RayScratch::kFlip), lo + 1, hi - 1) / ntrip);
+}
+
+// Step 1: features, memberships and the raw score of one ray.
+void features_ray(const Params& P, const Sweep& sw, int64_t r, RayScratch& s) {
+    const int64_t ng = sw.ngate, off = r * ng, h = sw.h;
+    const Ray ray{sw.z + off,
+                  sw.zdr ? sw.zdr + off : nullptr,
+                  sw.rho ? sw.rho + off : nullptr,
+                  sw.phi ? sw.phi + off : nullptr,
+                  sw.snr ? sw.snr + off : nullptr,
+                  ng};
+    for (int k = 0; k < RayScratch::kN; ++k) s.p(k)[0] = 0.0;
+    mark_echo(P, ray, s);
+    reflectivity_prefixes(P, ray, s);
+    polarimetric_prefixes(P, ray, s);
+    const double* pe = s.p(RayScratch::kEcho);
     float* raw = sw.raw + off;
     int8_t* cls = sw.cls + off;
     for (int64_t g = 0; g < ng; ++g) {
-        if (!echo[g]) {
+        if (!s.echo[g]) {
             raw[g] = kNaNf;
             cls[g] = kNoEcho;
             continue;
@@ -206,44 +278,11 @@ void features_ray(const Params& P, const Sweep& sw, int64_t r, RayScratch& s) {
         cls[g] = kSpeckle;  // until the score says otherwise
         const int64_t lo = std::max<int64_t>(g - h, 0);
         const int64_t hi = std::min<int64_t>(g + h, ng - 1) + 1;
-        double num = 0.0, den = 0.0;
-        auto add = [&](int k, double x) {
-            if (P.w[k] <= 0.0) return;
-            num = num + P.w[k] * trapezoid(x, P.lim[k]);
-            den = den + P.w[k];
-        };
-        if (rho != nullptr) {
-            const double n = span(rn, lo, hi);
-            if (n >= 1) add(0, span(r1, lo, hi) / n);
-        }
-        if (zdr != nullptr) {
-            const double n = span(zn, lo, hi);
-            const double mean = span(z1, lo, hi) / n;
-            if (n >= 1) add(1, mean);
-            if (n >= 3) {
-                const double var = span(z2, lo, hi) / n - mean * mean;
-                add(2, std::sqrt(std::max(var, 0.0)));
-            }
-        }
-        if (phi != nullptr) {
-            const double n = span(pn, lo, hi);
-            if (n >= 3) {
-                const double c = span(pc, lo, hi), sn = span(ps, lo, hi);
-                double r2 = (c * c + sn * sn) / (n * n);
-                r2 = std::min(std::max(r2, 1e-300), 1.0);
-                add(3, std::sqrt(-std::log(r2)) * kRadToDeg);
-            }
-        }
-        {
-            const double n = span(pp, lo, hi - 1);
-            if (n >= 1) add(4, span(pd, lo, hi - 1) / n);
-        }
-        {
-            const double n = span(pt, lo + 1, hi - 1);
-            if (n >= 1) add(5, 100.0 * span(pf, lo + 1, hi - 1) / n);
-        }
+        Score sc(P);
+        polarimetric_features(ray, s, lo, hi, sc);
+        reflectivity_features(s, lo, hi, sc);
         const bool isolated = span(pe, lo, hi) < static_cast<double>(h + 1);
-        raw[g] = (!isolated && den > 0.0) ? static_cast<float>(num / den) : kNaNf;
+        raw[g] = (!isolated && sc.den > 0.0) ? static_cast<float>(sc.num / sc.den) : kNaNf;
     }
 }
 
