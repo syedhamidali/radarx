@@ -267,6 +267,222 @@ inline bool load(const Table& t, const Block& b, int64_t i, Gate& g) {
     return true;
 }
 
+// Membership functions of the table (n_class, 5) and their weights. In the
+// additive modes variables with zero weight are dropped.
+void fill_terms(Table& t, const IArray& kind, const DArray& par, const IArray& fsel,
+                const DArray& weight, const IArray& group) {
+    if (kind.ndim() != 2 || kind.shape(1) != kNVar)
+        throw std::invalid_argument("kind must be (n_class, 5)");
+    t.nc = static_cast<int>(kind.shape(0));
+    if (t.nc < 1 || t.nc > kMaxClass) throw std::invalid_argument("bad number of classes");
+    if (par.size() != t.nc * kNVar * 4 || fsel.size() != t.nc * kNVar * 4 ||
+        weight.size() != t.nc * kNVar || group.size() != t.nc)
+        throw std::invalid_argument("membership table has inconsistent shapes");
+    for (int c = 0; c < t.nc; ++c) {
+        t.group[c] = static_cast<int>(group.data()[c]);
+        for (int v = 0; v < kNVar; ++v) {
+            const int64_t k = kind.data()[c * kNVar + v];
+            const double w = weight.data()[c * kNVar + v];
+            if (k < kNone || k > kTrap) throw std::invalid_argument("unknown membership kind");
+            if (k == kNone || (t.mode != kHybrid && !(w > 0.0))) continue;
+            Term& m = t.term[c][t.nterm[c]++];
+            m.v = v;
+            m.kind = static_cast<int>(k);
+            m.w = w;
+            for (int j = 0; j < 4; ++j) {
+                m.p[j] = par.data()[(c * kNVar + v) * 4 + j];
+                const int64_t sel = fsel.data()[(c * kNVar + v) * 4 + j];
+                if (sel < 0 || sel >= kNFunc) throw std::invalid_argument("bad function selector");
+                m.sel[j] = static_cast<int>(sel);
+            }
+            if (k == kBeta) {
+                if (!(m.p[1] != 0.0)) throw std::invalid_argument("beta half-width must not be 0");
+                const double b = m.p[2];
+                if (b >= 0.0 && b <= 64.0 && b == std::floor(b)) m.n = static_cast<int>(b);
+            }
+        }
+    }
+}
+
+// Hard thresholds: class, variable, operator (0: >, 1: <), function, value.
+void fill_rules(Table& t, const IArray& r_class, const IArray& r_var, const IArray& r_op,
+                const IArray& r_fsel, const DArray& r_thr) {
+    const py::ssize_t nr = r_class.size();
+    if (r_var.size() != nr || r_op.size() != nr || r_fsel.size() != nr || r_thr.size() != nr)
+        throw std::invalid_argument("rule arrays have inconsistent sizes");
+    for (py::ssize_t r = 0; r < nr; ++r) {
+        const int64_t c = r_class.data()[r], v = r_var.data()[r], sel = r_fsel.data()[r];
+        if (c < 0 || c >= t.nc || v < 0 || v >= kNVar || sel < 0 || sel >= kNFunc ||
+            t.nrule[c] >= 8)
+            throw std::invalid_argument("bad rule");
+        Rule& rule = t.rule[c][t.nrule[c]++];
+        rule.v = static_cast<int>(v);
+        rule.op = static_cast<int>(r_op.data()[r]);
+        rule.sel = static_cast<int>(sel);
+        rule.thr = r_thr.data()[r];
+    }
+}
+
+// Inputs and outputs of one block (sweep or grid), checked against its shape.
+struct BlockData {
+    std::vector<DArray> keep;
+    std::vector<U8Array> keep_u8;
+    std::vector<py::array_t<int8_t>> cls;
+    std::vector<py::array_t<float>> conf;
+    std::vector<py::object> scores;
+};
+
+Block make_block(const DArray& zh, const std::vector<py::object>& fields, int64_t first,
+                 int nc, bool want_scores, BlockData& d) {
+    if (zh.ndim() != 2) throw std::invalid_argument("fields must be 2-D (row, column)");
+    Block b;
+    b.nrow = zh.shape(0);
+    b.ncol = zh.shape(1);
+    b.first_row = first;
+    const int64_t n = b.nrow * b.ncol;
+    b.var[kZ] = zh.data();
+    b.var[kZdr] = optional(fields[0], n, d.keep, "zdr");
+    b.var[kKdp] = optional(fields[1], n, d.keep, "kdp");
+    b.var[kRho] = optional(fields[2], n, d.keep, "rhohv");
+    b.var[kT] = optional(fields[3], n, d.keep, "temperature");
+    b.phidp = optional(fields[4], n, d.keep, "phidp");
+    b.block = optional(fields[5], n, d.keep, "blockage");
+    b.height = optional(fields[7], n, d.keep, "height");
+    b.rng = optional(fields[8], b.ncol, d.keep, "range");
+    b.ml_bottom = optional(fields[9], b.nrow, d.keep, "ml_bottom");
+    b.ml_top = optional(fields[10], b.nrow, d.keep, "ml_top");
+    if (!fields[6].is_none()) {
+        d.keep_u8.push_back(fields[6].cast<U8Array>());
+        if (d.keep_u8.back().size() != n) throw std::invalid_argument("mask has the wrong size");
+        b.valid = d.keep_u8.back().data();
+    }
+    d.cls.emplace_back(std::vector<py::ssize_t>{b.nrow, b.ncol});
+    d.conf.emplace_back(std::vector<py::ssize_t>{b.nrow, b.ncol});
+    b.cls = d.cls.back().mutable_data();
+    b.conf = d.conf.back().mutable_data();
+    if (want_scores) {
+        py::array_t<float> s(std::vector<py::ssize_t>{nc, b.nrow, b.ncol});
+        b.scores = s.mutable_data();
+        d.scores.push_back(s);
+    } else {
+        d.scores.push_back(py::none());
+    }
+    return b;
+}
+
+// Melting layer of the winter classification (Thompson et al. 2014).
+struct WinterOptions {
+    int64_t gates_partial = 0, gates_complete = 0;
+    double rmin = 0.0, rmax = 0.0;      // range interval of the statistics [m]
+    double hist_lo = 0.0, hist_bin = 1.0;
+    int64_t hist_n = 1;
+};
+
+struct Melting {
+    int64_t n_ws = 0;
+    double height = kNaN;  // median height of the wet snow gates
+    int state = kNoMelting;
+};
+
+// Pass 1: wet snow vs other at every gate (flag stored in cls) and the median
+// height of the wet snow gates from per-thread histograms.
+Melting detect_melting(const Table& t, const std::vector<Block>& blocks, int nt,
+                       const WinterOptions& o) {
+    std::vector<int64_t> hist(static_cast<size_t>(nt) * o.hist_n, 0);
+    parallel_rows(blocks, nt, [&](const Block& b, int64_t r, int tid) {
+        int64_t* h = hist.data() + static_cast<size_t>(tid) * o.hist_n;
+        Gate gate;
+        for (int64_t g = 0; g < b.ncol; ++g) {
+            const int64_t i = r * b.ncol + g;
+            b.cls[i] = 0;
+            if (!load(t, b, i, gate)) continue;
+            const bool ws = score(t, t.ws, gate) > score(t, t.ot, gate);
+            b.cls[i] = ws ? 1 : 0;
+            if (!ws || std::isnan(b.height[i])) continue;
+            if (b.rng && (b.rng[g] < o.rmin || b.rng[g] > o.rmax)) continue;
+            int64_t k = static_cast<int64_t>(std::floor((b.height[i] - o.hist_lo) / o.hist_bin));
+            ++h[std::min(std::max<int64_t>(k, 0), o.hist_n - 1)];
+        }
+    });
+    std::vector<int64_t> total(o.hist_n, 0);
+    Melting m;
+    for (int tid = 0; tid < nt; ++tid)
+        for (int64_t k = 0; k < o.hist_n; ++k) total[k] += hist[tid * o.hist_n + k];
+    for (int64_t k = 0; k < o.hist_n; ++k) m.n_ws += total[k];
+    if (m.n_ws >= o.gates_complete) m.state = kComplete;
+    else if (m.n_ws >= o.gates_partial) m.state = kPartial;
+    // median: the bin holding the element of rank (n - 1) / 2
+    const int64_t rank = (m.n_ws - 1) / 2;
+    int64_t cum = 0;
+    for (int64_t k = 0; k < o.hist_n && m.n_ws > 0; ++k) {
+        cum += total[k];
+        if (cum > rank) {
+            m.height = o.hist_lo + (static_cast<double>(k) + 0.5) * o.hist_bin;
+            break;
+        }
+    }
+    return m;
+}
+
+// Classes allowed at gate (row r, column g): Thompson et al. (2014) wet snow
+// from the detection step, below-ML classes under the median melting-layer
+// height and above-ML classes elsewhere; or the Park et al. (2009) classes
+// for the beam position relative to the melting layer.
+inline int64_t allowed_classes(const Table& t, const Block& b, int64_t r, int64_t g,
+                               bool ws_flag, const Melting& ml, double sin_half_beam) {
+    const int64_t i = r * b.ncol + g;
+    if (t.mode == kWinter) {
+        if (ws_flag && ml.state != kNoMelting) return int64_t(1) << t.ws;
+        const bool below =
+            ml.state == kComplete && !std::isnan(b.height[i]) && b.height[i] < ml.height;
+        int64_t allowed = 0;
+        for (int c = 0; c < t.nc; ++c)
+            if (t.group[c] == (below ? 1 : 2)) allowed |= int64_t(1) << c;
+        return allowed;
+    }
+    if (!t.has_zones || !b.height || !b.ml_bottom || !b.ml_top) return ~int64_t(0);
+    const double bottom = b.ml_bottom[r], top = b.ml_top[r];
+    if (std::isnan(bottom) || std::isnan(top) || std::isnan(b.height[i])) return ~int64_t(0);
+    const double half = b.rng ? b.rng[g] * sin_half_beam : 0.0;
+    return t.zone_allowed[ml_zone(b.height[i], half, bottom, top)];
+}
+
+// Pass 2: scores, restrictions and argmax for every gate of a row.
+void classify_row(const Table& t, const Block& b, int64_t r, const Melting& ml,
+                  double sin_half_beam) {
+    constexpr float fnan = std::numeric_limits<float>::quiet_NaN();
+    Gate gate;
+    double s[kMaxClass];
+    const int64_t plane = b.nrow * b.ncol;
+    for (int64_t g = 0; g < b.ncol; ++g) {
+        const int64_t i = r * b.ncol + g;
+        const bool ws_flag = t.mode == kWinter && b.cls[i] == 1;
+        if (!load(t, b, i, gate)) {
+            b.cls[i] = 0;
+            b.conf[i] = fnan;
+            if (b.scores)
+                for (int c = 0; c < t.nc; ++c) b.scores[c * plane + i] = fnan;
+            continue;
+        }
+        for (int c = 0; c < t.nc; ++c) {
+            s[c] = score(t, c, gate);
+            if (b.scores) b.scores[c * plane + i] = static_cast<float>(s[c]);
+        }
+        const int64_t allowed = allowed_classes(t, b, r, g, ws_flag, ml, sin_half_beam);
+        int best = -1;
+        double best_s = -1.0;
+        for (int c = 0; c < t.nc; ++c) {
+            if (!((allowed >> c) & 1) || (t.nrule[c] && suppressed(t, c, gate))) continue;
+            if (s[c] > best_s) {
+                best_s = s[c];
+                best = c;
+            }
+        }
+        b.cls[i] = static_cast<int8_t>(best + 1);
+        b.conf[i] = best >= 0 ? static_cast<float>(best_s) : fnan;
+    }
+}
+
 }  // namespace
 
 // Classify the gates of a list of blocks (sweeps or grids, each 2-D
@@ -286,65 +502,25 @@ py::tuple classify(
     double stats_rmax, double hist_lo, double hist_bin, int64_t hist_n, bool want_scores,
     int n_threads) {
     const size_t nb = zh.size();
-    for (const auto* lst : {&zdr, &kdp, &rho, &temp, &phidp, &blockage, &valid, &height,
-                            &rng, &ml_bottom, &ml_top})
+    const std::vector<const std::vector<py::object>*> lists = {
+        &zdr, &kdp, &rho, &temp, &phidp, &blockage, &valid, &height, &rng, &ml_bottom, &ml_top};
+    for (const auto* lst : lists)
         if (lst->size() != nb) throw std::invalid_argument("need one entry per block in every list");
     if (mode < kAdditive || mode > kWinter) throw std::invalid_argument("unknown mode");
-    if (kind.ndim() != 2 || kind.shape(1) != kNVar)
-        throw std::invalid_argument("kind must be (n_class, 5)");
     Table t;
-    t.nc = static_cast<int>(kind.shape(0));
-    if (t.nc < 1 || t.nc > kMaxClass) throw std::invalid_argument("bad number of classes");
-    if (par.size() != t.nc * kNVar * 4 || fsel.size() != t.nc * kNVar * 4 ||
-        weight.size() != t.nc * kNVar || group.size() != t.nc)
-        throw std::invalid_argument("membership table has inconsistent shapes");
     t.mode = mode;
-    for (int c = 0; c < t.nc; ++c) {
-        t.group[c] = static_cast<int>(group.data()[c]);
-        for (int v = 0; v < kNVar; ++v) {
-            const int64_t k = kind.data()[c * kNVar + v];
-            const double w = weight.data()[c * kNVar + v];
-            if (k < kNone || k > kTrap) throw std::invalid_argument("unknown membership kind");
-            if (k == kNone || (mode != kHybrid && !(w > 0.0))) continue;
-            Term& m = t.term[c][t.nterm[c]++];
-            m.v = v;
-            m.kind = static_cast<int>(k);
-            m.w = w;
-            for (int j = 0; j < 4; ++j) {
-                m.p[j] = par.data()[(c * kNVar + v) * 4 + j];
-                const int64_t sel = fsel.data()[(c * kNVar + v) * 4 + j];
-                if (sel < 0 || sel >= kNFunc) throw std::invalid_argument("bad function selector");
-                m.sel[j] = static_cast<int>(sel);
-            }
-            if (k == kBeta) {
-                if (!(m.p[1] != 0.0)) throw std::invalid_argument("beta half-width must not be 0");
-                const double b = m.p[2];
-                if (b >= 0.0 && b <= 64.0 && b == std::floor(b)) m.n = static_cast<int>(b);
-            }
-        }
-    }
-    const py::ssize_t nr = r_class.size();
-    if (r_var.size() != nr || r_op.size() != nr || r_fsel.size() != nr || r_thr.size() != nr)
-        throw std::invalid_argument("rule arrays have inconsistent sizes");
-    for (py::ssize_t r = 0; r < nr; ++r) {
-        const int64_t c = r_class.data()[r], v = r_var.data()[r], sel = r_fsel.data()[r];
-        if (c < 0 || c >= t.nc || v < 0 || v >= kNVar || sel < 0 || sel >= kNFunc ||
-            t.nrule[c] >= 8)
-            throw std::invalid_argument("bad rule");
-        Rule& rule = t.rule[c][t.nrule[c]++];
-        rule.v = static_cast<int>(v);
-        rule.op = static_cast<int>(r_op.data()[r]);
-        rule.sel = static_cast<int>(sel);
-        rule.thr = r_thr.data()[r];
-    }
+    t.kdp_log = kdp_log;
+    t.quality = quality;
+    fill_terms(t, kind, par, fsel, weight, group);
+    fill_rules(t, r_class, r_var, r_op, r_fsel, r_thr);
     if (!zone_allowed.is_none()) {
         IArray za = zone_allowed.cast<IArray>();
         if (za.size() != 5) throw std::invalid_argument("zone_allowed needs 5 entries");
         t.has_zones = true;
         for (int k = 0; k < 5; ++k) t.zone_allowed[k] = za.data()[k];
     }
-    t.kdp_log = kdp_log;
-    t.quality = quality;
+    WinterOptions wo{ml_gates_partial, ml_gates_complete, stats_rmin, stats_rmax,
+                     hist_lo,          hist_bin,          hist_n};
     if (mode == kWinter) {
         if (ws_class < 0 || ws_class >= t.nc || ot_class < 0 || ot_class >= t.nc)
             throw std::invalid_argument("winter mode needs the wet snow and other classes");
@@ -353,171 +529,42 @@ py::tuple classify(
         t.ot = ot_class;
     }
 
-    std::vector<DArray> keep;
-    std::vector<U8Array> keep_u8;
-    keep.reserve(nb * 12);
-    std::vector<Block> blocks(nb);
-    std::vector<py::array_t<int8_t>> cls_out;
-    std::vector<py::array_t<float>> conf_out;
-    std::vector<py::object> score_out;
+    BlockData data;
+    data.keep.reserve(nb * 10);
+    data.keep_u8.reserve(nb);
+    std::vector<Block> blocks;
     int64_t first = 0;
     for (size_t i = 0; i < nb; ++i) {
-        if (zh[i].ndim() != 2) throw std::invalid_argument("fields must be 2-D (row, column)");
-        Block& b = blocks[i];
-        b.nrow = zh[i].shape(0);
-        b.ncol = zh[i].shape(1);
-        const int64_t n = b.nrow * b.ncol;
-        b.first_row = first;
-        first += b.nrow;
-        b.var[kZ] = zh[i].data();
-        b.var[kZdr] = optional(zdr[i], n, keep, "zdr");
-        b.var[kKdp] = optional(kdp[i], n, keep, "kdp");
-        b.var[kRho] = optional(rho[i], n, keep, "rhohv");
-        b.var[kT] = optional(temp[i], n, keep, "temperature");
-        b.phidp = optional(phidp[i], n, keep, "phidp");
-        b.block = optional(blockage[i], n, keep, "blockage");
-        b.height = optional(height[i], n, keep, "height");
-        b.rng = optional(rng[i], b.ncol, keep, "range");
-        b.ml_bottom = optional(ml_bottom[i], b.nrow, keep, "ml_bottom");
-        b.ml_top = optional(ml_top[i], b.nrow, keep, "ml_top");
-        if (!valid[i].is_none()) {
-            keep_u8.push_back(valid[i].cast<U8Array>());
-            if (keep_u8.back().size() != n) throw std::invalid_argument("mask has the wrong size");
-            b.valid = keep_u8.back().data();
-        }
-        if (mode == kWinter && !b.height)
+        std::vector<py::object> fields;
+        for (const auto* lst : lists) fields.push_back((*lst)[i]);
+        blocks.push_back(make_block(zh[i], fields, first, t.nc, want_scores, data));
+        first += blocks.back().nrow;
+        if (mode == kWinter && !blocks.back().height)
             throw std::invalid_argument("the winter classification needs gate heights");
-        cls_out.emplace_back(std::vector<py::ssize_t>{b.nrow, b.ncol});
-        conf_out.emplace_back(std::vector<py::ssize_t>{b.nrow, b.ncol});
-        b.cls = cls_out.back().mutable_data();
-        b.conf = conf_out.back().mutable_data();
-        if (want_scores) {
-            py::array_t<float> s(std::vector<py::ssize_t>{t.nc, b.nrow, b.ncol});
-            b.scores = s.mutable_data();
-            score_out.push_back(s);
-        } else {
-            score_out.push_back(py::none());
-        }
     }
 
-    unsigned hw = std::max(1u, std::thread::hardware_concurrency());
+    const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
     int nt = n_threads > 0 ? n_threads : static_cast<int>(hw);
     nt = static_cast<int>(std::max<int64_t>(1, std::min<int64_t>(nt, std::max<int64_t>(first, 1))));
 
-    int64_t n_ws = 0;
-    double ml_height = kNaN;
-    int state = kNoMelting;
+    Melting ml;
     {
         py::gil_scoped_release release;
-
-        if (mode == kWinter) {
-            // pass 1: melting-layer detection (wet snow vs other) and a
-            // histogram of the heights of wet snow gates within the range
-            // interval used for the melting-layer statistics.
-            std::vector<int64_t> hist(static_cast<size_t>(nt) * hist_n, 0);
-            parallel_rows(blocks, nt, [&](const Block& b, int64_t r, int tid) {
-                int64_t* h = hist.data() + static_cast<size_t>(tid) * hist_n;
-                Gate gate;
-                for (int64_t g = 0; g < b.ncol; ++g) {
-                    const int64_t i = r * b.ncol + g;
-                    b.cls[i] = 0;
-                    if (!load(t, b, i, gate)) continue;
-                    const bool ws = score(t, t.ws, gate) > score(t, t.ot, gate);
-                    b.cls[i] = ws ? 1 : 0;
-                    if (!ws || std::isnan(b.height[i])) continue;
-                    if (b.rng && (b.rng[g] < stats_rmin || b.rng[g] > stats_rmax)) continue;
-                    int64_t k = static_cast<int64_t>(std::floor((b.height[i] - hist_lo) / hist_bin));
-                    k = std::min(std::max<int64_t>(k, 0), hist_n - 1);
-                    ++h[k];
-                }
-            });
-            std::vector<int64_t> total(hist_n, 0);
-            for (int tid = 0; tid < nt; ++tid)
-                for (int64_t k = 0; k < hist_n; ++k) total[k] += hist[tid * hist_n + k];
-            for (int64_t k = 0; k < hist_n; ++k) n_ws += total[k];
-            if (n_ws >= ml_gates_complete) state = kComplete;
-            else if (n_ws >= ml_gates_partial) state = kPartial;
-            if (n_ws > 0) {
-                // median: the bin holding the element of rank (n - 1) / 2
-                const int64_t rank = (n_ws - 1) / 2;
-                int64_t cum = 0;
-                for (int64_t k = 0; k < hist_n; ++k) {
-                    cum += total[k];
-                    if (cum > rank) {
-                        ml_height = hist_lo + (static_cast<double>(k) + 0.5) * hist_bin;
-                        break;
-                    }
-                }
-            }
-        }
-
+        if (mode == kWinter) ml = detect_melting(t, blocks, nt, wo);
         parallel_rows(blocks, nt, [&](const Block& b, int64_t r, int) {
-            Gate gate;
-            double s[kMaxClass];
-            const double bottom = b.ml_bottom ? b.ml_bottom[r] : kNaN;
-            const double top = b.ml_top ? b.ml_top[r] : kNaN;
-            const bool zones = t.has_zones && !std::isnan(bottom) && !std::isnan(top);
-            const int64_t plane = b.nrow * b.ncol;
-            for (int64_t g = 0; g < b.ncol; ++g) {
-                const int64_t i = r * b.ncol + g;
-                const bool ws_flag = mode == kWinter && b.cls[i] == 1;
-                if (!load(t, b, i, gate)) {
-                    b.cls[i] = 0;
-                    b.conf[i] = std::numeric_limits<float>::quiet_NaN();
-                    if (b.scores)
-                        for (int c = 0; c < t.nc; ++c)
-                            b.scores[c * plane + i] = std::numeric_limits<float>::quiet_NaN();
-                    continue;
-                }
-                for (int c = 0; c < t.nc; ++c) {
-                    s[c] = score(t, c, gate);
-                    if (b.scores) b.scores[c * plane + i] = static_cast<float>(s[c]);
-                }
-                int64_t allowed = ~int64_t(0);
-                if (mode == kWinter) {
-                    // Thompson et al. (2014): wet snow from the detection
-                    // step, below-ML classes under the median melting-layer
-                    // height, above-ML classes elsewhere.
-                    int want = 2;
-                    if (state == kComplete && !std::isnan(b.height[i]) && b.height[i] < ml_height)
-                        want = 1;
-                    allowed = 0;
-                    if (ws_flag && state != kNoMelting) {
-                        allowed = int64_t(1) << t.ws;
-                    } else {
-                        for (int c = 0; c < t.nc; ++c)
-                            if (t.group[c] == want) allowed |= int64_t(1) << c;
-                    }
-                } else if (zones && b.height && !std::isnan(b.height[i])) {
-                    const double half = b.rng ? b.rng[g] * sin_half_beam : 0.0;
-                    allowed = t.zone_allowed[ml_zone(b.height[i], half, bottom, top)];
-                }
-                int best = -1;
-                double best_s = -1.0;
-                for (int c = 0; c < t.nc; ++c) {
-                    if (!((allowed >> c) & 1)) continue;
-                    if (t.nrule[c] && suppressed(t, c, gate)) continue;
-                    if (s[c] > best_s) {
-                        best_s = s[c];
-                        best = c;
-                    }
-                }
-                b.cls[i] = static_cast<int8_t>(best + 1);
-                b.conf[i] = best >= 0 ? static_cast<float>(best_s)
-                                      : std::numeric_limits<float>::quiet_NaN();
-            }
+            classify_row(t, b, r, ml, sin_half_beam);
         });
     }
     py::list cls_list, conf_list, score_list;
     for (size_t i = 0; i < nb; ++i) {
-        cls_list.append(cls_out[i]);
-        conf_list.append(conf_out[i]);
-        score_list.append(score_out[i]);
+        cls_list.append(data.cls[i]);
+        conf_list.append(data.conf[i]);
+        score_list.append(data.scores[i]);
     }
     py::dict info;
-    info["n_wet_snow"] = n_ws;
-    info["melting_layer_height"] = ml_height;
-    info["melting"] = state;
+    info["n_wet_snow"] = ml.n_ws;
+    info["melting_layer_height"] = ml.height;
+    info["melting"] = ml.state;
     return py::make_tuple(cls_list, conf_list, score_list, info);
 }
 

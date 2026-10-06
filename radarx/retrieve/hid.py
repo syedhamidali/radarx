@@ -583,96 +583,109 @@ def _ml_zone_numpy(h, half, bottom, top):
     return np.where(h + half < bottom, 0, zone)
 
 
+def _detect_melting_numpy(blocks, prepared, t, opts):
+    """Winter pass 1: wet snow gates and their median height (as the kernel)."""
+    lo, width, nbin = opts["hist_lo"], opts["hist_bin"], opts["hist_n"]
+    counts = np.zeros(nbin, dtype=np.int64)
+    for b, (_, _, ok, s) in zip(blocks, prepared):
+        ws = ok & (s[t["ws"]] > s[t["ot"]])
+        h = np.asarray(b["height"], float).ravel()
+        use = ws & ~np.isnan(h)
+        if b.get("range") is not None:
+            r = np.broadcast_to(b["range"], b["zh"].shape).ravel()
+            use &= (r >= opts["stats_rmin"]) & (r <= opts["stats_rmax"])
+        k = np.floor((h[use] - lo) / width).astype(np.int64)
+        counts += np.bincount(np.clip(k, 0, nbin - 1), minlength=nbin)
+    n_ws = int(counts.sum())
+    state = 0
+    if n_ws >= opts["ml_gates_complete"]:
+        state = 2
+    elif n_ws >= opts["ml_gates_partial"]:
+        state = 1
+    ml_height = np.nan
+    if n_ws:
+        k = int(np.searchsorted(np.cumsum(counts), (n_ws - 1) // 2 + 1))
+        ml_height = lo + (k + 0.5) * width
+    return {"n_wet_snow": n_ws, "melting_layer_height": ml_height, "melting": state}
+
+
+def _allowed_winter(b, t, ok, s, info):
+    nc = s.shape[0]
+    ws = ok & (s[t["ws"]] > s[t["ot"]])
+    h = np.asarray(b["height"], float).ravel()
+    below = np.zeros(h.size, dtype=bool)
+    if info["melting"] == 2:
+        with np.errstate(invalid="ignore"):
+            below = h < info["melting_layer_height"]
+    allowed = t["group"][:, None] == np.where(below, 1, 2)[None, :]
+    if info["melting"] > 0:
+        allowed = np.where(ws[None, :], np.arange(nc)[:, None] == t["ws"], allowed)
+    return allowed
+
+
+def _allowed_zones(b, t, nc, opts):
+    """Park et al. (2009) classes by beam position, or None (no restriction)."""
+    if t.get("zones") is None or any(
+        b.get(k) is None for k in ("ml_bottom", "ml_top", "height")
+    ):
+        return None
+    nrow, ncol = b["zh"].shape
+    bottom = np.repeat(np.asarray(b["ml_bottom"], float), ncol)
+    top = np.repeat(np.asarray(b["ml_top"], float), ncol)
+    h = np.asarray(b["height"], float).ravel()
+    half = np.zeros(h.size)
+    if b.get("range") is not None:
+        half = np.tile(np.asarray(b["range"], float) * opts["sin_half_beam"], nrow)
+    use = ~np.isnan(bottom) & ~np.isnan(top) & ~np.isnan(h)
+    bits = t["zones"][np.where(use, _ml_zone_numpy(h, half, bottom, top), 0)]
+    zallowed = ((bits[None, :] >> np.arange(nc)[:, None]) & 1).astype(bool)
+    return np.where(use[None, :], zallowed, True)
+
+
+def _apply_rules(allowed, t, x):
+    """Park et al. (2009) Table 3: drop classes failing a hard threshold."""
+    for c, v, op, thr, fsel in t["rules"]:
+        val = x[v]
+        limit = thr + _zfunc(fsel, x[0])
+        with np.errstate(invalid="ignore"):
+            bad = (val > limit) if op == 0 else (val < limit)
+        allowed[c] &= ~(bad & ~np.isnan(val))
+    return allowed
+
+
 def _classify_numpy(blocks, t, opts):
     """NumPy implementation of the compiled kernel (same results)."""
     nc = t["kind"].shape[0]
     prepared = []
-    info = {"n_wet_snow": 0, "melting_layer_height": np.nan, "melting": 0}
     for b in blocks:
         x, q, ok = _load_numpy(t, b)
         s = np.stack([_score_numpy(t, c, x, q) for c in range(nc)])
         prepared.append((x, q, ok, s))
-
+    info = {"n_wet_snow": 0, "melting_layer_height": np.nan, "melting": 0}
     if t["mode"] == _WINTER:
-        lo, width, nbin = opts["hist_lo"], opts["hist_bin"], opts["hist_n"]
-        counts = np.zeros(nbin, dtype=np.int64)
-        for b, (x, q, ok, s) in zip(blocks, prepared):
-            ws = ok & (s[t["ws"]] > s[t["ot"]])
-            h = np.asarray(b["height"], float).ravel()
-            use = ws & ~np.isnan(h)
-            if b.get("range") is not None:
-                r = np.broadcast_to(b["range"], b["zh"].shape).ravel()
-                use &= (r >= opts["stats_rmin"]) & (r <= opts["stats_rmax"])
-            k = np.floor((h[use] - lo) / width).astype(np.int64)
-            counts += np.bincount(np.clip(k, 0, nbin - 1), minlength=nbin)
-        n_ws = int(counts.sum())
-        state = (
-            2
-            if n_ws >= opts["ml_gates_complete"]
-            else 1 if n_ws >= opts["ml_gates_partial"] else 0
-        )
-        ml_height = np.nan
-        if n_ws:
-            k = int(np.searchsorted(np.cumsum(counts), (n_ws - 1) // 2 + 1))
-            ml_height = lo + (k + 0.5) * width
-        info = {"n_wet_snow": n_ws, "melting_layer_height": ml_height, "melting": state}
+        info = _detect_melting_numpy(blocks, prepared, t, opts)
 
     out = []
-    for b, (x, q, ok, s) in zip(blocks, prepared):
-        n = x[0].size
-        allowed = np.ones((nc, n), dtype=bool)
+    for b, (x, _, ok, s) in zip(blocks, prepared):
         if t["mode"] == _WINTER:
-            ws = ok & (s[t["ws"]] > s[t["ot"]])
-            h = np.asarray(b["height"], float).ravel()
-            below = np.zeros(n, dtype=bool)
-            if info["melting"] == 2:
-                with np.errstate(invalid="ignore"):
-                    below = h < info["melting_layer_height"]
-            want = np.where(below, 1, 2)
-            allowed = t["group"][:, None] == want[None, :]
-            if info["melting"] > 0:
-                allowed = np.where(
-                    ws[None, :], np.arange(nc)[:, None] == t["ws"], allowed
-                )
-        elif (
-            t.get("zones") is not None
-            and b.get("ml_bottom") is not None
-            and b.get("ml_top") is not None
-            and b.get("height") is not None
-        ):
-            nrow, ncol = b["zh"].shape
-            bottom = np.repeat(np.asarray(b["ml_bottom"], float), ncol)
-            top = np.repeat(np.asarray(b["ml_top"], float), ncol)
-            h = np.asarray(b["height"], float).ravel()
-            half = np.zeros(n)
-            if b.get("range") is not None:
-                half = np.tile(
-                    np.asarray(b["range"], float) * opts["sin_half_beam"], nrow
-                )
-            use = ~np.isnan(bottom) & ~np.isnan(top) & ~np.isnan(h)
-            zone = _ml_zone_numpy(h, half, bottom, top)
-            bits = t["zones"][np.where(use, zone, 0)]
-            zallowed = ((bits[None, :] >> np.arange(nc)[:, None]) & 1).astype(bool)
-            allowed = np.where(use[None, :], zallowed, True)
-        for c, v, op, thr, fsel in t["rules"]:
-            val = x[v]
-            limit = thr + _zfunc(fsel, x[0])
-            with np.errstate(invalid="ignore"):
-                bad = (val > limit) if op == 0 else (val < limit)
-            allowed[c] &= ~(bad & ~np.isnan(val))
+            allowed = _allowed_winter(b, t, ok, s, info)
+        else:
+            allowed = _allowed_zones(b, t, nc, opts)
+            if allowed is None:
+                allowed = np.ones(s.shape, dtype=bool)
+        allowed = _apply_rules(allowed, t, x)
         masked = np.where(allowed, s, -1.0)
         best = np.argmax(masked, axis=0)
         best_s = np.take_along_axis(masked, best[None], 0)[0]
-        found = best_s > -1.0
-        cls = np.where(ok & found, best + 1, 0).astype(np.int8)
-        conf = np.where(ok & found, best_s, np.nan).astype(np.float32)
+        found = ok & (best_s > -1.0)
         shape = b["zh"].shape
+        cls = np.where(found, best + 1, 0).astype(np.int8).reshape(shape)
+        conf = np.where(found, best_s, np.nan).astype(np.float32).reshape(shape)
         scores = None
         if opts["want_scores"]:
-            scores = (
-                np.where(ok[None], s, np.nan).astype(np.float32).reshape((nc,) + shape)
-            )
-        out.append((cls.reshape(shape), conf.reshape(shape), scores))
+            scores = np.where(ok[None], s, np.nan).astype(np.float32)
+            scores = scores.reshape((nc,) + shape)
+        out.append((cls, conf, scores))
     return out, info
 
 
@@ -840,6 +853,25 @@ def _flat2d(values):
     return values.reshape(-1, values.shape[-1])
 
 
+def _c2d(values, dtype=np.float64):
+    """Contiguous (rows, columns) array."""
+    return np.ascontiguousarray(_flat2d(values), dtype=dtype)
+
+
+def _temperature_values(ds, da, temperature, height, opts):
+    """Temperature (degC) on the gates of ``da``."""
+    if _is_profile(temperature):
+        from ..io.sounding import interpolate_profile
+
+        prof = _profile_dataset(temperature)
+        env = interpolate_profile(
+            prof, height, ["temperature"], n_threads=opts["n_threads"]
+        )["temperature"]
+        return _to_celsius(env.values, prof["temperature"].attrs.get("units"))
+    tda = _field_values(ds, temperature, da, "temperature")
+    return _to_celsius(tda.values, tda.attrs.get("units"))
+
+
 def _prepare(ds, fields, opts):
     """Arrays of one sweep or grid for the kernel, and wrapping info."""
     dbzh, zdr, kdp, rhohv, phidp = fields
@@ -853,16 +885,9 @@ def _prepare(ds, fields, opts):
         "rhohv": _find(ds, rhohv, "rhohv"),
         "phidp": _find(ds, phidp, "phidp"),
     }
-
-    def values(name):
-        if name is None:
-            return None
-        v = _on(ds[name], da).values
-        return np.ascontiguousarray(_flat2d(v), dtype=np.float64)
-
-    block = {"zh": np.ascontiguousarray(_flat2d(da.values), dtype=np.float64)}
+    block = {"zh": _c2d(da.values)}
     for key, name in names.items():
-        block[key] = values(name)
+        block[key] = None if name is None else _c2d(_on(ds[name], da).values)
 
     temperature = opts["temperature"]
     height = None
@@ -873,38 +898,58 @@ def _prepare(ds, fields, opts):
                 "gate heights are needed: the dataset has no 'z', 'height' or "
                 "'elevation' and 'range'"
             )
-        block["height"] = np.ascontiguousarray(_flat2d(height.values), dtype=np.float64)
+        block["height"] = _c2d(height.values)
     if temperature is not None:
-        if _is_profile(temperature):
-            from ..io.sounding import interpolate_profile
-
-            prof = _profile_dataset(temperature)
-            env = interpolate_profile(
-                prof, height, ["temperature"], n_threads=opts["n_threads"]
-            )["temperature"]
-            tval = _to_celsius(env.values, prof["temperature"].attrs.get("units"))
-        else:
-            tda = _field_values(ds, temperature, da, "temperature")
-            tval = _to_celsius(tda.values, tda.attrs.get("units"))
-        block["temperature"] = np.ascontiguousarray(_flat2d(tval), dtype=np.float64)
-
+        block["temperature"] = _c2d(
+            _temperature_values(ds, da, temperature, height, opts)
+        )
     mask = _field_values(ds, opts["mask"], da, "mask")
     if mask is not None:
-        block["valid"] = np.ascontiguousarray(
-            _flat2d(np.asarray(mask.values).astype(bool)), dtype=np.uint8
-        )
+        block["valid"] = _c2d(np.asarray(mask.values).astype(bool), np.uint8)
     blk = _field_values(ds, opts["blockage"], da, "blockage")
     if blk is not None:
-        block["blockage"] = np.ascontiguousarray(_flat2d(blk.values), dtype=np.float64)
+        block["blockage"] = _c2d(blk.values)
     if "range" in da.dims:
         block["range"] = np.ascontiguousarray(ds["range"].values, dtype=np.float64)
-    nrow = block["zh"].shape[0]
     if opts["ml"] is not None:
-        bottom, top = opts["ml"]
-        block["ml_bottom"] = np.full(nrow, bottom)
-        block["ml_top"] = np.full(nrow, top)
+        nrow = block["zh"].shape[0]
+        block["ml_bottom"] = np.full(nrow, opts["ml"][0])
+        block["ml_top"] = np.full(nrow, opts["ml"][1])
     used = [zname] + [n for n in names.values() if n]
     return block, {"da": da, "fields": used}
+
+
+def _zero_height_profile(temperature, opts):
+    """Wet-bulb 0 degC height of a profile (0 degC without humidity), or NaN."""
+    from ..io.sounding import isotherm_height, wet_bulb_zero_height
+
+    prof = _profile_dataset(temperature)
+    units = prof["temperature"].attrs.get("units")
+    vals = np.asarray(prof["temperature"].values, dtype=np.float64)
+    kelvin = units in _KELVIN or (units is None and np.nanmedian(vals) > 100)
+    top = np.array([np.nan])
+    if kelvin and "dewpoint" in prof and "pressure" in prof:
+        top = wet_bulb_zero_height(prof, n_threads=opts["n_threads"]).values
+    if not np.isfinite(top).any():
+        top = isotherm_height(
+            prof, 273.15 if kelvin else 0.0, n_threads=opts["n_threads"]
+        ).values
+    return float(np.nanmedian(top)) if np.isfinite(top).any() else np.nan
+
+
+def _zero_height_gates(temperature, datasets, opts):
+    """Median height of the gates within 0.5 K of 0 degC, or NaN."""
+    hs = []
+    for ds in datasets:
+        da = ds[_find(ds, opts["dbzh"], "dbzh", True)]
+        h = _heights(ds, da)
+        if h is None:
+            continue
+        t = _field_values(ds, temperature, da, "temperature")
+        tc = _to_celsius(t.values, t.attrs.get("units"))
+        hs.append(np.asarray(h.values)[np.abs(tc) <= 0.5])
+    hs = np.concatenate(hs) if hs else np.array([])
+    return float(np.median(hs)) if hs.size else np.nan
 
 
 def _melting_layer_heights(melting_layer, temperature, ml_thickness, datasets, opts):
@@ -921,35 +966,9 @@ def _melting_layer_heights(melting_layer, temperature, ml_thickness, datasets, o
     if temperature is None:
         return None
     if _is_profile(temperature):
-        from ..io.sounding import isotherm_height, wet_bulb_zero_height
-
-        prof = _profile_dataset(temperature)
-        units = prof["temperature"].attrs.get("units")
-        vals = np.asarray(prof["temperature"].values, dtype=np.float64)
-        kelvin = units in _KELVIN or (units is None and np.nanmedian(vals) > 100)
-        top = None
-        if kelvin and "dewpoint" in prof and "pressure" in prof:
-            top = wet_bulb_zero_height(prof, n_threads=opts["n_threads"]).values
-            if not np.isfinite(top).any():
-                top = None
-        if top is None:
-            top = isotherm_height(
-                prof, 273.15 if kelvin else 0.0, n_threads=opts["n_threads"]
-            ).values
-        top = float(np.nanmedian(np.asarray(top))) if np.isfinite(top).any() else np.nan
+        top = _zero_height_profile(temperature, opts)
     else:
-        # temperature per gate: median height of gates within 0.5 K of 0 degC
-        hs = []
-        for ds in datasets:
-            da = ds[_find(ds, opts["dbzh"], "dbzh", True)]
-            t = _field_values(ds, temperature, da, "temperature")
-            h = _heights(ds, da)
-            if h is None:
-                continue
-            tc = _to_celsius(t.values, t.attrs.get("units"))
-            hs.append(np.asarray(h.values)[np.abs(tc) <= 0.5])
-        hs = np.concatenate(hs) if hs else np.array([])
-        top = float(np.median(hs)) if hs.size else np.nan
+        top = _zero_height_gates(temperature, datasets, opts)
     if not np.isfinite(top):
         return None
     return top - float(ml_thickness), top
@@ -1034,6 +1053,27 @@ def _run(datasets, fields, classes, table, opts, n_threads, use_compiled):
         _wrap(p[1], c, f, s, classes, table, info)
         for p, (c, f, s) in zip(preps, results)
     ]
+
+
+def _check_inputs(obj, temperature, mask, blockage, ml_gates):
+    """Validate the input combinations; returns the ``ml_gates`` thresholds."""
+    lo, hi = (int(v) for v in ml_gates)
+    if lo > hi or lo < 0:
+        raise ValueError(
+            "ml_gates must be (partial, complete) with partial <= complete"
+        )
+    if isinstance(temperature, xr.DataTree):
+        raise TypeError("temperature must be a profile, a DataArray or a field name")
+    if not isinstance(obj, xr.DataTree):
+        return lo, hi
+    if isinstance(temperature, xr.DataArray) and not _is_profile(temperature):
+        raise TypeError(
+            "for a volume, temperature must be a profile on 'height' or a field name"
+        )
+    for name, spec in (("mask", mask), ("blockage", blockage)):
+        if spec is not None and not isinstance(spec, str):
+            raise TypeError(f"for a volume, {name} must be a field name")
+    return lo, hi
 
 
 def hid(
@@ -1182,25 +1222,7 @@ def hid(
     """
     classes, table = _scheme(method, band)
     use_compiled = _use_compiled(engine)
-    lo, hi = (int(v) for v in ml_gates)
-    if lo > hi or lo < 0:
-        raise ValueError(
-            "ml_gates must be (partial, complete) with partial <= complete"
-        )
-    if isinstance(temperature, xr.DataTree):
-        raise TypeError("temperature must be a profile, a DataArray or a field name")
-    if isinstance(obj, xr.DataTree) and isinstance(temperature, xr.DataArray):
-        if not _is_profile(temperature):
-            raise TypeError(
-                "for a volume, temperature must be a profile on 'height' or a field name"
-            )
-    for name, spec in (("mask", mask), ("blockage", blockage)):
-        if (
-            isinstance(obj, xr.DataTree)
-            and spec is not None
-            and not isinstance(spec, str)
-        ):
-            raise TypeError(f"for a volume, {name} must be a field name")
+    lo, hi = _check_inputs(obj, temperature, mask, blockage, ml_gates)
     opts = {
         "temperature": temperature,
         "mask": mask,
