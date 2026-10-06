@@ -222,7 +222,7 @@ the dealiased sweep below fixes the absolute fold of the next one
 ```{code-cell} ipython3
 with timed("3. dealias velocity"):
     volumes = [
-        vol.radarx.dealias("VRADH", name="VRADH_dealiased", wind_profile=era5)
+        vol.radarx.assign(vol.radarx.dealias("VRADH", wind_profile=era5))
         for vol in volumes
     ]
 ```
@@ -246,24 +246,16 @@ plt.show()
 
 `dtree.radarx.kdp` masks non-meteorological gates, removes the system offset,
 filters the phase in range and estimates KDP by least squares, for all rays of
-all sweeps in one call. It returns a `DataTree` of the products (the
-processed phase as `PHIDP_processed`, so the raw `PHIDP` is kept); we add them
-to the volumes.
+all sweeps in one call. Like every radarx retrieval it returns only its
+products (the processed phase as `PHIDP_processed`, so the raw `PHIDP` is
+kept); `radarx.assign` adds them to the volumes.
 
 ```{code-cell} ipython3
-def attach(volume, products):
-    """Add the variables of a product tree to the matching sweeps."""
-    out = volume.copy()
-    for name in products.children:
-        ds = products[name].to_dataset()
-        ds = ds.drop_vars([c for c in ds.coords if c not in ds.dims])
-        out[name] = out[name].to_dataset().assign(ds)
-    return out
-
-
 with timed("4. PhiDP processing and KDP"):
-    products = [vol.radarx.kdp(phidp="PHIDP", rhohv="RHOHV", dbzh="DBZH") for vol in volumes]
-volumes = [attach(vol, prod) for vol, prod in zip(volumes, products)]
+    volumes = [
+        vol.radarx.assign(vol.radarx.kdp(phidp="PHIDP", rhohv="RHOHV", dbzh="DBZH"))
+        for vol in volumes
+    ]
 ```
 
 ```{code-cell} ipython3
@@ -341,8 +333,7 @@ step 3 gives the azimuthal shear (rotation) and the radial divergence
 
 ```{code-cell} ipython3
 with timed("6. azimuthal shear and divergence"):
-    products = [vol.radarx.llsd("VRADH_dealiased") for vol in volumes]
-volumes = [attach(vol, prod) for vol, prod in zip(volumes, products)]
+    volumes = [vol.radarx.assign(vol.radarx.llsd("VRADH_dealiased")) for vol in volumes]
 ```
 
 ```{code-cell} ipython3
@@ -544,7 +535,7 @@ common analysis time, the storm motion and the interpolated frames.
 
 ```{code-cell} ipython3
 def stack(datasets):
-    return xr.concat([ds.set_coords("time") for ds in datasets], dim="time")
+    return xr.concat(datasets, dim="time")
 
 
 nodes = {"/": xr.Dataset(attrs={"title": "KGWX 30-31 March 2022 squall line, radarx products"})}
