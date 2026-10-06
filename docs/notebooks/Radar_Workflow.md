@@ -79,6 +79,14 @@ def timed(step):
     print(f"{step}: {timings[step]:.2f} s")
 ```
 
+
+```{note}
+This notebook processes several full NEXRAD volumes. It is executed and tested
+in the radarx continuous integration on every change; on the documentation
+website it is shown without outputs because it exceeds the website's build
+resources. Run it locally to see all figures.
+```
+
 ## 1. Read the volumes
 
 The four volumes come from the NOAA NEXRAD archive on AWS. xradar reads each

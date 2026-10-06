@@ -214,6 +214,11 @@ nb_execution_mode = "auto"
 nb_execution_kernel_name = "python3"
 nb_execution_in_temp = True
 nb_execution_timeout = 600
+# The end-to-end workflow notebook processes several full NEXRAD volumes and
+# exceeds the Read the Docs build resources; it is executed and tested in the
+# GitHub Actions notebook jobs instead and shown without outputs here.
+if os.environ.get("READTHEDOCS"):
+    nb_execution_excludepatterns = ["notebooks/Radar_Workflow.md"]
 # fail the build instead of publishing a traceback
 nb_execution_raise_on_error = True
 # HoloViews also emits a comm payload for live kernels; static docs use the
