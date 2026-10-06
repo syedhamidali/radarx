@@ -51,6 +51,7 @@ include = ["radarx*"]
 [tool.setuptools.package-data]
 "radarx.io" = ["data/*.csv"]
 "radarx.retrieve" = ["data/*.csv"]
+"radarx.ml" = ["models.toml"]
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
@@ -69,6 +70,9 @@ uxarray = ["uxarray", "spatialpandas", "geopandas"]
 # ERA5 profiles: anonymous Google ARCO-ERA5 Zarr over HTTPS (zarr, fsspec,
 # aiohttp) and the Copernicus CDS (cdsapi, needs an account)
 sounding = ["zarr", "fsspec", "aiohttp", "cdsapi"]
+# machine-learning models: ONNX Runtime runs them (PyTorch is only needed to
+# train models, see the ml/ folder of the repository)
+ml = ["onnxruntime", "pooch"]
 dev = [
     # testing
     "pytest",
