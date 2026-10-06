@@ -124,3 +124,30 @@ out = sounding._sounding.interp_vertical(
 if out.shape != (1, 1, 1) or not np.isclose(out[0, 0, 0], 275.0):
     sys.exit(f"compiled sounding kernel returned an unexpected result: {out}")
 print("compiled sounding kernel OK")
+
+from radarx.retrieve import qc  # noqa: E402
+
+if not qc.HAS_COMPILED_KERNEL:
+    sys.exit("radarx.retrieve._qc was not built: the compiled kernel is missing")
+dbz = np.full((azimuth.size, rng.size), 30.0)
+lim, wts = qc._options(None, None)
+scores, classes = qc._qc.classify(
+    [dbz],
+    [None],
+    [None],
+    [None],
+    [None],
+    [np.ones(azimuth.size, np.uint8)],
+    [3],
+    np.full(4, -np.inf),
+    3.0,
+    lim,
+    wts,
+    2.0,
+    0.6,
+    10,
+    0,
+)
+if classes[0].shape != dbz.shape or not (classes[0] == 1).all():
+    sys.exit(f"compiled QC kernel returned an unexpected result: {classes[0]}")
+print("compiled QC kernel OK")

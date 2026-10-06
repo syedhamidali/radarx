@@ -68,6 +68,13 @@ setup(
             extra_compile_args=extra_compile_args,
             optional=True,
         ),
+        Pybind11Extension(
+            "radarx.retrieve._qc",
+            ["radarx/retrieve/_qc.cpp"],
+            cxx_std=17,
+            extra_compile_args=extra_compile_args,
+            optional=True,
+        ),
     ],
     cmdclass={"build_ext": build_ext},
 )
