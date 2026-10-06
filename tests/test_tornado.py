@@ -476,22 +476,33 @@ def test_convert_on_first_use(tmp_path, monkeypatch):
         _onnx_models.onnx_path("nope")
 
 
-def test_load_model_objects(tmp_path):
-    model = Session(
-        _onnx_models.tornet_graph(tiny_tornet_params(np.random.default_rng(6)))
-    )
+def test_load_model_objects(tmp_path, monkeypatch):
+    params = tiny_tornet_params(np.random.default_rng(6))
+    model = Session(_onnx_models.tornet_graph(params))
     assert _onnx_models.load(model, "x") is model
     attrs = _onnx_models.model_attrs(model, "x")
     assert attrs["ml_model"] == "tiny" and attrs["ml_model_licence"] == "MIT"
     pytest.importorskip("radarx.ml")
     path = tmp_path / "tiny.onnx"
-    path.write_bytes(
-        _onnx_models.tornet_graph(
-            tiny_tornet_params(np.random.default_rng(6))
-        ).SerializeToString()
+    path.write_bytes(_onnx_models.tornet_graph(params).SerializeToString())
+    with pytest.warns(UserWarning, match="not in the model registry"):
+        loaded = _onnx_models.load(path, "x")
+    assert set(loaded.run(tornet_feed(np.random.default_rng(1)))) == {
+        "logit",
+        "heatmap",
+    }
+    # a converted model in the cache is registered with its licence and citation
+    monkeypatch.setenv("RADARX_CACHE_DIR", str(tmp_path))
+    (tmp_path / "models").mkdir()
+    (tmp_path / "models" / "tornet-baseline-v1.onnx").write_bytes(path.read_bytes())
+    net = _onnx_models.load(None, "tornet-baseline-v1")
+    attrs = _onnx_models.model_attrs(net, "x")
+    assert attrs["ml_model"] == "tornet-baseline-v1"
+    assert (
+        attrs["ml_model_licence"] == "MIT"
+        and "AIES-D-24-0006.1" in attrs["ml_model_citation"]
     )
-    loaded = _onnx_models.load(path, "x")
-    assert hasattr(loaded, "run")
+    assert _onnx_models.load("tornet-baseline-v1", "x").name == "tornet-baseline-v1"
 
 
 # --------------------------------------------------------------------------
