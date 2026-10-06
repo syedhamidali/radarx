@@ -149,13 +149,18 @@ a compact maximum of positive azimuthal shear.
 ## A whole volume in one call
 
 On a DataTree every sweep with the field is processed in a single call to the
-kernel, and a DataTree of results is returned.
+kernel, and a DataTree of results (with the root of the volume) is returned.
+`dtree.radarx.assign` adds the results to the sweeps of the volume.
 
 ```{code-cell} ipython3
 start = time.perf_counter()
 volume_shear = dtree.radarx.azimuthal_shear("VRADH")
 print(f"{len(volume_shear.children)} sweeps in {time.perf_counter() - start:.2f} s")
 volume_shear
+```
+
+```{code-cell} ipython3
+dtree.radarx.assign(volume_shear)["sweep_1"]
 ```
 
 ## References

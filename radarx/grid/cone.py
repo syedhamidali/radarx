@@ -276,7 +276,9 @@ def grid_cones(
     -------
     xarray.Dataset
         Gridded fields on ``(z, y, x)`` as float32, with ``lat``/``lon``
-        axis coordinates, the radar site, ``crs_wkt`` and the volume time.
+        axis coordinates, the radar site, ``crs_wkt`` and the mean time of
+        the volume as a scalar ``time`` coordinate, so grids of several
+        volumes stack along time with ``xr.concat(grids, "time")``.
 
     Raises
     ------
@@ -406,9 +408,9 @@ def _to_dataset(gridded, x, y, z, sweeps, site, attrs):
     )
     times = [np.ravel(ds["time"].values) for ds in sweeps if "time" in ds]
     if times:
-        out["time"] = xr.DataArray(
-            np.concatenate(times).astype("datetime64[ns]")
-        ).mean()
+        out = out.assign_coords(
+            time=xr.DataArray(np.concatenate(times).astype("datetime64[ns]")).mean()
+        )
     out.attrs = dict(attrs)
     out.attrs["radar_name"] = out.attrs.get("instrument_name", "")
     out.attrs["gridding_method"] = "cone"

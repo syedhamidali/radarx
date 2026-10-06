@@ -52,6 +52,7 @@ import cmweather  # noqa
 import fsspec
 import matplotlib.pyplot as plt
 import numpy as np
+import xarray as xr
 import xradar as xd
 
 import radarx as rx
@@ -89,6 +90,14 @@ def gridded_volume(name):
 g0, g1, g2 = (gridded_volume(name) for name in files)
 for g in (g0, g1, g2):
     print(g.time.values, g.DBZH.shape)
+```
+
+Each grid holds the mean time of its volume as a scalar `time` coordinate, so
+the grids stack into a time series directly:
+
+```{code-cell} ipython3
+series = xr.concat([g0, g1, g2], "time")
+series.DBZH.sizes
 ```
 
 ## Estimate the storm motion
