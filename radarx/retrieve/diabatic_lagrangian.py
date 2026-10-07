@@ -1,0 +1,1628 @@
+#!/usr/bin/env python
+# Copyright (c) 2024-2026, Radarx developers.
+# Distributed under the MIT License. See LICENSE for more info.
+
+"""
+Diabatic Lagrangian Analysis
+============================
+
+Potential temperature :math:`\\theta`, water vapour and cloud water mixing
+ratios :math:`q_v`, :math:`q_c` and virtual buoyancy retrieved from a time
+series of 3-D multi-Doppler winds and radar data by the diabatic Lagrangian
+analysis (DLA) of Ziegler (2013a, b).
+
+Algorithm
+---------
+1. A backward trajectory is computed from every grid point at the analysis
+   time through the time-dependent winds (:func:`radarx.retrieve.trajectories`:
+   predictor-corrector with three iterations, :math:`\\Delta t` = 20 s,
+   trilinear/linear interpolation, optional storm-motion advected grid,
+   surface parcels from the offset height :math:`H_0` with the parameterised
+   surface downdraft, eqs. 2-3) until it reaches the storm environment
+   (sect. 2a).
+2. Along each trajectory that reached the environment the ordinary
+   differential equations (eq. 1)
+
+   .. math::
+
+       \\frac{d\\phi}{dt} = M_\\phi + D_\\phi + F_\\psi,\\qquad
+       \\phi = (\\theta, q_v, q_c),\\ \\psi = (\\theta, q_v),
+
+   are integrated forward in time, from :math:`\\theta` and :math:`q_v` of the
+   environment at the origin of the trajectory (an environmental sounding,
+   or a 3-D mesoscale analysis, Ziegler 2013b sect. 3b) and :math:`q_c = 0`,
+   back to the grid point.
+3. The end values form the 3-D fields at the analysis time; grid points
+   whose trajectory did not reach the environment are hole-filled from their
+   neighbours and the fields are smoothed with a horizontal nine-point
+   low-pass filter.
+
+The integration runs along the stored backward path (reversed), so every
+forward integration ends exactly at its grid point.
+
+Thermodynamics
+--------------
+Pressure is the base-state pressure :math:`p_B(z)` of the sounding (the
+perturbation pressure is neglected), and the air density is
+:math:`\\rho_a = 10^5 (p_B/10^5)^{1-\\kappa} / (R_d \\theta)` with
+:math:`\\kappa = 0.2854` and :math:`R_d = 287.04` J kg\\ :sup:`-1`
+K\\ :sup:`-1` (Ziegler 2013a, sect. 2a). The saturation vapour pressure over
+water and the latent heat of vaporization follow Bolton (1980). After each
+displacement :math:`\\theta` and :math:`q_v` are conserved while the air is
+subsaturated; supersaturation is condensed to cloud water and cloud water in
+subsaturated air is evaporated until saturation or :math:`q_c = 0` by an
+isobaric saturation adjustment (Soong and Ogura 1973), in sub-steps of 4 s
+(Ziegler 2013a, sect. 2g). This conserves the equivalent potential
+temperature of saturated parcels.
+
+Microphysics :math:`M_\\phi`
+-----------------------------
+Ziegler (2013a) uses the "modified LFO" rates of Gilmore et al. (2004a),
+whose full description was an online supplement (doi:10.1175/MWR2760s1) that
+is no longer available. radarx therefore implements the rates from the
+original equations of Lin et al. (1983, LFO83), on which that scheme is
+based, with the rain and graupel size distributions of the DLA:
+
+=====================================  ===================  ==============
+process                                LFO83 equation       switch
+=====================================  ===================  ==============
+rain evaporation :math:`P_{REVP}`      (52)                 ``rain_evaporation``
+collection of cloud by rain            (51) :math:`P_{RACW}`  ``cloud_collection``
+collection of cloud by graupel         (40) :math:`P_{GACW}`  ``cloud_collection``
+graupel melting :math:`P_{GMLT}`       (47), with (42)      ``graupel_melting``
+graupel sublimation :math:`P_{GSUB}`   (46), (31)           ``graupel_sublimation``
+rain freezing (Bigg) :math:`P_{GFR}`   (45)                 ``rain_freezing``
+=====================================  ===================  ==============
+
+with the constants of the LFO83 appendix (:math:`a` = 2115
+cm\\ :sup:`0.2` s\\ :sup:`-1`, :math:`b` = 0.8, :math:`C_D` = 0.6,
+:math:`A'` = 0.66 K\\ :sup:`-1`, :math:`B'` = 100 m\\ :sup:`-3`
+s\\ :sup:`-1`, :math:`L_v`, :math:`L_f`, :math:`L_s`, :math:`C_w`,
+:math:`R_w`, :math:`E_{RW} = E_{GW} = E_{GR} = 1`), the thermal
+conductivity, vapour diffusivity and viscosity of air of Kumjian and Ryzhkov
+(2010, appendix), and the saturation vapour pressure over ice from the
+Clausius-Clapeyron equation with the constant :math:`L_s` of LFO83. The
+heating is :math:`L_v` (evaporation), :math:`L_s` (sublimation) and
+:math:`L_f` (melting, Bigg freezing, freezing of cloud collected by
+graupel below 0 degC) times the rate over :math:`c_p \\Pi`. Rates are held
+constant over a time step (Ziegler 2013a, sect. 2g) and limited so that a
+step does not evaporate beyond saturation or remove more cloud, rain or
+graupel than present.
+
+Differences from Gilmore et al. (2004a, b) and Ziegler (2013a), as far as the
+published papers state them: (i) the "Li"/"3-ICE" scheme of Gilmore et al.
+keeps a non-zero diameter and fall speed of cloud droplets in the accretion
+equations, whose modified forms were in the lost supplement; radarx uses the
+LFO83 forms (40) and (51); (ii) Gilmore et al. used constant intercepts and
+densities (:math:`n_{0r} = 8 \\times 10^6`, :math:`n_{0h} = 4 \\times 10^4`
+m\\ :sup:`-4`, :math:`\\rho_h` = 900 kg m\\ :sup:`-3`); the DLA takes
+:math:`n_0` and :math:`\\lambda` of rain and graupel from the precipitation
+closure and the graupel density of Ziegler (2013a, Table 2); (iii) eqs. (46)
+and (47) are printed with :math:`(4 g \\rho_G / 3 C_D)^{1/4}`; dimensional
+consistency with the fall speed (9) requires
+:math:`(4 g \\rho_G / 3 C_D \\rho)^{1/4}`, which is used here.
+
+Damping and surface flux
+------------------------
+Mixing is represented by the Lagrangian damping of Ziegler (2013a,
+eqs. 22-26) toward the base state :math:`\\phi_B` at the parcel,
+
+.. math::
+
+    D_\\phi = -\\frac{c_d V}{L_d e^{\\beta z}} (\\phi - \\phi_B),
+
+with :math:`V = |w|`, :math:`L_d = L_{d0}^{\\pm} + (|w| - W_0)
+L_W^{\\pm}` in updrafts (+, :math:`w > W_0`) and downdrafts (-,
+:math:`w < -W_0`), and :math:`V = |\\mathbf{V}_h - \\mathbf{V}_B|`,
+:math:`L_d = c_d / C_{d0}`, :math:`C_{d0} = (1 - q_p/q_{p0}) C_{min0} +
+(q_p/q_{p0}) C_{max0}` in quasi-horizontal flow, applied only where the
+precipitation mixing ratio :math:`q_p = q_r + q_g` reaches :math:`q_0`
+(surface grid points) or :math:`q_1` (elevated grid points); :math:`z` is
+the height above the ground in km. It is integrated exactly over a step,
+:math:`\\phi \\leftarrow \\phi_B + (\\phi - \\phi_B) e^{-K \\Delta t}`.
+The surface flux is (eq. 27) :math:`F_\\psi = e^{-\\beta_F z}
+(\\mathbf{V}_h \\cdot \\nabla \\psi|_{sfc})` below :math:`z_{BL}` where
+:math:`q_c + q_r + q_g \\le q_1`, with the horizontal gradient of the lowest
+level of the mesoscale analysis (zero without one) plus optional constant
+rates (``surface_flux``). Defaults are those of Ziegler (2013a, Table 1),
+:data:`DLA_DEFAULTS`.
+
+Precipitation closures
+----------------------
+The rain and graupel mixing ratios and number concentrations (inverse
+exponential size distributions, Ziegler 2013a eqs. 4-6) come from a
+pluggable closure, evaluated on the analysis grid at every wind time and
+interpolated to the parcels like the winds:
+
+- ``"polarimetric"`` (default, :func:`polarimetric_precipitation`): rain
+  below the melting level from the gamma DSD of :func:`radarx.retrieve.dsd`
+  (:math:`Z_H`, :math:`Z_{DR}`, optionally :math:`K_{DP}`), graupel where the
+  hydrometeor classification has graupel or hail, above the melting level, or
+  where the DSD retrieval fails in strong echo (rain-hail mixtures), from the
+  reflectivity left after rain with the graupel reflectivity of Ferrier
+  (1994) in the form of Ziegler (2013a, eq. 8) and a fixed intercept;
+- ``"ziegler2013"`` (:func:`ziegler2013_precipitation`): the reflectivity-only
+  closure of Ziegler (2013a, eqs. 9-21). Its regression profiles
+  :math:`Z_{0r}(z^*)`, :math:`Z_{0g}(z^*)`, :math:`S_0(z^*)` were derived from
+  a simulated storm and are **not tabulated** in the paper; they must be
+  supplied (``profiles=``);
+- any callable ``f(winds, base) -> Dataset`` returning ``qr``, ``nr``,
+  ``qg``, ``ng`` on the winds grid, or such a Dataset itself.
+
+Rain rate (Ziegler 2013b, eqs. 7-9): :math:`R = 3.6 \\times 10^6 \\rho q_r
+\\bar V_r / \\rho_w` mm h\\ :sup:`-1` with :math:`\\bar V_r = (1.225/\\rho)^{1/2}
+a_r [1 - (1 + f_r D_r)^{-4}]`, :math:`a_r` = 10 m s\\ :sup:`-1`,
+:math:`f_r` = 516.575 m\\ :sup:`-1`, :math:`D_r = 1/\\lambda_r` (here with
+the local air density).
+
+Sensitivity tests
+-----------------
+``processes`` switches every term (and the surface downdraft) off; the
+acronyms of Ziegler (2013a, Table 3) are accepted: ``"CNTL"``, ``"GMLT"``
+(no graupel melting), ``"NOCOL"`` (no cloud collection), ``"NOLD"`` (no
+damping), ``"RVAP"`` (no rain evaporation), ``"WSFC"`` (no surface
+downdraft); ``"NGSC"`` is ``graupel_scale`` of the closures.
+
+Applying DLA to observed QLCS cases
+-----------------------------------
+Ziegler (2013a, b) analysed supercells with winds blended to a sounding
+outside the radar coverage. Squall lines with a long-lived trailing cold pool
+and multi-Doppler winds of limited coverage need some care:
+
+- *Winds outside the coverage and untrusted winds.* Fill them (e.g. with the
+  background wind of :func:`radarx.retrieve.multi_doppler` and :math:`w = 0`)
+  so the parcels can continue, and pass the coverage as ``valid`` (e.g.
+  ``dd_valid``). ``valid_fraction`` tells how much of each trajectory used
+  analysed winds, and ``min_valid_fraction`` masks (and hole-fills) the
+  others. Columns in which the vertical integration of mass continuity
+  diverges (|w| of tens of m s\\ :sup:`-1` aloft above unobserved levels) also
+  carry spurious broad descent of several m s\\ :sup:`-1` at low levels, which
+  warms parcels adiabatically by several K: treat them as not valid.
+- *Unobserved lowest level.* If the ground level is below the lowest beams,
+  extrapolate the winds and radar fields to it from the level above (and their
+  validity), so that surface parcels see the precipitation that cools them.
+- *Environment.* A single sounding cannot represent a heterogeneous, evolving
+  inflow (e.g. evening cooling). Pass a time-dependent ``mesoscale`` analysis
+  (as in Ziegler 2013b, sect. 3b) built from pre-storm soundings and surface
+  stations, and keep the stations used for it apart from those used for
+  validation.
+- *Termination.* Ziegler's test (ii), :math:`w < 0.5` m s\\ :sup:`-1` for five
+  steps after 76 steps, ends surface trajectories in a stratiform cold pool
+  after about 26 min, still inside the outflow. ``termination="precipitation"``
+  follows them until they are outside echo and either ahead of the gust front
+  (``environment_mask``) or above the cold-pool depth (``cold_pool_depth``);
+  set ``min_steps`` to 0 with it, and a maximum duration with ``max_steps``.
+  Longer trajectories are more sensitive to errors of :math:`w`.
+- *Melting layer.* The polarimetric closure blends rain and graupel through a
+  melting layer of finite depth (default 1 km about the 0 degC level, or the
+  wet-snow band of the HID), so latent cooling is continuous in height.
+- *Storm motion.* Use the motion of the convective cells (the motion with which
+  the analyses were advected to their times) for ``storm_motion``.
+
+Computation
+-----------
+Trajectories and the forward integration of all grid points run in one call
+of the compiled kernel (``radarx.retrieve._lagrangian``, C++,
+multithreaded over grid points, GIL released, no storage of the
+trajectories); an identical NumPy implementation is used when the kernel is
+not built (``engine="numpy"``) and serves as its test oracle.
+
+References
+----------
+Bolton, D., 1980: The computation of equivalent potential temperature.
+*Mon. Wea. Rev.*, **108** (7), 1046-1053,
+https://doi.org/10.1175/1520-0493(1980)108<1046:TCOEPT>2.0.CO;2
+
+Ferrier, B. S., 1994: A double-moment multiple-phase four-class bulk ice
+scheme. Part I: Description. *J. Atmos. Sci.*, **51** (2), 249-280,
+https://doi.org/10.1175/1520-0469(1994)051<0249:ADMMPF>2.0.CO;2
+
+Gilmore, M. S., J. M. Straka, and E. N. Rasmussen, 2004a: Precipitation and
+evolution sensitivity in simulated deep convective storms: Comparisons
+between liquid-only and simple ice and liquid phase microphysics. *Mon. Wea.
+Rev.*, **132** (8), 1897-1916,
+https://doi.org/10.1175/1520-0493(2004)132<1897:PAESIS>2.0.CO;2
+
+Gilmore, M. S., J. M. Straka, and E. N. Rasmussen, 2004b: Precipitation
+uncertainty due to variations in precipitation particle parameters within a
+simple microphysics scheme. *Mon. Wea. Rev.*, **132** (11), 2610-2627,
+https://doi.org/10.1175/MWR2810.1
+
+Kumjian, M. R., and A. V. Ryzhkov, 2010: The impact of evaporation on
+polarimetric characteristics of rain: Theoretical model and practical
+implications. *J. Appl. Meteor. Climatol.*, **49** (6), 1247-1267,
+https://doi.org/10.1175/2010JAMC2243.1
+
+Lin, Y.-L., R. D. Farley, and H. D. Orville, 1983: Bulk parameterization of
+the snow field in a cloud model. *J. Climate Appl. Meteor.*, **22** (6),
+1065-1092, https://doi.org/10.1175/1520-0450(1983)022<1065:BPOTSF>2.0.CO;2
+
+Shapiro, R., 1970: Smoothing, filtering, and boundary effects. *Rev.
+Geophys.*, **8** (2), 359-387, https://doi.org/10.1029/RG008i002p00359
+
+Soong, S.-T., and Y. Ogura, 1973: A comparison between axisymmetric and
+slab-symmetric cumulus cloud models. *J. Atmos. Sci.*, **30** (5), 879-893,
+https://doi.org/10.1175/1520-0469(1973)030<0879:ACBAAS>2.0.CO;2
+
+Ziegler, C. L., 2013a: A diabatic Lagrangian technique for the analysis of
+convective storms. Part I: Description and validation via an observing system
+simulation experiment. *J. Atmos. Oceanic Technol.*, **30** (10), 2248-2265,
+https://doi.org/10.1175/JTECH-D-12-00194.1
+
+Ziegler, C. L., 2013b: A diabatic Lagrangian technique for the analysis of
+convective storms. Part II: Application to a radar-observed storm. *J. Atmos.
+Oceanic Technol.*, **30** (10), 2266-2280,
+https://doi.org/10.1175/JTECH-D-13-00036.1
+
+.. autosummary::
+   :nosignatures:
+   :toctree: generated/
+
+   diabatic_lagrangian
+   polarimetric_precipitation
+   ziegler2013_precipitation
+   microphysical_rates
+"""
+
+__all__ = [
+    "diabatic_lagrangian",
+    "polarimetric_precipitation",
+    "ziegler2013_precipitation",
+    "microphysical_rates",
+]
+
+import math
+import warnings
+
+import numpy as np
+import xarray as xr
+
+from . import _lagrangian_numpy as _nk
+from . import lagrangian as _traj
+
+#: Damping, surface-flux and graupel-density parameters (Ziegler 2013a,
+#: Tables 1 and 2), the trajectory parameters of
+#: :data:`radarx.retrieve.lagrangian.TRAJECTORY_DEFAULTS` and the condensation
+#: sub-step.
+DLA_DEFAULTS = {
+    **_traj.TRAJECTORY_DEFAULTS,
+    "dt_small": 4.0,  # s, sect. 2g
+    "cd": 0.2,  # damping coefficient, eq. (22)
+    "b": 1.0 / 3.0,  # height-scale coefficient (km-1), eq. (22)
+    "w0": 0.1,  # W0, m s-1
+    "ld1": 5000.0,  # L_d0 (updraft), m
+    "ld2": 300.0,  # L_d0 (downdraft), m
+    "lw1": 2000.0,  # dL/dw (updraft), s
+    "lw2": 100.0,  # dL/dw (downdraft), s
+    "cmin": 7.0e-5,  # C_min0, m-1
+    "cmax": 2.0e-4,  # C_max0, m-1
+    "qp0": 1.0e-3,  # q_p0, kg kg-1 (1 g kg-1)
+    "q0": 2.0e-3,  # surface threshold hydrometeor q, kg kg-1
+    "q1": 1.0e-4,  # threshold hydrometeor q, kg kg-1
+    "z_bl": 1000.0,  # boundary-layer height, m
+    "b_f": 3.0,  # height-scale coefficient (km-1), eq. (27)
+    "rho_g_sfc": 690.0,  # graupel density at the surface, kg m-3 (Table 2)
+    "rho_g_5km": 630.0,  # graupel density at 5 km AGL, kg m-3 (Table 2)
+}
+
+#: Physical processes of the DLA (all on by default).
+PROCESSES = (
+    "condensation",
+    "rain_evaporation",
+    "cloud_collection",
+    "graupel_melting",
+    "graupel_sublimation",
+    "rain_freezing",
+    "damping",
+    "surface_flux",
+    "surface_downdraft",
+)
+
+#: Sensitivity tests of Ziegler (2013a, Table 3) as process switches.
+SENSITIVITY_TESTS = {
+    "CNTL": {},
+    "GMLT": {"graupel_melting": False},
+    "NOCOL": {"cloud_collection": False},
+    "NOLD": {"damping": False},
+    "RVAP": {"rain_evaporation": False},
+    "WSFC": {"surface_downdraft": False},
+}
+
+_BITS = {
+    "condensation": _nk.COND,
+    "rain_evaporation": _nk.REVP,
+    "cloud_collection": _nk.RACW | _nk.GACW,
+    "graupel_melting": _nk.GMLT,
+    "graupel_sublimation": _nk.GSUB,
+    "rain_freezing": _nk.GFR,
+    "damping": _nk.DAMP,
+    "surface_flux": _nk.FLUX,
+}
+
+# Ziegler (2013a) Table 2 and (2013b) Table 1 constants of the closures
+C_R = 1.0e18  # mm6 m-3 per m6 m-3, eq. (7)
+A_R_DIEL = 0.224  # dielectric factor ratio, eq. (8)
+C_G = 7.295e19  # eq. (8)
+RHO_W = 1000.0
+ZIEGLER_CONSTANTS = {
+    "eps_r": 0.5,  # g kg-1, eq. (9)
+    "eps_g": 1.0,  # g kg-1, eq. (11)
+    "n0g0": 3.355e5,  # m-4, eq. (10)
+    "n0r": 8.0e5,  # m-4
+    "h_melt_ref": 3900.0,  # m, melting level of the regression storm
+    "a_frz": 0.1,
+    "w_min": 5.0,  # m s-1
+    "w_max": 20.0,  # m s-1
+}
+
+_BUDGET = (
+    ("condensation", "condensation and evaporation of cloud"),
+    ("rain_evaporation", "rain evaporation"),
+    ("graupel_melting", "graupel melting"),
+    ("graupel_sublimation", "graupel sublimation"),
+    ("freezing", "rain freezing and riming of cloud by graupel"),
+    ("damping", "Lagrangian damping"),
+    ("surface_flux", "surface flux"),
+)
+
+
+# ---------------------------------------------------------------------------
+# Base state
+# ---------------------------------------------------------------------------
+
+
+def _es_bolton(t):
+    tc = t - 273.15
+    return 611.2 * np.exp(17.67 * tc / (tc + 243.5))
+
+
+def _crossing(z, t, level):
+    """Highest height where t falls through level (NaN if none)."""
+    d = t - level
+    idx = np.flatnonzero((d[:-1] >= 0) & (d[1:] < 0))
+    if idx.size == 0:
+        return np.nan
+    i = idx[-1]
+    return float(z[i] + (z[i + 1] - z[i]) * d[i] / (d[i] - d[i + 1]))
+
+
+def _base_state(sounding, z, ground, dz=10.0):
+    """Base-state table (uniform in height) and profiles on the grid levels."""
+    if not isinstance(sounding, xr.Dataset) or "height" not in sounding.dims:
+        raise ValueError(
+            "sounding must be an xarray.Dataset on 'height' (radarx.io.sounding format)"
+        )
+    for name in ("pressure", "temperature"):
+        if name not in sounding:
+            raise ValueError(f"the sounding needs {name!r}")
+    s = sounding.sortby("height")
+    h = np.asarray(s["height"].values, float)
+    p = np.asarray(s["pressure"].values, float)
+    t = np.asarray(s["temperature"].values, float)
+    if "specific_humidity" in s:
+        q = np.asarray(s["specific_humidity"].values, float)
+        r = q / (1.0 - q)
+    elif "dewpoint" in s:
+        e = _es_bolton(np.asarray(s["dewpoint"].values, float))
+        r = _nk.EPS * e / (p - e)
+    else:
+        raise ValueError("the sounding needs 'specific_humidity' or 'dewpoint'")
+    u = np.asarray(s["u"].values, float) if "u" in s else np.zeros_like(h)
+    v = np.asarray(s["v"].values, float) if "v" in s else np.zeros_like(h)
+
+    zb = np.arange(min(ground, z[0]), z[-1] + dz, dz)
+
+    def interp(a, log=False):
+        ok = np.isfinite(a) & np.isfinite(h)
+        if ok.sum() < 2:
+            if a is u or a is v:
+                return np.zeros_like(zb)
+            raise ValueError("the sounding has fewer than two valid levels")
+        vals = np.log(a[ok]) if log else a[ok]
+        out = np.interp(zb, h[ok], vals)
+        return np.exp(out) if log else out
+
+    pb = interp(p, log=True)
+    tb = interp(t)
+    rb = np.maximum(interp(r), 0.0)
+    ub, vb = interp(u), interp(v)
+    thb = tb * (_nk.P0 / pb) ** _nk.KAPPA
+    table = np.column_stack([pb, thb, rb, ub, vb])
+    zagl = zb - ground
+    h_melt = _crossing(zagl, tb, 273.15)
+    h_15 = _crossing(zagl, tb, 258.15)
+
+    def at(a):
+        return np.interp(z, zb, a)
+
+    thv = thb * (1.0 + rb / _nk.EPS) / (1.0 + rb)
+    rho = _nk.air_density(thb, pb)
+    base = xr.Dataset(
+        {
+            "pressure": ("z", at(pb), {"standard_name": "air_pressure", "units": "Pa"}),
+            "temperature": (
+                "z",
+                at(tb),
+                {"standard_name": "air_temperature", "units": "K"},
+            ),
+            "theta": (
+                "z",
+                at(thb),
+                {"standard_name": "air_potential_temperature", "units": "K"},
+            ),
+            "qv": (
+                "z",
+                at(rb),
+                {"standard_name": "humidity_mixing_ratio", "units": "kg kg-1"},
+            ),
+            "theta_v": (
+                "z",
+                at(thv),
+                {"long_name": "virtual potential temperature", "units": "K"},
+            ),
+            "rho": ("z", at(rho), {"standard_name": "air_density", "units": "kg m-3"}),
+            "u": ("z", at(ub), {"units": "m s-1"}),
+            "v": ("z", at(vb), {"units": "m s-1"}),
+        },
+        coords={"z": z},
+        attrs={
+            "ground_height": float(ground),
+            "melting_level": h_melt,  # m above the ground
+            "minus15_level": h_15,
+            "rho0": float(
+                _nk.air_density(
+                    thb[np.argmin(abs(zb - ground))], pb[np.argmin(abs(zb - ground))]
+                )
+            ),
+        },
+    )
+    return table, float(zb[0]), float(dz), base
+
+
+# ---------------------------------------------------------------------------
+# Precipitation closures
+# ---------------------------------------------------------------------------
+
+
+def _graupel_density(zagl, rho_sfc, rho_5km):
+    return rho_sfc + (rho_5km - rho_sfc) * np.clip(zagl / 5000.0, 0.0, 1.0)
+
+
+def _scale_graupel(qg, ng, rho, rhog, scale):
+    """Ziegler (2013a, eqs. 18-21): N_g scaled at constant graupel reflectivity."""
+    if np.all(np.asarray(scale) == 1.0):
+        return qg, ng
+    with np.errstate(all="ignore"):
+        lam = np.cbrt(np.pi * rhog * ng / (rho * qg))
+        zg = A_R_DIEL * C_G * np.pi * rho * rhog * qg / (RHO_W**2 * lam**3)  # (19)
+        ng2 = scale * ng  # (18)
+        qg2 = np.sqrt(zg * ng2 / (A_R_DIEL * C_G * (rho / RHO_W) ** 2))  # (20)
+    ok = (qg > 0) & (ng > 0)
+    return np.where(ok, qg2, qg), np.where(ok, ng2, ng)
+
+
+def _dbz_name(ds, dbzh):
+    if dbzh not in (None, "auto"):
+        if dbzh not in ds:
+            raise ValueError(f"reflectivity {dbzh!r} not found")
+        return dbzh
+    for name in _traj._REFLECTIVITY:
+        if name in ds:
+            return name
+    raise ValueError("no reflectivity variable found; pass dbzh=")
+
+
+def _like(ds, name):
+    return ds[name].transpose(
+        *[d for d in ("time", "z", "y", "x") if d in ds[name].dims]
+    )
+
+
+def _closure_output(ref, qr, nr, qg, ng, attrs):
+    dims = ref.dims
+    meta = {
+        "qr": (
+            {
+                "standard_name": "mass_fraction_of_rain_in_air",
+                "long_name": "rain mixing ratio",
+                "units": "kg kg-1",
+            }
+        ),
+        "nr": ({"long_name": "rain number concentration", "units": "m-3"}),
+        "qg": ({"long_name": "graupel mixing ratio", "units": "kg kg-1"}),
+        "ng": ({"long_name": "graupel number concentration", "units": "m-3"}),
+    }
+    data = {"qr": qr, "nr": nr, "qg": qg, "ng": ng}
+    return xr.Dataset(
+        {
+            k: (dims, np.where(np.isfinite(a) & (a > 0), a, 0.0), meta[k])
+            for k, a in data.items()
+        },
+        coords={
+            c: ref.coords[c] for c in ref.coords if set(ref.coords[c].dims) <= set(dims)
+        },
+        attrs=attrs,
+    )
+
+
+def polarimetric_precipitation(
+    radar,
+    base,
+    *,
+    dbzh="auto",
+    zdr=None,
+    kdp=None,
+    hid="auto",
+    band="S",
+    mu_lambda="cao2008",
+    graupel_intercept=3.355e5,
+    rain_intercept=8.0e5,
+    graupel_min_dbz=40.0,
+    min_dbz=0.0,
+    graupel_scale=1.0,
+    graupel_density=(690.0, 630.0),
+    melting_layer=None,
+    melting_depth=1000.0,
+    engine="auto",
+    n_threads=None,
+):
+    """
+    Rain and graupel from polarimetric radar data (default DLA closure).
+
+    Below the melting level rain comes from the constrained-gamma DSD of
+    :func:`radarx.retrieve.dsd` (:math:`Z_H`, :math:`Z_{DR}`, optional
+    :math:`K_{DP}`): :math:`q_r` from the liquid water content and
+    :math:`N_r = N_0 \\Gamma(\\mu+1)/\\Lambda^{\\mu+1}`. Graupel is diagnosed
+    where the hydrometeor classification (``hid``) has a graupel or hail
+    class, everywhere above the melting level, and below it where the DSD
+    retrieval fails with :math:`Z_H \\ge` ``graupel_min_dbz`` (rain-hail
+    mixtures). The graupel reflectivity is what is left after rain,
+    :math:`Z_g = Z_H - Z_r(\\mathrm{DSD})`; with a fixed intercept
+    :math:`n_{0g}` it gives :math:`\\lambda_g` from Ziegler (2013a, eq. 8,
+    the graupel reflectivity of Ferrier 1994), then :math:`q_g` and
+    :math:`N_g` from eqs. (5)-(6). Rain cells below the melting level without a
+    DSD (e.g. no :math:`Z_{DR}`) use eq. (7) with ``rain_intercept``.
+
+    Rain and graupel are blended through a melting layer of finite depth
+    (by default 1 km centred on the environmental 0 degC level): with the ice
+    fraction :math:`f` rising linearly from 0 at its bottom to 1 at its top,
+    the rain contents are scaled by :math:`1 - f` and the graupel
+    reflectivity is :math:`f Z_H + (1 - f) Z_g^{below}`, so the diagnosed
+    contents, and the melting and evaporation they drive, are continuous in
+    height.
+
+    Parameters
+    ----------
+    radar : xarray.Dataset
+        Reflectivity (dBZ), differential reflectivity (dB) and optionally
+        :math:`K_{DP}` and an HID on the analysis grid ``(time, z, y, x)``.
+    base : xarray.Dataset
+        Base state on ``z`` with ``rho`` and the attributes
+        ``ground_height`` and ``melting_level`` (m above the ground), as
+        passed by :func:`diabatic_lagrangian`.
+    dbzh, zdr : str, optional
+        Variable names (default: found automatically).
+    kdp : str, optional
+        :math:`K_{DP}` variable (degrees/km). Default: not used.
+    hid : str or None, optional
+        Hydrometeor classification (``flag_meanings`` attribute as written by
+        :func:`radarx.retrieve.hid`); classes whose names contain "graupel" or
+        "hail" are graupel. ``"auto"``: ``HID`` if present.
+    band : {"S", "C", "X"}, optional
+        Radar band of the DSD scattering tables. Default ``"S"``.
+    mu_lambda : optional
+        :math:`\\mu`-:math:`\\Lambda` relation of :func:`radarx.retrieve.dsd`.
+    graupel_intercept : float, optional
+        :math:`n_{0g}` in m-4. Default :math:`3.355 \\times 10^5`
+        (:math:`(n_{0g})_0` of Ziegler 2013a, Table 2).
+    rain_intercept : float, optional
+        :math:`n_{0r}` (m-4) of the fallback rain. Default :math:`8 \\times
+        10^5` (Ziegler 2013a, Table 2).
+    graupel_min_dbz : float, optional
+        Minimum :math:`Z_H` for graupel where the DSD fails. Default 40.
+    min_dbz : float, optional
+        No precipitation below this reflectivity. Default 0.
+    graupel_scale : float, optional
+        Graupel concentration scale :math:`a_N` (eqs. 18-21). Default 1.
+    graupel_density : (float, float), optional
+        Graupel density at the ground and at 5 km above it (kg m-3), linear in
+        between. Default (690, 630) (Ziegler 2013a, Table 2).
+    melting_layer : (float, float), optional
+        Bottom and top of the melting layer in m above the ground (e.g. from
+        the wet-snow band of the HID or :func:`radarx.retrieve.melting_layer`).
+        Default: ``melting_depth`` centred on the melting level of ``base``.
+    melting_depth : float, optional
+        Depth (m) of the default melting layer. Default 1000; 0 switches
+        abruptly at the melting level.
+    engine, n_threads : optional
+        Passed to :func:`radarx.retrieve.dsd`.
+
+    Returns
+    -------
+    xarray.Dataset
+        ``qr``, ``qg`` (kg kg-1), ``nr``, ``ng`` (m-3) on the radar grid.
+    """
+    from .dsd import dsd
+
+    zname = _dbz_name(radar, dbzh)
+    ref = _like(radar, zname)
+    zh = np.asarray(ref.values, float)
+    zz = np.asarray(radar["z"].values, float)
+    zax = ref.dims.index("z")
+    shape = [1] * ref.ndim
+    shape[zax] = zz.size
+    zagl = (zz - base.attrs["ground_height"]).reshape(shape)
+    rho = np.asarray(base["rho"].interp(z=zz).values, float).reshape(shape)
+    hmelt = base.attrs["melting_level"]
+    if melting_layer is not None:
+        ml_bot, ml_top = (float(v) for v in melting_layer)
+    elif np.isfinite(hmelt):
+        ml_bot, ml_top = hmelt - 0.5 * melting_depth, hmelt + 0.5 * melting_depth
+    else:
+        ml_bot = ml_top = np.inf
+    if ml_top > ml_bot:
+        f_ice = np.clip((zagl - ml_bot) / (ml_top - ml_bot), 0.0, 1.0)
+    else:
+        f_ice = (zagl >= ml_top).astype(float)
+    below = f_ice < 1.0  # liquid present
+    echo = np.isfinite(zh) & (zh >= min_dbz)
+    zlin = np.where(echo, 10.0 ** (np.nan_to_num(zh) / 10.0), 0.0)
+    rhog = _graupel_density(zagl, *graupel_density)
+    dname = zdr
+    if dname is None:
+        dname = next(
+            (
+                n
+                for n in (
+                    "ZDR",
+                    "differential_reflectivity",
+                    "corrected_differential_reflectivity",
+                )
+                if n in radar
+            ),
+            None,
+        )
+    qr = np.zeros(zh.shape)
+    nr = np.zeros(zh.shape)
+    zr = np.zeros(zh.shape)
+    dsd_ok = np.zeros(zh.shape, bool)
+    if dname is not None:
+        sub = radar[[zname, dname] + ([kdp] if kdp else [])]
+        d = dsd(
+            sub,
+            dbzh=zname,
+            zdr=dname,
+            kdp=kdp,
+            band=band,
+            mu_lambda=mu_lambda,
+            engine=engine,
+            n_threads=n_threads,
+        )
+        n0 = np.asarray(d["N0"].transpose(*ref.dims).values, float)
+        mu = np.asarray(d["MU"].transpose(*ref.dims).values, float)
+        lam = np.asarray(d["LAMBDA"].transpose(*ref.dims).values, float)
+        lwc = np.asarray(d["LWC"].transpose(*ref.dims).values, float)
+        from scipy.special import gammaln
+
+        with np.errstate(all="ignore"):
+            nt = n0 * np.exp(gammaln(mu + 1.0)) / lam ** (mu + 1.0)
+            zd = n0 * np.exp(gammaln(mu + 7.0)) / lam ** (mu + 7.0)
+        dsd_ok = (
+            below
+            & echo
+            & np.isfinite(lwc)
+            & (lwc > 0)
+            & np.isfinite(nt)
+            & np.isfinite(zd)
+        )
+        qr = np.where(dsd_ok, lwc * 1.0e-3 / rho, 0.0)
+        nr = np.where(dsd_ok, nt, 0.0)
+        zr = np.where(dsd_ok, zd, 0.0)
+    else:
+        warnings.warn(
+            "no ZDR: rain from reflectivity with a fixed intercept", stacklevel=3
+        )
+    hname = ("HID" if "HID" in radar else None) if hid == "auto" else hid
+    hid_g = np.zeros(zh.shape, bool)
+    if hname is not None:
+        h = _like(radar, hname)
+        names = str(h.attrs.get("flag_meanings", "")).split()
+        codes = np.asarray(h.attrs.get("flag_values", np.arange(1, len(names) + 1)))
+        gcodes = [int(c) for c, n in zip(codes, names) if "graupel" in n or "hail" in n]
+        hid_g = np.isin(np.asarray(h.values), gcodes)
+    hail = below & echo & ~dsd_ok & (zh >= graupel_min_dbz)
+    # fallback rain from Z with a fixed intercept (Ziegler 2013a, eqs. 5-7)
+    fallback = below & echo & ~dsd_ok & ~hail & ~hid_g
+    with np.errstate(all="ignore"):
+        lam_r = (C_R * math.gamma(7.0) * rain_intercept / zlin) ** (1.0 / 7.0)
+        qr = np.where(fallback, np.pi * RHO_W * rain_intercept / (rho * lam_r**4), qr)
+        nr = np.where(fallback, rain_intercept / lam_r, nr)
+        zr = np.where(fallback, zlin, zr)
+        # graupel reflectivity: below the melting layer what rain leaves in HID
+        # graupel/hail or rain-hail cells; blended to all of Z_H above it
+        resid = np.where(hid_g | hail, np.maximum(zlin - zr, 0.0), 0.0)
+        zg = np.where(echo, f_ice * zlin + (1.0 - f_ice) * resid, 0.0)
+        wr = 1.0 - f_ice
+        qr, nr = qr * wr, nr * wr
+        lam_g = (
+            A_R_DIEL * C_G * (np.pi * rhog / RHO_W) ** 2 * graupel_intercept / zg
+        ) ** (1.0 / 7.0)
+        qg = np.where(zg > 0, np.pi * rhog * graupel_intercept / (rho * lam_g**4), 0.0)
+        ng = np.where(zg > 0, graupel_intercept / lam_g, 0.0)
+    qg, ng = _scale_graupel(qg, ng, rho, rhog, graupel_scale)
+    return _closure_output(
+        ref,
+        qr,
+        nr,
+        qg,
+        ng,
+        {"precipitation_closure": "polarimetric (radarx DSD + HID)"},
+    )
+
+
+def ziegler2013_precipitation(
+    radar,
+    base,
+    *,
+    profiles=None,
+    w="w",
+    dbzh="auto",
+    constants=None,
+    freezing_height=None,
+    graupel_scale=1.0,
+    graupel_density=(690.0, 630.0),
+):
+    """
+    Rain and graupel from reflectivity with the closure of Ziegler (2013a).
+
+    Provisional contents and the graupel intercept (eqs. 9-11)
+
+    .. math::
+
+        q_r^* = \\epsilon_r e^{[Z_H - Z_{0r}(z^*)]/S_{0,qr}(z^*)},\\quad
+        n_{0g} = (n_{0g})_0 - S_{0,n0g}(z^*) Z_H,\\quad
+        q_g^* = \\epsilon_g e^{[Z_H - Z_{0g}(z^*)]/S_{0,qg}(z^*)},
+
+    with :math:`z^* = z + (3.9\\ \\mathrm{km} - H_{melt})`, then graupel from
+    the updraft and height rules (eqs. 12-16), :math:`\\lambda_g` from
+    eq. (17) or (6), rain partitioned from the reflectivity left after
+    graupel (eq. 7) where :math:`w \\ge W_{min}`, and the optional graupel
+    concentration scaling (eqs. 18-21). The height rules are evaluated in
+    the :math:`z^*` frame, in which the melting level is at 3.9 km.
+
+    Parameters
+    ----------
+    radar : xarray.Dataset
+        Reflectivity (dBZ) and vertical velocity on ``(time, z, y, x)``.
+    base : xarray.Dataset
+        Base state as passed by :func:`diabatic_lagrangian`.
+    profiles : xarray.Dataset
+        Regression profiles on a ``z_star`` coordinate (m above the ground in
+        the scaled frame): ``Z0r``, ``Z0g`` (dBZ), ``S0_qr``, ``S0_qg``
+        (dB) and ``S0_n0g`` (m-4 dBZ-1). **Required**: Ziegler (2013a) fitted
+        them to a simulated storm and does not tabulate them (only
+        :math:`Z_{0g}` = 44.19 dBZ at 5 km is quoted). Values beyond the
+        profile take the nearest end.
+    w : str, optional
+        Vertical velocity variable. Default ``"w"``.
+    dbzh : str, optional
+        Reflectivity variable. Default: found automatically.
+    constants : dict, optional
+        Overrides of :data:`ZIEGLER_CONSTANTS` (Table 2: ``eps_r``,
+        ``eps_g`` in g kg-1, ``n0g0``, ``n0r`` in m-4, ``h_melt_ref`` in m,
+        ``a_frz``, ``w_min``, ``w_max`` in m s-1).
+    freezing_height : float, optional
+        :math:`H_{frz}`, height of -15 degC in the updraft core (m above the
+        ground). Default: the -15 degC level of the base state.
+    graupel_scale : float, optional
+        :math:`a_N` (eq. 18). Default 1.
+    graupel_density : (float, float), optional
+        Graupel density at the ground and at 5 km (kg m-3). Default
+        (690, 630).
+
+    Returns
+    -------
+    xarray.Dataset
+        ``qr``, ``qg`` (kg kg-1), ``nr``, ``ng`` (m-3).
+    """
+    need = ("Z0r", "Z0g", "S0_qr", "S0_qg", "S0_n0g")
+    if (
+        profiles is None
+        or not all(k in profiles for k in need)
+        or "z_star" not in profiles.coords
+    ):
+        raise ValueError(
+            "the Ziegler (2013a) closure needs the regression profiles Z0r, Z0g, S0_qr, "
+            "S0_qg and S0_n0g on a 'z_star' coordinate (profiles=); the paper does not "
+            "tabulate them (they were fitted to a simulated storm), so they must be "
+            "derived by the user, e.g. from a storm simulation"
+        )
+    c = dict(ZIEGLER_CONSTANTS)
+    if constants:
+        unknown = set(constants) - set(c)
+        if unknown:
+            raise ValueError(f"unknown constants: {sorted(unknown)}")
+        c.update(constants)
+    zname = _dbz_name(radar, dbzh)
+    ref = _like(radar, zname)
+    zh = np.asarray(ref.values, float)
+    ww = np.asarray(_like(radar, w).values, float)
+    zz = np.asarray(radar["z"].values, float)
+    zax = ref.dims.index("z")
+    shape = [1] * ref.ndim
+    shape[zax] = zz.size
+    zagl = zz - base.attrs["ground_height"]
+    hmelt = base.attrs["melting_level"]
+    if not np.isfinite(hmelt):
+        raise ValueError("the base state has no melting level")
+    hfrz = (
+        base.attrs["minus15_level"]
+        if freezing_height is None
+        else float(freezing_height)
+    )
+    shift = c["h_melt_ref"] - hmelt
+    zstar = zagl + shift
+    hm_s = c["h_melt_ref"]
+    hf_s = hfrz + shift
+    zp = np.asarray(profiles["z_star"].values, float)
+    o = np.argsort(zp)
+
+    def prof(name):
+        return np.interp(
+            zstar, zp[o], np.asarray(profiles[name].values, float)[o]
+        ).reshape(shape)
+
+    z0r, z0g, sqr, sqg, sn0g = (prof(k) for k in need)
+    zs = zstar.reshape(shape)
+    rho = np.asarray(base["rho"].interp(z=zz).values, float).reshape(shape)
+    rhog = _graupel_density(zagl.reshape(shape), *graupel_density)
+    valid = np.isfinite(zh)
+    zh0 = np.nan_to_num(zh, nan=-100.0)
+    zlin = np.where(valid, 10.0 ** (zh0 / 10.0), 0.0)
+    with np.errstate(all="ignore"):
+        qr_s = 1e-3 * c["eps_r"] * np.exp((zh0 - z0r) / sqr)  # (9)
+        n0g = c["n0g0"] - sn0g * zh0  # (10)
+        qg_s = 1e-3 * c["eps_g"] * np.exp((zh0 - z0g) / sqg)  # (11)
+        wstar = (ww - c["w_min"]) / (c["w_max"] - c["w_min"])
+        cfrz = np.exp(-c["a_frz"] * (zs - hm_s) / (hf_s - hm_s))
+        mid = (ww >= c["w_min"]) & (ww <= c["w_max"])
+        rule12 = (ww < c["w_min"]) | (zs > hf_s)
+        qg = np.select(
+            [
+                rule12,
+                (ww > c["w_max"]) & (zs < hm_s),  # (13)
+                mid & (zs < hm_s),  # (14)
+                mid & (zs >= hm_s),  # (15)
+                (ww > c["w_max"]) & (zs >= hm_s),  # (16)
+            ],
+            [
+                qg_s,
+                0.0,
+                (1.0 - wstar) * qg_s,
+                cfrz * (1.0 - wstar) * qg_s,
+                (1.0 - cfrz) * qg_s,
+            ],
+            default=qg_s,
+        )
+        qg = np.where(valid & (n0g > 0) & np.isfinite(ww), qg, 0.0)
+        lam17 = np.cbrt(
+            A_R_DIEL * C_G * np.pi * rho * rhog * qg / (RHO_W**2 * zlin)
+        )  # (17)
+        lam6 = (np.pi * rhog * n0g / (rho * qg)) ** 0.25  # (6)
+        lam_g = np.where((zs >= hm_s) & rule12, lam17, lam6)
+        ng = np.where(qg > 0, rho * qg * lam_g**3 / (np.pi * rhog), 0.0)  # (5), (6)
+        n0g_eff = ng * lam_g
+        zeg = np.where(
+            qg > 0,
+            A_R_DIEL * C_G * (np.pi * rhog / RHO_W) ** 2 * n0g_eff / lam_g**7,
+            0.0,
+        )
+        zer = zlin - zeg
+        lam_r7 = (C_R * math.gamma(7.0) * c["n0r"] / zer) ** (1.0 / 7.0)  # (7)
+        lam_r6 = (np.pi * RHO_W * c["n0r"] / (rho * qr_s)) ** 0.25  # (6)
+        updraft = ww >= c["w_min"]
+        lam_r = np.where(updraft, lam_r7, lam_r6)
+        qr = np.where(
+            updraft,
+            np.where(zer > 0, np.pi * RHO_W * c["n0r"] / (rho * lam_r**4), 0.0),
+            qr_s,
+        )
+        qr = np.where(valid & np.isfinite(ww), qr, 0.0)
+        nr = np.where(qr > 0, c["n0r"] / lam_r, 0.0)
+    qg, ng = _scale_graupel(qg, ng, rho, rhog, graupel_scale)
+    return _closure_output(
+        ref, qr, nr, qg, ng, {"precipitation_closure": "Ziegler (2013a) eqs. 9-21"}
+    )
+
+
+# ---------------------------------------------------------------------------
+# Microphysical rates
+# ---------------------------------------------------------------------------
+
+
+def _switches(processes):
+    if processes is None:
+        processes = {}
+    if isinstance(processes, str):
+        key = processes.upper()
+        if key not in SENSITIVITY_TESTS:
+            raise ValueError(
+                f"unknown sensitivity test {processes!r}; one of {sorted(SENSITIVITY_TESTS)}"
+            )
+        processes = SENSITIVITY_TESTS[key]
+    unknown = set(processes) - set(PROCESSES)
+    if unknown:
+        raise ValueError(f"unknown processes: {sorted(unknown)}; known: {PROCESSES}")
+    on = {k: bool(processes.get(k, True)) for k in PROCESSES}
+    bits = 0
+    for k, b in _BITS.items():
+        if on[k]:
+            bits |= b
+    return on, bits
+
+
+def microphysical_rates(
+    theta,
+    pressure,
+    qv,
+    qc,
+    qr,
+    nr,
+    qg,
+    ng,
+    *,
+    graupel_density=690.0,
+    rho0=1.2,
+    dt=20.0,
+    processes=None,
+    engine="auto",
+    n_threads=None,
+):
+    """
+    LFO83 microphysical rates and the resulting DLA tendencies.
+
+    Parameters
+    ----------
+    theta : array-like or xarray.DataArray
+        Potential temperature (K).
+    pressure : array-like or xarray.DataArray
+        Pressure (Pa).
+    qv, qc, qr, qg : array-like or xarray.DataArray
+        Mixing ratios of vapour, cloud, rain and graupel (kg kg-1).
+    nr, ng : array-like or xarray.DataArray
+        Number concentrations of rain and graupel (m-3).
+    graupel_density : float or array-like, optional
+        Graupel density (kg m-3). Default 690.
+    rho0 : float, optional
+        Air density at the ground (kg m-3) of the fall speeds. Default 1.2.
+    dt : float, optional
+        Time step (s) of the limits on the tendencies. Default 20.
+    processes : dict or str, optional
+        Process switches (see :func:`diabatic_lagrangian`).
+    engine, n_threads : optional
+        Implementation and threads.
+
+    Returns
+    -------
+    xarray.Dataset
+        The rates ``P_REVP``, ``P_RACW``, ``P_GACW``, ``P_GACR``, ``P_GMLT``,
+        ``P_GSUB``, ``P_GFR`` (kg kg-1 s-1, signed source terms of rain or
+        graupel as in LFO83) and the limited tendencies ``dtheta_dt`` (K s-1),
+        ``dqv_dt``, ``dqc_dt`` (kg kg-1 s-1).
+
+    References
+    ----------
+    Lin, Y.-L., R. D. Farley, and H. D. Orville, 1983, *J. Climate Appl.
+    Meteor.*, **22**, 1065-1092,
+    https://doi.org/10.1175/1520-0450(1983)022<1065:BPOTSF>2.0.CO;2
+    """
+    _, bits = _switches(processes)
+    arrs = [theta, pressure, qv, qc, qr, nr, qg, ng, graupel_density]
+    das = [a for a in arrs if isinstance(a, xr.DataArray)]
+    if das:
+        b = xr.broadcast(
+            *[a if isinstance(a, xr.DataArray) else xr.DataArray(a) for a in arrs]
+        )
+        dims, coords = b[0].dims, b[0].coords
+        vals = [np.asarray(x.values, float) for x in b]
+    else:
+        vals = [
+            np.asarray(a, float)
+            for a in np.broadcast_arrays(*[np.asarray(a, float) for a in arrs])
+        ]
+        dims = tuple(f"dim_{i}" for i in range(vals[0].ndim))
+        coords = None
+    shp = vals[0].shape
+    flat = [np.ascontiguousarray(v.ravel()) for v in vals]
+    if _traj._use_compiled(engine):
+        r, d = _traj._lagrangian.rates(
+            *flat, float(rho0), int(bits), float(dt), n_threads=int(n_threads or 0)
+        )
+        r, d = np.asarray(r), np.asarray(d)
+    else:
+        r, d = _nk.rates(*flat, float(rho0), int(bits), float(dt))
+    names = ("P_REVP", "P_RACW", "P_GACW", "P_GACR", "P_GMLT", "P_GSUB", "P_GFR")
+    data = {
+        n: (dims, r[:, i].reshape(shp), {"units": "kg kg-1 s-1"})
+        for i, n in enumerate(names)
+    }
+    data["dtheta_dt"] = (dims, d[:, 0].reshape(shp), {"units": "K s-1"})
+    data["dqv_dt"] = (dims, d[:, 1].reshape(shp), {"units": "kg kg-1 s-1"})
+    data["dqc_dt"] = (dims, d[:, 2].reshape(shp), {"units": "kg kg-1 s-1"})
+    return xr.Dataset(data, coords=coords, attrs={"source": "Lin et al. (1983) rates"})
+
+
+# ---------------------------------------------------------------------------
+# Gridding: hole filling and the nine-point filter
+# ---------------------------------------------------------------------------
+
+
+def _hole_fill(a):
+    """Fill NaN on each level with the mean of valid horizontal neighbours."""
+    out = np.array(a, dtype=float, copy=True)
+    for k in range(out.shape[0]):
+        f = out[k]
+        miss = np.isnan(f)
+        if not miss.any() or miss.all():
+            continue
+        for _ in range(f.shape[0] + f.shape[1]):
+            if not miss.any():
+                break
+            p = np.pad(f, 1, constant_values=np.nan)
+            s = np.zeros_like(f)
+            n = np.zeros_like(f)
+            for dj in (-1, 0, 1):
+                for di in (-1, 0, 1):
+                    if dj == 0 and di == 0:
+                        continue
+                    nb = p[1 + dj : 1 + dj + f.shape[0], 1 + di : 1 + di + f.shape[1]]
+                    ok = np.isfinite(nb)
+                    s += np.where(ok, nb, 0.0)
+                    n += ok
+            fill = miss & (n > 0)
+            f[fill] = s[fill] / n[fill]
+            miss = np.isnan(f)
+        out[k] = f
+    return out
+
+
+def _nine_point(a, passes=1):
+    """Horizontal nine-point (1-2-1 x 1-2-1) low-pass filter, edges repeated."""
+    out = np.array(a, dtype=float, copy=True)
+    for _ in range(int(passes)):
+        p = np.pad(out, ((0, 0), (1, 1), (1, 1)), mode="edge")
+        c = p[:, 1:-1, 1:-1]
+        sides = p[:, :-2, 1:-1] + p[:, 2:, 1:-1] + p[:, 1:-1, :-2] + p[:, 1:-1, 2:]
+        corners = p[:, :-2, :-2] + p[:, :-2, 2:] + p[:, 2:, :-2] + p[:, 2:, 2:]
+        new = 0.25 * c + 0.125 * sides + 0.0625 * corners
+        out = np.where(np.isnan(new), out, new)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# DLA
+# ---------------------------------------------------------------------------
+
+
+def _mesoscale(meso, prep, base):
+    """Mesoscale theta and q_v packed (nt, nz, ny, nx, 2), surface gradients
+    (nt, 2, ny, nx, 4) and the times (s relative to the analysis time)."""
+    m = meso
+    for c in ("x", "y", "z"):
+        if c not in m.coords:
+            raise ValueError(f"the mesoscale analysis needs a {c!r} coordinate")
+    if not (
+        np.array_equal(m["x"].values, prep["x"])
+        and np.array_equal(m["y"].values, prep["y"])
+        and np.array_equal(m["z"].values, prep["z"])
+    ):
+        m = m.interp(x=prep["x"], y=prep["y"], z=prep["z"])
+    if "time" in m.dims:
+        m = m.sortby("time")
+        mt = (
+            m["time"].values.astype("datetime64[ns]") - prep["time"]
+        ) / np.timedelta64(1, "s")
+        mt = np.asarray(mt, dtype=np.float64)
+        if np.any(np.diff(mt) <= 0):
+            raise ValueError("the mesoscale times must be distinct")
+    else:
+        m = m.expand_dims(time=[prep["time"]])
+        mt = np.zeros(1)
+    order = ("time", "z", "y", "x")
+    if "theta" in m:
+        th = m["theta"]
+    elif "temperature" in m:
+        p = m["pressure"] if "pressure" in m else base["pressure"]
+        th = m["temperature"] * (_nk.P0 / p) ** _nk.KAPPA
+    else:
+        raise ValueError("the mesoscale analysis needs 'theta' or 'temperature'")
+    if "qv" in m:
+        qv = m["qv"]
+    elif "mixing_ratio" in m:
+        qv = m["mixing_ratio"]
+    elif "specific_humidity" in m:
+        qv = m["specific_humidity"] / (1.0 - m["specific_humidity"])
+    else:
+        raise ValueError(
+            "the mesoscale analysis needs 'qv', 'mixing_ratio' or 'specific_humidity'"
+        )
+    th = np.asarray(th.broadcast_like(m).transpose(*order).values, float)
+    qv = np.asarray(qv.broadcast_like(m).transpose(*order).values, float)
+    if np.isnan(th).any() or np.isnan(qv).any():
+        th = np.where(np.isnan(th), base["theta"].values[None, :, None, None], th)
+        qv = np.where(np.isnan(qv), base["qv"].values[None, :, None, None], qv)
+    packed = np.stack([th, qv], axis=-1).astype(np.float32)
+    grads = []
+    for k in range(th.shape[0]):
+        gy_t, gx_t = np.gradient(th[k, 0], prep["y"], prep["x"])
+        gy_q, gx_q = np.gradient(qv[k, 0], prep["y"], prep["x"])
+        g = np.stack([gx_t, gy_t, gx_q, gy_q], axis=-1)
+        grads.append(np.stack([g, g]))
+    grad = np.stack(grads).astype(np.float32)
+    return packed, grad, mt
+
+
+def _precipitation(precipitation, prep, base, kwargs):
+    ds = prep["ds"]
+    if precipitation is None or (
+        isinstance(precipitation, str) and precipitation == "none"
+    ):
+        return None
+    if isinstance(precipitation, xr.Dataset):
+        pr = precipitation
+    else:
+        if precipitation == "polarimetric":
+            func = polarimetric_precipitation
+        elif precipitation == "ziegler2013":
+            func = ziegler2013_precipitation
+        elif callable(precipitation):
+            func = precipitation
+        else:
+            raise ValueError(
+                "precipitation must be 'polarimetric', 'ziegler2013', 'none', a callable or a Dataset"
+            )
+        pr = func(ds, base, **(kwargs or {}))
+    for k in ("qr", "nr", "qg", "ng"):
+        if k not in pr:
+            raise ValueError(f"the precipitation closure must return {k!r}")
+    if "time" not in pr.dims:
+        pr = pr.expand_dims(time=ds["time"].values)
+    pr = pr.reindex(time=ds["time"].values, method="nearest")
+    order = ("time", "z", "y", "x")
+    packed = np.empty(tuple(ds.sizes[d] for d in order) + (4,), dtype=np.float32)
+    for i, k in enumerate(("qr", "nr", "qg", "ng")):
+        packed[..., i] = pr[k].transpose(*order).values
+    np.nan_to_num(packed, copy=False, nan=0.0)
+    return pr, packed
+
+
+def diabatic_lagrangian(
+    winds,
+    sounding,
+    time=None,
+    *,
+    mesoscale=None,
+    precipitation="polarimetric",
+    precipitation_kwargs=None,
+    processes=None,
+    parameters=None,
+    surface_flux=(0.0, 0.0),
+    storm_motion=None,
+    extend=0.0,
+    dt=20.0,
+    iterations=3,
+    max_steps=None,
+    levels=None,
+    hole_fill=True,
+    filter_passes=1,
+    u="u",
+    v="v",
+    w="w",
+    reflectivity="auto",
+    termination=True,
+    valid=None,
+    environment_mask=None,
+    min_valid_fraction=None,
+    engine="auto",
+    n_threads=None,
+):
+    """
+    Diabatic Lagrangian analysis (DLA) of Ziegler (2013a, b).
+
+    Parameters
+    ----------
+    winds : xarray.Dataset
+        Time series of 3-D winds and radar data on ``(time, z, y, x)``
+        (``x``, ``y``, ``z`` in m, increasing; the lowest level is the
+        ground), with ``u``, ``v``, ``w`` (m s-1), reflectivity (dBZ) and the
+        variables the precipitation closure needs (for the default closure
+        ``ZDR`` and optionally ``KDP`` and ``HID``).
+    sounding : xarray.Dataset
+        Environmental sounding on ``height`` (same datum as ``z``), e.g. from
+        :func:`radarx.io.sounding.read_sounding` or
+        :func:`radarx.io.sounding.era5_profile`: ``pressure`` (Pa),
+        ``temperature`` (K), ``specific_humidity`` (or ``dewpoint``) and
+        ``u``, ``v``. It gives the base-state pressure, the base state of the
+        damping and of :math:`\\Delta\\theta_v`, and (without ``mesoscale``)
+        the initial :math:`\\theta`, :math:`q_v` of the trajectories.
+    time : datetime-like, optional
+        Analysis time. Default: the last wind time.
+    mesoscale : xarray.Dataset, optional
+        Heterogeneous environment on the grid (``z``, ``y``, ``x``, optionally
+        ``time``): ``theta`` or ``temperature`` (with ``pressure``, else the
+        base-state pressure), and ``qv``, ``mixing_ratio`` or
+        ``specific_humidity``, e.g. :func:`radarx.io.sounding.era5_column`
+        output (Ziegler 2013b, sect. 3b). Used for the initial values at the
+        origin and time of each trajectory, the damping base state and the
+        surface-flux gradient; with a ``time`` axis it is interpolated
+        linearly in time (and held constant before its first and after its
+        last time).
+    precipitation : str, callable, xarray.Dataset or None, optional
+        Precipitation closure: ``"polarimetric"`` (default,
+        :func:`polarimetric_precipitation`), ``"ziegler2013"``
+        (:func:`ziegler2013_precipitation`, needs ``profiles`` in
+        ``precipitation_kwargs``), a callable ``f(winds, base) -> Dataset``,
+        a Dataset with ``qr``, ``nr``, ``qg``, ``ng`` on the winds grid, or
+        ``"none"`` (no precipitation).
+    precipitation_kwargs : dict, optional
+        Keyword arguments of the closure.
+    processes : dict or str, optional
+        Switches of :data:`PROCESSES` (all True by default) or a sensitivity
+        test of :data:`SENSITIVITY_TESTS` (``"NOLD"``, ...).
+    parameters : dict, optional
+        Overrides of :data:`DLA_DEFAULTS`.
+    surface_flux : (float, float), optional
+        Constant surface fluxes of :math:`\\theta` (K s-1) and :math:`q_v`
+        (kg kg-1 s-1) added to the mesoscale advective flux of eq. (27).
+        Default (0, 0).
+    storm_motion, extend, dt, iterations, max_steps : optional
+        Trajectory options, see :func:`radarx.retrieve.trajectories`.
+    levels : sequence of int, optional
+        Grid levels to analyse. Default: all.
+    hole_fill : bool, optional
+        Fill grid points without a valid trajectory from their neighbours.
+        Default True.
+    filter_passes : int, optional
+        Passes of the nine-point low-pass filter. Default 1; 0 for none.
+    u, v, w, reflectivity : str, optional
+        Variable names, see :func:`radarx.retrieve.trajectories`.
+    termination : {True, "ziegler2013", "precipitation"}, optional
+        Environment test of the trajectories, see
+        :func:`radarx.retrieve.trajectories`. Default: Ziegler (2013a).
+    valid, environment_mask : str or xarray.DataArray, optional
+        Validity of the winds (e.g. ``"dd_valid"``) and the mask of
+        environmental air for ``termination="precipitation"``, see
+        :func:`radarx.retrieve.trajectories`.
+    min_valid_fraction : float, optional
+        Grid points whose trajectory spent a smaller fraction of its points in
+        valid winds are set missing (flag 64) before hole filling. Default:
+        not applied (``valid_fraction`` is still returned).
+    engine : {"auto", "compiled", "numpy"}, optional
+        Implementation. ``"auto"`` (default) prefers the compiled kernel.
+    n_threads : int, optional
+        Threads of the compiled kernel. Default: all cores.
+
+    Returns
+    -------
+    xarray.Dataset
+        On ``(z, y, x)`` at the analysis time: ``theta``, ``temperature``,
+        ``theta_v``, ``delta_theta_v`` (relative to the base state),
+        ``qv``, ``qc``, the diagnosed ``qr``, ``nr``, ``qg``, ``ng`` and
+        ``rain_rate``; per grid point ``flags``, ``n_steps``, ``environment``,
+        the trajectory origin ``origin_x``, ``origin_y``, ``origin_z``,
+        ``origin_time``, ``valid_fraction`` and the accumulated :math:`\\theta` change of each
+        process ``dtheta_<process>`` (unfiltered, NaN without a valid
+        trajectory); the base-state profiles ``theta_base``,
+        ``theta_v_base``, ``pressure_base`` on ``z``.
+
+    References
+    ----------
+    Ziegler, C. L., 2013a, *J. Atmos. Oceanic Technol.*, **30**, 2248-2265,
+    https://doi.org/10.1175/JTECH-D-12-00194.1
+
+    Ziegler, C. L., 2013b, *J. Atmos. Oceanic Technol.*, **30**, 2266-2280,
+    https://doi.org/10.1175/JTECH-D-13-00036.1
+    """
+    params = _traj._parameters(parameters, DLA_DEFAULTS)
+    on, bits = _switches(processes)
+    use_compiled = _traj._use_compiled(engine)
+    prep = _traj._prepare(
+        winds,
+        time,
+        "backward",
+        u=u,
+        v=v,
+        w=w,
+        reflectivity=reflectivity,
+        storm_motion=storm_motion,
+        extend=extend,
+        surface_downdraft_on=on["surface_downdraft"],
+        params=params,
+        valid=valid,
+        environment_mask=environment_mask,
+    )
+    if termination in (False, None):
+        raise ValueError("the DLA needs a termination test of the trajectories")
+    par = _traj._path_params(
+        prep, "backward", dt, iterations, max_steps, termination, params
+    )
+    ground = float(prep["z"][0])
+    table, bz0, bdz, base = _base_state(sounding, prep["z"], ground)
+    pr = _precipitation(precipitation, prep, base, precipitation_kwargs)
+    precip_ds, precip = (None, None) if pr is None else pr
+    meso = grad = None
+    meso_t = np.zeros(1)
+    if mesoscale is not None:
+        meso, grad, meso_t = _mesoscale(mesoscale, prep, base)
+    q = dict(params)
+    q.update(
+        z_sfc=ground,
+        rho0=base.attrs["rho0"],
+        flux_theta=float(surface_flux[0]),
+        flux_qv=float(surface_flux[1]),
+        switches=float(bits),
+    )
+    thermo = np.array([float(q[k]) for k in _nk.THERMO_KEYS])
+    starts, index, ks = _traj._grid_starts(prep, levels, params["offset_height"])
+    surface = (index[0] == 0).astype(np.int8)
+    if use_compiled:
+        dummy4 = np.zeros((1, 2, 2, 2, 4), np.float32)
+        dummy2 = np.zeros((1, 2, 2, 2, 2), np.float32)
+        out, bud, org, npts, flags = _traj._lagrangian.dla(
+            prep["packed"],
+            prep["x"],
+            prep["y"],
+            prep["z"],
+            prep["t"],
+            starts,
+            surface,
+            par,
+            prep["cx"],
+            prep["cy"],
+            prep["eb"],
+            prep["ea"],
+            table,
+            bz0,
+            bdz,
+            dummy4 if precip is None else precip,
+            precip is not None,
+            dummy2 if meso is None else meso,
+            meso_t,
+            meso is not None,
+            dummy4 if grad is None else grad,
+            grad is not None,
+            thermo,
+            n_threads=int(n_threads or 0),
+        )
+    else:
+        g = _nk.Grid(
+            prep["x"],
+            prep["y"],
+            prep["z"],
+            prep["t"],
+            prep["packed"],
+            prep["cx"],
+            prep["cy"],
+            prep["eb"],
+            prep["ea"],
+        )
+        gp = (
+            None
+            if precip is None
+            else _nk.Grid(
+                prep["x"],
+                prep["y"],
+                prep["z"],
+                prep["t"],
+                precip,
+                prep["cx"],
+                prep["cy"],
+                prep["eb"],
+                prep["ea"],
+            )
+        )
+        gm = (
+            None
+            if meso is None
+            else _nk.Grid(
+                prep["x"], prep["y"], prep["z"], meso_t, meso, 0, 0, 1e30, 1e30
+            )
+        )
+        gg = (
+            None
+            if grad is None
+            else _nk.Grid(
+                prep["x"], prep["y"], [0.0, 1.0], meso_t, grad, 0, 0, 1e30, 1e30
+            )
+        )
+        out, bud, org, npts, flags = _nk.dla(
+            g, par, starts, surface, table, bz0, bdz, gp, gm, gg, thermo
+        )
+    shape = (ks.size, prep["y"].size, prep["x"].size)
+    out = np.asarray(out).reshape(shape + (3,))
+    bud = np.asarray(bud).reshape(shape + (_nk.N_BUDGET,))
+    org = np.asarray(org).reshape(shape + (5,))
+    npts = np.asarray(npts).reshape(shape)
+    flags = np.asarray(flags).reshape(shape).astype(np.int32)
+    if min_valid_fraction is not None:
+        low = ~(org[..., 4] >= float(min_valid_fraction))
+        flags = np.where(low, flags | 64, flags)
+        out = np.where(low[..., None], np.nan, out)
+        bud = np.where(low[..., None], np.nan, bud)
+    theta, qv, qc = out[..., 0], out[..., 1], out[..., 2]
+    if hole_fill:
+        theta, qv, qc = _hole_fill(theta), _hole_fill(qv), _hole_fill(qc)
+    if filter_passes:
+        theta, qv, qc = (_nine_point(a, filter_passes) for a in (theta, qv, qc))
+    zsel = prep["z"][ks]
+    bsel = base.isel(z=ks)
+    pz = bsel["pressure"].values[:, None, None]
+    temp = theta * (pz / _nk.P0) ** _nk.KAPPA
+    thv = theta * (1.0 + qv / _nk.EPS) / (1.0 + qv)
+    dims = ("z", "y", "x")
+    ds0 = prep["ds"]
+    coords = {
+        "z": ("z", zsel, dict(ds0["z"].attrs)),
+        "y": ds0["y"],
+        "x": ds0["x"],
+        "time": prep["time"],
+    }
+    for name in ds0.coords:
+        if name not in coords and set(ds0[name].dims) <= {"y", "x"}:
+            coords[name] = ds0[name]
+    data = {
+        "theta": (
+            dims,
+            theta,
+            {"standard_name": "air_potential_temperature", "units": "K"},
+        ),
+        "temperature": (dims, temp, {"standard_name": "air_temperature", "units": "K"}),
+        "theta_v": (
+            dims,
+            thv,
+            {"long_name": "virtual potential temperature", "units": "K"},
+        ),
+        "delta_theta_v": (
+            dims,
+            thv - bsel["theta_v"].values[:, None, None],
+            {
+                "long_name": "virtual potential temperature minus base state",
+                "units": "K",
+            },
+        ),
+        "qv": (
+            dims,
+            qv,
+            {"standard_name": "humidity_mixing_ratio", "units": "kg kg-1"},
+        ),
+        "qc": (dims, qc, {"long_name": "cloud water mixing ratio", "units": "kg kg-1"}),
+        "flags": (
+            dims,
+            flags.astype(np.int32),
+            {
+                "long_name": "trajectory termination flags",
+                "flag_masks": np.array([1, 2, 4, 8, 16, 32, 64], np.int32),
+                "flag_meanings": _traj.FLAG_MEANINGS,
+            },
+        ),
+        "environment": (
+            dims,
+            ((flags & _nk.ENVIRONMENT) != 0) & ((flags & 64) == 0),
+            {"long_name": "trajectory reached the storm environment"},
+        ),
+        "n_steps": (
+            dims,
+            np.maximum(npts - 1, 0),
+            {"long_name": "number of trajectory steps"},
+        ),
+        "origin_x": (
+            dims,
+            org[..., 0],
+            {"long_name": "x of the trajectory origin", "units": "m"},
+        ),
+        "origin_y": (
+            dims,
+            org[..., 1],
+            {"long_name": "y of the trajectory origin", "units": "m"},
+        ),
+        "origin_z": (
+            dims,
+            org[..., 2],
+            {"long_name": "height of the trajectory origin", "units": "m"},
+        ),
+        "origin_time": (
+            dims,
+            org[..., 3],
+            {
+                "long_name": "time of the trajectory origin relative to the analysis time",
+                "units": "s",
+            },
+        ),
+        "valid_fraction": (
+            dims,
+            org[..., 4],
+            {
+                "long_name": "fraction of the trajectory points with valid winds",
+                "units": "1",
+            },
+        ),
+        "theta_base": (
+            "z",
+            bsel["theta"].values,
+            {"long_name": "base-state potential temperature", "units": "K"},
+        ),
+        "theta_v_base": (
+            "z",
+            bsel["theta_v"].values,
+            {"long_name": "base-state virtual potential temperature", "units": "K"},
+        ),
+        "pressure_base": (
+            "z",
+            bsel["pressure"].values,
+            {"long_name": "base-state pressure", "units": "Pa"},
+        ),
+    }
+    for i, (key, text) in enumerate(_BUDGET):
+        data[f"dtheta_{key}"] = (
+            dims,
+            bud[..., i],
+            {
+                "long_name": f"potential temperature change by {text} along the trajectory",
+                "units": "K",
+            },
+        )
+    if precip_ds is not None:
+        pa = precip_ds.isel(z=ks)
+        pt = pa.interp(time=prep["time"]) if pa.sizes["time"] > 1 else pa.isel(time=0)
+        for k in ("qr", "nr", "qg", "ng"):
+            data[k] = (
+                dims,
+                np.asarray(pt[k].transpose(*dims).values, float),
+                dict(precip_ds[k].attrs),
+            )
+        rho = bsel["rho"].values[:, None, None]
+        qr_, nr_ = data["qr"][1], data["nr"][1]
+        with np.errstate(all="ignore"):
+            lam = np.cbrt(np.pi * RHO_W * nr_ / (rho * qr_))
+            vbar = np.sqrt(1.225 / rho) * 10.0 * (1.0 - (1.0 + 516.575 / lam) ** -4.0)
+            rr = np.where(qr_ > 0, 3.6e6 * rho * qr_ * vbar / RHO_W, 0.0)
+        data["rain_rate"] = (
+            dims,
+            rr,
+            {
+                "standard_name": "rainfall_rate",
+                "long_name": "rain rate (Ziegler 2013b eqs. 7-9)",
+                "units": "mm h-1",
+            },
+        )
+    attrs = {
+        "method": "diabatic Lagrangian analysis (Ziegler 2013a, b)",
+        "microphysics": "Lin et al. (1983) rates; see radarx.retrieve.diabatic_lagrangian",
+        "processes": ", ".join(k for k in PROCESSES if on[k]),
+        "storm_motion": (prep["cx"], prep["cy"]),
+        "dt": float(dt),
+        "melting_level": base.attrs["melting_level"],
+        "ground_height": ground,
+        "environment_fraction": float(np.mean((flags & _nk.ENVIRONMENT) != 0)),
+        "termination": str(termination),
+    }
+    return xr.Dataset(data, coords=coords, attrs=attrs)
+
+
+from .._registry import accessor_method  # noqa: E402
+
+
+@accessor_method("dataset", name="diabatic_lagrangian")
+def _diabatic_lagrangian_dataset_accessor(self, sounding, time=None, **kwargs):
+    """
+    Diabatic Lagrangian analysis of the winds and radar data in this dataset.
+
+    See :func:`radarx.retrieve.diabatic_lagrangian` for the parameters.
+
+    Returns
+    -------
+    xarray.Dataset
+        Potential temperature, humidity, cloud water and virtual buoyancy at
+        the analysis time.
+    """
+    return diabatic_lagrangian(self.xarray_obj, sounding, time, **kwargs)
