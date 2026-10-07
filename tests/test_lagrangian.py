@@ -270,7 +270,7 @@ def test_gridpoint_output():
     assert tr.attrs["direction"] == "backward"
     assert tr.u.attrs["units"] == "m s-1"
     # NaN past the end of each trajectory
-    short = int(tr.n_points.argmin())
+    short = int(np.argmin(tr.n_points.values))
     assert np.isnan(tr.x[short, int(tr.n_points[short]) :]).all()
     assert np.isnat(tr.time[short, -1].values)
 
@@ -307,3 +307,19 @@ def test_errors():
     if not lg.HAS_COMPILED_KERNEL:  # pragma: no cover - depends on the build
         with pytest.raises(ImportError):
             trajectories(ds, start=p, engine="compiled")
+
+
+def test_options_and_coordinates():
+    ds = _winds(1.0, 0.0, 0.0)
+    p = _point(5000.0, 5000.0, 500.0)
+    a = trajectories(
+        ds,
+        start=p,
+        reflectivity="DBZ",
+        storm_motion=(1.0, 0.0),
+        extend=(60.0, 0.0),
+        termination=False,
+    )
+    assert int(a.n_points[0]) == 94
+    with pytest.raises(ValueError, match="coordinate"):
+        trajectories(ds.drop_vars("y"), start=p)

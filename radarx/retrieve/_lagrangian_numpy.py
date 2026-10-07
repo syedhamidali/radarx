@@ -546,8 +546,6 @@ def dla(g, par, starts, surface, base, base_z0, base_dz, precip, meso, grad, q):
     for j in range(int(k.max()) - 1):
         m = k - 1 - j
         r = np.flatnonzero(m >= 1)
-        if r.size == 0:
-            break
         rows = idx[r]
         A = pos[rows, m[r]]
         B = pos[rows, m[r] - 1]

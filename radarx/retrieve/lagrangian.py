@@ -167,7 +167,7 @@ def _use_compiled(engine):
         raise ValueError(
             f"engine must be 'auto', 'compiled' or 'numpy', not {engine!r}"
         )
-    if engine == "compiled" and not HAS_COMPILED_KERNEL:
+    if engine == "compiled" and not HAS_COMPILED_KERNEL:  # pragma: no cover
         raise ImportError("the compiled trajectory kernel is not available")
     return HAS_COMPILED_KERNEL and engine != "numpy"
 
@@ -262,10 +262,10 @@ def _prepare(
         raise ValueError("the wind times must be distinct")
     order = ("time", "z", "y", "x")
 
-    def arr(name):
-        return np.asarray(ds[name].transpose(*order).values, dtype=np.float64)
-
-    uu, vv, ww = arr(u), arr(v), arr(w)
+    shape = tuple(ds.sizes[d] for d in order)
+    packed = np.empty(shape + (4,), dtype=np.float32)
+    for i, name in enumerate((u, v, w)):
+        packed[..., i] = ds[name].transpose(*order).values
     zname = _reflectivity_name(ds, reflectivity)
     if zname is None:
         if reflectivity is not None and params["min_steps"] >= 0:
@@ -274,21 +274,20 @@ def _prepare(
                 "environment is not applied",
                 stacklevel=3,
             )
-        dbz = np.full(uu.shape, 1.0e3)
+        packed[..., 3] = 1.0e3
     else:
-        dbz = arr(zname)
-        dbz = np.where(np.isnan(dbz), params["dbz_floor"], dbz)
+        packed[..., 3] = ds[zname].transpose(*order).values
+        dbz = packed[..., 3]
+        dbz[np.isnan(dbz)] = params["dbz_floor"]
     if surface_downdraft_on:
-        ww = ww.copy()
-        ww[:, 0] = surface_downdraft(
-            ww,
-            dbz,
+        packed[:, 0, :, :, 2] = surface_downdraft(
+            packed[:, :2, :, :, 2].astype(np.float64),
+            packed[:, :1, :, :, 3].astype(np.float64),
             params["wmix0"],
             params["wmix1"],
             params["z0_dbz"],
             params["zddc_dbz"],
         )
-    packed = np.stack([uu, vv, ww, dbz], axis=-1).astype(np.float32)
     cx, cy = (
         (0.0, 0.0)
         if storm_motion is None

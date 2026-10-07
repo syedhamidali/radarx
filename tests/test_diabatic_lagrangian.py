@@ -788,3 +788,108 @@ def test_errors():
         ziegler2013_precipitation(
             ds, dl._base_state(cold, ds.z.values, 0.0)[3], profiles=_profiles()
         )
+
+
+def test_numpy_branches_and_inputs():
+    ds = _winds(w=-1.0, dbz=50.0, extra={"ZDR": 1.5})
+    ds = ds.assign_coords(lat=(("y", "x"), np.zeros((ds.sizes["y"], ds.sizes["x"]))))
+    snd = _sounding().drop_vars("u")
+    snd["v"] = snd.v * np.nan
+    pr = _precip(ds, qr=2e-3, nr=500.0, qg=1e-3, ng=50.0)
+    kw = dict(precipitation=pr, levels=[2], filter_passes=0)
+    for procs in ("NOCOL", {**NONE, "damping": True}):
+        a = diabatic_lagrangian(ds, snd, engine="numpy", processes=procs, **kw)
+        if lg.HAS_COMPILED_KERNEL:
+            b = diabatic_lagrangian(ds, snd, engine="compiled", processes=procs, **kw)
+            np.testing.assert_allclose(a.theta, b.theta, rtol=1e-10)
+    assert "lat" in a.coords
+    # no trajectory reaches the environment: all missing
+    c = diabatic_lagrangian(ds, snd, engine="numpy", max_steps=5, hole_fill=False, **kw)
+    assert np.isnan(c.theta).all() and not c.environment.any()
+    # mesoscale analysis on another grid, with a time axis, mixing ratio and gaps
+    base = dl._base_state(snd, ds.z.values, 0.0)[3]
+    xx = np.arange(-1000.0, 9001.0, 2000.0)
+    th = np.broadcast_to(
+        base.theta.values[:, None, None], (ds.sizes["z"], xx.size, xx.size)
+    ).copy()
+    th[3, 0, 0] = np.nan
+    meso = xr.Dataset(
+        {
+            "theta": (("z", "y", "x"), th),
+            "mixing_ratio": (
+                ("z", "y", "x"),
+                np.broadcast_to(base.qv.values[:, None, None], th.shape),
+            ),
+        },
+        coords={"z": ds.z.values, "y": xx, "x": xx},
+    ).expand_dims(time=[ds.time.values[-1]])
+    d = diabatic_lagrangian(
+        ds, snd, mesoscale=meso, processes=NONE, precipitation="none", levels=[2]
+    )
+    e = diabatic_lagrangian(ds, snd, processes=NONE, precipitation="none", levels=[2])
+    np.testing.assert_allclose(d.theta, e.theta, atol=5e-3)
+    # explicit closure names and constants
+    q = polarimetric_precipitation(ds, base, dbzh="DBZ", zdr="ZDR")
+    assert float(q.qr.max()) > 0
+    z = ziegler2013_precipitation(
+        ds, base, profiles=_profiles(), constants={"n0r": 4e5}
+    )
+    assert float(z.qr.max()) > 0
+
+
+# --------------------------------------------------------------------------
+# real data
+# --------------------------------------------------------------------------
+
+
+def test_real_nexrad_volume():
+    xd = pytest.importorskip("xradar")
+    from open_radar_data import DATASETS
+
+    from radarx.grid import grid_radar
+
+    try:
+        file = DATASETS.fetch("KLBB20160601_150025_V06")
+    except Exception as err:  # noqa: BLE001  # pragma: no cover - network
+        pytest.skip(f"sample data not available: {err}")
+    dtree = xd.io.open_nexradlevel2_datatree(file, sweep=[0, 1, 2, 3, 4, 5])
+    dtree = dtree.xradar.georeference()
+    for name in [n for n in dtree.children if n.startswith("sweep")]:
+        ds = dtree[name].to_dataset(inherit=False)
+        for var, lim in (("DBZH", -32.0), ("ZDR", -12.9)):
+            if var in ds:
+                ds[var] = ds[var].where(ds[var] > lim)
+        dtree[name] = ds
+    g = grid_radar(
+        dtree,
+        data_vars=["DBZH", "ZDR"],
+        x_lim=(-60e3, 60e3),
+        y_lim=(-60e3, 60e3),
+        z_lim=(0, 6e3),
+        x_step=2000,
+        y_step=2000,
+        z_step=500,
+        pseudo_cappi=False,
+    )
+    g = g.drop_vars("time").astype("float64")
+    rain = (g.DBZH > 35).fillna(False)
+    # a steady storm moving with the mean wind, sinking 1 m/s in echo
+    winds = g.assign(
+        u=xr.full_like(g.DBZH, 5.0),
+        v=xr.full_like(g.DBZH, 0.0),
+        w=xr.where(rain & (g.z > 0), -1.0, 0.0),
+    ).assign_coords(time=T0)
+    snd = _sounding(q_low=0.006, q_high=0.003)
+    k = int(np.argmax(rain.sum(("y", "x")).values))
+    out = diabatic_lagrangian(
+        winds, snd, storm_motion=(5.0, 0.0), extend=(2400.0, 0.0), levels=[k]
+    )
+    lev = out.isel(z=0)
+    core = rain.isel(z=k).values
+    assert core.sum() > 20
+    assert (lev.qr.values[core] > 1e-4).mean() > 0.9
+    rr = np.nanmedian(lev.rain_rate.values[core])
+    assert 2.0 < rr < 200.0
+    # evaporatively cooled air under the rain of a dry boundary layer
+    assert float(lev.dtheta_rain_evaporation.where(rain.isel(z=k)).mean()) < -0.3
+    assert out.attrs["environment_fraction"] > 0.9

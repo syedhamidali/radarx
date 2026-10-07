@@ -1106,11 +1106,12 @@ def _precipitation(precipitation, prep, base, kwargs):
     if "time" not in pr.dims:
         pr = pr.expand_dims(time=ds["time"].values)
     pr = pr.reindex(time=ds["time"].values, method="nearest")
-    arrs = [
-        np.nan_to_num(np.asarray(pr[k].transpose("time", "z", "y", "x").values, float))
-        for k in ("qr", "nr", "qg", "ng")
-    ]
-    return pr, np.stack(arrs, axis=-1).astype(np.float32)
+    order = ("time", "z", "y", "x")
+    packed = np.empty(tuple(ds.sizes[d] for d in order) + (4,), dtype=np.float32)
+    for i, k in enumerate(("qr", "nr", "qg", "ng")):
+        packed[..., i] = pr[k].transpose(*order).values
+    np.nan_to_num(packed, copy=False, nan=0.0)
+    return pr, packed
 
 
 def diabatic_lagrangian(
