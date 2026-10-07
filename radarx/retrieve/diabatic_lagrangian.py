@@ -163,6 +163,42 @@ acronyms of Ziegler (2013a, Table 3) are accepted: ``"CNTL"``, ``"GMLT"``
 damping), ``"RVAP"`` (no rain evaporation), ``"WSFC"`` (no surface
 downdraft); ``"NGSC"`` is ``graupel_scale`` of the closures.
 
+Applying DLA to observed QLCS cases
+-----------------------------------
+Ziegler (2013a, b) analysed supercells with winds blended to a sounding
+outside the radar coverage. Squall lines with a long-lived trailing cold pool
+and multi-Doppler winds of limited coverage need some care:
+
+- *Winds outside the coverage and untrusted winds.* Fill them (e.g. with the
+  background wind of :func:`radarx.retrieve.multi_doppler` and :math:`w = 0`)
+  so the parcels can continue, and pass the coverage as ``valid`` (e.g.
+  ``dd_valid``). ``valid_fraction`` tells how much of each trajectory used
+  analysed winds, and ``min_valid_fraction`` masks (and hole-fills) the
+  others. Columns in which the vertical integration of mass continuity
+  diverges (|w| of tens of m s\\ :sup:`-1` aloft above unobserved levels) also
+  carry spurious broad descent of several m s\\ :sup:`-1` at low levels, which
+  warms parcels adiabatically by several K: treat them as not valid.
+- *Unobserved lowest level.* If the ground level is below the lowest beams,
+  extrapolate the winds and radar fields to it from the level above (and their
+  validity), so that surface parcels see the precipitation that cools them.
+- *Environment.* A single sounding cannot represent a heterogeneous, evolving
+  inflow (e.g. evening cooling). Pass a time-dependent ``mesoscale`` analysis
+  (as in Ziegler 2013b, sect. 3b) built from pre-storm soundings and surface
+  stations, and keep the stations used for it apart from those used for
+  validation.
+- *Termination.* Ziegler's test (ii), :math:`w < 0.5` m s\\ :sup:`-1` for five
+  steps after 76 steps, ends surface trajectories in a stratiform cold pool
+  after about 26 min, still inside the outflow. ``termination="precipitation"``
+  follows them until they are outside echo and either ahead of the gust front
+  (``environment_mask``) or above the cold-pool depth (``cold_pool_depth``);
+  set ``min_steps`` to 0 with it, and a maximum duration with ``max_steps``.
+  Longer trajectories are more sensitive to errors of :math:`w`.
+- *Melting layer.* The polarimetric closure blends rain and graupel through a
+  melting layer of finite depth (default 1 km about the 0 degC level, or the
+  wet-snow band of the HID), so latent cooling is continuous in height.
+- *Storm motion.* Use the motion of the convective cells (the motion with which
+  the analyses were advected to their times) for ``storm_motion``.
+
 Computation
 -----------
 Trajectories and the forward integration of all grid points run in one call

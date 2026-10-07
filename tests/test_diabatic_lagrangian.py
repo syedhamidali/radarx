@@ -999,3 +999,17 @@ def test_time_dependent_mesoscale_valid_fraction_and_termination():
         diabatic_lagrangian(ds, snd, termination=False, **kw)
     with pytest.raises(ValueError, match="distinct"):
         diabatic_lagrangian(ds, snd, mesoscale=xr.concat([meso, meso], "time"), **kw)
+
+
+def test_closure_without_melting_level_and_dataarray_mask():
+    ds = _winds(dbz=40.0, extra={"ZDR": 1.0})
+    warm = _sounding().assign(temperature=lambda s: s.temperature + 80.0)
+    base = dl._base_state(warm, ds.z.values, 0.0)[3]
+    assert not np.isfinite(base.attrs["melting_level"])
+    pr = polarimetric_precipitation(ds, base)
+    assert float(pr.qg.max()) == 0.0 and (pr.qr > 0).all()
+    valid = (ds.x < 4000.0).assign_coords(time=ds.time[0])  # a scalar time
+    tr = lg.trajectories(
+        ds, start={"x": [3000.0], "y": [0.0], "z": [500.0]}, valid=valid
+    )
+    assert 0.0 < float(tr.valid_fraction[0]) <= 1.0
