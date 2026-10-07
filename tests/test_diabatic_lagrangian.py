@@ -561,7 +561,7 @@ def _base(ds):
 def test_polarimetric_closure():
     ds = _winds(dbz=lambda t, x, y, z: 30.0 + 2e-3 * x, extra={"ZDR": 1.2})
     base = _base(ds)
-    pr = polarimetric_precipitation(ds, base)
+    pr = polarimetric_precipitation(ds, base, melting_depth=0.0)
     hm = base.attrs["melting_level"]
     assert 4000.0 < hm < 4300.0
     below = pr.sel(z=slice(0, 3500))
@@ -610,6 +610,40 @@ def test_polarimetric_closure():
         np.pi * 1000 * 8e5 / (float(base.rho.sel(z=1000.0)) * lam**4),
         rtol=1e-10,
     )
+
+
+def test_polarimetric_closure_is_continuous_across_the_melting_level():
+    c = np.arange(0.0, 2001.0, 1000.0)
+    z = np.arange(0.0, 7001.0, 100.0)
+    ds = xr.Dataset(
+        {
+            "DBZ": (("z", "y", "x"), np.full((z.size, c.size, c.size), 42.0)),
+            "ZDR": (("z", "y", "x"), np.full((z.size, c.size, c.size), 1.3)),
+        },
+        coords={"z": z, "y": c, "x": c},
+    )
+    base = dl._base_state(_sounding(), z, 0.0)[3]
+    hm = base.attrs["melting_level"]
+    for depth, smooth in ((1000.0, True), (0.0, False)):
+        pr = polarimetric_precipitation(ds, base, melting_depth=depth).isel(y=0, x=0)
+        for k in ("qr", "qg"):
+            col = pr[k].values
+            jump = np.abs(np.diff(col)).max() / col.max()
+            # 100-m levels through a 1-km layer (q_g grows as f^(4/7) at its base)
+            assert (jump < 0.25) == smooth, (k, depth, jump)
+        # rain below, graupel above the layer, both inside it
+        assert float(pr.qg.sel(z=hm - 600.0, method="nearest")) == 0.0 or not smooth
+        assert float(pr.qr.sel(z=hm + 600.0, method="nearest")) == 0.0
+    mid = (
+        polarimetric_precipitation(ds, base)
+        .isel(y=0, x=0)
+        .sel(z=round(hm, -2), method="nearest")
+    )
+    assert float(mid.qr) > 0 and float(mid.qg) > 0
+    lay = polarimetric_precipitation(ds, base, melting_layer=(2000.0, 3000.0)).isel(
+        y=0, x=0
+    )
+    assert float(lay.qr.sel(z=3000.0)) == 0.0 and float(lay.qg.sel(z=2000.0)) == 0.0
 
 
 def _profiles():
@@ -893,3 +927,75 @@ def test_real_nexrad_volume():
     # evaporatively cooled air under the rain of a dry boundary layer
     assert float(lev.dtheta_rain_evaporation.where(rain.isel(z=k)).mean()) < -0.3
     assert out.attrs["environment_fraction"] > 0.9
+
+
+def test_time_dependent_mesoscale_valid_fraction_and_termination():
+    def dbz(t, x, y, z):
+        return np.where(x > 5000.0, 45.0, -10.0)
+
+    ds = _winds(u=4.0, w=0.0, dbz=dbz)
+    ds["dd_valid"] = (ds.x < 3000.0).broadcast_like(ds.u)
+    snd = _sounding()
+    base = dl._base_state(snd, ds.z.values, 0.0)[3]
+    shape = (2, ds.sizes["z"], ds.sizes["y"], ds.sizes["x"])
+    # an environment that cools by 2 K between the first and the last wind time
+    th = (
+        base.theta.values[None, :, None, None]
+        + np.array([2.0, 0.0])[:, None, None, None]
+    )
+    qv = np.broadcast_to(base.qv.values[None, :, None, None], shape)
+    dims = ("time", "z", "y", "x")
+    meso = xr.Dataset(
+        {"theta": (dims, np.broadcast_to(th, shape)), "qv": (dims, qv)},
+        coords={"time": ds.time.values[[0, -1]], "z": ds.z, "y": ds.y, "x": ds.x},
+    )
+    kw = dict(
+        precipitation="none",
+        processes=NONE,
+        filter_passes=0,
+        hole_fill=False,
+        levels=[2],
+    )
+    out = {}
+    engines = ("numpy", "compiled") if lg.HAS_COMPILED_KERNEL else ("numpy",)
+    for eng in engines:
+        out[eng] = diabatic_lagrangian(
+            ds,
+            snd,
+            mesoscale=meso,
+            valid="dd_valid",
+            min_valid_fraction=0.5,
+            engine=eng,
+            **kw,
+        )
+    a = out["numpy"]
+    if "compiled" in out:
+        for k in ("theta", "qv", "valid_fraction", "flags"):
+            np.testing.assert_allclose(
+                a[k], out["compiled"][k], rtol=1e-9, equal_nan=True
+            )
+    # parcels start from the environment at their origin time (linear in time)
+    ok = a.environment.values
+    span = float(ds.time[-1] - ds.time[0]) / 1e9
+    th0 = base.theta.sel(z=1000.0).item()
+    expect = th0 + 2.0 * (-a.origin_time.values[ok] / span)
+    np.testing.assert_allclose(a.theta.values[ok], expect, atol=1e-3)
+    # endpoints whose trajectories ran mostly outside valid winds are masked
+    low = a.valid_fraction.values < 0.5
+    assert low.any() and (~low).any()
+    assert np.isnan(a.theta.values[low]).all() and (a.flags.values[low] & 64).all()
+    assert not a.environment.values[low].any()
+    # the alternative termination keeps parcels in rain longer
+    b = diabatic_lagrangian(
+        ds,
+        snd,
+        termination="precipitation",
+        parameters={"cold_pool_depth": 500.0, "min_steps": 0},
+        **kw,
+    )
+    assert float(b.n_steps.mean()) != float(a.n_steps.mean())
+    assert b.attrs["termination"] == "precipitation"
+    with pytest.raises(ValueError, match="termination"):
+        diabatic_lagrangian(ds, snd, termination=False, **kw)
+    with pytest.raises(ValueError, match="distinct"):
+        diabatic_lagrangian(ds, snd, mesoscale=xr.concat([meso, meso], "time"), **kw)

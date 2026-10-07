@@ -67,28 +67,45 @@ level must be the ground.
 
 Termination
 -----------
-A backward trajectory has reached the storm environment (Ziegler 2013a,
-sect. 2a) when, after more than :math:`N = 76` steps, (i) :math:`Z_H < 0`
-dBZ or (ii) :math:`w < 0.5` m s\\ :sup:`-1` for at least five consecutive
-steps, or (iii) when it leaves the domain through a lateral boundary. These
-tests are applied to backward trajectories only. A trajectory also stops at
-the end of the wind time series, after ``max_steps`` steps, and at a missing
-(NaN) wind. The reason is returned as a bit mask (``flags``):
+By default (``termination="ziegler2013"``) a backward trajectory has reached
+the storm environment (Ziegler 2013a, sect. 2a) when, after more than
+:math:`N = 76` steps, (i) :math:`Z_H < 0` dBZ or (ii) :math:`w < 0.5`
+m s\\ :sup:`-1` for at least five consecutive steps, or (iii) when it leaves
+the domain through a lateral boundary. Test (ii) is met by any parcel that is
+not in an updraft, so in a long-lived cold pool (e.g. under the stratiform
+rain of a squall line) surface trajectories end after about 26 min while still
+inside the outflow.
+
+``termination="precipitation"`` (an option of radarx, not part of Ziegler
+2013a) instead requires the parcel to be outside precipitation, :math:`Z_H`
+below ``env_dbz`` for ``env_dbz_steps`` consecutive steps (after
+``min_steps``), *and* either at least ``cold_pool_depth`` above the ground or
+where ``environment_mask`` is true (for example the air ahead of the gust
+front); lateral boundaries still count as environment. Trajectories that
+never meet the test stop at ``max_steps`` (the maximum backward duration) or
+at the start of the data and are not environmental.
+
+The tests are applied to backward trajectories only. A trajectory also stops
+at the end of the wind time series, after ``max_steps`` steps, and at a
+missing (NaN) wind. The reason is returned as a bit mask (``flags``):
 
 =====  ====================================================================
 bit    meaning
 =====  ====================================================================
-1      environment: :math:`Z_H` below ``env_dbz`` after ``min_steps`` steps
+1      environment: outside precipitation (:math:`Z_H` test)
 2      environment: :math:`w` below ``env_w`` for ``env_w_steps`` steps
 4      left the analysed domain through a lateral boundary
 8      reached the end of the wind time series
 16     reached ``max_steps``
 32     missing (NaN) wind at the parcel
+64     (diabatic Lagrangian analysis) too little time in valid winds
 =====  ====================================================================
 
 Missing reflectivity is treated as no echo (``dbz_floor``). Missing winds stop
 a trajectory: fill them first (e.g. with the background wind outside the
-multi-Doppler coverage) where the parcels should continue.
+multi-Doppler coverage) where the parcels should continue, and pass the
+coverage as ``valid`` to obtain ``valid_fraction``, the fraction of the
+trajectory points in analysed winds.
 
 Computation
 -----------
@@ -151,14 +168,19 @@ TRAJECTORY_DEFAULTS = {
     "env_dbz": 0.0,
     "env_w": 0.5,
     "env_w_steps": 5,
+    "env_dbz_steps": 5,  # termination="precipitation"
+    "cold_pool_depth": 2000.0,  # m above the ground, termination="precipitation"
     "dbz_floor": -30.0,
 }
+
+#: Termination modes of backward trajectories.
+TERMINATION = {"ziegler2013": 1, "precipitation": 2}
 
 _REFLECTIVITY = ("DBZ", "DBZH", "reflectivity", "corrected_reflectivity", "dbz")
 
 FLAG_MEANINGS = (
     "environment_reflectivity environment_weak_vertical_velocity lateral_boundary "
-    "end_of_data max_steps missing_wind"
+    "end_of_data max_steps missing_wind outside_valid_winds"
 )
 
 
@@ -240,8 +262,10 @@ def _prepare(
     extend,
     surface_downdraft_on,
     params,
+    valid=None,
+    environment_mask=None,
 ):
-    """Winds as packed float32 (nt, nz, ny, nx, 4) plus coordinates."""
+    """Winds as packed float32 (nt, nz, ny, nx, 6) plus coordinates."""
     if not isinstance(winds, xr.Dataset):
         raise TypeError("winds must be an xarray.Dataset")
     for name in (u, v, w):
@@ -263,9 +287,24 @@ def _prepare(
     order = ("time", "z", "y", "x")
 
     shape = tuple(ds.sizes[d] for d in order)
-    packed = np.empty(shape + (4,), dtype=np.float32)
+    packed = np.empty(shape + (6,), dtype=np.float32)
     for i, name in enumerate((u, v, w)):
         packed[..., i] = ds[name].transpose(*order).values
+    for i, (item, default) in ((4, (valid, 1.0)), (5, (environment_mask, 0.0))):
+        if item is None:
+            packed[..., i] = default
+            continue
+        da = ds[item] if isinstance(item, str) else item
+        if not isinstance(da, xr.DataArray):
+            raise TypeError(
+                "valid and environment_mask must be variable names or DataArrays"
+            )
+        if "time" not in da.dims and "time" in da.coords:
+            da = da.drop_vars("time")
+        da = da.broadcast_like(ds[u]).transpose(*order)
+        packed[..., i] = (
+            np.nan_to_num(np.asarray(da.values, dtype=np.float64)) > 0
+        ).astype(np.float32)
     zname = _reflectivity_name(ds, reflectivity)
     if zname is None:
         if reflectivity is not None and params["min_steps"] >= 0:
@@ -331,7 +370,17 @@ def _path_params(prep, direction, dt, iterations, max_steps, termination, params
         span = (-t[0] + prep["eb"]) if direction == "backward" else (t[-1] + prep["ea"])
         max_steps = max(int(math.ceil(span / dt - 1e-9)), 0)
     sign = -1.0 if direction == "backward" else 1.0
-    env = 1.0 if (termination and direction == "backward") else 0.0
+    if termination is True:
+        termination = "ziegler2013"
+    if termination in (False, None):
+        mode = 0
+    elif termination in TERMINATION:
+        mode = TERMINATION[termination]
+    else:
+        raise ValueError(
+            f"termination must be True, False, 'ziegler2013' or 'precipitation', not {termination!r}"
+        )
+    env = float(mode) if direction == "backward" else 0.0
     return np.array(
         [
             float(dt),
@@ -343,6 +392,9 @@ def _path_params(prep, direction, dt, iterations, max_steps, termination, params
             float(params["env_dbz"]),
             float(params["env_w"]),
             float(params["env_w_steps"]),
+            float(params["env_dbz_steps"]),
+            float(params["cold_pool_depth"]),
+            float(prep["z"][0]),
         ]
     )
 
@@ -387,6 +439,13 @@ def _run_paths(prep, par, starts, use_compiled, n_threads):
     return _np_kernel.build_paths(g, par, starts)
 
 
+def _valid_fraction(val, npts):
+    steps = np.arange(val.shape[1])[None, :] < npts[:, None]
+    nvalid = ((np.nan_to_num(val[..., 4]) >= 0.5) & steps).sum(axis=1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return np.where(npts > 0, nvalid / np.maximum(npts, 1), np.nan)
+
+
 def trajectories(
     winds,
     time=None,
@@ -406,6 +465,8 @@ def trajectories(
     v="v",
     w="w",
     reflectivity="auto",
+    valid=None,
+    environment_mask=None,
     engine="auto",
     n_threads=None,
 ):
@@ -452,14 +513,20 @@ def trajectories(
     surface_downdraft : bool, optional
         Replace the vertical velocity at the ground with the parameterised
         surface downdraft (Ziegler 2013a, eqs. 2-3). Default True.
-    termination : bool, optional
-        Stop backward trajectories that reach the storm environment
-        (Ziegler 2013a, sect. 2a). Default True.
+    termination : {True, "ziegler2013", "precipitation", False}, optional
+        Environment test of backward trajectories. ``True`` or
+        ``"ziegler2013"`` (default): the tests of Ziegler (2013a, sect. 2a).
+        ``"precipitation"``: the parcel is outside precipitation
+        (:math:`Z_H` below ``env_dbz`` for ``env_dbz_steps`` steps) and
+        either above ``cold_pool_depth`` or where ``environment_mask`` is
+        true (e.g. ahead of the gust front); see the module documentation.
+        ``False``: no test (trajectories run to ``max_steps`` or the data).
     parameters : dict, optional
         Overrides of :data:`TRAJECTORY_DEFAULTS`: ``offset_height`` (m),
         ``wmix0``, ``wmix1`` (m s-1), ``z0_dbz``, ``zddc_dbz`` (dBZ),
-        ``min_steps``, ``env_dbz`` (dBZ), ``env_w`` (m s-1), ``env_w_steps``
-        and ``dbz_floor`` (dBZ given to missing reflectivity).
+        ``min_steps``, ``env_dbz`` (dBZ), ``env_w`` (m s-1), ``env_w_steps``,
+        ``env_dbz_steps``, ``cold_pool_depth`` (m above the ground) and
+        ``dbz_floor`` (dBZ given to missing reflectivity).
     u, v, w : str, optional
         Names of the wind components. Default ``"u"``, ``"v"``, ``"w"``.
     reflectivity : str or None, optional
@@ -467,6 +534,16 @@ def trajectories(
         ``DBZ``, ``DBZH``, ``reflectivity``, ``corrected_reflectivity``,
         ``dbz``) or None (not used; the reflectivity test of the environment
         is then never met).
+    valid : str or xarray.DataArray, optional
+        True (non-zero) where the winds are analysed, e.g. ``"dd_valid"`` of
+        :func:`radarx.retrieve.multi_doppler` output, and false where they are
+        a background or filled. Interpolated to the parcels; the fraction of
+        trajectory points with a value of at least 0.5 is returned as
+        ``valid_fraction``. Default: all valid.
+    environment_mask : str or xarray.DataArray, optional
+        True where a parcel may count as environmental for
+        ``termination="precipitation"`` below ``cold_pool_depth`` (e.g. the
+        air ahead of the gust front). Default: nowhere.
     engine : {"auto", "compiled", "numpy"}, optional
         Implementation. ``"auto"`` (default) prefers the compiled kernel.
     n_threads : int, optional
@@ -477,8 +554,9 @@ def trajectories(
     xarray.Dataset
         On ``(trajectory, step)``: ``x``, ``y``, ``z`` (m), ``time``
         (datetime64), ``u``, ``v``, ``w`` (m s-1, ``w`` with the surface
-        downdraft) and ``reflectivity`` (dBZ) at every point (NaN after the
-        end); on ``trajectory``: ``n_points``, ``flags`` (bit mask, see the
+        downdraft), ``reflectivity`` (dBZ) and ``valid`` (0-1) at every
+        point (NaN after the end); on ``trajectory``: ``n_points``,
+        ``valid_fraction``, ``flags`` (bit mask, see the
         module documentation), ``environment`` (True where the trajectory
         reached the storm environment or a lateral boundary) and the start
         point ``start_x``, ``start_y``, ``start_z`` (plus the grid indices
@@ -518,6 +596,8 @@ def trajectories(
         extend=extend,
         surface_downdraft_on=surface_downdraft,
         params=params,
+        valid=valid,
+        environment_mask=environment_mask,
     )
     par = _path_params(prep, direction, dt, iterations, max_steps, termination, params)
     index = None
@@ -575,6 +655,22 @@ def trajectories(
                 val[..., 3],
                 {"long_name": "radar reflectivity at the parcel", "units": "dBZ"},
             ),
+            "valid": (
+                dims,
+                val[..., 4],
+                {
+                    "long_name": "interpolated validity of the winds at the parcel",
+                    "units": "1",
+                },
+            ),
+            "valid_fraction": (
+                "trajectory",
+                _valid_fraction(val, npts),
+                {
+                    "long_name": "fraction of trajectory points with valid winds",
+                    "units": "1",
+                },
+            ),
             "n_points": (
                 "trajectory",
                 npts,
@@ -585,7 +681,7 @@ def trajectories(
                 flags,
                 {
                     "long_name": "trajectory termination flags",
-                    "flag_masks": np.array([1, 2, 4, 8, 16, 32], np.int32),
+                    "flag_masks": np.array([1, 2, 4, 8, 16, 32, 64], np.int32),
                     "flag_meanings": FLAG_MEANINGS,
                 },
             ),
@@ -608,6 +704,7 @@ def trajectories(
             "iterations": int(iterations),
             "storm_motion": (prep["cx"], prep["cy"]),
             "surface_downdraft": int(bool(surface_downdraft)),
+            "termination": str(termination),
             "method": "Ziegler (2013a) gridpoint trajectories",
         },
     )

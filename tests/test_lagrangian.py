@@ -323,3 +323,43 @@ def test_options_and_coordinates():
     assert int(a.n_points[0]) == 94
     with pytest.raises(ValueError, match="coordinate"):
         trajectories(ds.drop_vars("y"), start=p)
+
+
+@pytest.mark.parametrize("engine", ["auto", "numpy"])
+def test_valid_fraction_and_precipitation_termination(engine):
+    def dbz(t, x, y, z):
+        return np.where(x > 12000.0, 40.0, -10.0)  # rain in the east
+
+    ds = _winds(5.0, 0.0, 0.0, dbz=dbz, nt=6)
+    ds["dd_valid"] = (ds.x < 15000.0).astype(int).broadcast_like(ds.u)
+    ds["ahead"] = (ds.x < 4000.0).broadcast_like(ds.u)
+    p = _point(16000.0, 5000.0, 500.0)
+    kw = dict(start=p, surface_downdraft=False, engine=engine, valid="dd_valid")
+    # Ziegler's test ends the parcel after 77 steps (w < 0.5), still in rain
+    a = trajectories(ds, **kw)
+    assert int(a.flags[0]) == 3 and int(a.n_points[0]) == 78
+    # outside precipitation and below the cold-pool top: needs the mask
+    b = trajectories(ds, termination="precipitation", environment_mask="ahead", **kw)
+    n = int(b.n_points[0])
+    assert int(b.flags[0]) == 1
+    assert float(b.x[0, n - 1]) < 4000.0 and float(b.reflectivity[0, n - 1]) < 0
+    # the first points are in invalid winds (x > 15 km)
+    inval = int((b.x[0, :n] > 14500.0).sum())  # valid < 0.5
+    np.testing.assert_allclose(
+        float(b.valid_fraction[0]), (n - inval) / n, atol=1.5 / n
+    )
+    # above the cold pool the mask is not needed
+    c = trajectories(
+        ds,
+        termination="precipitation",
+        parameters={"cold_pool_depth": 300.0, "env_dbz_steps": 3},
+        **kw,
+    )
+    assert int(c.flags[0]) == 1 and float(c.x[0, int(c.n_points[0]) - 1]) < 12000.0
+    # never outside precipitation below the cold-pool top: runs to max_steps
+    d = trajectories(ds, termination="precipitation", max_steps=40, **kw)
+    assert int(d.flags[0]) == 16
+    with pytest.raises(ValueError, match="termination"):
+        trajectories(ds, termination="maybe", **kw)
+    with pytest.raises(TypeError, match="variable names"):
+        trajectories(ds, valid=1.0, start=p)

@@ -525,6 +525,8 @@ def polarimetric_precipitation(
     min_dbz=0.0,
     graupel_scale=1.0,
     graupel_density=(690.0, 630.0),
+    melting_layer=None,
+    melting_depth=1000.0,
     engine="auto",
     n_threads=None,
 ):
@@ -544,6 +546,14 @@ def polarimetric_precipitation(
     the graupel reflectivity of Ferrier 1994), then :math:`q_g` and
     :math:`N_g` from eqs. (5)-(6). Rain cells below the melting level without a
     DSD (e.g. no :math:`Z_{DR}`) use eq. (7) with ``rain_intercept``.
+
+    Rain and graupel are blended through a melting layer of finite depth
+    (by default 1 km centred on the environmental 0 degC level): with the ice
+    fraction :math:`f` rising linearly from 0 at its bottom to 1 at its top,
+    the rain contents are scaled by :math:`1 - f` and the graupel
+    reflectivity is :math:`f Z_H + (1 - f) Z_g^{below}`, so the diagnosed
+    contents, and the melting and evaporation they drive, are continuous in
+    height.
 
     Parameters
     ----------
@@ -581,6 +591,13 @@ def polarimetric_precipitation(
     graupel_density : (float, float), optional
         Graupel density at the ground and at 5 km above it (kg m-3), linear in
         between. Default (690, 630) (Ziegler 2013a, Table 2).
+    melting_layer : (float, float), optional
+        Bottom and top of the melting layer in m above the ground (e.g. from
+        the wet-snow band of the HID or :func:`radarx.retrieve.melting_layer`).
+        Default: ``melting_depth`` centred on the melting level of ``base``.
+    melting_depth : float, optional
+        Depth (m) of the default melting layer. Default 1000; 0 switches
+        abruptly at the melting level.
     engine, n_threads : optional
         Passed to :func:`radarx.retrieve.dsd`.
 
@@ -601,7 +618,17 @@ def polarimetric_precipitation(
     zagl = (zz - base.attrs["ground_height"]).reshape(shape)
     rho = np.asarray(base["rho"].interp(z=zz).values, float).reshape(shape)
     hmelt = base.attrs["melting_level"]
-    below = zagl < (hmelt if np.isfinite(hmelt) else np.inf)
+    if melting_layer is not None:
+        ml_bot, ml_top = (float(v) for v in melting_layer)
+    elif np.isfinite(hmelt):
+        ml_bot, ml_top = hmelt - 0.5 * melting_depth, hmelt + 0.5 * melting_depth
+    else:
+        ml_bot = ml_top = np.inf
+    if ml_top > ml_bot:
+        f_ice = np.clip((zagl - ml_bot) / (ml_top - ml_bot), 0.0, 1.0)
+    else:
+        f_ice = (zagl >= ml_top).astype(float)
+    below = f_ice < 1.0  # liquid present
     echo = np.isfinite(zh) & (zh >= min_dbz)
     zlin = np.where(echo, 10.0 ** (np.nan_to_num(zh) / 10.0), 0.0)
     rhog = _graupel_density(zagl, *graupel_density)
@@ -667,14 +694,20 @@ def polarimetric_precipitation(
         codes = np.asarray(h.attrs.get("flag_values", np.arange(1, len(names) + 1)))
         gcodes = [int(c) for c, n in zip(codes, names) if "graupel" in n or "hail" in n]
         hid_g = np.isin(np.asarray(h.values), gcodes)
-    graupel = echo & (~below | hid_g | (below & ~dsd_ok & (zh >= graupel_min_dbz)))
+    hail = below & echo & ~dsd_ok & (zh >= graupel_min_dbz)
     # fallback rain from Z with a fixed intercept (Ziegler 2013a, eqs. 5-7)
-    fallback = below & echo & ~dsd_ok & ~graupel
+    fallback = below & echo & ~dsd_ok & ~hail & ~hid_g
     with np.errstate(all="ignore"):
         lam_r = (C_R * math.gamma(7.0) * rain_intercept / zlin) ** (1.0 / 7.0)
         qr = np.where(fallback, np.pi * RHO_W * rain_intercept / (rho * lam_r**4), qr)
         nr = np.where(fallback, rain_intercept / lam_r, nr)
-        zg = np.where(graupel, np.maximum(zlin - zr, 0.0), 0.0)
+        zr = np.where(fallback, zlin, zr)
+        # graupel reflectivity: below the melting layer what rain leaves in HID
+        # graupel/hail or rain-hail cells; blended to all of Z_H above it
+        resid = np.where(hid_g | hail, np.maximum(zlin - zr, 0.0), 0.0)
+        zg = np.where(echo, f_ice * zlin + (1.0 - f_ice) * resid, 0.0)
+        wr = 1.0 - f_ice
+        qr, nr = qr * wr, nr * wr
         lam_g = (
             A_R_DIEL * C_G * (np.pi * rhog / RHO_W) ** 2 * graupel_intercept / zg
         ) ** (1.0 / 7.0)
@@ -1036,7 +1069,8 @@ def _nine_point(a, passes=1):
 
 
 def _mesoscale(meso, prep, base):
-    """Mesoscale theta and q_v packed (1, nz, ny, nx, 2) and surface gradients."""
+    """Mesoscale theta and q_v packed (nt, nz, ny, nx, 2), surface gradients
+    (nt, 2, ny, nx, 4) and the times (s relative to the analysis time)."""
     m = meso
     for c in ("x", "y", "z"):
         if c not in m.coords:
@@ -1048,8 +1082,17 @@ def _mesoscale(meso, prep, base):
     ):
         m = m.interp(x=prep["x"], y=prep["y"], z=prep["z"])
     if "time" in m.dims:
-        m = m.interp(time=prep["time"]) if m.sizes["time"] > 1 else m.isel(time=0)
-    order = ("z", "y", "x")
+        m = m.sortby("time")
+        mt = (
+            m["time"].values.astype("datetime64[ns]") - prep["time"]
+        ) / np.timedelta64(1, "s")
+        mt = np.asarray(mt, dtype=np.float64)
+        if np.any(np.diff(mt) <= 0):
+            raise ValueError("the mesoscale times must be distinct")
+    else:
+        m = m.expand_dims(time=[prep["time"]])
+        mt = np.zeros(1)
+    order = ("time", "z", "y", "x")
     if "theta" in m:
         th = m["theta"]
     elif "temperature" in m:
@@ -1067,17 +1110,20 @@ def _mesoscale(meso, prep, base):
         raise ValueError(
             "the mesoscale analysis needs 'qv', 'mixing_ratio' or 'specific_humidity'"
         )
-    th = np.asarray(th.transpose(*order).values, float)
-    qv = np.asarray(qv.transpose(*order).values, float)
+    th = np.asarray(th.broadcast_like(m).transpose(*order).values, float)
+    qv = np.asarray(qv.broadcast_like(m).transpose(*order).values, float)
     if np.isnan(th).any() or np.isnan(qv).any():
-        th = np.where(np.isnan(th), base["theta"].values[:, None, None], th)
-        qv = np.where(np.isnan(qv), base["qv"].values[:, None, None], qv)
-    packed = np.stack([th, qv], axis=-1)[None].astype(np.float32)
-    gy_t, gx_t = np.gradient(th[0], prep["y"], prep["x"])
-    gy_q, gx_q = np.gradient(qv[0], prep["y"], prep["x"])
-    g = np.stack([gx_t, gy_t, gx_q, gy_q], axis=-1)
-    grad = np.stack([g, g])[None].astype(np.float32)
-    return packed, grad
+        th = np.where(np.isnan(th), base["theta"].values[None, :, None, None], th)
+        qv = np.where(np.isnan(qv), base["qv"].values[None, :, None, None], qv)
+    packed = np.stack([th, qv], axis=-1).astype(np.float32)
+    grads = []
+    for k in range(th.shape[0]):
+        gy_t, gx_t = np.gradient(th[k, 0], prep["y"], prep["x"])
+        gy_q, gx_q = np.gradient(qv[k, 0], prep["y"], prep["x"])
+        g = np.stack([gx_t, gy_t, gx_q, gy_q], axis=-1)
+        grads.append(np.stack([g, g]))
+    grad = np.stack(grads).astype(np.float32)
+    return packed, grad, mt
 
 
 def _precipitation(precipitation, prep, base, kwargs):
@@ -1137,6 +1183,10 @@ def diabatic_lagrangian(
     v="v",
     w="w",
     reflectivity="auto",
+    termination=True,
+    valid=None,
+    environment_mask=None,
+    min_valid_fraction=None,
     engine="auto",
     n_threads=None,
 ):
@@ -1162,11 +1212,15 @@ def diabatic_lagrangian(
     time : datetime-like, optional
         Analysis time. Default: the last wind time.
     mesoscale : xarray.Dataset, optional
-        Heterogeneous environment on the grid (``z``, ``y``, ``x``):
-        ``theta`` or ``temperature`` (with ``pressure``, else the base-state
-        pressure), and ``qv``, ``mixing_ratio`` or ``specific_humidity``, e.g.
-        :func:`radarx.io.sounding.era5_column` output. Used for the initial
-        values, the damping base state and the surface-flux gradient.
+        Heterogeneous environment on the grid (``z``, ``y``, ``x``, optionally
+        ``time``): ``theta`` or ``temperature`` (with ``pressure``, else the
+        base-state pressure), and ``qv``, ``mixing_ratio`` or
+        ``specific_humidity``, e.g. :func:`radarx.io.sounding.era5_column`
+        output (Ziegler 2013b, sect. 3b). Used for the initial values at the
+        origin and time of each trajectory, the damping base state and the
+        surface-flux gradient; with a ``time`` axis it is interpolated
+        linearly in time (and held constant before its first and after its
+        last time).
     precipitation : str, callable, xarray.Dataset or None, optional
         Precipitation closure: ``"polarimetric"`` (default,
         :func:`polarimetric_precipitation`), ``"ziegler2013"``
@@ -1196,6 +1250,17 @@ def diabatic_lagrangian(
         Passes of the nine-point low-pass filter. Default 1; 0 for none.
     u, v, w, reflectivity : str, optional
         Variable names, see :func:`radarx.retrieve.trajectories`.
+    termination : {True, "ziegler2013", "precipitation"}, optional
+        Environment test of the trajectories, see
+        :func:`radarx.retrieve.trajectories`. Default: Ziegler (2013a).
+    valid, environment_mask : str or xarray.DataArray, optional
+        Validity of the winds (e.g. ``"dd_valid"``) and the mask of
+        environmental air for ``termination="precipitation"``, see
+        :func:`radarx.retrieve.trajectories`.
+    min_valid_fraction : float, optional
+        Grid points whose trajectory spent a smaller fraction of its points in
+        valid winds are set missing (flag 64) before hole filling. Default:
+        not applied (``valid_fraction`` is still returned).
     engine : {"auto", "compiled", "numpy"}, optional
         Implementation. ``"auto"`` (default) prefers the compiled kernel.
     n_threads : int, optional
@@ -1209,7 +1274,7 @@ def diabatic_lagrangian(
         ``qv``, ``qc``, the diagnosed ``qr``, ``nr``, ``qg``, ``ng`` and
         ``rain_rate``; per grid point ``flags``, ``n_steps``, ``environment``,
         the trajectory origin ``origin_x``, ``origin_y``, ``origin_z``,
-        ``origin_time`` and the accumulated :math:`\\theta` change of each
+        ``origin_time``, ``valid_fraction`` and the accumulated :math:`\\theta` change of each
         process ``dtheta_<process>`` (unfiltered, NaN without a valid
         trajectory); the base-state profiles ``theta_base``,
         ``theta_v_base``, ``pressure_base`` on ``z``.
@@ -1237,15 +1302,22 @@ def diabatic_lagrangian(
         extend=extend,
         surface_downdraft_on=on["surface_downdraft"],
         params=params,
+        valid=valid,
+        environment_mask=environment_mask,
     )
-    par = _traj._path_params(prep, "backward", dt, iterations, max_steps, True, params)
+    if termination in (False, None):
+        raise ValueError("the DLA needs a termination test of the trajectories")
+    par = _traj._path_params(
+        prep, "backward", dt, iterations, max_steps, termination, params
+    )
     ground = float(prep["z"][0])
     table, bz0, bdz, base = _base_state(sounding, prep["z"], ground)
     pr = _precipitation(precipitation, prep, base, precipitation_kwargs)
     precip_ds, precip = (None, None) if pr is None else pr
     meso = grad = None
+    meso_t = np.zeros(1)
     if mesoscale is not None:
-        meso, grad = _mesoscale(mesoscale, prep, base)
+        meso, grad, meso_t = _mesoscale(mesoscale, prep, base)
     q = dict(params)
     q.update(
         z_sfc=ground,
@@ -1279,6 +1351,7 @@ def diabatic_lagrangian(
             dummy4 if precip is None else precip,
             precip is not None,
             dummy2 if meso is None else meso,
+            meso_t,
             meso is not None,
             dummy4 if grad is None else grad,
             grad is not None,
@@ -1315,12 +1388,16 @@ def diabatic_lagrangian(
         gm = (
             None
             if meso is None
-            else _nk.Grid(prep["x"], prep["y"], prep["z"], [0.0], meso)
+            else _nk.Grid(
+                prep["x"], prep["y"], prep["z"], meso_t, meso, 0, 0, 1e30, 1e30
+            )
         )
         gg = (
             None
             if grad is None
-            else _nk.Grid(prep["x"], prep["y"], [0.0, 1.0], [0.0], grad)
+            else _nk.Grid(
+                prep["x"], prep["y"], [0.0, 1.0], meso_t, grad, 0, 0, 1e30, 1e30
+            )
         )
         out, bud, org, npts, flags = _nk.dla(
             g, par, starts, surface, table, bz0, bdz, gp, gm, gg, thermo
@@ -1328,9 +1405,14 @@ def diabatic_lagrangian(
     shape = (ks.size, prep["y"].size, prep["x"].size)
     out = np.asarray(out).reshape(shape + (3,))
     bud = np.asarray(bud).reshape(shape + (_nk.N_BUDGET,))
-    org = np.asarray(org).reshape(shape + (4,))
+    org = np.asarray(org).reshape(shape + (5,))
     npts = np.asarray(npts).reshape(shape)
-    flags = np.asarray(flags).reshape(shape)
+    flags = np.asarray(flags).reshape(shape).astype(np.int32)
+    if min_valid_fraction is not None:
+        low = ~(org[..., 4] >= float(min_valid_fraction))
+        flags = np.where(low, flags | 64, flags)
+        out = np.where(low[..., None], np.nan, out)
+        bud = np.where(low[..., None], np.nan, bud)
     theta, qv, qc = out[..., 0], out[..., 1], out[..., 2]
     if hole_fill:
         theta, qv, qc = _hole_fill(theta), _hole_fill(qv), _hole_fill(qc)
@@ -1383,13 +1465,13 @@ def diabatic_lagrangian(
             flags.astype(np.int32),
             {
                 "long_name": "trajectory termination flags",
-                "flag_masks": np.array([1, 2, 4, 8, 16, 32], np.int32),
+                "flag_masks": np.array([1, 2, 4, 8, 16, 32, 64], np.int32),
                 "flag_meanings": _traj.FLAG_MEANINGS,
             },
         ),
         "environment": (
             dims,
-            (flags & _nk.ENVIRONMENT) != 0,
+            ((flags & _nk.ENVIRONMENT) != 0) & ((flags & 64) == 0),
             {"long_name": "trajectory reached the storm environment"},
         ),
         "n_steps": (
@@ -1418,6 +1500,14 @@ def diabatic_lagrangian(
             {
                 "long_name": "time of the trajectory origin relative to the analysis time",
                 "units": "s",
+            },
+        ),
+        "valid_fraction": (
+            dims,
+            org[..., 4],
+            {
+                "long_name": "fraction of the trajectory points with valid winds",
+                "units": "1",
             },
         ),
         "theta_base": (
@@ -1478,6 +1568,7 @@ def diabatic_lagrangian(
         "melting_level": base.attrs["melting_level"],
         "ground_height": ground,
         "environment_fraction": float(np.mean((flags & _nk.ENVIRONMENT) != 0)),
+        "termination": str(termination),
     }
     return xr.Dataset(data, coords=coords, attrs=attrs)
 

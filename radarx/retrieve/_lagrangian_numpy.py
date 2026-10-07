@@ -21,6 +21,7 @@ BOUNDARY = 4
 END_OF_DATA = 8
 MAX_STEPS = 16
 MISSING = 32
+NW = 6  # wind pack: u, v, w, Z_H, valid, environment mask
 ENVIRONMENT = ENV_DBZ | ENV_W | BOUNDARY
 
 # Process switches
@@ -176,15 +177,16 @@ def sample(g, xp, yp, zp, tp, check_nan=True):
 
 
 def build_paths(g, par, starts):
-    """Paths of all start points: pos, val (n, m, 4), npts (n,), flags (n,)."""
+    """Paths of all start points: pos (n, m, 4), val (n, m, 6), npts, flags."""
     dt, n_iter, max_steps = par[0], int(par[1]), int(par[2])
     h = (-1.0 if par[3] < 0 else 1.0) * dt
-    env_tests, min_steps = par[4] != 0.0, int(par[5])
+    mode, min_steps = int(par[4]), int(par[5])
     env_dbz, env_w, env_w_steps = par[6], par[7], int(par[8])
+    env_dbz_steps, cold_pool_depth, z_sfc = int(par[9]), par[10], par[11]
     starts = np.asarray(starts, float).reshape(-1, 3)
     n, m = starts.shape[0], max_steps + 1
     pos = np.full((n, m, 4), np.nan)
-    val = np.full((n, m, 4), np.nan)
+    val = np.full((n, m, NW), np.nan)
     npts = np.zeros(n, np.int64)
     flags = np.zeros(n, np.int32)
     zlo, zhi = g.z[0], g.z[-1]
@@ -197,7 +199,7 @@ def build_paths(g, par, starts):
     tn = np.zeros(n)
     out0 = outside(xn, yn)
     flags[out0] = BOUNDARY
-    vn = np.zeros((n, 4))
+    vn = np.zeros((n, NW))
     ok = ~out0
     v, st = sample(g, xn[ok], yn[ok], zn[ok], tn[ok])
     idx = np.flatnonzero(ok)
@@ -210,6 +212,7 @@ def build_paths(g, par, starts):
     active = np.zeros(n, bool)
     active[good] = True
     wcount = np.zeros(n, np.int64)
+    dcount = np.zeros(n, np.int64)
     for step in range(1, max_steps + 1):
         a = np.flatnonzero(active)
         if a.size == 0:
@@ -222,7 +225,7 @@ def build_paths(g, par, starts):
         bad = outside(xs, ys)
         flags[a[bad]] |= BOUNDARY
         ok &= ~bad
-        v1 = np.zeros((a.size, 4))
+        v1 = np.zeros((a.size, NW))
         for _ in range(n_iter):
             r = np.flatnonzero(ok)
             vv, st = sample(g, xs[r], ys[r], zs[r], t1[r])
@@ -249,12 +252,20 @@ def build_paths(g, par, starts):
         npts[b] = step + 1
         xn[b], yn[b], zn[b], tn[b] = xs[r], ys[r], zs[r], t1[r]
         vn[b] = v1[r]
-        if env_tests:
+        if mode == 1:
             wcount[b] = np.where(v1[r, 2] < env_w, wcount[b] + 1, 0)
             if step > min_steps:
                 flags[b[v1[r, 3] < env_dbz]] |= ENV_DBZ
                 flags[b[wcount[b] >= env_w_steps]] |= ENV_W
                 active[b[flags[b] != 0]] = False
+        elif mode == 2:
+            dcount[b] = np.where(v1[r, 3] < env_dbz, dcount[b] + 1, 0)
+            if step > min_steps:
+                env = (dcount[b] >= env_dbz_steps) & (
+                    (zs[r] - z_sfc >= cold_pool_depth) | (v1[r, 5] >= 0.5)
+                )
+                flags[b[env]] |= ENV_DBZ
+                active[b[env]] = False
         if step == max_steps:
             flags[np.flatnonzero(active)] |= MAX_STEPS
     return pos, val, npts, flags
@@ -515,9 +526,12 @@ def dla(g, par, starts, surface, base, base_z0, base_dz, precip, meso, grad, q):
     zsfc = q[Q["z_sfc"]]
     out = np.full((n, 3), np.nan)
     bud = np.full((n, N_BUDGET), np.nan)
-    org = np.full((n, 4), np.nan)
+    org = np.full((n, 5), np.nan)
     has = npts > 0
-    org[has] = pos[np.flatnonzero(has), npts[has] - 1]
+    org[has, :4] = pos[np.flatnonzero(has), npts[has] - 1]
+    steps = np.arange(val.shape[1])[None, :] < npts[:, None]
+    nvalid = ((val[:, :, 4] >= 0.5) & steps).sum(axis=1)
+    org[has, 4] = nvalid[has] / npts[has]
     env = has & ((flags & ENVIRONMENT) != 0)
     idx = np.flatnonzero(env)
     if idx.size == 0:
@@ -525,15 +539,15 @@ def dla(g, par, starts, surface, base, base_z0, base_dz, precip, meso, grad, q):
     surf = np.asarray(surface)[idx] != 0
     k = npts[idx]
 
-    def base_at(xp, yp, zp):
+    def base_at(xp, yp, zp, tp):
         if meso is not None:
-            m, _ = sample(meso, xp, yp, zp, np.zeros_like(xp), False)
+            m, _ = sample(meso, xp, yp, zp, tp, False)
             return m[:, 0], m[:, 1]
         b = profile(base, base_z0, base_dz, zp)
         return b[:, 1], b[:, 2]
 
     p0 = pos[idx, k - 1]
-    theta, qv = base_at(p0[:, 0], p0[:, 1], p0[:, 2])
+    theta, qv = base_at(p0[:, 0], p0[:, 1], p0[:, 2], p0[:, 3])
     qc = np.zeros(idx.size)
     b = np.zeros((idx.size, N_BUDGET))
     pa = profile(base, base_z0, base_dz, p0[:, 2])[:, 0]
@@ -585,7 +599,7 @@ def dla(g, par, starts, surface, base, base_z0, base_dz, precip, meso, grad, q):
                     A[:, 0],
                     A[:, 1],
                     np.full(r.size, grad.z[0]),
-                    np.zeros(r.size),
+                    A[:, 3],
                     False,
                 )
                 ok = st == 0
@@ -617,7 +631,7 @@ def dla(g, par, starts, surface, base, base_z0, base_dz, precip, meso, grad, q):
                 q, VA[:, 2], VA[:, 0], VA[:, 1], pab[:, 3], pab[:, 4], qr + qg, zagl
             )
             f = np.exp(-kd * dt)
-            thb, qvb = base_at(B[:, 0], B[:, 1], B[:, 2])
+            thb, qvb = base_at(B[:, 0], B[:, 1], B[:, 2], B[:, 3])
             th_new = thb + (th - thb) * f
             bb[:, 5] += np.where(use, th_new - th, 0.0)
             th = np.where(use, th_new, th)

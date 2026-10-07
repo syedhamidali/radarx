@@ -10,6 +10,9 @@
 //
 // Gridded inputs are float32 arrays of shape (nt, nz, ny, nx, nvar) with the
 // variables of one grid node next to each other (one cache line per node).
+// The winds hold (u, v, w, Z_H, valid, environment mask); "valid" is 1 where
+// the wind is analysed and 0 where it is a background, "environment mask" is 1
+// where a parcel may count as environmental (termination mode 2).
 // Times are seconds relative to the analysis time. All work is spread over
 // std::thread workers with an atomic chunk counter; the GIL is released.
 
@@ -44,6 +47,7 @@ constexpr int kBoundary = 4;    // left the analysed domain through a lateral bo
 constexpr int kEndOfData = 8;   // reached the end of the wind time series
 constexpr int kMaxSteps = 16;   // reached max_steps
 constexpr int kMissing = 32;    // missing (NaN) wind at the parcel
+constexpr int kNW = 6;          // variables of the wind pack
 
 // Process switches of the DLA (bit mask)
 constexpr int kCond = 1;
@@ -158,10 +162,11 @@ struct PathParams {
     int n_iter;
     int64_t max_steps;
     int dir;
-    bool env_tests;
+    int mode;  // 0: no environment tests, 1: Ziegler (2013a), 2: outside precipitation
     int64_t min_steps;
     double env_dbz, env_w;
-    int64_t env_w_steps;
+    int64_t env_w_steps, env_dbz_steps;
+    double cold_pool_depth, z_sfc;
 };
 
 inline bool outside(const Grid& g, double xp, double yp) {
@@ -174,13 +179,13 @@ inline double clampz(const Grid& g, double zp) {
 
 // One trajectory from (x0, y0, z0) at t = 0: predictor (Euler) plus n_iter
 // trapezoidal corrector iterations per step (Ziegler et al. 2007; Ziegler
-// 2013a, sect. 2b). pos[4 * n] = (x, y, z, t), val[4 * n] = (u, v, w, Z_H)
+// 2013a, sect. 2b). pos[4 * n] = (x, y, z, t), val[kNW * n] = the wind pack
 // at each stored point. Returns the number of stored points.
 int64_t build_path(const Grid& g, const PathParams& p, double x0, double y0, double z0,
                    double* pos, double* val, int& flags) {
     flags = 0;
     double xn = x0, yn = y0, zn = clampz(g, z0), tn = 0.0;
-    double vn[4], v1[4];
+    double vn[kNW], v1[kNW];
     if (outside(g, xn, yn)) {
         flags = kBoundary;
         return 0;
@@ -194,9 +199,9 @@ int64_t build_path(const Grid& g, const PathParams& p, double x0, double y0, dou
     pos[1] = yn;
     pos[2] = zn;
     pos[3] = tn;
-    for (int v = 0; v < 4; ++v) val[v] = vn[v];
+    for (int v = 0; v < kNW; ++v) val[v] = vn[v];
     int64_t npts = 1;
-    int64_t wcount = 0;
+    int64_t wcount = 0, dcount = 0;
     const double h = p.dir * p.dt;
     for (int64_t n = 1; n <= p.max_steps; ++n) {
         const double t1 = tn + h;
@@ -233,19 +238,29 @@ int64_t build_path(const Grid& g, const PathParams& p, double x0, double y0, dou
         q[1] = ys;
         q[2] = zs;
         q[3] = t1;
-        for (int v = 0; v < 4; ++v) val[4 * npts + v] = v1[v];
+        for (int v = 0; v < kNW; ++v) val[kNW * npts + v] = v1[v];
         ++npts;
         xn = xs;
         yn = ys;
         zn = zs;
         tn = t1;
-        for (int v = 0; v < 4; ++v) vn[v] = v1[v];
-        if (p.env_tests) {
+        for (int v = 0; v < kNW; ++v) vn[v] = v1[v];
+        if (p.mode == 1) {
+            // Ziegler (2013a), sect. 2a, tests (i) and (ii)
             wcount = (v1[2] < p.env_w) ? wcount + 1 : 0;
             if (n > p.min_steps) {
                 if (v1[3] < p.env_dbz) flags |= kEnvDbz;
                 if (wcount >= p.env_w_steps) flags |= kEnvW;
                 if (flags) break;
+            }
+        } else if (p.mode == 2) {
+            // outside precipitation for env_dbz_steps steps, above the cold
+            // pool or where the environment mask allows it
+            dcount = (v1[3] < p.env_dbz) ? dcount + 1 : 0;
+            if (n > p.min_steps && dcount >= p.env_dbz_steps &&
+                (zs - p.z_sfc >= p.cold_pool_depth || v1[5] >= 0.5)) {
+                flags |= kEnvDbz;
+                break;
             }
         }
         if (n == p.max_steps) flags |= kMaxSteps;
@@ -307,19 +322,22 @@ Grid make_grid(const F64& x, const F64& y, const F64& z, const F64& t, const F32
 }
 
 PathParams make_path_params(const F64& par) {
-    if (par.ndim() != 1 || par.shape(0) != 9)
-        throw std::invalid_argument("path parameters must have 9 values");
+    if (par.ndim() != 1 || par.shape(0) != 12)
+        throw std::invalid_argument("path parameters must have 12 values");
     const double* q = par.data();
     PathParams p;
     p.dt = q[0];
     p.n_iter = static_cast<int>(q[1]);
     p.max_steps = static_cast<int64_t>(q[2]);
     p.dir = q[3] < 0 ? -1 : 1;
-    p.env_tests = q[4] != 0.0;
+    p.mode = static_cast<int>(q[4]);
     p.min_steps = static_cast<int64_t>(q[5]);
     p.env_dbz = q[6];
     p.env_w = q[7];
     p.env_w_steps = static_cast<int64_t>(q[8]);
+    p.env_dbz_steps = static_cast<int64_t>(q[9]);
+    p.cold_pool_depth = q[10];
+    p.z_sfc = q[11];
     if (!(p.dt > 0.0)) throw std::invalid_argument("dt must be positive");
     if (p.max_steps < 0) throw std::invalid_argument("max_steps must be >= 0");
     return p;
@@ -572,16 +590,16 @@ enum {
 struct Thermo {
     Table base;
     const Grid* precip;    // nvar 4: q_r, N_r, q_g, N_g (or nullptr)
-    const Grid* meso;      // nvar 2: theta, q_v (nt = 1) or nullptr
-    const Grid* grad;      // nvar 4: dtheta/dx, dtheta/dy, dqv/dx, dqv/dy (nz = 2, nt = 1) or nullptr
+    const Grid* meso;      // nvar 2: theta, q_v (any nt) or nullptr
+    const Grid* grad;      // nvar 4: dtheta/dx, dtheta/dy, dqv/dx, dqv/dy (nz = 2) or nullptr
     const double* q;
 };
 
-inline void base_at(const Thermo& th, double xp, double yp, double zp, double& theta,
-                    double& qv) {
+inline void base_at(const Thermo& th, double xp, double yp, double zp, double tp,
+                    double& theta, double& qv) {
     if (th.meso) {
         double m[2];
-        sample(*th.meso, xp, yp, zp, 0.0, m, false);
+        sample(*th.meso, xp, yp, zp, tp, m, false);
         theta = m[0];
         qv = m[1];
         return;
@@ -629,7 +647,7 @@ void integrate(const Thermo& th, const double* pos, const double* val, int64_t n
     for (int k = 0; k < kNBudget; ++k) bud[k] = 0.0;
     const double* p0 = pos + 4 * (npts - 1);
     double theta, qv, qc = 0.0;
-    base_at(th, p0[0], p0[1], p0[2], theta, qv);
+    base_at(th, p0[0], p0[1], p0[2], p0[3], theta, qv);
     double b[kBNv];
     profile(th.base, p0[2], b);
     double pa = b[kBP];
@@ -640,7 +658,7 @@ void integrate(const Thermo& th, const double* pos, const double* val, int64_t n
     for (int64_t m = npts - 1; m >= 1; --m) {
         const double* A = pos + 4 * m;
         const double* B = pos + 4 * (m - 1);
-        const double* VA = val + 4 * m;
+        const double* VA = val + kNW * m;
         const double zagl = A[2] - zsfc;
         profile(th.base, B[2], b);
         const double pb = b[kBP];
@@ -668,7 +686,7 @@ void integrate(const Thermo& th, const double* pos, const double* val, int64_t n
             double gth = 0.0, gqv = 0.0;
             if (th.grad) {
                 double gr[4];
-                if (!sample(*th.grad, A[0], A[1], th.grad->z[0], 0.0, gr, false)) {
+                if (!sample(*th.grad, A[0], A[1], th.grad->z[0], A[3], gr, false)) {
                     gth = VA[0] * gr[0] + VA[1] * gr[1];
                     gqv = VA[0] * gr[2] + VA[1] * gr[3];
                 }
@@ -701,7 +719,7 @@ void integrate(const Thermo& th, const double* pos, const double* val, int64_t n
                                            zagl);
             const double f = std::exp(-kd * dt);
             double thb, qvb;
-            base_at(th, B[0], B[1], B[2], thb, qvb);
+            base_at(th, B[0], B[1], B[2], B[3], thb, qvb);
             const double th_new = thb + (theta - thb) * f;
             bud[5] += th_new - theta;
             theta = th_new;
@@ -718,18 +736,18 @@ void integrate(const Thermo& th, const double* pos, const double* val, int64_t n
 }  // namespace
 
 // Trajectories from n start points (x, y, z) at t = 0. Returns positions
-// (n, max_steps + 1, 4: x, y, z, t), values (n, max_steps + 1, 4: u, v, w,
-// Z_H), the number of points and the flags of each trajectory.
+// (n, max_steps + 1, 4: x, y, z, t), values (n, max_steps + 1, 6: u, v, w,
+// Z_H, valid, environment mask), the number of points and the flags.
 py::tuple trajectories_py(const F32& fields, const F64& x, const F64& y, const F64& z,
                           const F64& t, const F64& starts, const F64& par, double cx, double cy,
                           double ext_before, double ext_after, int n_threads) {
-    const Grid g = make_grid(x, y, z, t, fields, cx, cy, ext_before, ext_after, 4);
+    const Grid g = make_grid(x, y, z, t, fields, cx, cy, ext_before, ext_after, kNW);
     const PathParams p = make_path_params(par);
     if (starts.ndim() != 2 || starts.shape(1) != 3)
         throw std::invalid_argument("starts must be (n, 3)");
     const int64_t n = starts.shape(0), m = p.max_steps + 1;
     py::array_t<double> pos(std::vector<py::ssize_t>{n, m, 4});
-    py::array_t<double> val(std::vector<py::ssize_t>{n, m, 4});
+    py::array_t<double> val(std::vector<py::ssize_t>{n, m, kNW});
     py::array_t<int64_t> npts(n);
     py::array_t<int32_t> flags(n);
     double *pp = pos.mutable_data(), *pv = val.mutable_data();
@@ -740,13 +758,11 @@ py::tuple trajectories_py(const F32& fields, const F64& x, const F64& y, const F
         py::gil_scoped_release release;
         parallel_for(n, n_threads, [&](int, int64_t i) {
             double* a = pp + i * m * 4;
-            double* b = pv + i * m * 4;
+            double* b = pv + i * m * kNW;
             int f = 0;
             const int64_t k = build_path(g, p, ps[3 * i], ps[3 * i + 1], ps[3 * i + 2], a, b, f);
-            for (int64_t s = k * 4; s < m * 4; ++s) {
-                a[s] = kNaN;
-                b[s] = kNaN;
-            }
+            for (int64_t s = k * 4; s < m * 4; ++s) a[s] = kNaN;
+            for (int64_t s = k * kNW; s < m * kNW; ++s) b[s] = kNaN;
             pn[i] = k;
             pf[i] = f;
         });
@@ -755,15 +771,15 @@ py::tuple trajectories_py(const F32& fields, const F64& x, const F64& y, const F
 }
 
 // The diabatic Lagrangian analysis at n start points. Returns (n, 3) theta,
-// q_v, q_c, (n, 7) theta budget, (n, 4) origin (x, y, z, t), the number of
-// points and the flags.
+// q_v, q_c, (n, 7) theta budget, (n, 5) origin (x, y, z, t) and fraction of
+// the trajectory points with valid winds, the number of points and the flags.
 py::tuple dla_py(const F32& fields, const F64& x, const F64& y, const F64& z, const F64& t,
                  const F64& starts, const I8& surface, const F64& par, double cx, double cy,
                  double ext_before, double ext_after, const F64& base, double base_z0,
                  double base_dz, const F32& precip, bool has_precip, const F32& meso,
-                 bool has_meso, const F32& grad, bool has_grad, const F64& thermo,
-                 int n_threads) {
-    const Grid g = make_grid(x, y, z, t, fields, cx, cy, ext_before, ext_after, 4);
+                 const F64& meso_t, bool has_meso, const F32& grad, bool has_grad,
+                 const F64& thermo, int n_threads) {
+    const Grid g = make_grid(x, y, z, t, fields, cx, cy, ext_before, ext_after, kNW);
     const PathParams p = make_path_params(par);
     if (starts.ndim() != 2 || starts.shape(1) != 3)
         throw std::invalid_argument("starts must be (n, 3)");
@@ -775,16 +791,14 @@ py::tuple dla_py(const F32& fields, const F64& x, const F64& y, const F64& z, co
     if (thermo.ndim() != 1 || thermo.shape(0) != qNpar)
         throw std::invalid_argument("thermo must have " + std::to_string(qNpar) + " values");
     Grid gp, gm, gg;
-    F64 tzero(1);
-    tzero.mutable_data()[0] = 0.0;
+    // the mesoscale analysis holds its first and last times beyond its span
+    const double hold = 1.0e30;
     if (has_precip) gp = make_grid(x, y, z, t, precip, cx, cy, ext_before, ext_after, 4);
-    if (has_meso) {
-        gm = make_grid(x, y, z, tzero, meso, 0.0, 0.0, 0.0, 0.0, 2);
-    }
+    if (has_meso) gm = make_grid(x, y, z, meso_t, meso, 0.0, 0.0, hold, hold, 2);
     F64 zz(2);
     zz.mutable_data()[0] = 0.0;
     zz.mutable_data()[1] = 1.0;
-    if (has_grad) gg = make_grid(x, y, zz, tzero, grad, 0.0, 0.0, 0.0, 0.0, 4);
+    if (has_grad) gg = make_grid(x, y, zz, meso_t, grad, 0.0, 0.0, hold, hold, 4);
     Thermo th;
     th.base = Table{base_z0, base_dz, base.shape(0), base.data(), kBNv};
     th.precip = has_precip ? &gp : nullptr;
@@ -794,10 +808,10 @@ py::tuple dla_py(const F32& fields, const F64& x, const F64& y, const F64& z, co
     const int nthr = thread_count(n_threads);
     const int64_t m = p.max_steps + 1;
     std::vector<std::vector<double>> bpos(nthr, std::vector<double>(4 * m));
-    std::vector<std::vector<double>> bval(nthr, std::vector<double>(4 * m));
+    std::vector<std::vector<double>> bval(nthr, std::vector<double>(kNW * m));
     py::array_t<double> out(std::vector<py::ssize_t>{n, 3});
     py::array_t<double> bud(std::vector<py::ssize_t>{n, kNBudget});
-    py::array_t<double> org(std::vector<py::ssize_t>{n, 4});
+    py::array_t<double> org(std::vector<py::ssize_t>{n, 5});
     py::array_t<int64_t> npts(n);
     py::array_t<int32_t> flags(n);
     double *po = out.mutable_data(), *pb = bud.mutable_data(), *pg = org.mutable_data();
@@ -814,15 +828,17 @@ py::tuple dla_py(const F32& fields, const F64& x, const F64& y, const F64& z, co
             const int64_t k = build_path(g, p, ps[3 * i], ps[3 * i + 1], ps[3 * i + 2], a, b, f);
             pn[i] = k;
             pf[i] = f;
+            for (int v = 0; v < 4; ++v) pg[5 * i + v] = k > 0 ? a[4 * (k - 1) + v] : kNaN;
+            int64_t nv = 0;
+            for (int64_t s = 0; s < k; ++s) nv += b[kNW * s + 4] >= 0.5 ? 1 : 0;
+            pg[5 * i + 4] = k > 0 ? static_cast<double>(nv) / static_cast<double>(k) : kNaN;
             const bool env = (f & (kEnvDbz | kEnvW | kBoundary)) != 0;
             if (k < 1 || !env) {
                 for (int v = 0; v < 3; ++v) po[3 * i + v] = kNaN;
                 for (int v = 0; v < kNBudget; ++v) pb[kNBudget * i + v] = kNaN;
-                for (int v = 0; v < 4; ++v) pg[4 * i + v] = k > 0 ? a[4 * (k - 1) + v] : kNaN;
                 return;
             }
             integrate(th, a, b, k, psf[i] != 0, p.dt, po + 3 * i, pb + kNBudget * i);
-            for (int v = 0; v < 4; ++v) pg[4 * i + v] = a[4 * (k - 1) + v];
         });
     }
     return py::make_tuple(out, bud, org, npts, flags);
@@ -875,7 +891,8 @@ PYBIND11_MODULE(_lagrangian, m) {
           py::arg("t"), py::arg("starts"), py::arg("surface"), py::arg("par"), py::arg("cx"),
           py::arg("cy"), py::arg("ext_before"), py::arg("ext_after"), py::arg("base"),
           py::arg("base_z0"), py::arg("base_dz"), py::arg("precip"), py::arg("has_precip"),
-          py::arg("meso"), py::arg("has_meso"), py::arg("grad"), py::arg("has_grad"),
+          py::arg("meso"), py::arg("meso_t"), py::arg("has_meso"), py::arg("grad"),
+          py::arg("has_grad"),
           py::arg("thermo"), py::arg("n_threads") = 0);
     m.def("rates", &rates_py, py::arg("theta"), py::arg("pressure"), py::arg("qv"),
           py::arg("qc"), py::arg("qr"), py::arg("nr"), py::arg("qg"), py::arg("ng"),
