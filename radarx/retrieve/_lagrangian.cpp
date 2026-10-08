@@ -47,6 +47,8 @@ constexpr int kBoundary = 4;    // left the analysed domain through a lateral bo
 constexpr int kEndOfData = 8;   // reached the end of the wind time series
 constexpr int kMaxSteps = 16;   // reached max_steps
 constexpr int kMissing = 32;    // missing (NaN) wind at the parcel
+// bit 64 (too little time in valid winds) is set by the Python layer of the DLA
+constexpr int kBoundaryStorm = 128;  // left through a lateral boundary that is not environment
 constexpr int kNW = 6;          // variables of the wind pack
 
 // Process switches of the DLA (bit mask)
@@ -167,7 +169,17 @@ struct PathParams {
     double env_dbz, env_w;
     int64_t env_w_steps, env_dbz_steps;
     double cold_pool_depth, z_sfc;
+    // classification of lateral-boundary exits of backward trajectories with an
+    // environment test: 0 every exit is environment (Ziegler 2013a, sect. 2a,
+    // test iii), 1 only where the environment mask is set at the boundary point,
+    // 2 only outside precipitation (Z_H < env_dbz) or where the mask is set,
+    // 3 only through the sides in the bit mask `sides`
+    int boundary;
+    int sides;
 };
+
+// Sides of the analysed domain (bit mask) beyond which (x, y) lies.
+constexpr int kWest = 1, kEast = 2, kSouth = 4, kNorth = 8;
 
 inline bool outside(const Grid& g, double xp, double yp) {
     return xp < g.x[0] || xp > g.x[g.nx - 1] || yp < g.y[0] || yp > g.y[g.ny - 1];
@@ -175,6 +187,53 @@ inline bool outside(const Grid& g, double xp, double yp) {
 
 inline double clampz(const Grid& g, double zp) {
     return std::min(std::max(zp, g.z[0]), g.z[g.nz - 1]);
+}
+
+inline int sides_of(const Grid& g, double xp, double yp) {
+    int s = 0;
+    if (xp < g.x[0]) s |= kWest;
+    if (xp > g.x[g.nx - 1]) s |= kEast;
+    if (yp < g.y[0]) s |= kSouth;
+    if (yp > g.y[g.ny - 1]) s |= kNorth;
+    return s;
+}
+
+// Sides through which a parcel at (xp, yp, tp) left the domain: of the fixed
+// grid, else of the analysis that sample() found it outside of (in the frame
+// moving with the storm).
+int exit_sides(const Grid& g, double xp, double yp, double tp) {
+    int s = sides_of(g, xp, yp);
+    if (s) return s;
+    int64_t lev[2] = {0, 0};
+    double wt[2] = {1.0, 0.0};
+    if (tp > g.t[g.nt - 1]) {
+        lev[0] = g.nt - 1;
+    } else if (tp >= g.t[0] && g.nt > 1) {
+        const int64_t i = bracket(g.t, g.nt, tp);
+        const double a = (tp - g.t[i]) / (g.t[i + 1] - g.t[i]);
+        lev[0] = i;
+        lev[1] = i + 1;
+        wt[0] = 1.0 - a;
+        wt[1] = a;
+    }
+    for (int l = 0; l < 2; ++l) {
+        if (!(wt[l] > 0.0)) continue;
+        const double dtl = tp - g.t[lev[l]];
+        s = sides_of(g, xp - g.cx * dtl, yp - g.cy * dtl);
+        if (s) return s;
+    }
+    return 0;
+}
+
+// Flag of a lateral-boundary exit; vlast holds the wind pack at the last
+// point inside the domain (the boundary point).
+inline int boundary_flag(const PathParams& p, int sides, const double* vlast) {
+    if (p.mode == 0) return kBoundary;
+    bool env = true;
+    if (p.boundary == 1) env = vlast[5] >= 0.5;
+    else if (p.boundary == 2) env = vlast[3] < p.env_dbz || vlast[5] >= 0.5;
+    else if (p.boundary == 3) env = (sides & p.sides) != 0;
+    return env ? kBoundary : kBoundaryStorm;
 }
 
 // One trajectory from (x0, y0, z0) at t = 0: predictor (Euler) plus n_iter
@@ -207,14 +266,14 @@ int64_t build_path(const Grid& g, const PathParams& p, double x0, double y0, dou
         const double t1 = tn + h;
         double xs = xn + h * vn[0], ys = yn + h * vn[1], zs = clampz(g, zn + h * vn[2]);
         if (outside(g, xs, ys)) {
-            flags |= kBoundary;
+            flags |= boundary_flag(p, sides_of(g, xs, ys), vn);
             break;
         }
         bool ok = true;
         for (int it = 0; it < p.n_iter; ++it) {
             st = sample(g, xs, ys, zs, t1, v1, true);
             if (st) {
-                flags |= st;
+                flags |= st == kBoundary ? boundary_flag(p, exit_sides(g, xs, ys, t1), vn) : st;
                 ok = false;
                 break;
             }
@@ -222,7 +281,7 @@ int64_t build_path(const Grid& g, const PathParams& p, double x0, double y0, dou
             ys = yn + 0.5 * h * (vn[1] + v1[1]);
             zs = clampz(g, zn + 0.5 * h * (vn[2] + v1[2]));
             if (outside(g, xs, ys)) {
-                flags |= kBoundary;
+                flags |= boundary_flag(p, sides_of(g, xs, ys), vn);
                 ok = false;
                 break;
             }
@@ -230,7 +289,7 @@ int64_t build_path(const Grid& g, const PathParams& p, double x0, double y0, dou
         if (!ok) break;
         st = sample(g, xs, ys, zs, t1, v1, true);
         if (st) {
-            flags |= st;
+            flags |= st == kBoundary ? boundary_flag(p, exit_sides(g, xs, ys, t1), vn) : st;
             break;
         }
         double* q = pos + 4 * npts;
@@ -322,8 +381,8 @@ Grid make_grid(const F64& x, const F64& y, const F64& z, const F64& t, const F32
 }
 
 PathParams make_path_params(const F64& par) {
-    if (par.ndim() != 1 || par.shape(0) != 12)
-        throw std::invalid_argument("path parameters must have 12 values");
+    if (par.ndim() != 1 || par.shape(0) != 14)
+        throw std::invalid_argument("path parameters must have 14 values");
     const double* q = par.data();
     PathParams p;
     p.dt = q[0];
@@ -338,6 +397,8 @@ PathParams make_path_params(const F64& par) {
     p.env_dbz_steps = static_cast<int64_t>(q[9]);
     p.cold_pool_depth = q[10];
     p.z_sfc = q[11];
+    p.boundary = static_cast<int>(q[12]);
+    p.sides = static_cast<int>(q[13]);
     if (!(p.dt > 0.0)) throw std::invalid_argument("dt must be positive");
     if (p.max_steps < 0) throw std::invalid_argument("max_steps must be >= 0");
     return p;
