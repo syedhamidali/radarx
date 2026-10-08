@@ -699,6 +699,128 @@ def insitu_match(pos, npts, dt, obs, op):
         return wsum, sth / wsum, sqv / wsum, kbest
 
 
+class _Forward:
+    """Forward integration of the DLA along stored paths (as the kernel's
+    integrate), vectorised over trajectories."""
+
+    def __init__(self, base, base_z0, base_dz, precip, meso, grad, q, dt):
+        self.base, self.z0, self.dz = base, base_z0, base_dz
+        self.precip, self.meso, self.grad, self.q, self.dt = precip, meso, grad, q, dt
+        self.sw = int(q[Q["switches"]])
+        self.ice = bool(self.sw & ICE)
+
+    def pressure(self, zp):
+        return profile(self.base, self.z0, self.dz, zp)[:, 0]
+
+    def base_at(self, xp, yp, zp, tp):
+        if self.meso is not None:
+            m, _ = sample(self.meso, xp, yp, zp, tp, False)
+            return m[:, 0], m[:, 1]
+        b = profile(self.base, self.z0, self.dz, zp)
+        return b[:, 1], b[:, 2]
+
+    def cond(self, s, p, b):
+        """Saturation adjustment of the state s = [theta, q_v, q_c, q_i]."""
+        if not self.sw & COND:
+            return s
+        if self.ice:
+            th, v, c, i, d1, d2 = adjust_ice(*s, p, self.q[Q["t00"]])
+            b[:, 4] += d2
+        else:
+            th, v, c, d1 = adjust(s[0], s[1], s[2], p)
+            i = s[3]
+        b[:, 0] += d1
+        return [th, v, c, i]
+
+    def precipitation(self, A):
+        if self.precip is None:
+            return np.zeros((A.shape[0], 4))
+        pr, st = sample(self.precip, A[:, 0], A[:, 1], A[:, 2], A[:, 3], False)
+        pr[st != 0] = 0.0
+        return np.where(pr > 0.0, pr, 0.0)
+
+    def micro(self, s, p, pr, zagl):
+        q = self.q
+        if not self.sw & MICRO:
+            return (np.zeros(p.size),) * 7
+        th, qvr, qcr, qir = s
+        qr, nr, qg, ng = pr.T
+        t = th * exner(p)
+        rho = air_density(th, p)
+        rhog = q[Q["rho_g_sfc"]] + (q[Q["rho_g_5km"]] - q[Q["rho_g_sfc"]]) * np.clip(
+            zagl / 5000.0, 0.0, 1.0
+        )
+        rates = lfo_rates(
+            t, p, rho, qvr, qcr, qr, nr, qg, ng, rhog, q[Q["rho0"]], self.sw, qir
+        )
+        return tendencies(rates, th, p, qvr, qcr, qr, qg, self.dt)
+
+    def flux(self, s, pr, A, VA, zagl):
+        q, n = self.q, A.shape[0]
+        if not self.sw & FLUX:
+            return np.zeros(n), np.zeros(n)
+        use = (zagl <= q[Q["z_bl"]]) & (s[2] + s[3] + pr[:, 0] + pr[:, 2] <= q[Q["q1"]])
+        gth = np.zeros(n)
+        gqv = np.zeros(n)
+        if self.grad is not None:
+            g = self.grad
+            gr, st = sample(g, A[:, 0], A[:, 1], np.full(n, g.z[0]), A[:, 3], False)
+            ok = st == 0
+            gth = np.where(ok, VA[:, 0] * gr[:, 0] + VA[:, 1] * gr[:, 1], 0.0)
+            gqv = np.where(ok, VA[:, 0] * gr[:, 2] + VA[:, 1] * gr[:, 3], 0.0)
+        e = np.exp(-q[Q["b_f"]] * zagl / 1000.0)
+        return (
+            np.where(use, e * (gth + q[Q["flux_theta"]]), 0.0),
+            np.where(use, e * (gqv + q[Q["flux_qv"]]), 0.0),
+        )
+
+    def damp(self, s, pr, A, B, VA, zagl, qthr, b):
+        if not self.sw & DAMP:
+            return s
+        qp = pr[:, 0] + pr[:, 2]
+        use = qp >= qthr
+        pab = profile(self.base, self.z0, self.dz, A[:, 2])
+        kd = damping_rate(
+            self.q, VA[:, 2], VA[:, 0], VA[:, 1], pab[:, 3], pab[:, 4], qp, zagl
+        )
+        f = np.exp(-kd * self.dt)
+        thb, qvb = self.base_at(B[:, 0], B[:, 1], B[:, 2], B[:, 3])
+        th_new = thb + (s[0] - thb) * f
+        b[:, 5] += np.where(use, th_new - s[0], 0.0)
+        return [
+            np.where(use, th_new, s[0]),
+            np.where(use, qvb + (s[1] - qvb) * f, s[1]),
+            np.where(use, s[2] * f, s[2]),
+            np.where(use, s[3] * f, s[3]),
+        ]
+
+    def step(self, s, A, B, VA, pa, qthr, b):
+        """One step from point A to point B with sub-steps dt_small."""
+        dt, q = self.dt, self.q
+        zagl = A[:, 2] - q[Q["z_sfc"]]
+        pb = self.pressure(B[:, 2])
+        pr = self.precipitation(A)
+        d = self.micro(s, pa, pr, zagl)
+        fth, fqv = self.flux(s, pr, A, VA, zagl)
+        ns = max(1, int(math.ceil(dt / q[Q["dt_small"]] - 1e-9)))
+        h = dt / ns
+        for k in range(1, ns + 1):
+            ps = pa + (pb - pa) * float(k) / float(ns)
+            s = [
+                s[0] + h * (d[0] + fth),
+                np.maximum(s[1] + h * (d[1] + fqv), 0.0),
+                np.maximum(s[2] + h * d[2], 0.0),
+                s[3],
+            ]
+            s = self.cond(s, ps, b)
+        b[:, 1] += dt * d[3]
+        b[:, 2] += dt * d[4]
+        b[:, 3] += dt * d[5]
+        b[:, 4] += dt * d[6]
+        b[:, 6] += dt * fth
+        return self.damp(s, pr, A, B, VA, zagl, qthr, b), pb
+
+
 def dla(
     g,
     par,
@@ -722,10 +844,6 @@ def dla(
     pos, val, npts, flags = build_paths(g, par, starts)
     n = npts.size
     dt = par[0]
-    sw = int(q[Q["switches"]])
-    ice = bool(sw & ICE)
-    t00 = q[Q["t00"]]
-    zsfc = q[Q["z_sfc"]]
     out = np.full((n, 4), np.nan)
     bud = np.full((n, N_BUDGET), np.nan)
     org = np.full((n, 5), np.nan)
@@ -737,7 +855,6 @@ def dla(
     org[has, 4] = nvalid[has] / npts[has]
     env = has & ((flags & ENVIRONMENT) != 0)
     kstart = npts - 1
-    th_obs = qv_obs = None
     matched = np.zeros(n, bool)
     if obs is not None and len(obs):
         wsum, th_obs, qv_obs, kbest = insitu_match(pos, npts, dt, obs, obs_par)
@@ -749,126 +866,38 @@ def dla(
     idx = np.flatnonzero(env | matched)
     if idx.size == 0:
         return out, bud, org, npts, flags, init
-    surf = np.asarray(surface)[idx] != 0
+    fw = _Forward(base, base_z0, base_dz, precip, meso, grad, q, dt)
     k = kstart[idx] + 1
-
-    def base_at(xp, yp, zp, tp):
-        if meso is not None:
-            m, _ = sample(meso, xp, yp, zp, tp, False)
-            return m[:, 0], m[:, 1]
-        b = profile(base, base_z0, base_dz, zp)
-        return b[:, 1], b[:, 2]
-
-    def cond(th, qvr, qcr, qir, p):
-        if ice:
-            th, qvr, qcr, qir, d1, d2 = adjust_ice(th, qvr, qcr, qir, p, t00)
-            return th, qvr, qcr, qir, d1, d2
-        th, qvr, qcr, d1 = adjust(th, qvr, qcr, p)
-        return th, qvr, qcr, qir, d1, 0.0
-
     p0 = pos[idx, k - 1]
-    theta, qv = base_at(p0[:, 0], p0[:, 1], p0[:, 2], p0[:, 3])
+    theta, qv = fw.base_at(p0[:, 0], p0[:, 1], p0[:, 2], p0[:, 3])
     mi = matched[idx]
     if mi.any():
         theta = np.where(mi, th_obs[idx], theta)
         qv = np.where(mi, qv_obs[idx], qv)
-    qc = np.zeros(idx.size)
-    qi = np.zeros(idx.size)
     b = np.zeros((idx.size, N_BUDGET))
-    pa = profile(base, base_z0, base_dz, p0[:, 2])[:, 0]
-    if sw & COND:
-        theta, qv, qc, qi, dth, dfz = cond(theta, qv, qc, qi, pa)
-        b[:, 0] += dth
-        b[:, 4] += dfz
-    ns = max(1, int(math.ceil(dt / q[Q["dt_small"]] - 1e-9)))
-    h = dt / ns
-    qthr = np.where(surf, q[Q["q0"]], q[Q["q1"]])
+    pa = fw.pressure(p0[:, 2])
+    state = np.stack(
+        fw.cond([theta, qv, np.zeros(idx.size), np.zeros(idx.size)], pa, b)
+    )
+    qthr = np.where(np.asarray(surface)[idx] != 0, q[Q["q0"]], q[Q["q1"]])
     for j in range(int(k.max()) - 1):
         m = k - 1 - j
         r = np.flatnonzero(m >= 1)
         rows = idx[r]
-        A = pos[rows, m[r]]
-        B = pos[rows, m[r] - 1]
-        VA = val[rows, m[r]]
-        zagl = A[:, 2] - zsfc
-        pb = profile(base, base_z0, base_dz, B[:, 2])[:, 0]
-        if precip is not None:
-            pr, st = sample(precip, A[:, 0], A[:, 1], A[:, 2], A[:, 3], False)
-            pr[st != 0] = 0.0
-            pr = np.where(pr > 0.0, pr, 0.0)
-        else:
-            pr = np.zeros((r.size, 4))
-        qr, nr, qg, ng = pr.T
-        th, qvr, qcr, qir, par_ = theta[r], qv[r], qc[r], qi[r], pa[r]
-        if sw & MICRO:
-            t = th * exner(par_)
-            rho = air_density(th, par_)
-            rhog = q[Q["rho_g_sfc"]] + (
-                q[Q["rho_g_5km"]] - q[Q["rho_g_sfc"]]
-            ) * np.clip(zagl / 5000.0, 0.0, 1.0)
-            rates = lfo_rates(
-                t, par_, rho, qvr, qcr, qr, nr, qg, ng, rhog, q[Q["rho0"]], sw, qir
-            )
-            d = tendencies(rates, th, par_, qvr, qcr, qr, qg, dt)
-        else:
-            zz = np.zeros(r.size)
-            d = (zz,) * 7
-        fth = np.zeros(r.size)
-        fqv = np.zeros(r.size)
-        if sw & FLUX:
-            use = (zagl <= q[Q["z_bl"]]) & (qcr + qir + qr + qg <= q[Q["q1"]])
-            gth = np.zeros(r.size)
-            gqv = np.zeros(r.size)
-            if grad is not None:
-                gr, st = sample(
-                    grad,
-                    A[:, 0],
-                    A[:, 1],
-                    np.full(r.size, grad.z[0]),
-                    A[:, 3],
-                    False,
-                )
-                ok = st == 0
-                gth = np.where(ok, VA[:, 0] * gr[:, 0] + VA[:, 1] * gr[:, 1], 0.0)
-                gqv = np.where(ok, VA[:, 0] * gr[:, 2] + VA[:, 1] * gr[:, 3], 0.0)
-            e = np.exp(-q[Q["b_f"]] * zagl / 1000.0)
-            fth = np.where(use, e * (gth + q[Q["flux_theta"]]), 0.0)
-            fqv = np.where(use, e * (gqv + q[Q["flux_qv"]]), 0.0)
         bb = b[r]
-        for s in range(1, ns + 1):
-            ps = par_ + (pb - par_) * float(s) / float(ns)
-            th = th + h * (d[0] + fth)
-            qvr = qvr + h * (d[1] + fqv)
-            qcr = qcr + h * d[2]
-            qvr = np.where(qvr < 0.0, 0.0, qvr)
-            qcr = np.where(qcr < 0.0, 0.0, qcr)
-            if sw & COND:
-                th, qvr, qcr, qir, dth, dfz = cond(th, qvr, qcr, qir, ps)
-                bb[:, 0] += dth
-                bb[:, 4] += dfz
-        bb[:, 1] += dt * d[3]
-        bb[:, 2] += dt * d[4]
-        bb[:, 3] += dt * d[5]
-        bb[:, 4] += dt * d[6]
-        bb[:, 6] += dt * fth
-        if sw & DAMP:
-            use = qr + qg >= qthr[r]
-            pab = profile(base, base_z0, base_dz, A[:, 2])
-            kd = damping_rate(
-                q, VA[:, 2], VA[:, 0], VA[:, 1], pab[:, 3], pab[:, 4], qr + qg, zagl
-            )
-            f = np.exp(-kd * dt)
-            thb, qvb = base_at(B[:, 0], B[:, 1], B[:, 2], B[:, 3])
-            th_new = thb + (th - thb) * f
-            bb[:, 5] += np.where(use, th_new - th, 0.0)
-            th = np.where(use, th_new, th)
-            qvr = np.where(use, qvb + (qvr - qvb) * f, qvr)
-            qcr = np.where(use, qcr * f, qcr)
-            qir = np.where(use, qir * f, qir)
-        theta[r], qv[r], qc[r], qi[r] = th, qvr, qcr, qir
+        s, pb = fw.step(
+            list(state[:, r]),
+            pos[rows, m[r]],
+            pos[rows, m[r] - 1],
+            val[rows, m[r]],
+            pa[r],
+            qthr[r],
+            bb,
+        )
+        state[:, r] = np.stack(s)
         b[r] = bb
         pa[r] = pb
-    out[idx] = np.column_stack([theta, qv, qc, qi])
+    out[idx] = state.T
     bud[idx] = b
     return out, bud, org, npts, flags, init
 

@@ -1460,12 +1460,11 @@ def _mesoscale(meso, prep, base):
     return packed, grad, mt
 
 
-def _observations(obs, prep, base, options, ds0):
-    """In situ observations as (n, 6) x, y, z, t (s from the analysis time),
-    theta, q_v and the matching options (window, radius, z tolerance,
-    kappa_s, tau_i, tau_L)."""
-    if not isinstance(obs, xr.Dataset):
-        raise TypeError("observations must be an xarray.Dataset")
+_OBS_KEYS = ("window", "radius", "z_tolerance", "kappa_s", "tau_i", "tau_l")
+
+
+def _observation_options(options):
+    """Options of the in situ initialization with defaults and checks."""
     opts = dict(INSITU_DEFAULTS)
     unknown = set(options or {}) - set(opts)
     if unknown:
@@ -1475,9 +1474,63 @@ def _observations(obs, prep, base, options, ds0):
     opts.update(options or {})
     if opts["radius"] is None:
         opts["radius"] = 2.0 * math.sqrt(opts["kappa_s"])
-    for k in ("window", "radius", "z_tolerance", "kappa_s", "tau_i", "tau_l"):
+    for k in _OBS_KEYS:
         if not float(opts[k]) > 0:
             raise ValueError(f"observation option {k!r} must be positive")
+    return opts
+
+
+def _observation_xy(flat, ds0):
+    """Grid coordinates of the observations (x/y or latitude/longitude)."""
+    if "x" in flat and "y" in flat:
+        return flat["x"].astype(float), flat["y"].astype(float)
+    lat = flat.get("lat", flat.get("latitude"))
+    lon = flat.get("lon", flat.get("longitude"))
+    if lat is None or lon is None:
+        raise ValueError("the observations need 'x' and 'y' or latitude/longitude")
+    if "origin_latitude" not in ds0.attrs or "origin_longitude" not in ds0.attrs:
+        raise ValueError(
+            "observations given by latitude/longitude need the grid's "
+            "'origin_latitude' and 'origin_longitude' attributes"
+        )
+    from ..grid.multi import _aeqd
+
+    proj = _aeqd(ds0.attrs["origin_latitude"], ds0.attrs["origin_longitude"])
+    x, y = proj(lon.astype(float), lat.astype(float))
+    return np.asarray(x, float), np.asarray(y, float)
+
+
+def _observation_theta(flat, p):
+    if "theta" in flat:
+        return flat["theta"].astype(float)
+    if "temperature" in flat:
+        return flat["temperature"].astype(float) * (_nk.P0 / p) ** _nk.KAPPA
+    raise ValueError("the observations need 'theta' or 'temperature'")
+
+
+def _observation_qv(flat, p):
+    if "qv" in flat:
+        return flat["qv"].astype(float)
+    if "mixing_ratio" in flat:
+        return flat["mixing_ratio"].astype(float)
+    if "specific_humidity" in flat:
+        q = flat["specific_humidity"].astype(float)
+        return q / (1.0 - q)
+    if "dewpoint" in flat:
+        e = _es_bolton(flat["dewpoint"].astype(float))
+        return _nk.EPS * e / (p - e)
+    raise ValueError(
+        "the observations need 'qv', 'mixing_ratio', 'specific_humidity' or 'dewpoint'"
+    )
+
+
+def _observations(obs, prep, base, options, ds0):
+    """In situ observations as (n, 6) x, y, z, t (s from the analysis time),
+    theta, q_v and the matching options (window, radius, z tolerance,
+    kappa_s, tau_i, tau_L)."""
+    if not isinstance(obs, xr.Dataset):
+        raise TypeError("observations must be an xarray.Dataset")
+    opts = _observation_options(options)
     o = obs.reset_coords()
     if "time" not in o:
         raise ValueError("the observations need 'time'")
@@ -1486,66 +1539,23 @@ def _observations(obs, prep, base, options, ds0):
     flat = {n: np.asarray(a.values).ravel() for n, a in zip(names, b)}
     tt = flat["time"]
     if np.issubdtype(tt.dtype, np.datetime64):
-        t = (tt.astype("datetime64[ns]") - prep["time"]) / np.timedelta64(1, "s")
-    else:
-        t = tt.astype(float)
-    t = np.asarray(t, float)
-    if "x" in flat and "y" in flat:
-        x, y = flat["x"].astype(float), flat["y"].astype(float)
-    else:
-        lat = flat.get("lat", flat.get("latitude"))
-        lon = flat.get("lon", flat.get("longitude"))
-        if lat is None or lon is None:
-            raise ValueError("the observations need 'x' and 'y' or latitude/longitude")
-        if "origin_latitude" not in ds0.attrs or "origin_longitude" not in ds0.attrs:
-            raise ValueError(
-                "observations given by latitude/longitude need the grid's "
-                "'origin_latitude' and 'origin_longitude' attributes"
-            )
-        from ..grid.multi import _aeqd
-
-        proj = _aeqd(ds0.attrs["origin_latitude"], ds0.attrs["origin_longitude"])
-        x, y = (
-            np.asarray(a, float) for a in proj(lon.astype(float), lat.astype(float))
-        )
+        tt = (tt.astype("datetime64[ns]") - prep["time"]) / np.timedelta64(1, "s")
+    t = np.asarray(tt, float)
+    x, y = _observation_xy(flat, ds0)
     zname = next((n for n in ("z", "height", "altitude") if n in flat), None)
-    z = (
-        flat[zname].astype(float)
-        if zname is not None
-        else np.full(t.shape, float(prep["z"][0]))
-    )
+    if zname is None:
+        z = np.full(t.shape, float(prep["z"][0]))
+    else:
+        z = flat[zname].astype(float)
     if "pressure" in flat:
         p = flat["pressure"].astype(float)
     else:
         p = np.interp(z, base["z"].values, base["pressure"].values)
-    if "theta" in flat:
-        th = flat["theta"].astype(float)
-    elif "temperature" in flat:
-        th = flat["temperature"].astype(float) * (_nk.P0 / p) ** _nk.KAPPA
-    else:
-        raise ValueError("the observations need 'theta' or 'temperature'")
-    if "qv" in flat:
-        qv = flat["qv"].astype(float)
-    elif "mixing_ratio" in flat:
-        qv = flat["mixing_ratio"].astype(float)
-    elif "specific_humidity" in flat:
-        q = flat["specific_humidity"].astype(float)
-        qv = q / (1.0 - q)
-    elif "dewpoint" in flat:
-        e = _es_bolton(flat["dewpoint"].astype(float))
-        qv = _nk.EPS * e / (p - e)
-    else:
-        raise ValueError(
-            "the observations need 'qv', 'mixing_ratio', 'specific_humidity' or 'dewpoint'"
-        )
-    arr = np.column_stack([x, y, z, t, th, qv])
-    arr = np.ascontiguousarray(arr[np.isfinite(arr).all(axis=1)])
-    par = np.array(
-        [
-            float(opts[k])
-            for k in ("window", "radius", "z_tolerance", "kappa_s", "tau_i", "tau_l")
-        ]
+    arr = np.column_stack(
+        [x, y, z, t, _observation_theta(flat, p), _observation_qv(flat, p)]
     )
+    arr = np.ascontiguousarray(arr[np.isfinite(arr).all(axis=1)])
+    par = np.array([float(opts[k]) for k in _OBS_KEYS])
     return arr, par, opts
 
 
@@ -1581,6 +1591,105 @@ def _precipitation(precipitation, prep, base, kwargs):
         packed[..., i] = pr[k].transpose(*order).values
     np.nan_to_num(packed, copy=False, nan=0.0)
     return pr, packed
+
+
+def _ice_insitu_output(data, attrs, dims, qi, init, flags, ice, obs, obs_opts, params):
+    """Output variables and attributes of the ice and in situ options."""
+    if ice:
+        data["qi"] = (
+            dims,
+            qi,
+            {"long_name": "cloud ice mixing ratio", "units": "kg kg-1"},
+        )
+    if obs is not None:
+        data["insitu_weight"] = (
+            dims,
+            init[..., 0],
+            {
+                "long_name": "sum of the Barnes weights of the in situ observations "
+                "that initialised the trajectory (Ziegler et al. 2007, eq. 1)",
+                "units": "1",
+            },
+        )
+        data["insitu_time"] = (
+            dims,
+            init[..., 1],
+            {
+                "long_name": "start time of the trajectory at the in situ observation "
+                "relative to the analysis time",
+                "units": "s",
+            },
+        )
+    if ice:
+        attrs["ice_adjustment"] = (
+            f"Tao et al. (1989), T00 = {params['t00']} K; homogeneous freezing at "
+            "233.15 K and melting of cloud ice above 273.15 K"
+        )
+    if obs is not None:
+        attrs["insitu_observations"] = int(obs.shape[0])
+        attrs["insitu_options"] = ", ".join(f"{k}={obs_opts[k]}" for k in obs_opts)
+        attrs["insitu_fraction"] = float(np.mean((flags & _nk.INSITU) != 0))
+
+
+def _run_kernel(
+    use_compiled,
+    prep,
+    par,
+    starts,
+    surface,
+    table,
+    precip,
+    meso,
+    meso_t,
+    grad,
+    thermo,
+    obs,
+    obs_par,
+    n_threads,
+):
+    """The DLA of all start points with the compiled kernel or the NumPy
+    reference."""
+    table, bz0, bdz = table
+    xyz = (prep["x"], prep["y"], prep["z"])
+    moving = (prep["cx"], prep["cy"], prep["eb"], prep["ea"])
+    if use_compiled:
+        dummy4 = np.zeros((1, 2, 2, 2, 4), np.float32)
+        dummy2 = np.zeros((1, 2, 2, 2, 2), np.float32)
+        return _traj._lagrangian.dla(
+            prep["packed"],
+            *xyz,
+            prep["t"],
+            starts,
+            surface,
+            par,
+            *moving,
+            table,
+            bz0,
+            bdz,
+            dummy4 if precip is None else precip,
+            precip is not None,
+            dummy2 if meso is None else meso,
+            meso_t,
+            meso is not None,
+            dummy4 if grad is None else grad,
+            grad is not None,
+            thermo,
+            np.zeros((0, 6)) if obs is None else obs,
+            np.zeros(6) if obs_par is None else obs_par,
+            obs is not None,
+            n_threads=int(n_threads or 0),
+        )
+    g = _nk.Grid(*xyz, prep["t"], prep["packed"], *moving)
+    gp = None if precip is None else _nk.Grid(*xyz, prep["t"], precip, *moving)
+    gm = None if meso is None else _nk.Grid(*xyz, meso_t, meso, 0, 0, 1e30, 1e30)
+    gg = (
+        None
+        if grad is None
+        else _nk.Grid(*xyz[:2], [0.0, 1.0], meso_t, grad, 0, 0, 1e30, 1e30)
+    )
+    return _nk.dla(
+        g, par, starts, surface, table, bz0, bdz, gp, gm, gg, thermo, obs, obs_par
+    )
 
 
 def diabatic_lagrangian(
@@ -1810,82 +1919,22 @@ def diabatic_lagrangian(
         )
     starts, index, ks = _traj._grid_starts(prep, levels, params["offset_height"])
     surface = (index[0] == 0).astype(np.int8)
-    if use_compiled:
-        dummy4 = np.zeros((1, 2, 2, 2, 4), np.float32)
-        dummy2 = np.zeros((1, 2, 2, 2, 2), np.float32)
-        out, bud, org, npts, flags, init = _traj._lagrangian.dla(
-            prep["packed"],
-            prep["x"],
-            prep["y"],
-            prep["z"],
-            prep["t"],
-            starts,
-            surface,
-            par,
-            prep["cx"],
-            prep["cy"],
-            prep["eb"],
-            prep["ea"],
-            table,
-            bz0,
-            bdz,
-            dummy4 if precip is None else precip,
-            precip is not None,
-            dummy2 if meso is None else meso,
-            meso_t,
-            meso is not None,
-            dummy4 if grad is None else grad,
-            grad is not None,
-            thermo,
-            np.zeros((0, 6)) if obs is None else obs,
-            np.zeros(6) if obs_par is None else obs_par,
-            obs is not None,
-            n_threads=int(n_threads or 0),
-        )
-    else:
-        g = _nk.Grid(
-            prep["x"],
-            prep["y"],
-            prep["z"],
-            prep["t"],
-            prep["packed"],
-            prep["cx"],
-            prep["cy"],
-            prep["eb"],
-            prep["ea"],
-        )
-        gp = (
-            None
-            if precip is None
-            else _nk.Grid(
-                prep["x"],
-                prep["y"],
-                prep["z"],
-                prep["t"],
-                precip,
-                prep["cx"],
-                prep["cy"],
-                prep["eb"],
-                prep["ea"],
-            )
-        )
-        gm = (
-            None
-            if meso is None
-            else _nk.Grid(
-                prep["x"], prep["y"], prep["z"], meso_t, meso, 0, 0, 1e30, 1e30
-            )
-        )
-        gg = (
-            None
-            if grad is None
-            else _nk.Grid(
-                prep["x"], prep["y"], [0.0, 1.0], meso_t, grad, 0, 0, 1e30, 1e30
-            )
-        )
-        out, bud, org, npts, flags, init = _nk.dla(
-            g, par, starts, surface, table, bz0, bdz, gp, gm, gg, thermo, obs, obs_par
-        )
+    out, bud, org, npts, flags, init = _run_kernel(
+        use_compiled,
+        prep,
+        par,
+        starts,
+        surface,
+        (table, bz0, bdz),
+        precip,
+        meso,
+        meso_t,
+        grad,
+        thermo,
+        obs,
+        obs_par,
+        n_threads,
+    )
     shape = (ks.size, prep["y"].size, prep["x"].size)
     out = np.asarray(out).reshape(shape + (4,))
     init = np.asarray(init).reshape(shape + (2,))
@@ -2012,31 +2061,6 @@ def diabatic_lagrangian(
             {"long_name": "base-state pressure", "units": "Pa"},
         ),
     }
-    if ice:
-        data["qi"] = (
-            dims,
-            qi,
-            {"long_name": "cloud ice mixing ratio", "units": "kg kg-1"},
-        )
-    if obs is not None:
-        data["insitu_weight"] = (
-            dims,
-            init[..., 0],
-            {
-                "long_name": "sum of the Barnes weights of the in situ observations "
-                "that initialised the trajectory (Ziegler et al. 2007, eq. 1)",
-                "units": "1",
-            },
-        )
-        data["insitu_time"] = (
-            dims,
-            init[..., 1],
-            {
-                "long_name": "start time of the trajectory at the in situ observation "
-                "relative to the analysis time",
-                "units": "s",
-            },
-        )
     for i, (key, text) in enumerate(_BUDGET):
         data[f"dtheta_{key}"] = (
             dims,
@@ -2084,15 +2108,7 @@ def diabatic_lagrangian(
         "termination": str(termination),
         "ice": int(bool(ice)),
     }
-    if ice:
-        attrs["ice_adjustment"] = (
-            f"Tao et al. (1989), T00 = {params['t00']} K; homogeneous freezing at "
-            "233.15 K and melting of cloud ice above 273.15 K"
-        )
-    if obs is not None:
-        attrs["insitu_observations"] = int(obs.shape[0])
-        attrs["insitu_options"] = ", ".join(f"{k}={obs_opts[k]}" for k in obs_opts)
-        attrs["insitu_fraction"] = float(np.mean((flags & _nk.INSITU) != 0))
+    _ice_insitu_output(data, attrs, dims, qi, init, flags, ice, obs, obs_opts, params)
     return xr.Dataset(data, coords=coords, attrs=attrs)
 
 
