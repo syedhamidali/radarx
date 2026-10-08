@@ -1,0 +1,9 @@
+# training and evaluation of the single-Doppler network (not needed by radarx)
+radarx
+torch>=2.4
+onnx
+onnxruntime
+onnxscript
+matplotlib
+boto3
+cdsapi
