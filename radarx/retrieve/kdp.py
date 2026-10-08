@@ -68,6 +68,24 @@ Methods
     used here enforces the same assumption in a single O(N) pass. Use it only
     for rain; hail or ice above the melting layer can have negative
     :math:`K_{DP}`.
+``"ml"``
+    A physics-constrained neural network (a one-dimensional convolutional
+    network over range, run with ONNX Runtime through :mod:`radarx.ml`,
+    ``pip install radarx[ml]``). Steps 1-4 are the same as above; the network
+    receives the range derivative of the unfolded phase, the gate mask,
+    :math:`\\rho_{hv}` and :math:`Z_H`, and returns :math:`K_{DP}`, the
+    backscatter phase :math:`\\delta` and the standard deviation of
+    :math:`K_{DP}`. It was trained on rays simulated from the T-matrix
+    scattering tables of :mod:`radarx.retrieve.dsd` with a loss that,
+    besides the error against the simulated truth, requires
+    :math:`\\Psi_{DP} = 2\\int K_{DP}\\,dr + \\delta + \\Phi_{DP}^0`
+    at valid gates, penalises negative :math:`K_{DP}` in rain and rough
+    profiles (see ``ml/models/kdp`` in the radarx repository). The processed
+    :math:`\\Phi_{DP}` is :math:`2\\int K_{DP}\\,dr` plus the constant that
+    fits it best to :math:`\\Psi_{DP} - \\delta`, so it is consistent with
+    :math:`K_{DP}` by construction. The trained weights are not distributed
+    yet: register a model with :func:`radarx.ml.register_model` or pass a
+    loaded model as ``model``.
 
 The work is done by a compiled C++ kernel, multithreaded over rays; if it is
 not available, an equivalent NumPy implementation is used.
@@ -408,6 +426,185 @@ def _process_compiled(sweeps, params, n_threads):
 
 
 # --------------------------------------------------------------------------
+# machine-learning method
+# --------------------------------------------------------------------------
+
+DEFAULT_ML_MODEL = "radarx-kdp-v1"
+ML_FEATURES = ("dphi", "valid", "rhohv", "has_rhohv", "dbzh", "has_dbzh", "dr")
+_ML_CHUNK = 512  # rays per network call
+
+
+def _ml_features(phi, rho, z, dr, params, sign, mask=None):
+    """
+    Network inputs of one sweep, from the same masking, sign, offset and
+    unfolding steps as the other methods.
+
+    Returns the features (ray, feature, range) as float32 in the order of
+    ``ML_FEATURES``, the unfolded phase without offset (NaN at masked gates),
+    the valid-gate mask, the rays with enough valid gates and the offsets.
+    """
+    if mask is None:
+        mask = _mask_numpy(phi, rho, z, params)
+    valid = mask[0].copy()
+    offset = _offsets(
+        valid,
+        mask[1],
+        mask[2],
+        params["n_offset"],
+        params["offset_mode"],
+        params["offset"],
+    )
+    psi = _unfold(sign * phi, valid, sign * offset)
+    good = valid.sum(axis=1) >= _MIN_VALID
+    valid &= good[:, None]
+    psi = np.where(valid, psi, np.nan)
+    filled = np.where(good[:, None], _fill(psi, valid), 0.0)
+    nr, ng = phi.shape
+    feats = np.zeros((nr, len(ML_FEATURES), ng), dtype=np.float32)
+    # half the range derivative (degrees/km), scaled by 0.1
+    feats[:, 0] = 0.05 * np.gradient(filled, dr, axis=1)
+    feats[:, 1] = valid
+    if rho is not None:
+        ok = np.isfinite(rho)
+        feats[:, 2] = np.where(ok, np.clip(np.where(ok, rho, 0.0), 0.0, 1.0), 0.0)
+        feats[:, 3] = ok
+    if z is not None:
+        ok = np.isfinite(z)
+        feats[:, 4] = (
+            np.where(ok, np.clip(np.where(ok, z, 0.0), -30.0, 80.0), 0.0) / 50.0
+        )
+        feats[:, 5] = ok
+    feats[:, 6] = dr
+    return feats, psi, valid, good, offset
+
+
+def _ml_phase(kdp, delta, psi, valid, good, dr):
+    """
+    Processed phase consistent with KDP: twice its range integral plus the
+    constant that fits it best (least squares) to ``psi - delta``.
+    """
+    steps = dr * (kdp[:, :-1] + kdp[:, 1:])  # 2 * trapezoid of KDP
+    phi = np.zeros_like(kdp)
+    phi[:, 1:] = np.cumsum(steps, axis=1)
+    n = np.maximum(valid.sum(axis=1), 1)
+    shift = np.where(valid, psi - delta - phi, 0.0).sum(axis=1) / n
+    phi = phi + shift[:, None]
+    return np.where(good[:, None], phi, np.nan)
+
+
+def _ml_model(model):
+    """The model object for ``method="ml"``: a name or a loaded model."""
+    if model is None:
+        model = DEFAULT_ML_MODEL
+    if not isinstance(model, str):
+        if not callable(getattr(model, "run", None)):
+            raise TypeError(
+                "model must be a registered model name or a loaded radarx.ml "
+                f"model with a run() method, not {type(model).__name__}"
+            )
+        return model, getattr(model, "info", None) or {}, None
+    try:
+        from radarx import ml
+    except ImportError as err:  # radarx.ml or onnxruntime missing
+        raise ImportError(
+            "method='ml' needs radarx.ml and ONNX Runtime: pip install radarx[ml]"
+        ) from err
+    listed = ml.list_models()
+    names = listed.keys() if isinstance(listed, dict) else [m["name"] for m in listed]
+    if model not in names:
+        raise ValueError(
+            f"the KDP model {model!r} is not registered. The weights of the "
+            "radarx KDP network are not distributed yet; train one with the "
+            "scripts in ml/models/kdp of the radarx repository and register it "
+            "with radarx.ml.register_model(...), or pass a loaded model as "
+            "model=..."
+        )
+    loaded = ml.load_model(model)
+    return loaded, getattr(loaded, "info", None) or {}, model
+
+
+def _ml_run(model, feats):
+    """Run the network over chunks of rays: KDP, delta and KDP std."""
+    outs = {"kdp": [], "delta": [], "kdp_std": []}
+    for start in range(0, feats.shape[0], _ML_CHUNK):
+        res = model.run({"features": feats[start : start + _ML_CHUNK]})
+        for key in outs:
+            if key not in res:
+                raise KeyError(f"the KDP model returned no {key!r} output")
+            outs[key].append(np.asarray(res[key], dtype=np.float64))
+    shape = feats[:, 0].shape
+    return [
+        np.concatenate(v, axis=0).reshape(shape) if v else np.zeros(shape)
+        for v in outs.values()
+    ]
+
+
+def _run_ml(datasets, fields, params, model):
+    """``method="ml"`` for a list of sweep datasets."""
+    model, info, name = _ml_model(model)
+    sweeps = [_prepare_sweep(ds, fields, params) for ds in datasets]
+    masks = [
+        _mask_numpy(sw["phi"], sw["rho"], sw["z"], {**params, **sw}) for sw in sweeps
+    ]
+    sign = _decide_sign([m[3] for m in masks], params["phidp_sign"])
+    ml_attrs = {
+        "ml_model": str(info.get("name", name or type(model).__name__)),
+        "ml_model_version": str(info.get("version", "unknown")),
+        "ml_model_licence": str(info.get("licence", "unknown")),
+    }
+    results = []
+    for sw, mask in zip(sweeps, masks):
+        p = {**params, **sw}
+        feats, psi, valid, good, offset = _ml_features(
+            sw["phi"], sw["rho"], sw["z"], sw["dr"], p, sign, mask
+        )
+        kdp, delta, std = _ml_run(model, feats)
+        phi = _ml_phase(kdp, delta, psi, valid, good, sw["dr"])
+        keep = valid & good[:, None]
+        out = _wrap_sweep(
+            sw,
+            phi,
+            np.where(keep, kdp, np.nan),
+            offset,
+            "ml",
+            sign,
+        )
+        dims = out.KDP.dims
+        out["PHIDP_BACKSCATTER"] = (
+            dims,
+            _transpose_like(np.where(keep, delta, np.nan), sw, dims),
+            {
+                "long_name": "Backscatter differential phase",
+                "units": "degrees",
+                "comment": "backscatter phase delta estimated by the network",
+            },
+        )
+        out["KDP_UNCERTAINTY"] = (
+            dims,
+            _transpose_like(np.where(keep, std, np.nan), sw, dims),
+            {
+                "long_name": "Standard deviation of the specific differential phase",
+                "units": "degrees/km",
+                "comment": "predicted by the network",
+            },
+        )
+        for var in ("PHIDP_processed", "KDP", "PHIDP_BACKSCATTER", "KDP_UNCERTAINTY"):
+            out[var].attrs.update(ml_attrs)
+        out["PHIDP_processed"].attrs["comment"] = (
+            f"{sw['name']}{' multiplied by -1,' if sign < 0 else ''} twice the "
+            "range integral of the network KDP, fitted to the measured phase "
+            "minus the backscatter phase (method='ml')"
+        )
+        results.append(out)
+    return results
+
+
+def _transpose_like(values, sweep, dims):
+    """(ray, range) values in the dimension order ``dims`` of the output."""
+    return values if dims[0] == sweep["ray_dim"] else values.T
+
+
+# --------------------------------------------------------------------------
 # xarray layer
 # --------------------------------------------------------------------------
 
@@ -591,6 +788,7 @@ def estimate_kdp(
     phidp_sign="auto",
     n_threads=None,
     engine="auto",
+    model=None,
 ):
     """
     Process the differential phase and estimate KDP for a sweep or a volume.
@@ -613,9 +811,10 @@ def estimate_kdp(
         in the ``source_fields`` attribute of the output ``PHIDP_processed``. Without
         :math:`\\rho_{hv}` only the texture test masks gates; without
         reflectivity the long KDP window is used everywhere.
-    method : {"hubbert", "vulpiani", "monotone"}, optional
+    method : {"hubbert", "vulpiani", "monotone", "ml"}, optional
         Range filtering method, see :mod:`radarx.retrieve.kdp`.
-        Default ``"hubbert"``.
+        Default ``"hubbert"``. ``"ml"`` runs a neural network and needs
+        ``pip install radarx[ml]`` and a registered model (see ``model``).
     rhohv_min : float, optional
         Minimum :math:`\\rho_{hv}` of meteorological gates. Default 0.85.
     texture_window : float, optional
@@ -663,7 +862,12 @@ def estimate_kdp(
         Threads for the compiled kernel. Default: all cores.
     engine : {"auto", "compiled", "numpy"}, optional
         Implementation to use. ``"auto"`` (default) prefers the compiled
-        kernel and falls back to NumPy.
+        kernel and falls back to NumPy. Not used by ``"ml"``.
+    model : str or radarx.ml.Model, optional
+        ``method="ml"`` only: the name of a model registered with
+        :mod:`radarx.ml` (default ``"radarx-kdp-v1"``) or a loaded model.
+        Its ONNX graph takes ``features`` (float32, ray x feature x range)
+        and returns ``kdp``, ``delta`` and ``kdp_std`` (ray x range).
 
     Returns
     -------
@@ -673,7 +877,10 @@ def estimate_kdp(
         bridged and gates beyond the first and last valid gate hold the end
         values), ``KDP`` (degrees/km; NaN at non-meteorological gates) and
         the system offset ``PHIDP_OFFSET`` per ray (in the convention of the
-        input phase), on the input coordinates. For a volume, a DataTree
+        input phase), on the input coordinates. ``method="ml"`` adds the
+        backscatter phase ``PHIDP_BACKSCATTER`` and the standard deviation
+        ``KDP_UNCERTAINTY`` of KDP, and the attributes ``ml_model``,
+        ``ml_model_version`` and ``ml_model_licence``. For a volume, a DataTree
         with one such node per sweep that has the differential phase, and the
         root of the input. Merge the products into the input with
         ``ds.radarx.assign(products)`` or ``dtree.radarx.assign(products)``.
@@ -683,9 +890,11 @@ def estimate_kdp(
     KeyError
         If a requested field is missing.
     ValueError
-        For unknown options or non-uniform range gates.
+        For unknown options or non-uniform range gates, or for
+        ``method="ml"`` with a model name that is not registered.
     ImportError
-        If ``engine="compiled"`` and the compiled kernel is not available.
+        If ``engine="compiled"`` and the compiled kernel is not available,
+        or for ``method="ml"`` without :mod:`radarx.ml` and ONNX Runtime.
 
     References
     ----------
@@ -712,9 +921,12 @@ def estimate_kdp(
     --------
     >>> out = radarx.retrieve.estimate_kdp(dtree["sweep_0"].ds)  # doctest: +SKIP
     >>> out = dtree.radarx.kdp(method="vulpiani")  # doctest: +SKIP
+    >>> out = estimate_kdp(sweep, method="ml", model="my-kdp")  # doctest: +SKIP
     """
-    if method not in METHODS:
-        raise ValueError(f"method must be one of {sorted(METHODS)}, not {method!r}")
+    if method not in METHODS and method != "ml":
+        raise ValueError(
+            f"method must be one of {sorted([*METHODS, 'ml'])}, not {method!r}"
+        )
     if isinstance(offset, str):
         if offset not in ("sweep", "ray"):
             raise ValueError(
@@ -732,10 +944,10 @@ def estimate_kdp(
     else:
         raise ValueError(f"phidp_sign must be 'auto', 1 or -1, not {phidp_sign!r}")
     if n_iter is None:
-        n_iter = _DEFAULT_N_ITER[method]
+        n_iter = _DEFAULT_N_ITER.get(method, 0)
     use_compiled = _use_compiled(engine)
     params = {
-        "method": METHODS[method],
+        "method": METHODS.get(method, -1),
         "method_name": method,
         "rhohv_min": float(rhohv_min),
         "texture_window": texture_window,
@@ -754,9 +966,18 @@ def estimate_kdp(
         "phidp_sign": sign_value,
     }
     fields = (phidp, rhohv, dbzh)
+    if method == "ml":
+
+        def run(datasets):
+            return _run_ml(datasets, fields, params, model)
+
+    else:
+
+        def run(datasets):
+            return _run(datasets, fields, params, n_threads, use_compiled)
 
     if isinstance(obj, xr.Dataset):
-        return _run([obj], fields, params, n_threads, use_compiled)[0]
+        return run([obj])[0]
 
     names = [
         name
@@ -767,5 +988,5 @@ def estimate_kdp(
     if not names:
         raise KeyError("no sweep contains a differential phase field")
     datasets = [obj[name].to_dataset(inherit=False) for name in names]
-    results = _run(datasets, fields, params, n_threads, use_compiled)
+    results = run(datasets)
     return product_tree(obj, dict(zip(names, results)))

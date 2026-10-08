@@ -33,6 +33,9 @@ dependencies:
   - aiohttp
   - cdsapi
   - pooch
+  # radarx[ml]: ONNX Runtime; onnx builds the example model of the notebook
+  - onnx
+  - onnxruntime
   - xradar
   - fsspec
   - wradlib

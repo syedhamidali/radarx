@@ -49,6 +49,9 @@ dependencies:
   - nbformat
   - pooch
   - itables
+  # radarx[ml]: ONNX Runtime; onnx builds the example model of the notebook
+  - onnx
+  - onnxruntime
   - pip
   - pip:
     # for the Barnes test in tests/grid/test_grid.py; supports Python < 3.13 only

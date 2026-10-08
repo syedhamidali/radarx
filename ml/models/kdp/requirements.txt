@@ -1,0 +1,7 @@
+# training and evaluation of the KDP network (not needed to use radarx)
+torch>=2.2
+onnx>=1.15
+onnxruntime>=1.17
+matplotlib
+open-radar-data
+xradar

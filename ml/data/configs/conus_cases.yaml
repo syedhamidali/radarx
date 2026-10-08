@@ -1,0 +1,67 @@
+# Case selection across seasons, regimes and radars (a starting point for a
+# full training set; about 1000 volumes). Splits are drawn per event from a
+# hash of the event key; KPAH is held out entirely (test only).
+#
+#   python ml/data/build_dataset.py ml/data/configs/conus_cases.yaml --dry-run
+#   python ml/data/build_dataset.py ml/data/configs/conus_cases.yaml -o conus -w 16
+#
+# freezing_level: height (m above sea level) of the 0 degC level from the
+# nearest radiosonde; a value below the radar puts the surface below 0 degC.
+name: radarx-nexrad-conus
+seed: 7
+max_elevation: 6.5
+max_volumes_per_case: 80
+
+tasks:
+  qc: {}
+  kdp: {}
+  hid: {}
+  dealias: {}
+  inpaint: {}
+  nowcast: {}
+  multidoppler:
+    max_elevation: 20.0
+    grid:
+      x: [-120000, 60000, 2000]
+      y: [-120000, 100000, 2000]
+      z: [500, 12000, 500]
+    pairs:
+      - radars: [KGWX, KBMX]
+        time: "2022-03-31T00:00:00"
+      - radars: [KGWX, KBMX]
+        time: "2022-03-31T01:00:00"
+
+splits:
+  fractions: {train: 0.7, val: 0.15, test: 0.15}
+  holdout_radars: [KPAH]
+  min_gap_hours: 24
+
+cases:
+  - {name: kgwx-qlcs-2022-03-30, radar: KGWX, start: "2022-03-30T22:00:00", end: "2022-03-31T02:00:00",
+     event: qlcs-2022-03-30, regime: squall line, season: spring, freezing_level: 3600}
+  - {name: kbmx-qlcs-2022-03-30, radar: KBMX, start: "2022-03-30T23:00:00", end: "2022-03-31T03:00:00",
+     event: qlcs-2022-03-30, regime: squall line, season: spring, freezing_level: 3400}
+  - {name: khgx-harvey-2017-08-27, radar: KHGX, start: "2017-08-26T18:00:00", end: "2017-08-27T18:00:00",
+     regime: tropical cyclone rain, season: summer, freezing_level: 4800}
+  - {name: kamx-irma-2017-09-10, radar: KAMX, start: "2017-09-10T06:00:00", end: "2017-09-10T12:00:00",
+     regime: tropical cyclone, season: summer, freezing_level: 4900}
+  - {name: kltx-florence-2018-09-14, radar: KLTX, start: "2018-09-14T06:00:00", end: "2018-09-14T12:00:00",
+     regime: tropical cyclone, season: summer, freezing_level: 4800}
+  - {name: ktlx-supercell-2013-05-20, radar: KTLX, start: "2013-05-20T19:00:00", end: "2013-05-20T21:00:00",
+     regime: supercell, season: spring, freezing_level: 4200}
+  - {name: klbb-convection-2016-06-01, radar: KLBB, start: "2016-06-01T15:00:00", end: "2016-06-01T17:00:00",
+     regime: summer convection, season: summer, freezing_level: 4500}
+  - {name: kdvn-derecho-2020-08-10, radar: KDVN, start: "2020-08-10T15:00:00", end: "2020-08-10T19:00:00",
+     regime: derecho, season: summer, freezing_level: 4500}
+  - {name: kpah-tornado-2021-12-11, radar: KPAH, start: "2021-12-11T02:00:00", end: "2021-12-11T05:00:00",
+     regime: nocturnal supercell / QLCS, season: winter, freezing_level: 3500}
+  - {name: kokx-blizzard-2022-01-29, radar: KOKX, start: "2022-01-29T06:00:00", end: "2022-01-29T18:00:00",
+     regime: winter storm (snow), season: winter, freezing_level: -600}
+  - {name: kfws-winter-2021-02-15, radar: KFWS, start: "2021-02-15T00:00:00", end: "2021-02-15T06:00:00",
+     regime: winter storm (sleet, snow), season: winter, freezing_level: -500}
+  - {name: kmpx-snow-2023-02-22, radar: KMPX, start: "2023-02-22T18:00:00", end: "2023-02-22T23:00:00",
+     regime: winter storm (snow), season: winter, freezing_level: -800}
+  - {name: kftg-blizzard-2021-03-14, radar: KFTG, start: "2021-03-14T06:00:00", end: "2021-03-14T12:00:00",
+     regime: upslope snow, season: spring, freezing_level: 1200}
+  - {name: kmlb-ian-2022-09-28, radar: KMLB, start: "2022-09-28T18:00:00", end: "2022-09-29T00:00:00",
+     regime: tropical cyclone, season: autumn, freezing_level: 4900}

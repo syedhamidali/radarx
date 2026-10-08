@@ -4,7 +4,6 @@
 
 """
 Radarx IO
-=========
 
 .. toctree::
     :maxdepth: 4
@@ -13,11 +12,13 @@ Radarx IO
 .. automodule:: radarx.io.aws_data
 .. automodule:: radarx.io.sounding
 .. automodule:: radarx.io.lma
+.. automodule:: radarx.io.disdrometer
 """
 
 from .imd import *  # noqa
 from .aws_data import *  # noqa
 from .sounding import *  # noqa
 from .lma import *  # noqa
+from .disdrometer import *  # noqa
 
 __all__ = [s for s in dir() if not s.startswith("_")]
