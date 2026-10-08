@@ -36,7 +36,9 @@ GSUB = 32
 GFR = 64
 DAMP = 128
 FLUX = 256
+ICE = 512  # mixed-phase saturation adjustment (Tao et al. 1989) with cloud ice
 MICRO = REVP | RACW | GACW | GMLT | GSUB | GFR
+INSITU = 256  # DLA flag: initial state from in situ observations (Ziegler et al. 2007)
 
 T0 = 273.15
 P0 = 1.0e5
@@ -58,6 +60,14 @@ G = 9.805
 A_PR = 0.66
 B_PR = 100.0
 RHO_W = 1000.0
+
+# Tao, Simpson and McCumber (1989), eqs. (3a), (3b), (6c), (6d); P in mb
+TAO_A1 = 17.2693882
+TAO_A2 = 21.8745584
+TAO_B = 3.8
+T_HOM = (
+    233.15  # homogeneous freezing of cloud water at T <= -40 degC (Hsie et al. 1980)
+)
 
 # thermodynamic parameter indices (same order as the kernel)
 THERMO_KEYS = (
@@ -83,9 +93,11 @@ THERMO_KEYS = (
     "flux_theta",
     "flux_qv",
     "switches",
+    "t00",
 )
 Q = {k: i for i, k in enumerate(THERMO_KEYS)}
 N_BUDGET = 7
+N_OBS_PAR = 6  # window, radius, z_tolerance, kappa_s, tau_i, tau_L
 
 
 class Grid:
@@ -399,6 +411,53 @@ def adjust(th, qv, qc, p):
     return th + dth, qv - dq, qc + dq, dth
 
 
+def tao_saturation(t, p):
+    """Saturation mixing ratios over water and ice, Tao et al. (1989) (3a), (3b)."""
+    b = TAO_B / (p / 100.0)
+    qws = b * np.exp(TAO_A1 * (t - 273.16) / (t - 35.86))
+    qis = b * np.exp(TAO_A2 * (t - 273.16) / (t - 7.66))
+    return qws, qis
+
+
+def adjust_ice(th, qv, qc, qi, p, t00):
+    """Ice-water saturation adjustment of Tao et al. (1989), after melting of
+    cloud ice above 0 degC and homogeneous freezing of cloud water at or below
+    -40 degC (LFO83, Hsie et al. 1980); returns new (theta, q_v, q_c, q_i) and
+    the heating of the adjustment and of the phase changes."""
+    pi = exner(p)
+    t = th * pi
+    # P_IMLT and P_IHOM, heating from Tao et al. (4a) with dq_c = -dq_i
+    melt = np.where(t > T0, qi, 0.0)
+    frz = np.where(t <= T_HOM, qc, 0.0)
+    dth_f = (LS_L - LV_L) * (frz - melt) / (CP * pi)
+    qc = qc + melt - frz
+    qi = qi - melt + frz
+    th = th + dth_f
+    t = th * pi
+    cnd = np.clip((t - t00) / (T0 - t00), 0.0, 1.0)
+    dep = 1.0 - cnd
+    qws, qis = tao_saturation(t, p)
+    cloud = qc + qi
+    has = cloud > 0.0
+    den = np.where(has, cloud, 1.0)
+    wc = np.where(has, qc / den, cnd)
+    wi = np.where(has, qi / den, dep)
+    qvs = wc * qws + wi * qis
+    a1 = 237.3 * TAO_A1 * pi / ((t - 35.86) * (t - 35.86))
+    a2 = 265.5 * TAO_A2 * pi / ((t - 7.66) * (t - 7.66))
+    r1 = qv - qvs  # (6a)
+    r2 = a1 * wc * qws + a2 * wi * qis  # (6b)
+    a3 = (LV_L * cnd + LS_L * dep) / (CP * pi)  # (6e)
+    dq = r1 / (1.0 + r2 * a3)  # (7b)
+    dqc = np.maximum(dq * cnd, -qc)  # (2b), limited by q_c
+    dqi = np.maximum(dq * dep, -qi)  # (2c), limited by q_i
+    need = (r1 > 0.0) | has
+    dqc = np.where(need, dqc, 0.0)
+    dqi = np.where(need, dqi, 0.0)
+    dth = (LV_L * dqc + LS_L * dqi) / (CP * pi)  # (4a)
+    return th + dth, qv - dqc - dqi, qc + dqc, qi + dqi, dth, dth_f
+
+
 def air_props(t, p, rho):
     ka = (0.441635 + 0.0071 * t) * 1.0e-2
     psi = 2.11e-5 * np.power(t / T0, 1.94) * (1.0e5 / p)
@@ -406,8 +465,9 @@ def air_props(t, p, rho):
     return ka, psi, nu, nu / psi
 
 
-def lfo_rates(t, p, rho, qv, qc, qr, nr, qg, ng, rhog, rho0, sw):
-    """LFO83 rates (n, 7): revp, racw, gacw, gacr, gmlt, gsub, gfr."""
+def lfo_rates(t, p, rho, qv, qc, qr, nr, qg, ng, rhog, rho0, sw, qi=0.0):
+    """LFO83 rates (n, 7): revp, racw, gacw, gacr, gmlt, gsub, gfr; q_i only
+    enters the in-cloud test of the graupel sublimation (delta_1, eq. 20)."""
     arrs = np.broadcast_arrays(
         *(np.asarray(a, float) for a in (t, p, rho, qv, qc, qr, nr, qg, ng, rhog))
     )
@@ -519,7 +579,7 @@ def lfo_rates(t, p, rho, qv, qc, qr, nr, qg, ng, rhog, rho0, sw):
             a2 = LS_L * LS_L / (ka * RV * t * t)
             b2 = 1.0 / (rho * qsi * psi)
             gsub = np.where(
-                graupel & (t < T0) & (qc <= 0.0) & (si < 1.0),
+                graupel & (t < T0) & (qc + qi <= 0.0) & (si < 1.0),
                 2.0 * np.pi * (si - 1.0) / (rho * (a2 + b2)) * n0g * vent_g,
                 0.0,
             )
@@ -591,27 +651,106 @@ def damping_rate(q, w, u, v, ub, vb, qp, zagl):
     return q[Q["cd"]] * vel / (ld * np.exp(q[Q["b"]] * zagl / 1000.0))
 
 
-def dla(g, par, starts, surface, base, base_z0, base_dz, precip, meso, grad, q):
-    """Diabatic Lagrangian analysis (NumPy reference of the kernel's dla)."""
+def insitu_match(pos, npts, dt, obs, op):
+    """Initial states from in situ observations (Ziegler et al. 2007, eq. 1).
+
+    Returns the weight sum (0 without a candidate), the weighted theta and
+    q_v and the index of the stored path point nearest the time of the
+    candidate with the largest weight (-1 without a candidate)."""
+    n, m = npts.size, pos.shape[1]
+    window, radius, ztol, kap, tau_i, tau_l = (float(v) for v in op)
+    h = -float(dt)
+    wsum = np.zeros(n)
+    sth = np.zeros(n)
+    sqv = np.zeros(n)
+    wbest = np.zeros(n)
+    kbest = np.full(n, -1, np.int64)
+    rows = np.arange(n)
+    for xo, yo, zo, to, tho, qvo in np.asarray(obs, float).reshape(-1, 6):
+        if not (to <= 0.0 and -to <= window):
+            continue
+        f = to / h
+        k0 = int(math.floor(f))
+        a = f - k0
+        need = k0 + (1 if a > 0.0 else 0)
+        if need > m - 1:
+            continue
+        ok = npts - 1 >= need
+        p0 = pos[rows, k0]
+        if a > 0.0:
+            p1 = pos[rows, k0 + 1]
+            pt = (1.0 - a) * p0 + a * p1
+        else:
+            pt = p0
+        with np.errstate(invalid="ignore"):
+            dx = pt[:, 0] - xo
+            dy = pt[:, 1] - yo
+            r2 = dx * dx + dy * dy
+            ok &= (r2 <= radius * radius) & (np.abs(pt[:, 2] - zo) <= ztol)
+        w = np.exp(-r2 / kap - to * to / tau_i - to * to / tau_l)
+        w = np.where(ok, w, 0.0)
+        wsum += w
+        sth += w * tho
+        sqv += w * qvo
+        better = ok & (w > wbest)
+        wbest = np.where(better, w, wbest)
+        kbest = np.where(better, int(math.floor(f + 0.5)), kbest)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return wsum, sth / wsum, sqv / wsum, kbest
+
+
+def dla(
+    g,
+    par,
+    starts,
+    surface,
+    base,
+    base_z0,
+    base_dz,
+    precip,
+    meso,
+    grad,
+    q,
+    obs=None,
+    obs_par=None,
+):
+    """Diabatic Lagrangian analysis (NumPy reference of the kernel's dla).
+
+    Returns (n, 4) theta, q_v, q_c, q_i, the (n, 7) theta budget, (n, 5)
+    origin, the number of points, the flags and (n, 2) in situ weight and
+    start time."""
     pos, val, npts, flags = build_paths(g, par, starts)
     n = npts.size
     dt = par[0]
     sw = int(q[Q["switches"]])
+    ice = bool(sw & ICE)
+    t00 = q[Q["t00"]]
     zsfc = q[Q["z_sfc"]]
-    out = np.full((n, 3), np.nan)
+    out = np.full((n, 4), np.nan)
     bud = np.full((n, N_BUDGET), np.nan)
     org = np.full((n, 5), np.nan)
+    init = np.full((n, 2), np.nan)
     has = npts > 0
     org[has, :4] = pos[np.flatnonzero(has), npts[has] - 1]
     steps = np.arange(val.shape[1])[None, :] < npts[:, None]
     nvalid = ((val[:, :, 4] >= 0.5) & steps).sum(axis=1)
     org[has, 4] = nvalid[has] / npts[has]
     env = has & ((flags & ENVIRONMENT) != 0)
-    idx = np.flatnonzero(env)
+    kstart = npts - 1
+    th_obs = qv_obs = None
+    matched = np.zeros(n, bool)
+    if obs is not None and len(obs):
+        wsum, th_obs, qv_obs, kbest = insitu_match(pos, npts, dt, obs, obs_par)
+        matched = has & (kbest >= 0) & (wsum > 0.0)
+        kstart = np.where(matched, kbest, kstart)
+        flags = np.where(matched, flags | INSITU, flags).astype(np.int32)
+        init[matched, 0] = wsum[matched]
+        init[matched, 1] = pos[np.flatnonzero(matched), kbest[matched], 3]
+    idx = np.flatnonzero(env | matched)
     if idx.size == 0:
-        return out, bud, org, npts, flags
+        return out, bud, org, npts, flags, init
     surf = np.asarray(surface)[idx] != 0
-    k = npts[idx]
+    k = kstart[idx] + 1
 
     def base_at(xp, yp, zp, tp):
         if meso is not None:
@@ -620,14 +759,27 @@ def dla(g, par, starts, surface, base, base_z0, base_dz, precip, meso, grad, q):
         b = profile(base, base_z0, base_dz, zp)
         return b[:, 1], b[:, 2]
 
+    def cond(th, qvr, qcr, qir, p):
+        if ice:
+            th, qvr, qcr, qir, d1, d2 = adjust_ice(th, qvr, qcr, qir, p, t00)
+            return th, qvr, qcr, qir, d1, d2
+        th, qvr, qcr, d1 = adjust(th, qvr, qcr, p)
+        return th, qvr, qcr, qir, d1, 0.0
+
     p0 = pos[idx, k - 1]
     theta, qv = base_at(p0[:, 0], p0[:, 1], p0[:, 2], p0[:, 3])
+    mi = matched[idx]
+    if mi.any():
+        theta = np.where(mi, th_obs[idx], theta)
+        qv = np.where(mi, qv_obs[idx], qv)
     qc = np.zeros(idx.size)
+    qi = np.zeros(idx.size)
     b = np.zeros((idx.size, N_BUDGET))
     pa = profile(base, base_z0, base_dz, p0[:, 2])[:, 0]
     if sw & COND:
-        theta, qv, qc, dth = adjust(theta, qv, qc, pa)
+        theta, qv, qc, qi, dth, dfz = cond(theta, qv, qc, qi, pa)
         b[:, 0] += dth
+        b[:, 4] += dfz
     ns = max(1, int(math.ceil(dt / q[Q["dt_small"]] - 1e-9)))
     h = dt / ns
     qthr = np.where(surf, q[Q["q0"]], q[Q["q1"]])
@@ -647,7 +799,7 @@ def dla(g, par, starts, surface, base, base_z0, base_dz, precip, meso, grad, q):
         else:
             pr = np.zeros((r.size, 4))
         qr, nr, qg, ng = pr.T
-        th, qvr, qcr, par_ = theta[r], qv[r], qc[r], pa[r]
+        th, qvr, qcr, qir, par_ = theta[r], qv[r], qc[r], qi[r], pa[r]
         if sw & MICRO:
             t = th * exner(par_)
             rho = air_density(th, par_)
@@ -655,7 +807,7 @@ def dla(g, par, starts, surface, base, base_z0, base_dz, precip, meso, grad, q):
                 q[Q["rho_g_5km"]] - q[Q["rho_g_sfc"]]
             ) * np.clip(zagl / 5000.0, 0.0, 1.0)
             rates = lfo_rates(
-                t, par_, rho, qvr, qcr, qr, nr, qg, ng, rhog, q[Q["rho0"]], sw
+                t, par_, rho, qvr, qcr, qr, nr, qg, ng, rhog, q[Q["rho0"]], sw, qir
             )
             d = tendencies(rates, th, par_, qvr, qcr, qr, qg, dt)
         else:
@@ -664,7 +816,7 @@ def dla(g, par, starts, surface, base, base_z0, base_dz, precip, meso, grad, q):
         fth = np.zeros(r.size)
         fqv = np.zeros(r.size)
         if sw & FLUX:
-            use = (zagl <= q[Q["z_bl"]]) & (qcr + qr + qg <= q[Q["q1"]])
+            use = (zagl <= q[Q["z_bl"]]) & (qcr + qir + qr + qg <= q[Q["q1"]])
             gth = np.zeros(r.size)
             gqv = np.zeros(r.size)
             if grad is not None:
@@ -691,8 +843,9 @@ def dla(g, par, starts, surface, base, base_z0, base_dz, precip, meso, grad, q):
             qvr = np.where(qvr < 0.0, 0.0, qvr)
             qcr = np.where(qcr < 0.0, 0.0, qcr)
             if sw & COND:
-                th, qvr, qcr, dth = adjust(th, qvr, qcr, ps)
+                th, qvr, qcr, qir, dth, dfz = cond(th, qvr, qcr, qir, ps)
                 bb[:, 0] += dth
+                bb[:, 4] += dfz
         bb[:, 1] += dt * d[3]
         bb[:, 2] += dt * d[4]
         bb[:, 3] += dt * d[5]
@@ -711,12 +864,13 @@ def dla(g, par, starts, surface, base, base_z0, base_dz, precip, meso, grad, q):
             th = np.where(use, th_new, th)
             qvr = np.where(use, qvb + (qvr - qvb) * f, qvr)
             qcr = np.where(use, qcr * f, qcr)
-        theta[r], qv[r], qc[r] = th, qvr, qcr
+            qir = np.where(use, qir * f, qir)
+        theta[r], qv[r], qc[r], qi[r] = th, qvr, qcr, qir
         b[r] = bb
         pa[r] = pb
-    out[idx] = np.column_stack([theta, qv, qc])
+    out[idx] = np.column_stack([theta, qv, qc, qi])
     bud[idx] = b
-    return out, bud, org, npts, flags
+    return out, bud, org, npts, flags, init
 
 
 def rates(theta, p, qv, qc, qr, nr, qg, ng, rhog, rho0, switches, dt):
@@ -736,3 +890,16 @@ def rates(theta, p, qv, qc, qr, nr, qg, ng, rhog, rho0, switches, dt):
         dt,
     )
     return r, np.column_stack(d[:3])
+
+
+def adjust_states(theta, p, qv, qc, qi, t00, ice):
+    """Saturation adjustment of 1-D states as the kernel's adjust: (n, 4)
+    theta, q_v, q_c, q_i and (n, 2) heating of the adjustment and of the
+    freezing or melting of cloud condensate."""
+    theta, p, qv, qc, qi = (np.asarray(a, float) for a in (theta, p, qv, qc, qi))
+    if ice:
+        th, v, c, x, d1, d2 = adjust_ice(theta, qv, qc, qi, p, t00)
+    else:
+        th, v, c, d1 = adjust(theta, qv, qc, p)
+        x, d2 = qi, np.zeros_like(theta)
+    return np.column_stack([th, v, c, x]), np.column_stack([d1, d2])
