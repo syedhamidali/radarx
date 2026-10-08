@@ -57,6 +57,7 @@ notebooks/DSD_Retrieval
 notebooks/Disdrometers
 notebooks/QVP
 notebooks/Evaporation
+notebooks/Bayesian_DSD
 ```
 
 ```{toctree}
@@ -65,6 +66,15 @@ notebooks/Evaporation
 
 notebooks/Soundings_and_ERA5
 notebooks/Diabatic_Lagrangian
+notebooks/Cold_Pools_and_Wind_Profiles
+```
+
+```{toctree}
+:maxdepth: 2
+:caption: Convective hazards
+
+notebooks/Lightning
+notebooks/Tornado_Detection
 ```
 
 ```{toctree}
