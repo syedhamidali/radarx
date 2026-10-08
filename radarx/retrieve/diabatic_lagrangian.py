@@ -1652,7 +1652,7 @@ def _run_kernel(
     table, bz0, bdz = table
     xyz = (prep["x"], prep["y"], prep["z"])
     moving = (prep["cx"], prep["cy"], prep["eb"], prep["ea"])
-    if use_compiled:
+    if use_compiled:  # pragma: no cover - depends on the build
         dummy4 = np.zeros((1, 2, 2, 2, 4), np.float32)
         dummy2 = np.zeros((1, 2, 2, 2, 2), np.float32)
         return _traj._lagrangian.dla(

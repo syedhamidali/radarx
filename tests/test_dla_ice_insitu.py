@@ -165,6 +165,12 @@ def test_tao_adjustment_partition_and_limits(engine):
     th1, qv1, _, _, _, _ = _tao_step(th, p, 1e-4, 0.0, 1e-3)
     dep = (273.15 - 263.15) / (273.15 - t00)
     np.testing.assert_allclose(st[0, 3] - 1e-3, (qv1 - 1e-4) * -dep, rtol=1e-10)
+    # without ice: water saturation (Bolton), cloud ice untouched
+    st, ht = _adjust(engine, th, p, 3e-3, 0.0, 1e-4, ice=False)
+    assert st[0, 3] == 1e-4 and ht[0, 1] == 0.0 and st[0, 2] > 0
+    t1 = st[0, 0] * pi
+    es = 611.2 * math.exp(17.67 * (t1 - 273.15) / (t1 - 273.15 + 243.5))
+    np.testing.assert_allclose(st[0, 1], 287.04 / 461.5 * es / (p - es), rtol=1e-6)
     # T00 = -25 degC: ice only below
     th = 243.15 / pi
     st, _ = _adjust(engine, th, p, 2e-3, 0.0, 0.0, t00=248.15)
@@ -288,6 +294,40 @@ def test_ice_in_the_dla_engines_agree_with_precipitation():
     for k in ("theta", "qv", "qc", "qi", "dtheta_freezing", "dtheta_condensation"):
         np.testing.assert_allclose(a[k].values, b[k].values, rtol=1e-9, atol=1e-12)
     assert float(a.qi.max()) > 0
+
+
+def test_ice_with_mesoscale_surface_flux_by_hand():
+    """NumPy path of the surface flux from the mesoscale gradient with ice:
+    dtheta/dt = exp(-b_F z) u dtheta/dx along a dry surface parcel."""
+    ds = _winds(u=6.0, dbz=45.0, nt=2, step=1800.0)
+    snd = _sounding(dry=True)
+    base = dl._base_state(snd, ds.z.values, 0.0)[3]
+    zz, yy, xx = np.meshgrid(ds.z, ds.y, ds.x, indexing="ij")
+    meso = xr.Dataset(
+        {
+            "theta": (("z", "y", "x"), base.theta.values[:, None, None] + 1e-4 * xx),
+            "qv": (("z", "y", "x"), base.qv.values[:, None, None] + 0.0 * xx),
+        },
+        coords={"z": ds.z, "y": ds.y, "x": ds.x},
+    )
+    out = diabatic_lagrangian(
+        ds,
+        snd,
+        precipitation="none",
+        processes={**DRY, "surface_flux": True},
+        mesoscale=meso,
+        ice=True,
+        engine="numpy",
+        filter_passes=0,
+        hole_fill=False,
+        levels=[0],
+    ).isel(z=0)
+    ok = out.environment.values & (out.n_steps.values > 0)
+    expect = out.n_steps.values * 20.0 * math.exp(-3.0 * 10.0 / 1000.0) * 6.0 * 1e-4
+    np.testing.assert_allclose(
+        out.dtheta_surface_flux.values[ok], expect[ok], rtol=1e-6
+    )
+    assert float(abs(out.qi).max()) == 0.0
 
 
 def test_ice_errors():
