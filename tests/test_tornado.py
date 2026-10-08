@@ -4,6 +4,7 @@
 
 """Tests for TorNet / MistNet ONNX conversion, tornado detection and MistNet."""
 
+import hashlib
 import io
 import json
 import zipfile
@@ -20,6 +21,7 @@ from radarx.retrieve import (
     tornet_inputs,
 )
 from radarx.retrieve import biology as bio_mod
+from radarx.retrieve import tornado as tor_mod
 
 onnx = pytest.importorskip("onnx")
 ort = pytest.importorskip("onnxruntime")
@@ -746,3 +748,50 @@ def test_real_nexrad_inputs_and_couplets():
     assert float(np.nanmin(inp.DBZ)) > -32.0
     out = rotation_couplets(dtree["sweep_1"].to_dataset(inherit="all_coords"))
     assert "couplet" in out.dims
+
+
+def test_cache_dir_default(monkeypatch):
+    monkeypatch.delenv("RADARX_CACHE_DIR", raising=False)
+    assert _onnx_models.cache_dir().name == "models"
+    monkeypatch.setenv("RADARX_CACHE_DIR", "/somewhere")
+    assert str(_onnx_models.cache_dir()) == "/somewhere/models"
+
+
+def test_torchscript_rejects_other_tensor_types(tmp_path):
+    path = tmp_path / "tiny.pt"
+    write_torchscript(path, tiny_mistnet_params(np.random.default_rng(3)))
+    with zipfile.ZipFile(path) as zf:
+        members = {n: zf.read(n) for n in zf.namelist()}
+    meta = json.loads(members["m/model.json"])
+    meta["tensors"][0]["dataType"] = "DOUBLE"
+    members["m/model.json"] = json.dumps(meta).encode()
+    with zipfile.ZipFile(path, "w") as zf:
+        for n, b in members.items():
+            zf.writestr(n, b)
+    with pytest.raises(ValueError, match="unexpected tensor type"):
+        _onnx_models.read_mistnet_torchscript(path)
+
+
+def test_render_skips_missing_fields():
+    ds = sweep(0.5, ["DBZH"], n_az=360, n_rng=100)
+    out = bio_mod._render(ds, ("DBZH", None, "ZDR"), 16, 1000.0)
+    assert out.shape == (3, 16, 16)
+    assert np.isnan(out[1:]).all()
+
+
+def test_sha256(tmp_path):
+    path = tmp_path / "blob"
+    path.write_bytes(b"radarx")
+    assert _onnx_models.sha256(path) == hashlib.sha256(b"radarx").hexdigest()
+
+
+def test_sweep_helpers_fallbacks():
+    tree = xr.DataTree.from_dict(
+        {"/": xr.Dataset(), "sweep_0": xr.Dataset(), "other": xr.Dataset()}
+    )
+    assert [n for n, _ in tor_mod._sweeps(tree)] == ["sweep_0"]
+    ds = xr.Dataset(coords={"elevation": ("azimuth", np.full(4, 1.5))})
+    assert tor_mod._fixed_angle(ds) == 1.5
+    vel = xr.Dataset({"VRADH": ((), 0.0, {"nyquist_velocity": 27.0})})
+    assert tor_mod._nyquist(vel, "VRADH", None, 0.5) == 27.0
+    assert tor_mod._nyquist(xr.Dataset({"VRADH": 0.0}), "VRADH", None, 0.5) is None

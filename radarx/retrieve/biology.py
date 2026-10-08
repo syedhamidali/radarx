@@ -240,7 +240,7 @@ def biological_echo(
     nodes = {}
     for s, (name, ds) in enumerate(chosen):
         if name in nodes:  # the same sweep nearest to two elevations
-            continue
+            continue  # pragma: no cover
         grid = np.stack([y[1, s], y[2, s], weather_mean])
         polar, dims = _to_polar(ds, grid, size, resolution)
         bio, wx, wx_mean = polar

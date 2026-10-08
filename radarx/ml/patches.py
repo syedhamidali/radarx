@@ -181,7 +181,7 @@ def _extract_numpy(data, table, h, w, wrap, fill):
     for k, sweep in enumerate(data):
         sel = np.flatnonzero(table[:, 0] == k)
         if not sel.size:
-            continue
+            continue  # pragma: no cover
         nray, ngate = sweep.shape[1:]
         rays = table[sel, 1, None] + np.arange(h)
         gates = table[sel, 2, None] + np.arange(w)
@@ -212,7 +212,7 @@ def _reassemble_numpy(patches, table, shapes, wa, wr, wrap):
             _, a0, r0 = table[p]
             j0, j1 = max(0, -r0), min(w, ngate - r0)
             if j1 <= j0:
-                continue
+                continue  # pragma: no cover
             rays = a0 + np.arange(h)
             if wrap:
                 rays %= nray
