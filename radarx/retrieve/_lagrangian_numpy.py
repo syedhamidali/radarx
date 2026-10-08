@@ -21,6 +21,8 @@ BOUNDARY = 4
 END_OF_DATA = 8
 MAX_STEPS = 16
 MISSING = 32
+VALID_FRACTION = 64  # (DLA, set in Python) too little time in valid winds
+BOUNDARY_STORM = 128  # left through a lateral boundary that is not environment
 NW = 6  # wind pack: u, v, w, Z_H, valid, environment mask
 ENVIRONMENT = ENV_DBZ | ENV_W | BOUNDARY
 
@@ -176,6 +178,72 @@ def sample(g, xp, yp, zp, tp, check_nan=True):
     return out, status
 
 
+WEST, EAST, SOUTH, NORTH = 1, 2, 4, 8
+
+
+def sides_of(g, xp, yp):
+    """Sides (bit mask) of the domain beyond which the points lie."""
+    return (
+        np.where(xp < g.x[0], WEST, 0)
+        | np.where(xp > g.x[-1], EAST, 0)
+        | np.where(yp < g.y[0], SOUTH, 0)
+        | np.where(yp > g.y[-1], NORTH, 0)
+    ).astype(np.int32)
+
+
+def exit_sides(g, xp, yp, tp):
+    """Sides of the fixed grid, else of the analysis moving with the storm,
+    beyond which the points lie (as the kernel's exit_sides)."""
+    xp, yp, tp = (np.asarray(a, float) for a in (xp, yp, tp))
+    s = sides_of(g, xp, yp)
+    n = xp.size
+    lev0 = np.zeros(n, np.int64)
+    lev1 = np.zeros(n, np.int64)
+    wt1 = np.zeros(n)
+    after = tp > g.t[-1]
+    lev0[after] = g.t.size - 1
+    inside = (tp >= g.t[0]) & ~after
+    if g.t.size > 1:
+        i = _bracket(g.t, tp)
+        a = (tp - g.t[i]) / (g.t[i + 1] - g.t[i])
+        lev0 = np.where(inside, i, lev0)
+        lev1 = np.where(inside, i + 1, lev1)
+        wt1 = np.where(inside, a, wt1)
+    wt0 = np.where(inside, 1.0 - wt1, 1.0)
+    for lev, wt in ((lev0, wt0), (lev1, wt1)):
+        dtl = tp - g.t[lev]
+        sl = sides_of(g, xp - g.cx * dtl, yp - g.cy * dtl)
+        s = np.where((s == 0) & (wt > 0.0), sl, s)
+    return s
+
+
+def boundary_flag(par, sides, vlast):
+    """BOUNDARY or BOUNDARY_STORM for exits through ``sides`` (as the kernel)."""
+    mode, rule, allowed = int(par[4]), int(par[12]), int(par[13])
+    sides = np.asarray(sides, np.int32)
+    env = np.ones(sides.shape, bool)
+    if mode != 0:
+        if rule == 1:
+            env = vlast[:, 5] >= 0.5
+        elif rule == 2:
+            env = (vlast[:, 3] < par[6]) | (vlast[:, 5] >= 0.5)
+        elif rule == 3:
+            env = (sides & allowed) != 0
+    return np.where(env, BOUNDARY, BOUNDARY_STORM).astype(np.int32)
+
+
+def _classify(g, par, st, xp, yp, tp, vlast):
+    """Sample status with BOUNDARY (left the analysis moving with the storm)
+    classified by :func:`boundary_flag`."""
+    f = np.array(st, np.int32, copy=True)
+    bnd = f == BOUNDARY
+    if bnd.any():
+        f[bnd] = boundary_flag(
+            par, exit_sides(g, xp[bnd], yp[bnd], tp[bnd]), vlast[bnd]
+        )
+    return f
+
+
 def build_paths(g, par, starts):
     """Paths of all start points: pos (n, m, 4), val (n, m, 6), npts, flags."""
     dt, n_iter, max_steps = par[0], int(par[1]), int(par[2])
@@ -223,13 +291,16 @@ def build_paths(g, par, starts):
         zs = np.clip(zn[a] + h * vn[a, 2], zlo, zhi)
         ok = np.ones(a.size, bool)
         bad = outside(xs, ys)
-        flags[a[bad]] |= BOUNDARY
+        flags[a[bad]] |= boundary_flag(par, sides_of(g, xs[bad], ys[bad]), vn[a[bad]])
         ok &= ~bad
         v1 = np.zeros((a.size, NW))
+
         for _ in range(n_iter):
             r = np.flatnonzero(ok)
             vv, st = sample(g, xs[r], ys[r], zs[r], t1[r])
-            flags[a[r[st != 0]]] |= st[st != 0]
+            flags[a[r[st != 0]]] |= _classify(
+                g, par, st, xs[r], ys[r], t1[r], vn[a[r]]
+            )[st != 0]
             ok[r[st != 0]] = False
             r = r[st == 0]
             v1[r] = vv[st == 0]
@@ -237,11 +308,14 @@ def build_paths(g, par, starts):
             ys[r] = yn[a[r]] + 0.5 * h * (vn[a[r], 1] + v1[r, 1])
             zs[r] = np.clip(zn[a[r]] + 0.5 * h * (vn[a[r], 2] + v1[r, 2]), zlo, zhi)
             bad = outside(xs[r], ys[r])
-            flags[a[r[bad]]] |= BOUNDARY
-            ok[r[bad]] = False
+            rb = r[bad]
+            flags[a[rb]] |= boundary_flag(par, sides_of(g, xs[rb], ys[rb]), vn[a[rb]])
+            ok[rb] = False
         r = np.flatnonzero(ok)
         vv, st = sample(g, xs[r], ys[r], zs[r], t1[r])
-        flags[a[r[st != 0]]] |= st[st != 0]
+        flags[a[r[st != 0]]] |= _classify(g, par, st, xs[r], ys[r], t1[r], vn[a[r]])[
+            st != 0
+        ]
         ok[r[st != 0]] = False
         r = r[st == 0]
         v1[r] = vv[st == 0]

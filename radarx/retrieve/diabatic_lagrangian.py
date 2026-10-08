@@ -144,8 +144,10 @@ interpolated to the parcels like the winds:
 - ``"ziegler2013"`` (:func:`ziegler2013_precipitation`): the reflectivity-only
   closure of Ziegler (2013a, eqs. 9-21). Its regression profiles
   :math:`Z_{0r}(z^*)`, :math:`Z_{0g}(z^*)`, :math:`S_0(z^*)` were derived from
-  a simulated storm and are **not tabulated** in the paper; they must be
-  supplied (``profiles=``);
+  a simulated supercell and are **not tabulated** in the paper. radarx ships
+  the same regressions fitted to a simulated squall line
+  (:func:`ziegler2013_profiles`), used by default with a warning; pass your
+  own with ``profiles=``;
 - any callable ``f(winds, base) -> Dataset`` returning ``qr``, ``nr``,
   ``qg``, ``ng`` on the winds grid, or such a Dataset itself.
 
@@ -193,11 +195,81 @@ and multi-Doppler winds of limited coverage need some care:
   (``environment_mask``) or above the cold-pool depth (``cold_pool_depth``);
   set ``min_steps`` to 0 with it, and a maximum duration with ``max_steps``.
   Longer trajectories are more sensitive to errors of :math:`w`.
+- *Time morphing.* The air of a mature squall-line cold pool is often older
+  than the wind series. Without more winds the "precipitation" termination
+  then leaves most surface trajectories inside the cold pool when the data run
+  out (flag 8 or 16, not environmental). ``extend_before`` reuses the first
+  analysis, moved with ``storm_motion``, before the series (Ziegler 2013b,
+  sect. 2c and Fig. 1; a storm steady in its own frame).
+- *Lateral boundaries.* By default every exit through a lateral boundary
+  counts as environment (Ziegler 2013a, sect. 2a). Where an edge of the
+  analysis cuts through the storm (e.g. the rear of a trailing cold pool),
+  restrict it with ``boundary``: a list of the sides that lie in the
+  environment (e.g. ``["east", "north", "south"]`` for a line moving east),
+  ``"environment_mask"`` or ``"no_echo"``. The other exits get flag 128, are
+  not environmental and are hole-filled.
 - *Melting layer.* The polarimetric closure blends rain and graupel through a
   melting layer of finite depth (default 1 km about the 0 degC level, or the
   wet-snow band of the HID), so latent cooling is continuous in height.
-- *Storm motion.* Use the motion of the convective cells (the motion with which
-  the analyses were advected to their times) for ``storm_motion``.
+- *Storm motion.* Use the motion with which the analyses were advected to
+  their times (``storm_motion``). ``storm_motion="estimate"`` takes the median
+  of :func:`radarx.retrieve.estimate_motion` between consecutive analyses;
+  it tracks echoes, and the cells of a squall line can move along and across
+  the line differently from the line itself, so check it against the motion
+  of the gust front. The motion must be in the frame of the analysis
+  coordinates: for a model domain that translates with the storm it is the
+  domain motion, not the echo motion within the domain.
+- *Ice processes.* The DLA follows Ziegler (2013a) and has no deposition or
+  freezing of cloud water in updrafts. Cloudy updraft air above the melting
+  level stays saturated with respect to water and misses the latent heat of
+  freezing and of deposition onto ice, so it comes out too cold aloft.
+
+Recommended squall-line configuration (Ziegler's defaults are unchanged)::
+
+    diabatic_lagrangian(
+        winds, sounding,
+        termination="precipitation", parameters={"min_steps": 0},
+        environment_mask="ahead",          # True ahead of the gust front
+        storm_motion=(cx, cy), extend_before=7200.0,
+        boundary=["east", "north", "south"],  # edges in the environment
+    )
+
+*Evidence from an observing-system simulation experiment.* The DLA was given
+the perfect winds and reflectivity (every 2 min for 100 min, 1-km grid) of a
+CM1 (release 21.1; Bryan and Fritsch 2002) squall line with GSR-LFO
+three-ice microphysics, the inflow sounding and the Ziegler closure with
+profiles fitted to the same simulation (:func:`ziegler2013_profiles`), and
+was scored against the model at the analysis time (surface cold pool: 0-60 km
+behind the gust front where the truth :math:`\\Delta\\theta_v < -1` K, mean
+over the points whose trajectory reached the environment):
+
+==============================================  =====  =========  =======
+configuration                                   valid  truth (K)  DLA (K)
+==============================================  =====  =========  =======
+``termination="ziegler2013"``                   100 %  -5.38      -1.17
+``"precipitation"``                             1 %    -5.30      -0.00
+``"precipitation"``, ``extend_before=7200``     61 %   -5.47      -4.47
+==============================================  =====  =========  =======
+
+Ziegler's test ends all surface cold-pool trajectories after 77 steps
+(25.7 min), about 50 m above the ground inside the cold pool, so they start
+with inflow values; the "precipitation" test alone leaves 98 % of them in the
+cold pool when the data run out; with two hours of time morphing they reach
+the inflow and the DLA recovers about 80 % of the cold pool (in the whole
+hole-filled surface cold pool -4.28 K against -5.38 K; storm-volume
+:math:`\\theta_v` RMSE 2.27 K, bias -0.80 K). With radar-like winds (3-min
+cadence, 1-km smoothing, 1.5 m s\\ :sup:`-1` noise, no data below 250 m,
+:math:`w` from mass continuity) the same configuration gives -4.53 K against
+-5.55 K. In that domain 8 % of the trajectories leave through its rear (west)
+edge, inside the cold pool; ``boundary=["east", "north", "south"]`` flags them
+(128) and the environmental points are then exactly those of a manual
+exclusion of rear exits, with the same scores (-4.47 K, RMSE 2.27 K); the
+hole-filled fields change by less than 0.05 K. ``"no_echo"`` flags only the
+2.8 % of exits in echo. The missing ice processes show up as a spurious cold
+anomaly above the line: line-averaged :math:`\\Delta\\theta_v` at 5-7 km,
+0-30 km behind the gust front, is -2.2 K in the DLA (minimum -4.7 K) against
+-0.1 K (minimum -0.7 K) in the truth, independent of the termination,
+boundary and time-morphing options.
 
 Computation
 -----------
@@ -212,6 +284,10 @@ References
 Bolton, D., 1980: The computation of equivalent potential temperature.
 *Mon. Wea. Rev.*, **108** (7), 1046-1053,
 https://doi.org/10.1175/1520-0493(1980)108<1046:TCOEPT>2.0.CO;2
+
+Bryan, G. H., and J. M. Fritsch, 2002: A benchmark simulation for moist
+nonhydrostatic numerical models. *Mon. Wea. Rev.*, **130** (12), 2917-2928,
+https://doi.org/10.1175/1520-0493(2002)130<2917:ABSFMN>2.0.CO;2
 
 Ferrier, B. S., 1994: A double-moment multiple-phase four-class bulk ice
 scheme. Part I: Description. *J. Atmos. Sci.*, **51** (2), 249-280,
@@ -261,6 +337,7 @@ https://doi.org/10.1175/JTECH-D-13-00036.1
    diabatic_lagrangian
    polarimetric_precipitation
    ziegler2013_precipitation
+   ziegler2013_profiles
    microphysical_rates
 """
 
@@ -268,11 +345,13 @@ __all__ = [
     "diabatic_lagrangian",
     "polarimetric_precipitation",
     "ziegler2013_precipitation",
+    "ziegler2013_profiles",
     "microphysical_rates",
 ]
 
 import math
 import warnings
+from pathlib import Path
 
 import numpy as np
 import xarray as xr
@@ -760,6 +839,87 @@ def polarimetric_precipitation(
     )
 
 
+_PROFILE_FILES = {
+    "cm1_squall_line": "ziegler2013_profiles_cm1_squall_line.csv",
+}
+_PROFILE_META = {
+    "Z0r": ("Z0r(z*) of Ziegler (2013a) eq. (9)", "dBZ"),
+    "S0_qr": ("[S0(z*)]_qr of Ziegler (2013a) eq. (9)", "dB"),
+    "Z0g": ("Z0g(z*) of Ziegler (2013a) eq. (11)", "dBZ"),
+    "S0_qg": ("[S0(z*)]_qg of Ziegler (2013a) eq. (11)", "dB"),
+    "S0_n0g": ("[S0(z*)]_n0g of Ziegler (2013a) eq. (10)", "m-4 dBZ-1"),
+}
+
+
+def ziegler2013_profiles(name="cm1_squall_line"):
+    """
+    Regression profiles of the Ziegler (2013a) closure shipped with radarx.
+
+    Ziegler (2013a, sect. 2d) fitted the profiles :math:`Z_{0r}(z^*)`,
+    :math:`S_{0,qr}(z^*)`, :math:`Z_{0g}(z^*)`, :math:`S_{0,qg}(z^*)` and
+    :math:`S_{0,n0g}(z^*)` of eqs. (9)-(11) to a simulated supercell but did
+    not publish them. ``"cm1_squall_line"`` are the same regressions fitted to
+    a CM1 (release 21.1; Bryan and Fritsch 2002) squall-line simulation with
+    the GSR-LFO single-moment three-ice microphysics (rain intercept
+    :math:`8 \\times 10^6` m\\ :sup:`-4`, graupel intercept
+    :math:`3.355 \\times 10^5` m\\ :sup:`-4`, graupel density 660 kg
+    m\\ :sup:`-3`): Levenberg-Marquardt fits per level at points with
+    :math:`w < 5` m s\\ :sup:`-1`, smoothed with a cubic smoothing spline and
+    tabulated every 100 m of :math:`z^* = z + (3.9\\ \\mathrm{km} -
+    H_{melt})`, with :math:`H_{melt}` = 3.48 km. The provenance is in the
+    header of the data file (``radarx/retrieve/data``) and in the attributes.
+    They describe a squall line, not Ziegler's supercell; the closure is most
+    consistent with them with ``constants={"n0r": 8e6}`` and
+    ``graupel_density=(660, 660)``.
+
+    Parameters
+    ----------
+    name : str, optional
+        Table name. Default (and only): ``"cm1_squall_line"``.
+
+    Returns
+    -------
+    xarray.Dataset
+        ``Z0r``, ``S0_qr``, ``Z0g``, ``S0_qg``, ``S0_n0g`` on ``z_star`` (m).
+
+    References
+    ----------
+    Bryan, G. H., and J. M. Fritsch, 2002: A benchmark simulation for moist
+    nonhydrostatic numerical models. *Mon. Wea. Rev.*, **130** (12),
+    2917-2928, https://doi.org/10.1175/1520-0493(2002)130<2917:ABSFMN>2.0.CO;2
+
+    Ziegler, C. L., 2013a, *J. Atmos. Oceanic Technol.*, **30**, 2248-2265,
+    https://doi.org/10.1175/JTECH-D-12-00194.1
+    """
+    if name not in _PROFILE_FILES:
+        raise ValueError(f"unknown profiles {name!r}; one of {sorted(_PROFILE_FILES)}")
+    path = Path(__file__).parent / "data" / _PROFILE_FILES[name]
+    lines = path.read_text().splitlines()
+    notes = [ln[1:].strip() for ln in lines if ln.startswith("#")]
+    rows = [ln for ln in lines if ln and not ln.startswith("#")]
+    cols = [c.strip() for c in rows[0].split(",")]
+    data = np.array([[float(v) for v in r.split(",")] for r in rows[1:]])
+    zstar = {
+        "long_name": "height above the ground with the melting level at 3.9 km",
+        "units": "m",
+    }
+    return xr.Dataset(
+        {
+            k: ("z_star", data[:, cols.index(k)], {"long_name": ln, "units": u})
+            for k, (ln, u) in _PROFILE_META.items()
+        },
+        coords={"z_star": ("z_star", data[:, cols.index("z_star")], zstar)},
+        attrs={
+            "title": notes[0],
+            "source": "CM1 r21.1 squall-line simulation (GSR-LFO microphysics)",
+            "history": " ".join(notes[1:]),
+            "h_melt_m": 3476.6,
+            "n0r_m-4": 8.0e6,
+            "graupel_density_kg_m-3": 660.0,
+        },
+    )
+
+
 def ziegler2013_precipitation(
     radar,
     base,
@@ -796,13 +956,15 @@ def ziegler2013_precipitation(
         Reflectivity (dBZ) and vertical velocity on ``(time, z, y, x)``.
     base : xarray.Dataset
         Base state as passed by :func:`diabatic_lagrangian`.
-    profiles : xarray.Dataset
+    profiles : xarray.Dataset or str, optional
         Regression profiles on a ``z_star`` coordinate (m above the ground in
         the scaled frame): ``Z0r``, ``Z0g`` (dBZ), ``S0_qr``, ``S0_qg``
-        (dB) and ``S0_n0g`` (m-4 dBZ-1). **Required**: Ziegler (2013a) fitted
-        them to a simulated storm and does not tabulate them (only
-        :math:`Z_{0g}` = 44.19 dBZ at 5 km is quoted). Values beyond the
-        profile take the nearest end.
+        (dB) and ``S0_n0g`` (m-4 dBZ-1), or the name of a table of
+        :func:`ziegler2013_profiles`. Ziegler (2013a) fitted them to a
+        simulated supercell and does not tabulate them (only
+        :math:`Z_{0g}` = 44.19 dBZ at 5 km is quoted). Default: the
+        ``"cm1_squall_line"`` tables, fitted to a simulated squall line, with
+        a warning. Values beyond the profile take the nearest end.
     w : str, optional
         Vertical velocity variable. Default ``"w"``.
     dbzh : str, optional
@@ -826,16 +988,19 @@ def ziegler2013_precipitation(
         ``qr``, ``qg`` (kg kg-1), ``nr``, ``ng`` (m-3).
     """
     need = ("Z0r", "Z0g", "S0_qr", "S0_qg", "S0_n0g")
-    if (
-        profiles is None
-        or not all(k in profiles for k in need)
-        or "z_star" not in profiles.coords
-    ):
+    if profiles is None or isinstance(profiles, str):
+        name = "cm1_squall_line" if profiles is None else profiles
+        profiles = ziegler2013_profiles(name)
+        warnings.warn(
+            "Ziegler (2013a) did not publish the regression profiles of eqs. 9-11; "
+            f"using the radarx {name!r} tables, fitted to a CM1 squall-line "
+            "simulation (not Ziegler's supercell). Pass profiles= to use your own.",
+            stacklevel=2,
+        )
+    if not all(k in profiles for k in need) or "z_star" not in profiles.coords:
         raise ValueError(
             "the Ziegler (2013a) closure needs the regression profiles Z0r, Z0g, S0_qr, "
-            "S0_qg and S0_n0g on a 'z_star' coordinate (profiles=); the paper does not "
-            "tabulate them (they were fitted to a simulated storm), so they must be "
-            "derived by the user, e.g. from a storm simulation"
+            "S0_qg and S0_n0g on a 'z_star' coordinate (profiles=)"
         )
     c = dict(ZIEGLER_CONSTANTS)
     if constants:
@@ -1209,6 +1374,8 @@ def diabatic_lagrangian(
     surface_flux=(0.0, 0.0),
     storm_motion=None,
     extend=0.0,
+    extend_before=None,
+    extend_after=None,
     dt=20.0,
     iterations=3,
     max_steps=None,
@@ -1220,6 +1387,7 @@ def diabatic_lagrangian(
     w="w",
     reflectivity="auto",
     termination=True,
+    boundary="environment",
     valid=None,
     environment_mask=None,
     min_valid_fraction=None,
@@ -1275,7 +1443,13 @@ def diabatic_lagrangian(
         Constant surface fluxes of :math:`\\theta` (K s-1) and :math:`q_v`
         (kg kg-1 s-1) added to the mesoscale advective flux of eq. (27).
         Default (0, 0).
-    storm_motion, extend, dt, iterations, max_steps : optional
+    storm_motion, extend, extend_before, extend_after : optional
+        Storm motion (a pair, an :func:`radarx.retrieve.estimate_motion`
+        result or ``"estimate"``) and time morphing (s) before the first and
+        after the last analysis (Ziegler 2013b, sect. 2c), see
+        :func:`radarx.retrieve.trajectories` and "Applying DLA to observed
+        QLCS cases" in the module documentation.
+    dt, iterations, max_steps : optional
         Trajectory options, see :func:`radarx.retrieve.trajectories`.
     levels : sequence of int, optional
         Grid levels to analyse. Default: all.
@@ -1289,6 +1463,11 @@ def diabatic_lagrangian(
     termination : {True, "ziegler2013", "precipitation"}, optional
         Environment test of the trajectories, see
         :func:`radarx.retrieve.trajectories`. Default: Ziegler (2013a).
+    boundary : str or sequence of str, optional
+        Which lateral-boundary exits count as environmental: ``"environment"``
+        (default, every exit, Ziegler 2013a), ``"environment_mask"``,
+        ``"no_echo"`` or a list of sides; other exits get flag 128 and are
+        hole-filled. See :func:`radarx.retrieve.trajectories`.
     valid, environment_mask : str or xarray.DataArray, optional
         Validity of the winds (e.g. ``"dd_valid"``) and the mask of
         environmental air for ``termination="precipitation"``, see
@@ -1340,11 +1519,13 @@ def diabatic_lagrangian(
         params=params,
         valid=valid,
         environment_mask=environment_mask,
+        extend_before=extend_before,
+        extend_after=extend_after,
     )
     if termination in (False, None):
         raise ValueError("the DLA needs a termination test of the trajectories")
     par = _traj._path_params(
-        prep, "backward", dt, iterations, max_steps, termination, params
+        prep, "backward", dt, iterations, max_steps, termination, params, boundary
     )
     ground = float(prep["z"][0])
     table, bz0, bdz, base = _base_state(sounding, prep["z"], ground)
@@ -1501,7 +1682,7 @@ def diabatic_lagrangian(
             flags.astype(np.int32),
             {
                 "long_name": "trajectory termination flags",
-                "flag_masks": np.array([1, 2, 4, 8, 16, 32, 64], np.int32),
+                "flag_masks": _traj.FLAG_MASKS,
                 "flag_meanings": _traj.FLAG_MEANINGS,
             },
         ),
@@ -1600,6 +1781,8 @@ def diabatic_lagrangian(
         "microphysics": "Lin et al. (1983) rates; see radarx.retrieve.diabatic_lagrangian",
         "processes": ", ".join(k for k in PROCESSES if on[k]),
         "storm_motion": (prep["cx"], prep["cy"]),
+        "extend": (prep["eb"], prep["ea"]),
+        "boundary": str(boundary),
         "dt": float(dt),
         "melting_level": base.attrs["melting_level"],
         "ground_height": ground,

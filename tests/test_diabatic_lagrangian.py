@@ -663,8 +663,8 @@ def _profiles():
 def test_ziegler_closure():
     ds = _winds(w=lambda t, x, y, z: -2.0 + 3e-3 * x, dbz=50.0)
     base = _base(ds)
-    with pytest.raises(ValueError, match="does not\\s+tabulate"):
-        ziegler2013_precipitation(ds, base)
+    with pytest.raises(ValueError, match="profiles"):
+        ziegler2013_precipitation(ds, base, profiles=_profiles().drop_vars("Z0r"))
     with pytest.raises(ValueError, match="unknown constants"):
         ziegler2013_precipitation(ds, base, profiles=_profiles(), constants={"x": 1})
     pr = ziegler2013_precipitation(ds, base, profiles=_profiles())

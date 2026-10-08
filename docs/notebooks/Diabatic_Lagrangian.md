@@ -155,6 +155,43 @@ print(
 )
 ```
 
+## Squall lines: time morphing and the boundary rule
+
+Ziegler's termination test ends surface trajectories in a long-lived cold
+pool after about 26 min, still inside the outflow. For squall lines radarx
+offers the "precipitation" termination (outside echo and ahead of the gust
+front, here the `ahead` mask, or above the cold pool), time morphing before
+the first analysis (`extend_before`, Ziegler 2013b) so that air older than the
+wind series can reach the inflow, a storm motion estimated from the
+reflectivity, and a stricter lateral-boundary rule (`boundary`): exits
+through edges inside the storm get flag 128 and are not environmental. In a
+simulated squall line these options raised the recovered surface cold pool
+from about 25 % to about 80 % of the truth (see
+`radarx.retrieve.diabatic_lagrangian`, "Applying DLA to observed QLCS
+cases").
+
+```{code-cell} ipython3
+winds["ahead"] = (dims, xs > 12e3)  # ahead of the gust front
+qlcs = dict(
+    storm_motion="estimate",
+    termination="precipitation",
+    environment_mask="ahead",
+    parameters={"min_steps": 0, "env_dbz": 15.0},
+    levels=[0],
+)
+for label, extra in [
+    ("winds only", {}),
+    ("+ 45 min of time morphing", {"extend_before": 2700.0}),
+    ("+ boundary exits only outside echo", {"extend_before": 2700.0, "boundary": "no_echo"}),
+]:
+    tr = trajectories(winds, **qlcs, **extra)
+    print(
+        f"{label:38s} environment {float(tr.environment.mean()):4.0%}, "
+        f"flag 128 {float(((tr.flags & 128) > 0).mean()):4.0%}"
+    )
+print("estimated storm motion (m/s): {:.1f}, {:.1f}".format(*tr.attrs["storm_motion"]))
+```
+
 ## References
 
 - Ziegler, C. L., 2013a: A diabatic Lagrangian technique for the analysis of

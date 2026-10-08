@@ -40,10 +40,13 @@ value of analysis :math:`i` at :math:`(x, y)` is read at
 interpolation (Ziegler 2013a, sect. 2b). This is the advection of the grid
 coordinates in a time-to-space sense described by Ziegler, evaluated directly
 at the parcel (one interpolation instead of a bilinear re-gridding followed by
-the trilinear interpolation). With ``extend`` the first and last analyses are
-also moved with the storm, unchanged, before the first and after the last
-analysis time (the time morphing of Ziegler 2013b, sect. 2c, which assumes a
-storm steady in its own frame).
+the trilinear interpolation). With ``extend_before`` / ``extend_after`` (or
+``extend``) the first and last analyses are also moved with the storm,
+unchanged, before the first and after the last analysis time (the time
+morphing of Ziegler 2013b, sect. 2c and Fig. 1, which assumes a storm steady
+in its own frame). ``storm_motion="estimate"`` takes the motion from the
+reflectivity of the first and last analyses with
+:func:`radarx.retrieve.estimate_motion`.
 
 Surface parcels
 ---------------
@@ -81,9 +84,23 @@ inside the outflow.
 below ``env_dbz`` for ``env_dbz_steps`` consecutive steps (after
 ``min_steps``), *and* either at least ``cold_pool_depth`` above the ground or
 where ``environment_mask`` is true (for example the air ahead of the gust
-front); lateral boundaries still count as environment. Trajectories that
-never meet the test stop at ``max_steps`` (the maximum backward duration) or
-at the start of the data and are not environmental.
+front). Trajectories that never meet the test stop at ``max_steps`` (the
+maximum backward duration) or at the start of the data and are not
+environmental. Air in a long-lived squall-line cold pool is often older than
+the wind series; time morphing before the first analysis
+(``extend_before``) lets it be traced back to the inflow.
+
+Lateral boundaries
+------------------
+By default a parcel that leaves the analysed domain through a lateral
+boundary has reached the environment (test iii). Where the domain edge lies
+inside the storm (e.g. the rear edge of an analysis that cuts through a
+trailing cold pool) this gives such parcels environmental values.
+``boundary`` restricts the rule: to exits where ``environment_mask`` is true
+(``"environment_mask"``), where the boundary point is outside precipitation
+or in the mask (``"no_echo"``), or to a list of sides (e.g. ``["east",
+"north", "south"]``). Other exits end the trajectory with flag 128; they are
+not environmental (the DLA hole-fills them).
 
 The tests are applied to backward trajectories only. A trajectory also stops
 at the end of the wind time series, after ``max_steps`` steps, and at a
@@ -99,6 +116,8 @@ bit    meaning
 16     reached ``max_steps``
 32     missing (NaN) wind at the parcel
 64     (diabatic Lagrangian analysis) too little time in valid winds
+128    left through a lateral boundary that does not count as environment
+       (``boundary``)
 =====  ====================================================================
 
 Missing reflectivity is treated as no echo (``dbz_floor``). Missing winds stop
@@ -180,8 +199,14 @@ _REFLECTIVITY = ("DBZ", "DBZH", "reflectivity", "corrected_reflectivity", "dbz")
 
 FLAG_MEANINGS = (
     "environment_reflectivity environment_weak_vertical_velocity lateral_boundary "
-    "end_of_data max_steps missing_wind outside_valid_winds"
+    "end_of_data max_steps missing_wind outside_valid_winds "
+    "lateral_boundary_not_environment"
 )
+FLAG_MASKS = np.array([1, 2, 4, 8, 16, 32, 64, 128], np.int32)
+
+#: Rules for lateral-boundary exits of backward trajectories (``boundary=``).
+BOUNDARY_RULES = {"environment": 0, "environment_mask": 1, "no_echo": 2}
+_SIDES = {"west": 1, "east": 2, "south": 4, "north": 8}
 
 
 def _use_compiled(engine):
@@ -264,6 +289,8 @@ def _prepare(
     params,
     valid=None,
     environment_mask=None,
+    extend_before=None,
+    extend_after=None,
 ):
     """Winds as packed float32 (nt, nz, ny, nx, 6) plus coordinates."""
     if not isinstance(winds, xr.Dataset):
@@ -327,17 +354,23 @@ def _prepare(
             params["z0_dbz"],
             params["zddc_dbz"],
         )
-    cx, cy = (
-        (0.0, 0.0)
-        if storm_motion is None
-        else (float(storm_motion[0]), float(storm_motion[1]))
-    )
+    cx, cy = _storm_motion(storm_motion, ds, zname)
     if np.ndim(extend) == 0:
         eb = ea = float(extend)
     else:
         eb, ea = (float(e) for e in extend)
+    if extend_before is not None:
+        eb = float(extend_before)
+    if extend_after is not None:
+        ea = float(extend_after)
     if eb < 0 or ea < 0:
-        raise ValueError("extend must be >= 0")
+        raise ValueError("extend, extend_before and extend_after must be >= 0")
+    if (eb > 0 or ea > 0) and storm_motion is None and t.size > 1:
+        warnings.warn(
+            "time morphing (extend) without storm_motion holds the first and last "
+            "analyses fixed; pass the storm motion (or 'estimate')",
+            stacklevel=3,
+        )
     if t.size == 1 and eb == 0 and ea == 0 and storm_motion is None:
         raise ValueError(
             "a single wind analysis needs storm_motion and extend (time morphing)"
@@ -358,7 +391,84 @@ def _prepare(
     }
 
 
-def _path_params(prep, direction, dt, iterations, max_steps, termination, params):
+def _storm_motion(storm_motion, ds, zname):
+    """(c_x, c_y) from a pair, an estimate_motion Dataset or "estimate"."""
+    if storm_motion is None:
+        return 0.0, 0.0
+    if isinstance(storm_motion, str):
+        if storm_motion != "estimate":
+            raise ValueError(
+                f"storm_motion must be (c_x, c_y), a Dataset or 'estimate', not {storm_motion!r}"
+            )
+        if zname is None or ds.sizes["time"] < 2:
+            raise ValueError(
+                "storm_motion='estimate' needs reflectivity at two or more wind times"
+            )
+        from .advection import estimate_motion
+
+        # median of the motions between consecutive analyses (robust to echoes
+        # entering or leaving the domain and to storm evolution)
+        refl = ds[[zname]]
+        for c in ("x", "y"):
+            # coordinates stored in float32 are evenly spaced only to rounding
+            a = np.asarray(refl[c].values, np.float64)
+            even = np.linspace(a[0], a[-1], a.size)
+            if np.allclose(a, even, rtol=0.0, atol=1e-4 * abs(a[1] - a[0])):
+                refl = refl.assign_coords({c: even})
+        uv = []
+        for i in range(ds.sizes["time"] - 1):
+            m = estimate_motion(refl.isel(time=i), refl.isel(time=i + 1), field=zname)
+            uv.append((float(m["u"]), float(m["v"])))
+        uv = np.array(uv)
+        uv = uv[np.isfinite(uv).all(axis=1)]
+        storm_motion = (
+            (np.nan, np.nan) if uv.size == 0 else tuple(np.median(uv, axis=0))
+        )
+    if isinstance(storm_motion, xr.Dataset):
+        if "u" not in storm_motion or "v" not in storm_motion:
+            raise ValueError("a storm_motion Dataset needs 'u' and 'v'")
+        if storm_motion["u"].ndim or storm_motion["v"].ndim:
+            raise ValueError("storm_motion must be a single (domain-wide) motion")
+        storm_motion = (float(storm_motion["u"]), float(storm_motion["v"]))
+    cx, cy = (float(storm_motion[0]), float(storm_motion[1]))
+    if not (np.isfinite(cx) and np.isfinite(cy)):
+        raise ValueError(
+            "the storm motion is not finite (e.g. the estimate found no correlation)"
+        )
+    return cx, cy
+
+
+def _boundary_rule(boundary):
+    """(rule, sides) of the lateral-boundary option."""
+    if isinstance(boundary, str):
+        if boundary in BOUNDARY_RULES:
+            return BOUNDARY_RULES[boundary], 0
+        boundary = [boundary]
+    try:
+        sides = [str(b).lower() for b in boundary]
+    except TypeError:
+        sides = [None]
+    if not sides or any(b not in _SIDES for b in sides):
+        raise ValueError(
+            f"boundary must be one of {sorted(BOUNDARY_RULES)} or a sequence of the "
+            f"sides {sorted(_SIDES)}, not {boundary!r}"
+        )
+    bits = 0
+    for b in sides:
+        bits |= _SIDES[b]
+    return 3, bits
+
+
+def _path_params(
+    prep,
+    direction,
+    dt,
+    iterations,
+    max_steps,
+    termination,
+    params,
+    boundary="environment",
+):
     if direction not in ("backward", "forward"):
         raise ValueError("direction must be 'backward' or 'forward'")
     if not dt > 0:
@@ -381,6 +491,7 @@ def _path_params(prep, direction, dt, iterations, max_steps, termination, params
             f"termination must be True, False, 'ziegler2013' or 'precipitation', not {termination!r}"
         )
     env = float(mode) if direction == "backward" else 0.0
+    rule, sides = _boundary_rule(boundary)
     return np.array(
         [
             float(dt),
@@ -395,6 +506,8 @@ def _path_params(prep, direction, dt, iterations, max_steps, termination, params
             float(params["env_dbz_steps"]),
             float(params["cold_pool_depth"]),
             float(prep["z"][0]),
+            float(rule),
+            float(sides),
         ]
     )
 
@@ -458,8 +571,11 @@ def trajectories(
     max_steps=None,
     storm_motion=None,
     extend=0.0,
+    extend_before=None,
+    extend_after=None,
     surface_downdraft=True,
     termination=True,
+    boundary="environment",
     parameters=None,
     u="u",
     v="v",
@@ -502,14 +618,22 @@ def trajectories(
     max_steps : int, optional
         Maximum number of steps. Default: enough to reach the end of the wind
         time series (plus ``extend``).
-    storm_motion : (float, float), optional
+    storm_motion : (float, float), xarray.Dataset or "estimate", optional
         Constant storm motion :math:`(c_x, c_y)` in m s-1 with which every
-        analysis is moved between its time and the parcel time. Default: no
-        motion (fixed analyses).
+        analysis is moved between its time and the parcel time: a pair, the
+        domain-wide output of :func:`radarx.retrieve.estimate_motion` (``u``,
+        ``v``), or ``"estimate"`` to estimate it with
+        :func:`radarx.retrieve.estimate_motion` from the reflectivity of the
+        first and last wind times. Default: no motion (fixed analyses).
     extend : float or (float, float), optional
         Seconds by which the series is extended before the first and after the
         last analysis by moving those analyses with ``storm_motion`` (time
-        morphing). Default 0.
+        morphing, Ziegler 2013b, sect. 2c). Default 0.
+    extend_before, extend_after : float, optional
+        Seconds of time morphing before the first and after the last analysis;
+        override the corresponding part of ``extend``. For backward
+        trajectories ``extend_before`` lets parcels of an air mass older than
+        the wind series (e.g. a squall-line cold pool) reach the environment.
     surface_downdraft : bool, optional
         Replace the vertical velocity at the ground with the parameterised
         surface downdraft (Ziegler 2013a, eqs. 2-3). Default True.
@@ -521,6 +645,17 @@ def trajectories(
         either above ``cold_pool_depth`` or where ``environment_mask`` is
         true (e.g. ahead of the gust front); see the module documentation.
         ``False``: no test (trajectories run to ``max_steps`` or the data).
+    boundary : str or sequence of str, optional
+        Which exits through a lateral boundary count as reaching the
+        environment (backward trajectories with a termination test).
+        ``"environment"`` (default, Ziegler 2013a, sect. 2a, test iii): every
+        exit. ``"environment_mask"``: only where ``environment_mask`` is true
+        at the last point inside the domain. ``"no_echo"``: only where the
+        reflectivity there is below ``env_dbz`` or the mask is true. A
+        sequence of sides (``"west"``, ``"east"``, ``"south"``, ``"north"``;
+        the domain edges at the smallest and largest ``x`` and ``y``): only
+        exits through those sides. Other exits stop the trajectory with flag
+        128 and are not environmental.
     parameters : dict, optional
         Overrides of :data:`TRAJECTORY_DEFAULTS`: ``offset_height`` (m),
         ``wmix0``, ``wmix1`` (m s-1), ``z0_dbz``, ``zddc_dbz`` (dBZ),
@@ -598,8 +733,12 @@ def trajectories(
         params=params,
         valid=valid,
         environment_mask=environment_mask,
+        extend_before=extend_before,
+        extend_after=extend_after,
     )
-    par = _path_params(prep, direction, dt, iterations, max_steps, termination, params)
+    par = _path_params(
+        prep, direction, dt, iterations, max_steps, termination, params, boundary
+    )
     index = None
     if start is None:
         starts, index, _ = _grid_starts(prep, levels, params["offset_height"])
@@ -681,7 +820,7 @@ def trajectories(
                 flags,
                 {
                     "long_name": "trajectory termination flags",
-                    "flag_masks": np.array([1, 2, 4, 8, 16, 32, 64], np.int32),
+                    "flag_masks": FLAG_MASKS,
                     "flag_meanings": FLAG_MEANINGS,
                 },
             ),
@@ -703,8 +842,10 @@ def trajectories(
             "dt": float(dt),
             "iterations": int(iterations),
             "storm_motion": (prep["cx"], prep["cy"]),
+            "extend": (prep["eb"], prep["ea"]),
             "surface_downdraft": int(bool(surface_downdraft)),
             "termination": str(termination),
+            "boundary": str(boundary),
             "method": "Ziegler (2013a) gridpoint trajectories",
         },
     )
