@@ -192,6 +192,75 @@ for label, extra in [
 print("estimated storm motion (m/s): {:.1f}, {:.1f}".format(*tr.attrs["storm_motion"]))
 ```
 
+## Ice in updrafts and in situ stations
+
+Ziegler's DLA keeps cloudy updraft air saturated with respect to water at all
+temperatures. `ice=True` carries cloud ice and uses the ice-water saturation
+adjustment of Tao et al. (1989): above the freezing level new condensate is
+split between cloud water and cloud ice by temperature (all ice below
+-40 degC, where the remaining cloud water also freezes), with the latent heat
+of sublimation for the ice part. The updraft is warmer above the freezing
+level:
+
+```{code-cell} ipython3
+ice = winds.radarx.diabatic_lagrangian(sounding, storm_motion=(cx, cy), ice=True)
+sec_i = ice.sel(y=0.0)
+fig, axes = plt.subplots(1, 2, figsize=(10, 3.6), layout="constrained")
+pc = axes[0].pcolormesh(
+    x / 1e3, z / 1e3, sec_i.theta - sec.theta, cmap="RdBu_r", vmin=-1, vmax=1
+)
+fig.colorbar(pc, ax=axes[0], label=r"$\theta$ (ice) $-$ $\theta$ (water) (K)")
+pc = axes[1].pcolormesh(x / 1e3, z / 1e3, sec_i.qi * 1e3, cmap="Blues")
+axes[1].contour(x / 1e3, z / 1e3, sec_i.qc * 1e3, [0.1, 1.0, 3.0], colors="k", linewidths=0.8)
+fig.colorbar(pc, ax=axes[1], label="cloud ice (g/kg)")
+for ax in axes:
+    ax.axhline(ice.attrs["melting_level"] / 1e3, color="0.4", ls="--", lw=0.8)
+    ax.set(xlabel="x (km)", ylabel="height (km)")
+axes[1].set_title("contours: cloud water (g/kg)")
+plt.show()
+```
+
+In situ observations (surface stations, mobile mesonet, soundings) can give
+the trajectories that pass near them their initial state (Ziegler et al.
+2007; Ziegler 2013a). Here a few stations in the cold pool report air 1.5 K
+colder than the analysis for the 12 min before the analysis time; the
+trajectories that pass within 1.5 km of a station start from its values
+(weighted with the Barnes weights of Ziegler et al. 2007) and are integrated
+forward from there:
+
+```{code-cell} ipython3
+sx = np.array([2e3, 5e3, 8e3, 5e3])
+sy = np.array([0.0, -4e3, 2e3, 4e3])
+st = sfc.sel(x=xr.DataArray(sx), y=xr.DataArray(sy))
+obs_times = times[-1] - np.arange(0, 721, 120).astype("timedelta64[s]")
+stations = xr.Dataset(
+    {
+        "x": ("station", sx),
+        "y": ("station", sy),
+        "theta": (("station", "time"), np.repeat(st.theta.values[:, None] - 1.5, 7, 1)),
+        "qv": (("station", "time"), np.repeat(st.qv.values[:, None], 7, 1)),
+    },
+    coords={"time": obs_times},
+)
+obs = winds.radarx.diabatic_lagrangian(
+    sounding,
+    storm_motion=(cx, cy),
+    levels=[0],
+    observations=stations,
+    observation_options={"radius": 1500.0, "kappa_s": 1.0e6},
+).isel(z=0)
+fig, ax = plt.subplots(figsize=(5, 4), layout="constrained")
+pc = ax.pcolormesh(
+    x / 1e3, y / 1e3, obs.delta_theta_v - sfc.delta_theta_v, cmap="RdBu_r", vmin=-2, vmax=2
+)
+ax.contour(x / 1e3, y / 1e3, (obs.flags & 256) > 0, [0.5], colors="k", linewidths=0.8)
+ax.plot(sx / 1e3, sy / 1e3, "k^")
+ax.set(xlabel="x (km)", ylabel="y (km)", aspect="equal", title="initialised from stations")
+fig.colorbar(pc, ax=ax, label=r"change of $\Delta\theta_v$ (K)")
+plt.show()
+print(f"{float(((obs.flags & 256) > 0).mean()):.1%} of the surface points use a station")
+```
+
 ## References
 
 - Ziegler, C. L., 2013a: A diabatic Lagrangian technique for the analysis of
@@ -203,3 +272,10 @@ print("estimated storm motion (m/s): {:.1f}, {:.1f}".format(*tr.attrs["storm_mot
 - Lin, Y.-L., R. D. Farley, and H. D. Orville, 1983: Bulk parameterization of
   the snow field in a cloud model. *J. Climate Appl. Meteor.*, **22**,
   1065–1092, doi:10.1175/1520-0450(1983)022<1065:BPOTSF>2.0.CO;2
+- Tao, W.-K., J. Simpson, and M. McCumber, 1989: An ice-water saturation
+  adjustment. *Mon. Wea. Rev.*, **117**, 231–235,
+  doi:10.1175/1520-0493(1989)117<0231:AIWSA>2.0.CO;2
+- Ziegler, C. L., M. S. Buban, and E. N. Rasmussen, 2007: A Lagrangian
+  objective analysis technique for assimilating in situ observations with
+  multiple-radar-derived airflow. *Mon. Wea. Rev.*, **135**, 2417–2442,
+  doi:10.1175/MWR3396.1
