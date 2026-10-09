@@ -76,9 +76,24 @@ jobs:
     - name: Install coverage via pip   # ADD THIS STEP TO INSTALL COVERAGE
       run: |
         python -m pip install coverage pytest-cov pytest-xdist pytest-mock
+    - name: Cache the test data
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/open-radar-data
+          ~/.cache/radarx_data
+          ~/Library/Caches/open-radar-data
+          ~/Library/Caches/radarx_data
+          ~\AppData\Local\open-radar-data
+          ~\AppData\Local\radarx_data
+        key: test-data-${{ runner.os }}-v1
+        restore-keys: test-data-${{ runner.os }}-
     - name: Install radarx
       run: |
         python -m pip install . --no-deps
+    - name: Fetch the test data
+      run: |
+        python ci/fetch_test_data.py
     - name: Version Info
       run: |
         python -c "import radarx; print(radarx.version.version)"
@@ -135,9 +150,24 @@ jobs:
     - name: Install pytest plugins via pip
       run: |
         python -m pip install pytest-xdist pytest-mock
+    - name: Cache the test data
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/open-radar-data
+          ~/.cache/radarx_data
+          ~/Library/Caches/open-radar-data
+          ~/Library/Caches/radarx_data
+          ~\AppData\Local\open-radar-data
+          ~\AppData\Local\radarx_data
+        key: test-data-${{ runner.os }}-v1
+        restore-keys: test-data-${{ runner.os }}-
     - name: Install radarx
       run: |
         python -m pip install . --no-deps
+    - name: Fetch the test data
+      run: |
+        python ci/fetch_test_data.py
     - name: Version Info
       run: |
         python -c "import radarx; print(radarx.version.version)"
@@ -187,6 +217,9 @@ jobs:
     - name: Install radarx
       run: |
         python -m pip install . --no-deps
+    - name: Fetch the test data
+      run: |
+        python ci/fetch_test_data.py
     - name: Version Info
       run: |
         python -c "import radarx; print(radarx.version.version)"
