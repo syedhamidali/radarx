@@ -8,6 +8,7 @@ import hashlib
 import io
 import json
 import zipfile
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -754,7 +755,7 @@ def test_cache_dir_default(monkeypatch):
     monkeypatch.delenv("RADARX_CACHE_DIR", raising=False)
     assert _onnx_models.cache_dir().name == "models"
     monkeypatch.setenv("RADARX_CACHE_DIR", "/somewhere")
-    assert str(_onnx_models.cache_dir()) == "/somewhere/models"
+    assert _onnx_models.cache_dir() == Path("/somewhere") / "models"
 
 
 def test_torchscript_rejects_other_tensor_types(tmp_path):
