@@ -27,6 +27,8 @@ dependencies:
   # tiny test models
   - onnx
   - onnxruntime
+  # reads the Keras file of the TorNet weights (converted to ONNX on first use)
+  - h5py
   # testing
   - coverage
   - open-radar-data>=0.3.0

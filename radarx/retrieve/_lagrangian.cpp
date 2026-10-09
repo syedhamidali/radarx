@@ -61,6 +61,10 @@ constexpr int kGsub = 32;
 constexpr int kGfr = 64;
 constexpr int kDamp = 128;
 constexpr int kFlux = 256;
+constexpr int kIce = 512;      // mixed-phase adjustment with cloud ice (Tao et al. 1989)
+
+// DLA flag: initial state from in situ observations (Ziegler et al. 2007)
+constexpr int kInsitu = 256;
 
 // Thermodynamic constants
 constexpr double kT0 = 273.15;
@@ -84,6 +88,12 @@ constexpr double kG = 9.805;              // g = 980.5 cm s^-2
 constexpr double kApr = 0.66;             // A', Bigg freezing, eq. (45)
 constexpr double kBpr = 100.0;            // B' (m^-3 s^-1), eq. (45)
 constexpr double kRhoW = 1000.0;
+
+// Tao, Simpson and McCumber (1989), eqs. (3a), (3b): b = 3.8 / P (P in mb)
+constexpr double kTaoA1 = 17.2693882;
+constexpr double kTaoA2 = 21.8745584;
+constexpr double kTaoB = 3.8;
+constexpr double kTHom = 233.15;  // homogeneous freezing at T <= -40 degC (Hsie et al. 1980)
 
 // ---------------------------------------------------------------------------
 // Gridded field sampling: trilinear in space, linear in time, on a grid that
@@ -463,6 +473,58 @@ inline double adjust(double& th, double& qv, double& qc, double p) {
     return dth;
 }
 
+// Ice-water saturation adjustment of Tao, Simpson and McCumber (1989).
+// First the phase changes of cloud condensate that LFO83 (sect. 3f) and Hsie
+// et al. (1980, sect. 3b5) prescribe: cloud ice melts instantaneously above
+// 0 degC (P_IMLT) and cloud water freezes at or below -40 degC (P_IHOM), with
+// the heating of Tao et al. eq. (4a) for dq_c = -dq_i. Then one
+// non-iterative step: the saturation mixing ratio is the mass-weighted mix
+// (1) of Teten's values over water and ice (3a, 3b), the excess vapour
+// dq = r1 / (1 + r2 A3) (6a-6e, 7b) is split into cloud water and cloud ice
+// in proportions CND and DEP linear in T between T00 and 0 degC (2b, 2c),
+// evaporation limited by the available q_c and q_i, and theta changes by
+// (4a). Without condensate the weights of (1) are CND and DEP (those of the
+// condensate the step produces). Returns the heating of the adjustment; the
+// heating of the phase changes is added to dfrz.
+inline double adjust_ice(double& th, double& qv, double& qc, double& qi, double p, double t00,
+                         double& dfrz) {
+    const double pi = exner(p);
+    double t = th * pi;
+    const double melt = t > kT0 ? qi : 0.0;
+    const double frz = t <= kTHom ? qc : 0.0;
+    const double dth_f = (kLsL - kLvL) * (frz - melt) / (kCp * pi);
+    qc = qc + melt - frz;
+    qi = qi - melt + frz;
+    th = th + dth_f;
+    dfrz += dth_f;
+    t = th * pi;
+    const double cnd = std::min(std::max((t - t00) / (kT0 - t00), 0.0), 1.0);
+    const double dep = 1.0 - cnd;
+    const double b = kTaoB / (p / 100.0);
+    const double qws = b * std::exp(kTaoA1 * (t - 273.16) / (t - 35.86));
+    const double qis = b * std::exp(kTaoA2 * (t - 273.16) / (t - 7.66));
+    const double cloud = qc + qi;
+    const bool has = cloud > 0.0;
+    const double wc = has ? qc / cloud : cnd;
+    const double wi = has ? qi / cloud : dep;
+    const double qvs = wc * qws + wi * qis;
+    const double a1 = 237.3 * kTaoA1 * pi / ((t - 35.86) * (t - 35.86));
+    const double a2 = 265.5 * kTaoA2 * pi / ((t - 7.66) * (t - 7.66));
+    const double r1 = qv - qvs;                                // (6a)
+    if (!(r1 > 0.0) && !has) return 0.0;
+    const double r2 = a1 * wc * qws + a2 * wi * qis;           // (6b)
+    const double a3 = (kLvL * cnd + kLsL * dep) / (kCp * pi);  // (6e)
+    const double dq = r1 / (1.0 + r2 * a3);                    // (7b)
+    const double dqc = std::max(dq * cnd, -qc);                // (2b)
+    const double dqi = std::max(dq * dep, -qi);                // (2c)
+    const double dth = (kLvL * dqc + kLsL * dqi) / (kCp * pi);  // (4a)
+    th += dth;
+    qv = qv - dqc - dqi;
+    qc += dqc;
+    qi += dqi;
+    return dth;
+}
+
 // ---------------------------------------------------------------------------
 // Microphysical rates of Lin, Farley and Orville (1983, LFO83), SI units
 // (every rate is dimensionally homogeneous). Equation numbers of LFO83.
@@ -489,7 +551,7 @@ inline Props air_props(double t, double p, double rho) {
 }
 
 Rates lfo_rates(double t, double p, double rho, double qv, double qc, double qr, double nr,
-                double qg, double ng, double rhog, double rho0, int sw) {
+                double qg, double ng, double rhog, double rho0, int sw, double qi) {
     Rates r{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
     const bool rain = qr > 1.0e-12 && nr > 0.0;
     const bool graupel = qg > 1.0e-12 && ng > 0.0;
@@ -555,8 +617,9 @@ Rates lfo_rates(double t, double p, double rho, double qv, double qc, double qr,
                      kCw * tc / kLfL * (r.gacw + r.gacr);
             if (r.gmlt > 0.0) r.gmlt = 0.0;
         }
-        // (46) sublimation of graupel outside cloud below 0 degC
-        if ((sw & kGsub) && t < kT0 && qc <= 0.0) {
+        // (46) sublimation of graupel outside cloud (delta_1 of eq. 20:
+        // l_CW + l_CI = 0) below 0 degC
+        if ((sw & kGsub) && t < kT0 && qc + qi <= 0.0) {
             const double ei = es_ice(t);
             const double qsi = kEps * ei / std::max(p - ei, 1.0);
             const double si = qv / qsi;
@@ -645,7 +708,7 @@ enum { kBP = 0, kBTheta = 1, kBQv = 2, kBU = 3, kBV = 4, kBNv = 5 };
 // Thermodynamic parameters (order shared with the Python layer)
 enum {
     qDtSmall = 0, qCd, qBd, qW0, qLd1, qLd2, qLw1, qLw2, qCmin, qCmax, qQp0, qQ0, qQ1, qZbl,
-    qBf, qZsfc, qRhoGsfc, qRhoG5, qRho0, qFluxTh, qFluxQv, qSwitch, qNpar
+    qBf, qZsfc, qRhoGsfc, qRhoG5, qRho0, qFluxTh, qFluxQv, qSwitch, qT00, qNpar
 };
 
 struct Thermo {
@@ -698,25 +761,100 @@ inline double damping_rate(const double* q, double w, double u, double v, double
 
 constexpr int kNBudget = 7;  // theta budget: cond, revp, gmlt, gsub, frz, damp, flux
 
-// Forward integration of theta, q_v, q_c along a stored backward path
-// (points npts - 1 -> 0). out: theta, q_v, q_c; bud: theta budget.
-void integrate(const Thermo& th, const double* pos, const double* val, int64_t npts,
-               bool surface, double dt, double* out, double* bud) {
+// In situ observations (Ziegler et al. 2007): (nobs, 6) x, y, z, t, theta,
+// q_v and the options window, radius, z tolerance, kappa_s, tau_i, tau_L.
+struct Obs {
+    const double* v;
+    int64_t n;
+    double window, radius, ztol, kap, tau_i, tau_l;
+};
+
+// Candidates are the observations within the data window (at or before the
+// analysis time) whose position is within radius (horizontal) and z
+// tolerance of the trajectory at the observation time (linear between stored
+// points). Each has the weight of Ziegler et al. (2007) eq. (1) with t_i =
+// t_o and t_L = |t_o|. Returns the index of the stored point nearest the time
+// of the candidate with the largest weight (-1 without a candidate), the
+// weight sum and the weighted theta and q_v.
+int64_t insitu_match(const Obs& ob, const double* pos, int64_t npts, double dt, double& wsum,
+                     double& th0, double& qv0) {
+    const double h = -dt;
+    double sth = 0.0, sqv = 0.0, wbest = 0.0;
+    int64_t kbest = -1;
+    wsum = 0.0;
+    for (int64_t j = 0; j < ob.n; ++j) {
+        const double* o = ob.v + 6 * j;
+        const double to = o[3];
+        if (!(to <= 0.0 && -to <= ob.window)) continue;
+        const double f = to / h;
+        const double fk = std::floor(f);
+        const int64_t k0 = static_cast<int64_t>(fk);
+        const double a = f - fk;
+        const int64_t need = k0 + (a > 0.0 ? 1 : 0);
+        if (need > npts - 1) continue;
+        const double* p0 = pos + 4 * k0;
+        double pt[3];
+        if (a > 0.0) {
+            const double* p1 = p0 + 4;
+            for (int v = 0; v < 3; ++v) pt[v] = (1.0 - a) * p0[v] + a * p1[v];
+        } else {
+            for (int v = 0; v < 3; ++v) pt[v] = p0[v];
+        }
+        const double dx = pt[0] - o[0];
+        const double dy = pt[1] - o[1];
+        const double r2 = dx * dx + dy * dy;
+        if (!(r2 <= ob.radius * ob.radius) || !(std::fabs(pt[2] - o[2]) <= ob.ztol)) continue;
+        const double w = std::exp(-r2 / ob.kap - to * to / ob.tau_i - to * to / ob.tau_l);
+        wsum += w;
+        sth += w * o[4];
+        sqv += w * o[5];
+        if (w > wbest) {
+            wbest = w;
+            kbest = static_cast<int64_t>(std::floor(f + 0.5));
+        }
+    }
+    if (kbest < 0 || !(wsum > 0.0)) return -1;
+    th0 = sth / wsum;
+    qv0 = sqv / wsum;
+    return kbest;
+}
+
+// Saturation adjustment of the DLA: water only (Ziegler 2013a) or, with
+// kIce, the ice-water adjustment of Tao et al. (1989).
+inline void condense(const double* q, int sw, double& theta, double& qv, double& qc, double& qi,
+                     double p, double* bud) {
+    if (sw & kIce)
+        bud[0] += adjust_ice(theta, qv, qc, qi, p, q[qT00], bud[4]);
+    else
+        bud[0] += adjust(theta, qv, qc, p);
+}
+
+// Forward integration of theta, q_v, q_c (and q_i) along a stored backward
+// path from point kstart to point 0. The initial theta, q_v are those of the
+// environment at the start point, or th_init, qv_init (in situ) if use_init.
+// out: theta, q_v, q_c, q_i; bud: theta budget.
+void integrate(const Thermo& th, const double* pos, const double* val, int64_t kstart,
+               bool surface, double dt, bool use_init, double th_init, double qv_init,
+               double* out, double* bud) {
     const double* q = th.q;
     const int sw = static_cast<int>(q[qSwitch]);
     const double zsfc = q[qZsfc];
     for (int k = 0; k < kNBudget; ++k) bud[k] = 0.0;
-    const double* p0 = pos + 4 * (npts - 1);
-    double theta, qv, qc = 0.0;
+    const double* p0 = pos + 4 * kstart;
+    double theta, qv, qc = 0.0, qi = 0.0;
     base_at(th, p0[0], p0[1], p0[2], p0[3], theta, qv);
+    if (use_init) {
+        theta = th_init;
+        qv = qv_init;
+    }
     double b[kBNv];
     profile(th.base, p0[2], b);
     double pa = b[kBP];
-    if (sw & kCond) bud[0] += adjust(theta, qv, qc, pa);
+    if (sw & kCond) condense(q, sw, theta, qv, qc, qi, pa, bud);
     const int64_t ns = std::max<int64_t>(1, static_cast<int64_t>(std::ceil(dt / q[qDtSmall] - 1e-9)));
     const double h = dt / static_cast<double>(ns);
     const double qthr = (surface ? q[qQ0] : q[qQ1]);
-    for (int64_t m = npts - 1; m >= 1; --m) {
+    for (int64_t m = kstart; m >= 1; --m) {
         const double* A = pos + 4 * m;
         const double* B = pos + 4 * (m - 1);
         const double* VA = val + kNW * m;
@@ -738,12 +876,12 @@ void integrate(const Thermo& th, const double* pos, const double* val, int64_t n
         Tend d{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
         if (sw & (kRevp | kRacw | kGacw | kGmlt | kGsub | kGfr)) {
             const Rates r = lfo_rates(t, pa, rho, qv, qc, qr, nr, qg, ng,
-                                      graupel_density(q, zagl), q[qRho0], sw);
+                                      graupel_density(q, zagl), q[qRho0], sw, qi);
             d = tendencies(r, theta, pa, qv, qc, qr, qg, dt);
         }
         // surface flux, Ziegler (2013a) eq. (27)
         double fth = 0.0, fqv = 0.0;
-        if ((sw & kFlux) && zagl <= q[qZbl] && qc + qr + qg <= q[qQ1]) {
+        if ((sw & kFlux) && zagl <= q[qZbl] && qc + qi + qr + qg <= q[qQ1]) {
             double gth = 0.0, gqv = 0.0;
             if (th.grad) {
                 double gr[4];
@@ -765,7 +903,7 @@ void integrate(const Thermo& th, const double* pos, const double* val, int64_t n
             qc += h * d.qc;
             if (qv < 0.0) qv = 0.0;
             if (qc < 0.0) qc = 0.0;
-            if (sw & kCond) bud[0] += adjust(theta, qv, qc, ps);
+            if (sw & kCond) condense(q, sw, theta, qv, qc, qi, ps, bud);
         }
         bud[1] += dt * d.revp;
         bud[2] += dt * d.gmlt;
@@ -786,12 +924,14 @@ void integrate(const Thermo& th, const double* pos, const double* val, int64_t n
             theta = th_new;
             qv = qvb + (qv - qvb) * f;
             qc = qc * f;
+            qi = qi * f;
         }
         pa = pb;
     }
     out[0] = theta;
     out[1] = qv;
     out[2] = qc;
+    out[3] = qi;
 }
 
 }  // namespace
@@ -831,15 +971,17 @@ py::tuple trajectories_py(const F32& fields, const F64& x, const F64& y, const F
     return py::make_tuple(pos, val, npts, flags);
 }
 
-// The diabatic Lagrangian analysis at n start points. Returns (n, 3) theta,
-// q_v, q_c, (n, 7) theta budget, (n, 5) origin (x, y, z, t) and fraction of
-// the trajectory points with valid winds, the number of points and the flags.
+// The diabatic Lagrangian analysis at n start points. Returns (n, 4) theta,
+// q_v, q_c, q_i, (n, 7) theta budget, (n, 5) origin (x, y, z, t) and fraction
+// of the trajectory points with valid winds, the number of points, the flags
+// and (n, 2) in situ weight sum and start time (NaN without observation).
 py::tuple dla_py(const F32& fields, const F64& x, const F64& y, const F64& z, const F64& t,
                  const F64& starts, const I8& surface, const F64& par, double cx, double cy,
                  double ext_before, double ext_after, const F64& base, double base_z0,
                  double base_dz, const F32& precip, bool has_precip, const F32& meso,
                  const F64& meso_t, bool has_meso, const F32& grad, bool has_grad,
-                 const F64& thermo, int n_threads) {
+                 const F64& thermo, const F64& obs, const F64& obs_par, bool has_obs,
+                 int n_threads) {
     const Grid g = make_grid(x, y, z, t, fields, cx, cy, ext_before, ext_after, kNW);
     const PathParams p = make_path_params(par);
     if (starts.ndim() != 2 || starts.shape(1) != 3)
@@ -851,6 +993,14 @@ py::tuple dla_py(const F32& fields, const F64& x, const F64& y, const F64& z, co
         throw std::invalid_argument("base must be (n, 5)");
     if (thermo.ndim() != 1 || thermo.shape(0) != qNpar)
         throw std::invalid_argument("thermo must have " + std::to_string(qNpar) + " values");
+    Obs ob{nullptr, 0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0};
+    if (has_obs) {
+        if (obs.ndim() != 2 || obs.shape(1) != 6) throw std::invalid_argument("obs must be (n, 6)");
+        if (obs_par.ndim() != 1 || obs_par.shape(0) != 6)
+            throw std::invalid_argument("obs_par must have 6 values");
+        const double* op = obs_par.data();
+        ob = Obs{obs.data(), obs.shape(0), op[0], op[1], op[2], op[3], op[4], op[5]};
+    }
     Grid gp, gm, gg;
     // the mesoscale analysis holds its first and last times beyond its span
     const double hold = 1.0e30;
@@ -870,12 +1020,14 @@ py::tuple dla_py(const F32& fields, const F64& x, const F64& y, const F64& z, co
     const int64_t m = p.max_steps + 1;
     std::vector<std::vector<double>> bpos(nthr, std::vector<double>(4 * m));
     std::vector<std::vector<double>> bval(nthr, std::vector<double>(kNW * m));
-    py::array_t<double> out(std::vector<py::ssize_t>{n, 3});
+    py::array_t<double> out(std::vector<py::ssize_t>{n, 4});
+    py::array_t<double> init(std::vector<py::ssize_t>{n, 2});
     py::array_t<double> bud(std::vector<py::ssize_t>{n, kNBudget});
     py::array_t<double> org(std::vector<py::ssize_t>{n, 5});
     py::array_t<int64_t> npts(n);
     py::array_t<int32_t> flags(n);
     double *po = out.mutable_data(), *pb = bud.mutable_data(), *pg = org.mutable_data();
+    double* pin = init.mutable_data();
     int64_t* pn = npts.mutable_data();
     int32_t* pf = flags.mutable_data();
     const double* ps = starts.data();
@@ -894,15 +1046,28 @@ py::tuple dla_py(const F32& fields, const F64& x, const F64& y, const F64& z, co
             for (int64_t s = 0; s < k; ++s) nv += b[kNW * s + 4] >= 0.5 ? 1 : 0;
             pg[5 * i + 4] = k > 0 ? static_cast<double>(nv) / static_cast<double>(k) : kNaN;
             const bool env = (f & (kEnvDbz | kEnvW | kBoundary)) != 0;
-            if (k < 1 || !env) {
-                for (int v = 0; v < 3; ++v) po[3 * i + v] = kNaN;
+            int64_t kstart = k - 1;
+            double wsum = 0.0, th0 = 0.0, qv0 = 0.0;
+            int64_t kin = -1;
+            if (ob.n > 0 && k > 0) kin = insitu_match(ob, a, k, p.dt, wsum, th0, qv0);
+            pin[2 * i] = kNaN;
+            pin[2 * i + 1] = kNaN;
+            if (kin >= 0) {
+                kstart = kin;
+                pf[i] = f | kInsitu;
+                pin[2 * i] = wsum;
+                pin[2 * i + 1] = a[4 * kin + 3];
+            }
+            if (k < 1 || (!env && kin < 0)) {
+                for (int v = 0; v < 4; ++v) po[4 * i + v] = kNaN;
                 for (int v = 0; v < kNBudget; ++v) pb[kNBudget * i + v] = kNaN;
                 return;
             }
-            integrate(th, a, b, k, psf[i] != 0, p.dt, po + 3 * i, pb + kNBudget * i);
+            integrate(th, a, b, kstart, psf[i] != 0, p.dt, kin >= 0, th0, qv0, po + 4 * i,
+                      pb + kNBudget * i);
         });
     }
-    return py::make_tuple(out, bud, org, npts, flags);
+    return py::make_tuple(out, bud, org, npts, flags, init);
 }
 
 // LFO83 rates and limited theta/q_v/q_c tendencies for 1-D arrays of states.
@@ -926,7 +1091,7 @@ py::tuple rates_py(const F64& theta, const F64& p, const F64& qv, const F64& qc,
             const double tk = a0[i] * exner(a1[i]);
             const double rho = air_density(a0[i], a1[i]);
             const Rates r = lfo_rates(tk, a1[i], rho, a2[i], a3[i], a4[i], a5[i], a6[i], a7[i],
-                                      a8[i], rho0, switches);
+                                      a8[i], rho0, switches, 0.0);
             o[7 * i + 0] = r.revp;
             o[7 * i + 1] = r.racw;
             o[7 * i + 2] = r.gacw;
@@ -943,6 +1108,34 @@ py::tuple rates_py(const F64& theta, const F64& p, const F64& qv, const F64& qc,
     return py::make_tuple(rr, tt);
 }
 
+// Saturation adjustment of 1-D states (water only, or ice-water with ice).
+// Returns (n, 4) theta, q_v, q_c, q_i and (n, 2) heating of the adjustment
+// and of the freezing/melting of cloud condensate.
+py::tuple adjust_py(const F64& theta, const F64& p, const F64& qv, const F64& qc, const F64& qi,
+                    double t00, bool ice) {
+    const int64_t n = theta.size();
+    for (const F64* a : {&p, &qv, &qc, &qi})
+        if (a->size() != n) throw std::invalid_argument("all states must have the same size");
+    py::array_t<double> st(std::vector<py::ssize_t>{n, 4});
+    py::array_t<double> ht(std::vector<py::ssize_t>{n, 2});
+    double *o = st.mutable_data(), *o2 = ht.mutable_data();
+    for (int64_t i = 0; i < n; ++i) {
+        double th = theta.data()[i], v = qv.data()[i], c = qc.data()[i], x = qi.data()[i];
+        double dfrz = 0.0, dth;
+        if (ice)
+            dth = adjust_ice(th, v, c, x, p.data()[i], t00, dfrz);
+        else
+            dth = adjust(th, v, c, p.data()[i]);
+        o[4 * i] = th;
+        o[4 * i + 1] = v;
+        o[4 * i + 2] = c;
+        o[4 * i + 3] = x;
+        o2[2 * i] = dth;
+        o2[2 * i + 1] = dfrz;
+    }
+    return py::make_tuple(st, ht);
+}
+
 PYBIND11_MODULE(_lagrangian, m) {
     m.doc() = "Compiled trajectory and diabatic Lagrangian analysis kernel for radarx.";
     m.def("trajectories", &trajectories_py, py::arg("fields"), py::arg("x"), py::arg("y"),
@@ -953,8 +1146,10 @@ PYBIND11_MODULE(_lagrangian, m) {
           py::arg("cy"), py::arg("ext_before"), py::arg("ext_after"), py::arg("base"),
           py::arg("base_z0"), py::arg("base_dz"), py::arg("precip"), py::arg("has_precip"),
           py::arg("meso"), py::arg("meso_t"), py::arg("has_meso"), py::arg("grad"),
-          py::arg("has_grad"),
-          py::arg("thermo"), py::arg("n_threads") = 0);
+          py::arg("has_grad"), py::arg("thermo"), py::arg("obs"), py::arg("obs_par"),
+          py::arg("has_obs"), py::arg("n_threads") = 0);
+    m.def("adjust", &adjust_py, py::arg("theta"), py::arg("pressure"), py::arg("qv"),
+          py::arg("qc"), py::arg("qi"), py::arg("t00"), py::arg("ice"));
     m.def("rates", &rates_py, py::arg("theta"), py::arg("pressure"), py::arg("qv"),
           py::arg("qc"), py::arg("qr"), py::arg("nr"), py::arg("qg"), py::arg("ng"),
           py::arg("rho_g"), py::arg("rho0"), py::arg("switches"), py::arg("dt"),
