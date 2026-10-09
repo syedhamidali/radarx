@@ -6,13 +6,17 @@
 // azimuthal_reduce: for every sweep and range gate, reduce all variables over
 // the rays in a single pass. A gate takes part only if every quality field
 // exceeds its threshold (e.g. rhohv > 0.6 and Z > -10 dBZ, Ryzhkov et al.
-// 2016) and the variable itself is finite. Variables in dB are averaged in
-// linear units and converted back. Work is split into (sweep, gate block)
+// 2016, p. 553) and the variable itself is finite. A value is defined where
+// the number of valid gates is at least min_count (Ryzhkov et al. 2016 require
+// it to exceed 30, so min_count = 31 reproduces the paper; the default 30
+// accepts one gate fewer). Variables in dB are averaged in linear units and
+// converted back (radarx choice). Work is split into (sweep, gate block)
 // items handed out with an atomic counter; each thread owns its buffers.
 //
 // melting_layer: melting-layer detection in QVPs from the co-located rhohv
-// minimum and ZDR / Z maxima (after Giangrande et al. 2008), one profile per
-// work item. Top and bottom are where rhohv departs from its background
+// minimum and ZDR / Z maxima (loosely after Giangrande et al. 2008: other
+// thresholds and a symmetric window, see the Notes of melting_layer in
+// vertical_profiles.py), one profile per work item. Top and bottom are where rhohv departs from its background
 // above and below the minimum (onset of the signature, after Griffin et al.
 // 2020) or, alternatively, the half-prominence edges of the ZDR / rhohv
 // anomalies.
