@@ -23,6 +23,12 @@ dependencies:
   - holoviews>=1.20
   - hvplot>=0.11
   - panel
+  # optional radarx[ml] extra (ONNX Runtime, about 17 MB); onnx builds the
+  # tiny test models
+  - onnx
+  - onnxruntime
+  # reads the Keras file of the TorNet weights (converted to ONNX on first use)
+  - h5py
   # testing
   - coverage
   - open-radar-data>=0.3.0

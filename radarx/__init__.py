@@ -20,6 +20,7 @@ try:  # pragma: no cover
     from . import io  # noqa
 except ModuleNotFoundError:  # pragma: no cover
     io = None
+from . import ml  # noqa
 from . import retrieve  # noqa
 from . import testing  # noqa
 from . import vis  # noqa

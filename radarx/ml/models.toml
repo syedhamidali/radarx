@@ -1,0 +1,19 @@
+# radarx model registry
+#
+# One table per model. The ONNX weights are never shipped with radarx: they are
+# downloaded from the URL given here (the release of the model's authors) on
+# first use, checked against the SHA-256 hash and cached. Only add models whose
+# licence allows this use, and give the licence and the reference to cite.
+#
+# [models.example-model-v1]
+# url = "https://zenodo.org/records/.../files/model.onnx"   # ONNX file
+# sha256 = "..."                                             # hash of that file
+# licence = "MIT"                                            # SPDX identifier
+# citation = "Authors (year): Title. Journal, volume, pages, https://doi.org/..."
+# version = "1"
+# task = "tornado-detection"
+# description = "What the model does and what it was trained on."
+# inputs = { x = "float32[N,C,H,W]: normalised DBZH, ZDR on 0.5 deg x 250 m patches" }
+# outputs = { probability = "float32[N]" }
+
+[models]
