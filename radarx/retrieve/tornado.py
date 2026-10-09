@@ -10,64 +10,101 @@ Two independent tornado diagnostics on WSR-88D volumes:
 
 ``tornado_probability``
     The convolutional neural network (CNN) baseline of the TorNet benchmark
-    (Veillette et al. 2025), run with ONNX Runtime through :mod:`radarx.ml`.
-    The network sees image chips of 120 rays (60° at 0.5° spacing) by 240
-    gates (60 km at 250 m) of the two lowest tilts (0.5° and 0.9°) of six
-    variables: reflectivity, dealiased radial velocity, specific
+    (Veillette et al. 2025 [1]_), run with ONNX Runtime through
+    :mod:`radarx.ml`. The network sees image chips of 120 rays (60° at 0.5°
+    spacing) by 240 gates of 250 m of the two lowest tilts (0.5° and 0.9°) of
+    six variables: reflectivity, dealiased radial velocity, specific
     differential phase, copolar correlation coefficient, differential
-    reflectivity and spectrum width, plus a mask of range-folded gates and
-    the range of every gate. Each variable is scaled to about [-1, 1] with
-    fixed bounds, and gates without data are set to -3. The network ends in
-    a 1 x 1 convolution that gives a tornado logit on a grid 16 times
-    coarser than the chip; the chip's output is the maximum of that map.
-    The chips tile the whole sweep with overlap; the per-gate probability
-    is the logistic function of the logit map, taking the maximum where
-    chips overlap.
+    reflectivity and spectrum width, plus a mask of range-folded gates (13
+    channels), and the range of every gate and its inverse (CoordConv layers)
+    (Veillette et al. 2025 [1]_, sections 2d and 3b). Each variable is scaled
+    to about [-1, 1] with fixed bounds, and gates without data are set to -3.
+    The network ends in 1 x 1 convolutions that give a tornado logit on a
+    grid 16 times coarser than the chip; the chip's output is the maximum of
+    that map. The chips tile the whole sweep with overlap; the per-gate
+    probability is the logistic function of the logit map, taking the maximum
+    where chips overlap.
 ``rotation_couplets``
     A physical comparison: compact maxima of the linear least-squares
-    derivative (LLSD) azimuthal shear (:func:`radarx.retrieve.llsd`) above
-    0.006 s⁻¹, the threshold with which the NWS Tornado Probability
-    Algorithm extracts candidate circulations from the 0.5° tilt (Sandmæl
-    et al. 2023), with the velocity difference across each couplet.
+    derivative (LLSD) azimuthal shear (:func:`radarx.retrieve.llsd`; Mahalik
+    et al. 2019 [3]_) above 0.006 s⁻¹, with the velocity difference across
+    each couplet. The threshold is the one that Veillette et al. (2025 [1]_,
+    appendix on feature extraction) apply to the azimuthal shear field of
+    their non-deep-learning baselines; radarx also attributes it to the NWS
+    Tornado Probability Algorithm (Sandmæl et al. 2023 [2]_), not
+    checked against that paper.
 
-The CNN was trained on the TorNet data set (2013-2022 WSR-88D Level II
-data, chips centred on storm cells), whose velocities were dealiased with
-the method of Veillette et al. (2023) and whose KDP is the Level III
-product. Here the inputs are prepared from the Level II volume with radarx:
-velocities are dealiased with :func:`radarx.retrieve.dealias_velocity` and
-KDP is estimated with :func:`radarx.retrieve.estimate_kdp`; both differ
-slightly from the inputs the network was trained on. TorNet's CNN takes no
-azimuthal shear input (the authors left it out on purpose); azimuthal shear
-is the basis of the separate physical diagnostic.
+What is taken from the TorNet paper and what is not. Checked against the
+arXiv preprint of Veillette et al. (arXiv:2401.16437v1, January 2024); the
+published version (doi below) was not consulted, and its wording and
+numbers may differ.
 
-The upstream Keras weights (MIT licence, Hugging Face
-``tornet-ml/tornado_detector_baseline_v1``) are converted to ONNX on first
-use (needs the ``onnx`` and ``h5py`` packages once) and cached; inference
-needs ``onnxruntime`` (``pip install radarx[ml]``).
+* Chip shape, tilts, variables, range-folded mask, the -3 fill of gates
+  without data and range-folded gates, the CoordConv input of the range and
+  its inverse, four convolution blocks (hence the factor 16), only the last
+  frame of a sample and no azimuthal shear input ("only takes raw radar
+  imagery") are as stated in sections 2d and 3b of the preprint. The preprint
+  gives the chip as "80 km (240 250-m gates)", but 240 gates of 250 m are 60
+  km.
+* The preprint says the variables are "normalized to the range [0-1]". The
+  released code and weights scale each channel with fixed minimum and maximum
+  values to "approximate [-1,1]" (``normalize`` in
+  ``tornet/models/keras/cnn_baseline.py`` and ``CHANNEL_MIN_MAX`` in
+  ``tornet/data/constants.py`` of github.com/mit-ll/tornet, MIT licence); the
+  ONNX model here uses the values stored in the Keras file.
+* The preprint trains the network on chips, applies a global maximum over the
+  chip and, in its section 4, runs the network on a full scan by removing the
+  global maximum pooling (the network is fully convolutional), upsampling the
+  likelihood field bilinearly. radarx instead tiles the sweep with 120 x 240
+  chips (``stride``), repeats each coarse cell and takes the maximum where
+  chips overlap: a radarx choice, not the procedure of the paper.
+* The chip stride (a quarter of the chip), batch size, NEXRAD range grid
+  (250 m gates from 2125 m, the ``min_range_m`` default of ``tornet`` code),
+  the ZDR fill of -8 dB at gates without ZDR (read from the TorNet files, not
+  stated in the paper) and the nearest-neighbour resampling of the sweeps to
+  720 rays at 0.5° are radarx choices or readings of the released files.
+
+The CNN was trained on the TorNet data set (August 2013 - August 2022
+WSR-88D Level II data, 203 133 samples centred on storm cells identified by
+SCIT, about 6.8 % of them confirmed tornadoes; Veillette et al. 2025 [1]_,
+section 2c), whose velocities were dealiased with the method of Veillette et
+al. (2023) [4]_ and whose KDP is the Level III product, upsampled to 0.5° by
+nearest neighbour (section 2d). Here the inputs are prepared from the Level II
+volume with radarx: velocities are dealiased with
+:func:`radarx.retrieve.dealias_velocity` and KDP is estimated with
+:func:`radarx.retrieve.estimate_kdp`; both differ slightly from the inputs the
+network was trained on.
+
+Model and data licences. The upstream Keras weights (Hugging Face
+``tornet-ml/tornado_detector_baseline_v1``, MIT licence per the model card)
+are converted to ONNX on first use
+(needs the ``onnx`` and ``h5py`` packages once) and cached; inference needs
+``onnxruntime`` (``pip install radarx[ml]``). The TorNet data are on Zenodo
+(one record per year, listed in the README of github.com/mit-ll/tornet, e.g.
+https://doi.org/10.5281/zenodo.12636522 for 2013 and the catalog; Creative
+Commons Attribution 4.0 per DataCite) and are not part of radarx. Cite
+Veillette et al. (2025) [1]_ when using the model.
 
 References
 ----------
-Veillette, M. S., J. M. Kurdzo, P. M. Stepanian, J. Y. N. Cho, T. Reis,
-S. Samsi, J. McDonald, and N. Chisler, 2025: A benchmark dataset for tornado
-detection and prediction using full-resolution polarimetric weather radar
-data. *Artif. Intell. Earth Syst.*, **4** (1),
-https://doi.org/10.1175/AIES-D-24-0006.1
-
-Veillette, M. S., J. M. Kurdzo, P. M. Stepanian, J. McDonald, S. Samsi, and
-J. Y. N. Cho, 2023: A deep learning-based velocity dealiasing algorithm
-derived from the WSR-88D open radar product generator. *Artif. Intell. Earth
-Syst.*, **2** (3), https://doi.org/10.1175/AIES-D-22-0084.1
-
-Sandmæl, T. N., B. R. Smith, A. E. Reinhart, I. M. Schick, M. C. Ake,
-J. G. Madden, R. B. Steeves, S. S. Williams, K. L. Elmore, and T. C. Meyer,
-2023: The Tornado Probability Algorithm: A probabilistic machine learning
-tornadic circulation detection algorithm. *Wea. Forecasting*, **38** (3),
-445-466, https://doi.org/10.1175/WAF-D-22-0123.1
-
-Mahalik, M. C., B. R. Smith, K. L. Elmore, D. M. Kingfield, K. L. Ortega,
-and T. M. Smith, 2019: Estimates of gradients in radar moments using a
-linear least squares derivative technique. *Wea. Forecasting*, **34**,
-415-434, https://doi.org/10.1175/WAF-D-18-0095.1
+.. [1] Veillette, M. S., J. M. Kurdzo, P. M. Stepanian, J. Y. N. Cho, T.
+   Reis, S. Samsi, J. McDonald, and N. Chisler, 2025: A benchmark dataset
+   for tornado detection and prediction using full-resolution polarimetric
+   weather radar data. *Artif. Intell. Earth Syst.*, **4** (1),
+   https://doi.org/10.1175/AIES-D-24-0006.1
+.. [2] Sandmæl, T. N., B. R. Smith, A. E. Reinhart, I. M. Schick, M. C. Ake,
+   J. G. Madden, R. B. Steeves, S. S. Williams, K. L. Elmore, and T. C.
+   Meyer, 2023: The Tornado Probability Algorithm: A probabilistic machine
+   learning tornadic circulation detection algorithm. *Wea. Forecasting*,
+   **38** (3), 445-466, https://doi.org/10.1175/WAF-D-22-0123.1
+.. [3] Mahalik, M. C., B. R. Smith, K. L. Elmore, D. M. Kingfield, K. L.
+   Ortega, and T. M. Smith, 2019: Estimates of gradients in radar moments
+   using a linear least squares derivative technique. *Wea. Forecasting*,
+   **34** (2), 415-434, https://doi.org/10.1175/WAF-D-18-0095.1
+.. [4] Veillette, M. S., J. M. Kurdzo, P. M. Stepanian, J. McDonald, S.
+   Samsi, and J. Y. N. Cho, 2023: A deep learning-based velocity dealiasing
+   algorithm derived from the WSR-88D open radar product generator. *Artif.
+   Intell. Earth Syst.*, **2** (3), https://doi.org/10.1175/AIES-D-22-0084.1
 
 .. autosummary::
    :nosignatures:
@@ -92,12 +129,17 @@ from ._products import product_tree
 #: Name of the default model, converted on first use.
 DEFAULT_MODEL = "tornet-baseline-v1"
 
-#: TorNet chip size (rays, gates) and gate spacing.
+#: TorNet chip size (rays, gates): 120 0.5-degree rays by 240 gates of 250 m
+#: (Veillette et al. 2025, section 2d; the preprint calls it "80 km" but 240 x
+#: 250 m = 60 km).
 CHIP = (120, 240)
 _AZ_STEP = 0.5
 _GATE = 250.0
+#: First gate (m): ``min_range_m`` in tornet/data/preprocess.py of the TorNet
+#: code (github.com/mit-ll/tornet).
 _FIRST_GATE = 2125.0
-#: ZDR (dB) of gates without ZDR data in the TorNet files.
+#: ZDR (dB) of gates without ZDR data in the TorNet files: read from the
+#: released files, not stated in Veillette et al. (2025).
 _ZDR_FILL = -8.0
 
 _VARIABLES = _onnx_models.TORNET_VARIABLES
@@ -321,12 +363,33 @@ def tornet_inputs(
         If a tilt is missing, or dealiasing is requested without a Nyquist
         velocity.
 
+    Notes
+    -----
+    The layout (two tilts of 0.5° and 0.9°, six variables, range-folded mask,
+    ZDR fill) is that of the TorNet samples of Veillette et al. (2025) [1]_
+    (sections 2d, 3b; arXiv preprint checked, see :mod:`radarx.retrieve.
+    tornado`); dealiasing of the velocities with the method of Veillette et al.
+    (2023) [2]_ in TorNet is replaced here by
+    :func:`radarx.retrieve.dealias_velocity`, and the Level III KDP of TorNet
+    by :func:`radarx.retrieve.estimate_kdp` unless ``KDP`` is present. The
+    first gate at 2125 m and the 250 m gate spacing follow the TorNet code
+    (``min_range_m`` in ``tornet/data/preprocess.py``); 720 rays at 0.5°
+    spacing and the ``tolerance`` of 0.25° for the tilt angles are radarx
+    choices. The ZDR fill of -8 dB (the lowest coded ZDR) is how the released
+    TorNet files were read, not a statement in the paper.
+
     References
     ----------
-    Veillette, M. S., and co-authors, 2025: A benchmark dataset for tornado
-    detection and prediction using full-resolution polarimetric weather radar
-    data. *Artif. Intell. Earth Syst.*, **4** (1),
-    https://doi.org/10.1175/AIES-D-24-0006.1
+    .. [1] Veillette, M. S., J. M. Kurdzo, P. M. Stepanian, J. Y. N. Cho, T.
+       Reis, S. Samsi, J. McDonald, and N. Chisler, 2025: A benchmark dataset
+       for tornado detection and prediction using full-resolution
+       polarimetric weather radar data. *Artif. Intell. Earth Syst.*, **4**
+       (1), https://doi.org/10.1175/AIES-D-24-0006.1
+    .. [2] Veillette, M. S., J. M. Kurdzo, P. M. Stepanian, J. McDonald, S.
+       Samsi, and J. Y. N. Cho, 2023: A deep learning-based velocity
+       dealiasing algorithm derived from the WSR-88D open radar product
+       generator. *Artif. Intell. Earth Syst.*, **2** (3),
+       https://doi.org/10.1175/AIES-D-22-0084.1
     """
     if not hasattr(volume, "children"):
         raise TypeError("tornet_inputs needs an xarray.DataTree volume")
@@ -395,7 +458,10 @@ def _coordinates(rng_chip):
     TorNet labels each gate one gate (250 m) farther than the gate centre of
     the Level II data and computes the channels from the chip's range limits
     (outer edges of the labelled gates) as ``linspace(lower + 250, upper -
-    250)``; the same is done here.
+    250)`` with the scale 1e-5 (``compute_coordinates`` in
+    ``tornet/data/preprocess.py`` of github.com/mit-ll/tornet); the same is
+    done here. The paper describes the channels as a scaled radial coordinate
+    and its inverse (CoordConv, Veillette et al. 2025, section 3b).
     """
     scale = 1e-5
     lower = (rng_chip[0] + _GATE - _GATE / 2 + _GATE) * scale
@@ -504,19 +570,34 @@ def tornado_probability(
 
     Notes
     -----
-    The network was trained on chips centred on storm cells with about 7 %
-    tornadic samples, so its probabilities are relative scores rather than
-    calibrated frequencies for arbitrary chips; Veillette et al. (2025)
-    report the area under the ROC curve (0.87) and the critical success
-    index (0.34) at the best threshold on their test set.
+    The network was trained on samples centred on storm cells, about 6.8 %
+    of them confirmed tornadoes (Veillette et al. 2025 [1]_, section 2c), so
+    its output is a likelihood on the TorNet sample distribution rather than
+    a calibrated frequency for arbitrary gates. The paper (section 3c.4)
+    shows that the raw likelihood is over-confident for mid-range values
+    (0.2-0.7) and under-confident above 0.8, and fits an isotonic calibration
+    (Brier score 0.0423 before and 0.0404 after on the test set); that
+    calibration is not applied here.
+
+    *Skill of the network (TorNet test set, from the paper, not measured
+    here).* Table 2 (i) of the arXiv preprint ("confirmed tornadoes versus all
+    nulls", test set of 31 467 samples, mean of five random seeds) gives for
+    the CNN an area under the ROC curve of 0.8742 and a maximum critical
+    success index of 0.3380 (the maxima taken over all thresholds); for
+    comparison the operational TVS gives 0.6308 and 0.2002. Those numbers
+    belong to chips of the TorNet test set, not to the full-scan output of
+    this function, and the published version of the paper may differ. The
+    model file used here is the released one (Hugging Face
+    ``tornet-ml/tornado_detector_baseline_v1``, MIT licence), which is not
+    necessarily one of the five seeds of the table.
 
     References
     ----------
-    Veillette, M. S., J. M. Kurdzo, P. M. Stepanian, J. Y. N. Cho, T. Reis,
-    S. Samsi, J. McDonald, and N. Chisler, 2025: A benchmark dataset for
-    tornado detection and prediction using full-resolution polarimetric
-    weather radar data. *Artif. Intell. Earth Syst.*, **4** (1),
-    https://doi.org/10.1175/AIES-D-24-0006.1
+    .. [1] Veillette, M. S., J. M. Kurdzo, P. M. Stepanian, J. Y. N. Cho, T.
+       Reis, S. Samsi, J. McDonald, and N. Chisler, 2025: A benchmark dataset
+       for tornado detection and prediction using full-resolution
+       polarimetric weather radar data. *Artif. Intell. Earth Syst.*, **4**
+       (1), https://doi.org/10.1175/AIES-D-24-0006.1
 
     Examples
     --------
@@ -743,16 +824,23 @@ def rotation_couplets(
         Dealiased radial velocity (m s⁻¹). Default ``"VRADH"``.
     threshold : float, optional
         Azimuthal shear (s⁻¹) above which gates belong to a candidate
-        circulation. Default 0.006, the threshold of the NWS Tornado
-        Probability Algorithm on the 0.5° tilt (Sandmæl et al. 2023).
+        circulation. Default 0.006, the threshold that Veillette et al. (2025)
+        [3]_ apply to the azimuthal shear field of their feature-based
+        baselines (appendix); the same value is credited here to the NWS
+        Tornado Probability Algorithm (Sandmæl et al. 2023 [1]_) on the 0.5°
+        tilt, not checked against the paper.
     window : tuple of float, optional
         LLSD window ``(range_m, azimuth_m)``, see
-        :func:`radarx.retrieve.llsd`. Default ``(750, 2500)``.
+        :func:`radarx.retrieve.llsd` and Mahalik et al. (2019) [2]_.
+        Default ``(750, 2500)``, a radarx choice not checked against
+        Mahalik et al. or Sandmæl et al.
     min_area : float, optional
-        Smallest area (m²) of a region above the threshold. Default 0.5 km².
+        Smallest area (m²) of a region above the threshold. Default 0.5 km²,
+        a radarx choice without a published source.
     diameter : float, optional
         Diameter (m) of the circle around the shear peak in which the
-        largest velocity difference ``delta_v`` is measured. Default 5 km.
+        largest velocity difference ``delta_v`` is measured. Default 5 km, a
+        radarx choice without a published source.
     min_reflectivity : float, optional
         If given, only gates with at least this reflectivity (dBZ) count.
 
@@ -766,18 +854,36 @@ def rotation_couplets(
         input gives a DataTree with one such node per sweep that has
         ``field``.
 
+    Notes
+    -----
+    A couplet is an 8-connected region of gates with LLSD azimuthal shear at
+    or above ``threshold`` (and optionally ``min_reflectivity``); the peak
+    shear, the velocity difference within ``diameter`` of the peak and the
+    area are reported, and ``rotational_velocity`` is ``delta_v / 2`` (the
+    usual definition of rotational velocity, not taken from the cited
+    papers). This is a simplified physical diagnostic, not the Tornado
+    Probability Algorithm of Sandmæl et al. (2023) [1]_, which is a machine-
+    learning model on LLSD-derived features; the region extraction, minimum
+    area, ``delta_v`` measurement and all sizes other than the 0.006 s⁻¹
+    threshold are radarx choices.
+
     References
     ----------
-    Sandmæl, T. N., B. R. Smith, A. E. Reinhart, I. M. Schick, M. C. Ake,
-    J. G. Madden, R. B. Steeves, S. S. Williams, K. L. Elmore, and
-    T. C. Meyer, 2023: The Tornado Probability Algorithm: A probabilistic
-    machine learning tornadic circulation detection algorithm. *Wea.
-    Forecasting*, **38** (3), 445-466, https://doi.org/10.1175/WAF-D-22-0123.1
-
-    Mahalik, M. C., B. R. Smith, K. L. Elmore, D. M. Kingfield,
-    K. L. Ortega, and T. M. Smith, 2019: Estimates of gradients in radar
-    moments using a linear least squares derivative technique. *Wea.
-    Forecasting*, **34**, 415-434, https://doi.org/10.1175/WAF-D-18-0095.1
+    .. [1] Sandmæl, T. N., B. R. Smith, A. E. Reinhart, I. M. Schick, M. C.
+       Ake, J. G. Madden, R. B. Steeves, S. S. Williams, K. L. Elmore, and
+       T. C. Meyer, 2023: The Tornado Probability Algorithm: A probabilistic
+       machine learning tornadic circulation detection algorithm. *Wea.
+       Forecasting*, **38** (3), 445-466,
+       https://doi.org/10.1175/WAF-D-22-0123.1
+    .. [2] Mahalik, M. C., B. R. Smith, K. L. Elmore, D. M. Kingfield, K. L.
+       Ortega, and T. M. Smith, 2019: Estimates of gradients in radar moments
+       using a linear least squares derivative technique. *Wea. Forecasting*,
+       **34** (2), 415-434, https://doi.org/10.1175/WAF-D-18-0095.1
+    .. [3] Veillette, M. S., J. M. Kurdzo, P. M. Stepanian, J. Y. N. Cho, T.
+       Reis, S. Samsi, J. McDonald, and N. Chisler, 2025: A benchmark dataset
+       for tornado detection and prediction using full-resolution
+       polarimetric weather radar data. *Artif. Intell. Earth Syst.*, **4**
+       (1), https://doi.org/10.1175/AIES-D-24-0006.1
     """
     options = (field, threshold, window, min_area, diameter, min_reflectivity)
     if isinstance(obj, xr.Dataset):

@@ -8,20 +8,32 @@ NumPy reference implementation of the cold-pool kernel.
 Same functions, arguments and results as the compiled
 ``radarx.retrieve._coldpool`` module; used when the extension is not built and
 as the test oracle.
+
+Sources of the formulas (full references in the docstrings of
+:mod:`radarx.retrieve.coldpool` and :mod:`radarx.retrieve.wind_profile`):
+Bolton (1980, Mon. Wea. Rev. 108, 1046-1053) for the vapour pressure and the
+equivalent potential temperature, Rotunno, Klemp and Weisman (1988, J. Atmos.
+Sci. 45, 463-485) for the cold-pool strength C^2 = 2 int(-B) dz, Davies-Jones
+(1984, J. Atmos. Sci. 41, 2991-3006) for the storm-relative helicity and
+Browning and Wexler (1968, J. Appl. Meteor. 7, 105-113) for the VAD fit. The
+equation numbers quoted below are not checked against the papers. Constants not tied to a paper are conventional.
 """
 
 import numpy as np
 
+# Constants: conventional values (radarx choice, not from a table of the
+# cited papers); the same as in radarx.io.sounding.
 RD = 287.04749  # gas constant of dry air [J kg-1 K-1]
 RV = 461.52311  # gas constant of water vapour [J kg-1 K-1]
 EPS = RD / RV
 CPD = 1005.7  # specific heat of dry air at constant pressure [J kg-1 K-1]
 KAPPA = RD / CPD
-T0 = 273.15
-P0 = 100000.0
+T0 = 273.15  # [K]
+P0 = 100000.0  # reference pressure of theta, 1000 hPa [Pa]
 
 
 def _esat(t):
+    """Saturation vapour pressure over water [Pa], Bolton (1980) eq. (10)."""
     tc = t - T0
     return 611.2 * np.exp(17.67 * tc / (tc + 243.5))
 
@@ -32,12 +44,16 @@ def thermo(t, p, td, n_threads=0):
     with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
         d = np.where(td < t, td, t)
         d = np.where(np.isnan(td), np.nan, d)
-        th = t * (P0 / p) ** KAPPA
+        th = t * (P0 / p) ** KAPPA  # Poisson's equation, textbook
         e = _esat(d)
         r = EPS * e / (p - e)
         thv = th * (1.0 + r / EPS) / (1.0 + r)
+        # Bolton (1980) eq. (15): temperature at the lifting condensation
+        # level [K] (coefficients 56 K and 800 as in the paper)
         tl = 1.0 / (1.0 / (d - 56.0) + np.log(t / d) / 800.0) + 56.0
-        rg = 1000.0 * r
+        rg = 1000.0 * r  # mixing ratio in g kg-1, the unit of eq. (43)
+        # Bolton (1980) eq. (43): 0.2854 (1 - 0.28e-3 r), 3.376 / TL - 0.00254
+        # and (1 + 0.81e-3 r) are the paper's coefficients
         the = (
             t
             * (P0 / p) ** (0.2854 * (1.0 - 0.28e-3 * rg))
@@ -47,6 +63,8 @@ def thermo(t, p, td, n_threads=0):
 
 
 def _cold_pool_column(z, b, bottom, threshold, top):
+    # C^2 = 2 int(-B) dz (Rotunno et al. 1988), trapezoidal rule; the top is
+    # where B first reaches ``threshold`` (radarx definition of the depth)
     ok = np.isfinite(z) & np.isfinite(b)
     if np.isfinite(bottom):
         first = np.flatnonzero(ok & (z >= bottom))
@@ -116,6 +134,8 @@ def _profile_column(z, u, v, ground, bottom, top, cu, cv):
     vs = np.concatenate([[lo[1]], v[inner], [hi[1]]])
     if np.isfinite(cu) and np.isfinite(cv):
         ur, vr = us - cu, vs - cv
+        # storm-relative helicity, exact for winds linear between levels
+        # (Davies-Jones 1984; sign: positive for clockwise-turning hodographs)
         out[4] = np.sum(ur[1:] * vr[:-1] - ur[:-1] * vr[1:])
     if zt > zb:
         dz = np.diff(zs)

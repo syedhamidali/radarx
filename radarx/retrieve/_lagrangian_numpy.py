@@ -8,6 +8,22 @@ NumPy reference of the compiled trajectory and DLA kernel.
 Same steps, in the same order, as ``radarx/retrieve/_lagrangian.cpp``,
 vectorised over trajectories. Used when the kernel is not built and as the
 test oracle of the kernel.
+
+Sources of the numbers (details and the full reference list are in the module
+documentation of :mod:`radarx.retrieve.lagrangian` and
+:mod:`radarx.retrieve.diabatic_lagrangian`; the pointers were checked against
+the papers): Z13a = Ziegler (2013a, J. Atmos. Oceanic Technol. 30, 2248-2265,
+https://doi.org/10.1175/JTECH-D-12-00194.1); Z07 = Ziegler et al. (2007, Mon.
+Wea. Rev. 135, 2417-2442, https://doi.org/10.1175/MWR3396.1); LFO83 = Lin et al.
+(1983, J. Climate Appl. Meteor. 22, 1065-1092,
+https://doi.org/10.1175/1520-0450(1983)022<1065:BPOTSF>2.0.CO;2); Tao et al.
+(1989, Mon. Wea. Rev. 117, 231-235,
+https://doi.org/10.1175/1520-0493(1989)117<0231:AIWSA>2.0.CO;2); Hsie et al.
+(1980, J. Appl. Meteor. 19, 950-977,
+https://doi.org/10.1175/1520-0450(1980)019<0950:NSOIPC>2.0.CO;2). Numbers
+without a pointer are radarx choices. The LFO83 rates are implemented from
+LFO83, not from the "modified LFO" supplement of Gilmore et al. (2004a), which
+was not consulted.
 """
 
 import math
@@ -40,34 +56,39 @@ ICE = 512  # mixed-phase saturation adjustment (Tao et al. 1989) with cloud ice
 MICRO = REVP | RACW | GACW | GMLT | GSUB | GFR
 INSITU = 256  # DLA flag: initial state from in situ observations (Ziegler et al. 2007)
 
-T0 = 273.15
-P0 = 1.0e5
-RD = 287.04
-KAPPA = 0.2854
-CP = RD / KAPPA
-RV = 461.5
-EPS = RD / RV
-ES0 = 611.2
+T0 = 273.15  # melting temperature, LFO83 appendix, p. 1091
+P0 = 1.0e5  # Pa
+RD = 287.04  # J kg-1 K-1, Z13a sect. 2a (p. 2250)
+KAPPA = 0.2854  # Z13a sect. 2a (p. 2250)
+CP = RD / KAPPA  # radarx choice (1005.8; LFO83 list 1005, appendix p. 1089)
+RV = 461.5  # R_w, LFO83 appendix, p. 1091
+EPS = RD / RV  # radarx
+ES0 = (
+    611.2  # e_s(0 degC) of the Bolton (1980) fit, Pa; not re-checked against the paper
+)
 
-LV_L = 2.5e6
-LF_L = 3.336e5
-LS_L = 2.8336e6
-CW = 4.187e3
-A_R = 841.99
-B_R = 0.8
-C_D = 0.6
-G = 9.805
-A_PR = 0.66
-B_PR = 100.0
-RHO_W = 1000.0
+# LFO83 appendix (pp. 1089-1092), SI units
+LV_L = 2.5e6  # L_v, J kg-1
+LF_L = 3.336e5  # L_f, J kg-1
+LS_L = 2.8336e6  # L_s, J kg-1
+CW = 4.187e3  # C_w, J kg-1 K-1
+A_R = 841.99  # a = 2115 cm^0.2 s-1 in m^0.2 s-1, eq. (7), p. 1069
+B_R = 0.8  # b, eq. (7)
+C_D = 0.6  # hail drag coefficient, eq. (9), p. 1069
+G = 9.805  # g = 980.5 cm s-2
+A_PR = 0.66  # A', K-1, Bigg freezing, eq. (45), p. 1075
+B_PR = 100.0  # B', m-3 s-1, eq. (45)
+RHO_W = 1000.0  # density of water, LFO83 appendix (1 g cm-3)
 
-# Tao, Simpson and McCumber (1989), eqs. (3a), (3b), (6c), (6d); P in mb
+# Tao, Simpson and McCumber (1989), eqs. (3a), (3b), p. 232: a = 17.2693882
+# and 21.8745584, b = 3.8 / P with P in mb; eqs. (6c), (6d) use 237.3 and 265.5
+# (= 273.16 - 35.86 and 273.16 - 7.66)
 TAO_A1 = 17.2693882
 TAO_A2 = 21.8745584
 TAO_B = 3.8
-T_HOM = (
-    233.15  # homogeneous freezing of cloud water at T <= -40 degC (Hsie et al. 1980)
-)
+# homogeneous freezing of cloud water at T <= -40 degC (LFO83 sect. 3f, p. 1077;
+# Hsie et al. 1980, sect. 3b5, p. 956)
+T_HOM = 233.15
 
 # thermodynamic parameter indices (same order as the kernel)
 THERMO_KEYS = (
@@ -259,6 +280,9 @@ def _classify(g, par, st, xp, yp, tp, vlast):
 def build_paths(g, par, starts):
     """Paths of all start points: pos (n, m, 4), val (n, m, 6), npts, flags."""
     dt, n_iter, max_steps = par[0], int(par[1]), int(par[2])
+    # Euler predictor and n_iter trapezoidal corrector iterations: radarx's reading
+    # of the "first-order predictor corrector scheme as in Z07" with three
+    # iterations (Z13a sect. 2b, p. 2250; Z07 p. 2422)
     h = (-1.0 if par[3] < 0 else 1.0) * dt
     mode, min_steps = int(par[4]), int(par[5])
     env_dbz, env_w, env_w_steps = par[6], par[7], int(par[8])
@@ -363,6 +387,8 @@ def build_paths(g, par, starts):
 
 
 def es_water(t):
+    # Bolton (1980) fit: 611.2 Pa, 17.67, 243.5 K (radarx choice, not checked
+    # against the paper)
     tc = t - T0
     return ES0 * np.exp(17.67 * tc / (tc + 243.5))
 
@@ -377,6 +403,7 @@ def es_ice(t):
 
 
 def lv_bolton(t):
+    # radarx choice (2.501e6 - 2370 (T - T0) J kg-1); not from Z13a
     return 2.501e6 - 2370.0 * (t - T0)
 
 
@@ -385,11 +412,19 @@ def exner(p):
 
 
 def air_density(theta, p):
+    # Z13a (sect. 2a, p. 2250) prints rho = 1e5 [(p/1000 mb)^0.2854]^2.509 /
+    # (287.04 theta), exponent 0.7161; radarx uses 1 - kappa = 0.7146 (< 0.1 %
+    # difference in density above 500 hPa)
     return P0 * np.power(p / P0, 1.0 - KAPPA) / (RD * theta)
 
 
 def adjust(th, qv, qc, p):
-    """Saturation adjustment; returns new (theta, qv, qc) and the heating."""
+    """Saturation adjustment; returns new (theta, qv, qc) and the heating.
+
+    Z13a sect. 2g (p. 2257) applies "ideas from the Eulerian frame modeling
+    approach of Soong and Ogura (1973)"; the six Newton iterations on
+    q_v - dq = q_vs(T + L dq / c_p) are radarx's implementation.
+    """
     pi = exner(p)
     t = th * pi
     need = (qv > qvs_water(t, p)) | (qc > 0.0)
@@ -459,6 +494,9 @@ def adjust_ice(th, qv, qc, qi, p, t00):
 
 
 def air_props(t, p, rho):
+    # Thermal conductivity, vapour diffusivity, kinematic viscosity of air as
+    # in Kumjian and Ryzhkov (2010, appendix); not checked against that
+    # paper, same expressions as radarx.retrieve.evaporation.
     ka = (0.441635 + 0.0071 * t) * 1.0e-2
     psi = 2.11e-5 * np.power(t / T0, 1.94) * (1.0e5 / p)
     nu = (0.379565 + 0.0049 * t) * 1.0e-5 / rho
@@ -467,7 +505,16 @@ def air_props(t, p, rho):
 
 def lfo_rates(t, p, rho, qv, qc, qr, nr, qg, ng, rhog, rho0, sw, qi=0.0):
     """LFO83 rates (n, 7): revp, racw, gacw, gacr, gmlt, gsub, gfr; q_i only
-    enters the in-cloud test of the graupel sublimation (delta_1, eq. 20)."""
+    enters the in-cloud test of the graupel sublimation (delta_1, eq. 20, p. 1070).
+
+    Equations of Lin et al. (1983): lambda_R, lambda_G (4), (6), p. 1068; fall
+    speeds (7), (9) and mass-weighted velocities (11), (13), pp. 1068-1069;
+    P_GACW (40) and P_GACR (42), p. 1075; P_GFR (45), p. 1075; P_GSUB (46) with
+    A'', B'' of (31), pp. 1072 and 1076; P_GMLT (47), p. 1076; P_RACW (51),
+    p. 1076; P_REVP (52), p. 1077. Eq. (46) is printed with
+    (4 g rho_G / 3 C_D rho)^(1/4) but eq. (47) without rho; the form with rho,
+    which the fall speed (9) requires dimensionally, is used for both.
+    """
     arrs = np.broadcast_arrays(
         *(np.asarray(a, float) for a in (t, p, rho, qv, qc, qr, nr, qg, ng, rhog))
     )
@@ -592,7 +639,15 @@ def lfo_rates(t, p, rho, qv, qc, qr, nr, qg, ng, rhog, rho0, sw, qi=0.0):
 
 
 def tendencies(r, th, p, qv, qc, qr, qg, dt):
-    """Limited tendencies (theta, qv, qc) and the theta parts (revp, gmlt, gsub, frz)."""
+    """Limited tendencies (theta, qv, qc) and the theta parts (revp, gmlt, gsub, frz).
+
+    The limits (evaporation to saturation and to the available rain or
+    graupel, collection to the available cloud water, melting and freezing to
+    the available graupel and rain) are numerical safeguards of radarx, not
+    from LFO83 or Z13a. The heating is L / (c_p Pi) times the rate (radarx
+    thermodynamics, cf. LFO83 eq. 53); freezing of cloud collected by graupel
+    below 0 degC is heated with L_f.
+    """
     revp, racw, gacw, gacr, gmlt, gsub, gfr = (r[..., k].copy() for k in range(7))
     pi = exner(p)
     t = th * pi
@@ -631,6 +686,8 @@ def profile(table, z0, dz, zp):
 
 
 def damping_rate(q, w, u, v, ub, vb, qp, zagl):
+    # Ziegler (2013a) eqs. (22)-(26), pp. 2257-2258: K = c_d V / (L_d exp(b z)),
+    # with z in km (radarx's reading; the unit is not stated in the paper)
     aw = np.abs(w)
     f = np.clip(qp / q[Q["qp0"]], 0.0, 1.0)
     c0 = (1.0 - f) * q[Q["cmin"]] + f * q[Q["cmax"]]
@@ -652,7 +709,8 @@ def damping_rate(q, w, u, v, ub, vb, qp, zagl):
 
 
 def insitu_match(pos, npts, dt, obs, op):
-    """Initial states from in situ observations (Ziegler et al. 2007, eq. 1).
+    """Initial states from in situ observations (Ziegler et al. 2007, eq. 1,
+    p. 2422: first-pass Barnes weight exp(-r^2/kappa_s - t_i^2/tau_i - t_L^2/tau_L)).
 
     Returns the weight sum (0 without a candidate), the weighted theta and
     q_v and the index of the stored path point nearest the time of the

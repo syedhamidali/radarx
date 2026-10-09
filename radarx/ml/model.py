@@ -21,7 +21,19 @@ and models can be registered for the session with :func:`register_model`.
 
 Every model carries its licence and citation: they are shown by
 ``repr(model)`` and :func:`list_models`, and :attr:`Model.attrs` adds them to
-the outputs of radarx functions that use the model.
+the outputs of radarx functions that use the model. A registry entry must
+give the licence of the weights as an SPDX identifier (checked against the
+licence stated by the authors' release, not assumed) and a citation that
+ends in the DOI of the paper (``https://doi.org/...``); a dataset or software
+DOI can be added to the citation text. The registry itself holds no
+scientific content: it stores what the authors of a model published, and
+which statements about a model were checked against its paper is documented
+in the module of the method that uses it (for example
+:mod:`radarx.retrieve.tornado` and :mod:`radarx.retrieve.biology`).
+
+ONNX Runtime (github.com/microsoft/onnxruntime, MIT licence per the GitHub
+API) executes the models; the ONNX format and the ``onnx`` package used to
+write converted models are Apache-2.0 (github.com/onnx/onnx, same check).
 """
 
 from __future__ import annotations
@@ -152,9 +164,12 @@ def register_model(
         SHA-256 hash of the file. Required for URLs; for a local file
         ``None`` skips the check.
     licence : str
-        Licence of the weights (SPDX identifier, e.g. ``"MIT"``).
+        Licence of the weights (SPDX identifier, e.g. ``"MIT"``), as stated by
+        the authors' release.
     citation : str
-        Reference to cite when using the model.
+        Reference to cite when using the model: authors, year, title,
+        journal, volume, pages and the DOI (``https://doi.org/...``) of the
+        paper. The DOI must resolve to the cited paper.
     version : str, default "1"
         Model version.
     task : str, optional

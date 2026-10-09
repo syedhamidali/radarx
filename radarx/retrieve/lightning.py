@@ -18,25 +18,53 @@ CF layout of the xlma-python package.
 Flashes
 -------
 :func:`cluster_flashes` groups sources into flashes by their separation in
-space and time (Fuchs et al. 2016): the source positions are converted to
-Earth-centred Cartesian coordinates, divided by a distance scale (default
-3 km) and the source times by a time scale (default 0.15 s), and two sources
-belong to the same flash when their normalized space-time distance is at most
-one,
+space and time, with the normalization of Fuchs et al. (2016) [1]_ (section
+2.1, p. 8628; the weighted Euclidean distance of Mach et al. 2007 [7]_): the
+source positions are converted to Earth-centred Cartesian
+coordinates, divided by a distance scale (default 3 km) and the source times
+by a time scale (default 0.15 s), and two sources belong to the same flash
+when their normalized space-time distance is at most one (Fuchs et al. use
+:math:`\\epsilon = 1` on the same coordinates),
 
 .. math::
 
     \\left(\\frac{|\\mathbf{x}_i - \\mathbf{x}_j|}{d}\\right)^2 +
     \\left(\\frac{t_i - t_j}{\\tau}\\right)^2 \\le 1 .
 
-Flashes are the connected groups of such links, i.e. the clusters of DBSCAN
-with a minimum of one point, as in Fuchs et al. (2016) and the xlma-python
-flash sorting. Unlike their streamed processing, no maximum flash duration
-is imposed (it only limits memory there). Flashes with few sources are kept
-and left out later (``min_sources``), as is customary (Fuchs et al. 2016).
-For every flash the start and end time, duration, number of sources,
-initiation point (first source), centroid and plan area (convex hull of the
-sources seen from above; Bruning and MacGorman 2013) are computed.
+Flashes are the connected groups of such links (single linkage). This is what
+DBSCAN [2]_ gives with a minimum number of points :math:`N_{min}` of one or
+two, and only then. Fuchs et al. (2016) [1]_ (sections 2.1 and 2.2, pp.
+8628-8629) ran the scikit-learn DBSCAN with :math:`\\epsilon = 1` and
+:math:`N_{min} = 2` (Alabama, Washington D.C.) and :math:`N_{min} = 10`
+(Colorado). A flash then starts from a core source with at least
+:math:`N_{min}` sources within :math:`\\epsilon`, and an outer source must lie
+near a core source; for :math:`N_{min} > 2` this is stricter than the
+dot-to-dot linking used here, which Fuchs et al. contrast with DBSCAN (p.
+8628). Singletons and clusters of fewer than :math:`N_{min}` sources ("noise" in
+DBSCAN) are kept as small flashes. radarx has no :math:`N_{min}` argument, so
+it reproduces the Alabama and D.C. setting but not the Colorado one: on 150
+synthetic random-walk flashes (check of issue 178) scikit-learn DBSCAN with
+:math:`N_{min}` = 1 and 2 gave the same 622 flashes as radarx, with 3 it gave
+707 and with 10 it gave 3607 (counts depend on the synthetic sample; an
+independent repeat gave identical partitions for 1 and 2 and more flashes for
+3 and 10).
+
+Fuchs et al. (2016) also impose, by default, an "arbitrary 3 s maximum
+duration" on the flashes, because their streamed processing clusters a buffer
+of twice that length (p. 8629); flashes longer than 3 s can be split by it, so
+it is a limit that changes the result, not only a memory saving. radarx imposes
+no maximum duration. The sources should be filtered first as in Fuchs et al.
+(at least six stations by default and :math:`\\chi^2 \\le 1`, p. 8628, e.g.
+with the ``min_stations`` and ``max_chi2`` arguments of
+:func:`radarx.io.read_lma`).
+Flashes with few sources are kept and left out later (``min_sources``), as
+is customary (Fuchs et al. 2016, p. 8629). For every flash the start and end
+time, duration, number of sources, initiation point (first source),
+centroid (mean of the source latitudes, longitudes and altitudes; a radarx
+definition) and plan area (convex hull of the sources seen from above, "the
+area enclosed by a rubber band wrapped around the flash viewed from above",
+Fuchs et al. 2016, p. 8626, after Bruning and MacGorman 2013 [3]_) are
+computed.
 
 Gridded products
 ----------------
@@ -45,12 +73,19 @@ Gridded products
 :func:`radarx.grid.grid_cones`) and time interval:
 
 - ``source_density``: VHF sources;
-- ``flash_extent_density``: flashes with at least one source in the box
-  (Bruning and MacGorman 2013);
+- ``flash_extent_density``: flashes with at least one source in the box (the
+  definition used here; the product is attributed to Bruning and MacGorman
+  2013 [3]_, whose text is not checked, so the attribution is
+  unconfirmed);
 - ``flash_initiation_density``: flashes whose first source is in the box.
 
 With heights ``z`` the counts are per 3-D box (lightning on the radar grid);
-without, per column.
+without, per column. The default ``min_sources=10`` follows Schultz et al.
+(2011) [5]_ (section 2b, p. 747), who required "a minimum of 10 VHF source
+points" per flash to remove spurious noise points (Fuchs et al. 2016 [1]_
+use :math:`N_{min} = 10` for Colorado). The 5-min interval, the box edges
+midway between grid centres and the azimuthal equidistant projection are
+radarx choices without a source.
 
 Storm cells and lightning jumps
 -------------------------------
@@ -61,20 +96,32 @@ rates per cell and vertical source distributions.
 :func:`vertical_source_distribution` gives the height distribution of all
 sources and flash initiations.
 
-:func:`lightning_jump` applies the "2σ" lightning jump algorithm of Schultz
-et al. (2009), as specified by Schultz et al. (2011, section 2c) and Schultz
-et al. (2016):
+:func:`lightning_jump` follows the "2σ" lightning jump algorithm of Schultz
+et al. (2009) [4]_ as listed step by step by Schultz et al. (2011, section 2c,
+pp. 747-748; appendix, p. 753) [5]_ and Schultz et al. (2016, section 2c,
+pp. 97-98) [6]_:
 
-1. the total flash rate is averaged over 2-min periods;
+1. the total flash rate is averaged over 2-min periods ([5]_ step (i), [6]_
+   step 1);
 2. the rate of change ``DFRDT`` is the difference between consecutive
-   periods divided by the period (flashes min\\ :sup:`-2`);
+   periods divided by the period (flashes min\\ :sup:`-2`; [4]_ Eq. 3, [5]_
+   Eq. A2, [6]_ step 2);
 3. :math:`\\sigma` is the standard deviation of the five previous ``DFRDT``
-   values, and the sigma level is ``DFRDT`` / :math:`\\sigma`;
-4. a jump occurs when the sigma level reaches 2 while the flash rate is at
-   least 10 flashes min\\ :sup:`-1`, after a spin-up of six periods (five
-   ``DFRDT`` values before the current one, 14 min);
-5. a jump lasts until the sigma level drops below zero, and jumps starting
-   within 6 min of an earlier one are one jump.
+   values ([4]_ p. 2549: the five most recent periods "not including the
+   period of interest"), and the sigma level is ``DFRDT`` / :math:`\\sigma`
+   ([6]_ step 4);
+4. a jump occurs when the sigma level reaches 2 while the averaged flash rate
+   is at least 10 flashes min\\ :sup:`-1`, after a spin-up of 14 min: six
+   2-min periods give the five ``DFRDT`` values and the seventh is the
+   current one ([6]_ step 5);
+5. a jump lasts until the sigma level drops below zero ([6]_), and jumps
+   starting within 6 min of an earlier one are one jump ([4]_ p. 2550, [6]_
+   step 6).
+
+Where the algorithm is not fully specified in the papers, or the papers
+disagree, the choices made here are listed in the Notes of
+:func:`lightning_jump` (strict or non-strict inequalities, end of a jump,
+sample or population standard deviation, zero standard deviation).
 
 The heavy loops (clustering, flash properties, gridding, cell counts) run in
 a compiled kernel (``radarx.retrieve._lightning``, multithreaded over sources
@@ -82,29 +129,35 @@ and flashes) with an identical NumPy reference implementation as fallback.
 
 References
 ----------
-Bruning, E. C., and D. R. MacGorman, 2013: Theory and observations of controls
-on lightning flash size spectra. *J. Atmos. Sci.*, **70** (12), 4012-4029,
-https://doi.org/10.1175/JAS-D-12-0289.1
-
-Fuchs, B. R., E. C. Bruning, S. A. Rutledge, L. D. Carey, P. R. Krehbiel,
-and W. Rison, 2016: Climatological analyses of LMA data with an open-source
-lightning flash-clustering algorithm. *J. Geophys. Res. Atmos.*, **121**
-(14), 8625-8648, https://doi.org/10.1002/2015JD024663
-
-Schultz, C. J., W. A. Petersen, and L. D. Carey, 2009: Preliminary
-development and evaluation of lightning jump algorithms for the real-time
-detection of severe weather. *J. Appl. Meteor. Climatol.*, **48** (12),
-2543-2563, https://doi.org/10.1175/2009JAMC2237.1
-
-Schultz, C. J., W. A. Petersen, and L. D. Carey, 2011: Lightning and severe
-weather: A comparison between total and cloud-to-ground lightning trends.
-*Wea. Forecasting*, **26** (5), 744-755,
-https://doi.org/10.1175/WAF-D-10-05026.1
-
-Schultz, E. V., C. J. Schultz, L. D. Carey, D. J. Cecil, and M. Bateman,
-2016: Automated storm tracking and the lightning jump algorithm using GOES-R
-Geostationary Lightning Mapper (GLM) proxy data. *J. Operational Meteor.*,
-**4** (7), 92-107, https://doi.org/10.15191/nwajom.2016.0407
+.. [1] Fuchs, B. R., E. C. Bruning, S. A. Rutledge, L. D. Carey, P. R.
+   Krehbiel, and W. Rison, 2016: Climatological analyses of LMA data with an
+   open-source lightning flash-clustering algorithm. *J. Geophys. Res.
+   Atmos.*, **121** (14), 8625-8648, https://doi.org/10.1002/2015JD024663
+.. [2] Ester, M., H.-P. Kriegel, J. Sander, and X. Xu, 1996: A density-based
+   algorithm for discovering clusters in large spatial databases with noise.
+   *Proc. Second Int. Conf. on Knowledge Discovery and Data Mining (KDD-96)*,
+   AAAI Press, 226-231 (no DOI; reference as listed in [1]_).
+.. [3] Bruning, E. C., and D. R. MacGorman, 2013: Theory and observations of
+   controls on lightning flash size spectra. *J. Atmos. Sci.*, **70** (12),
+   4012-4029, https://doi.org/10.1175/JAS-D-12-0289.1
+.. [4] Schultz, C. J., W. A. Petersen, and L. D. Carey, 2009: Preliminary
+   development and evaluation of lightning jump algorithms for the real-time
+   detection of severe weather. *J. Appl. Meteor. Climatol.*, **48** (12),
+   2543-2563, https://doi.org/10.1175/2009JAMC2237.1
+.. [5] Schultz, C. J., W. A. Petersen, and L. D. Carey, 2011: Lightning and
+   severe weather: A comparison between total and cloud-to-ground lightning
+   trends. *Wea. Forecasting*, **26** (5), 744-755,
+   https://doi.org/10.1175/WAF-D-10-05026.1
+.. [6] Schultz, E. V., C. J. Schultz, L. D. Carey, D. J. Cecil, and M.
+   Bateman, 2016: Automated storm tracking and the lightning jump algorithm
+   using GOES-R Geostationary Lightning Mapper (GLM) proxy data. *J.
+   Operational Meteor.*, **4** (7), 92-107,
+   https://doi.org/10.15191/nwajom.2016.0407
+.. [7] Mach, D. M., H. J. Christian, R. J. Blakeslee, D. J. Boccippio, S. J.
+   Goodman, and W. L. Boeck, 2007: Performance assessment of the Optical
+   Transient Detector and Lightning Imaging Sensor. *J. Geophys. Res.*,
+   **112**, D09210, https://doi.org/10.1029/2006JD007787 (cited by [1]_ for
+   the normalization; its content is not checked)
 
 .. autosummary::
    :nosignatures:
@@ -404,6 +457,15 @@ def _components(n, i, j, labels):
 
 
 def _cluster_numpy(x, y, z, t, distance, time):
+    # Flashes = connected components of the links (dx / d)^2 + (dt / tau)^2 <= 1
+    # (single linkage), the DBSCAN clustering (Ester et al. 1996) with
+    # eps = 1 on the normalized coordinates and a minimum of 1 or 2 points. It
+    # equals the flash sorter of Fuchs et al. (2016, pp. 8628-8629) for their
+    # N_min = 2 (Alabama, D.C.), not for their N_min = 10 (Colorado), and it
+    # has no maximum flash duration (Fuchs et al. impose 3 s by default, which
+    # can split longer flashes; see issue 178). Sources are sorted by time, so
+    # source i only needs partners j > i with t_j - t_i <= tau; the loop
+    # runs over the index lag j - i and stops when no pair is within tau.
     n = t.size
     labels = np.arange(n)
     id2, it2 = 1.0 / (distance * distance), 1.0 / (time * time)
@@ -622,11 +684,13 @@ def cluster_flashes(ds, *, distance=3000.0, time=0.15, engine="auto", n_threads=
         chi-square and number of stations first, e.g. ``max_chi2=1``,
         ``min_stations=6``).
     distance : float, optional
-        Distance scale :math:`d` in metres. Default 3000 m (Fuchs et al.
-        2016 use 3 km for sensitive networks and 6 km for less sensitive
-        ones).
+        Distance scale :math:`d` in metres. Default 3000 m: Fuchs et al.
+        (2016) [1]_ (p. 8628) took 3 km for the sensitive Colorado network
+        and 6 km for the less sensitive Alabama and D.C. networks, "in
+        accordance with values from other algorithms" there.
     time : float, optional
-        Time scale :math:`\\tau` in seconds. Default 0.15 s.
+        Time scale :math:`\\tau` in seconds. Default 0.15 s, the 150 ms of
+        Fuchs et al. (2016) [1]_ (p. 8628).
     engine : {"auto", "compiled", "numpy"}, optional
         Implementation to use. ``"auto"`` (default) prefers the compiled
         kernel and falls back to NumPy.
@@ -648,20 +712,77 @@ def cluster_flashes(ds, *, distance=3000.0, time=0.15, engine="auto", n_threads=
     -----
     Two sources are linked when
     :math:`(|\\Delta \\mathbf{x}| / d)^2 + (\\Delta t / \\tau)^2 \\le 1`, with
-    :math:`\\Delta \\mathbf{x}` the straight-line (Earth-centred Cartesian)
-    separation; flashes are the connected groups of linked sources (DBSCAN
-    with a minimum of one point).
+    :math:`\\Delta \\mathbf{x}` the straight-line (Earth-centred Cartesian,
+    WGS84) separation; flashes are the connected groups of linked sources
+    (single linkage).
+
+    Relation to Fuchs et al. (2016). Single linkage is the clustering of
+    DBSCAN [2]_ with :math:`\\epsilon = 1` on these normalized coordinates and
+    a minimum number of points :math:`N_{min}` (scikit-learn ``min_samples``,
+    the source itself counted) of 1 or 2, and not for larger :math:`N_{min}`.
+    Fuchs et al. [1]_ (sections 2.1 and 2.2, pp. 8628-8629) used
+    :math:`N_{min} = 2` for Alabama and D.C. and :math:`N_{min} = 10` for
+    Colorado. With :math:`N_{min} = 10` a flash grows only from core sources
+    with at least ten sources within :math:`\\epsilon` and an outer source must
+    be within :math:`\\epsilon` of a core source, unlike the "simple dot-to-dot
+    algorithm" that this function implements; sources of clusters smaller than
+    :math:`N_{min}` are kept as small flashes in both. radarx has no
+    :math:`N_{min}` argument. Check on 150 synthetic random-walk flashes
+    (issue 178), scikit-learn ``DBSCAN(eps=1, min_samples=N_min)`` on the same
+    normalized coordinates, noise points turned into one-source flashes:
+    ``N_min`` = 1 and 2 give the same partition as this function (622
+    flashes), ``N_min`` = 3 gives 707 and ``N_min`` = 10 gives 3607 flashes
+    against 622 here, so the Colorado setting of Fuchs et al. is not
+    reproduced (the counts depend on the synthetic sample; an independent
+    repeat on another sample gave identical partitions for 1 and 2 and more
+    flashes for 3 and 10).
+
+    Maximum duration. Fuchs et al. [1]_ (p. 8629) impose "by default an
+    arbitrary 3 s maximum duration" on flashes, because they cluster a buffer
+    of twice that duration in a stream; a flash longer than 3 s can be split
+    by this. It is an imposed limit that changes which sources are grouped.
+    No maximum duration is imposed here (flashes can be longer than 3 s).
+
+    The flash centroid is the mean of the source latitudes, longitudes and
+    altitudes and the plan area is the convex hull of the sources in an
+    azimuthal equidistant projection about their mean position (both radarx
+    definitions; Fuchs et al. [1]_, p. 8626, describe the plan area as a
+    rubber band around the flash seen from above, after Bruning and
+    MacGorman [3]_, not checked against the paper). Fuchs et
+    al. measure the normalization from the LMA coordinate centre; here the
+    first source is subtracted, which does not change any separation. The
+    normalization of the space and time axes is the weighted Euclidean
+    distance of Mach et al. [4]_ as used by Fuchs et al. [1]_ (p. 8628; the
+    paper of Mach et al. is not checked). The plan-area hull is
+    computed with Qhull (Barber et al. [6]_) in the NumPy path and with
+    Andrew's monotone chain [5]_ in the compiled kernel; both give the area of
+    the same convex polygon.
 
     References
     ----------
-    Fuchs, B. R., E. C. Bruning, S. A. Rutledge, L. D. Carey, P. R.
-    Krehbiel, and W. Rison, 2016: Climatological analyses of LMA data with an
-    open-source lightning flash-clustering algorithm. *J. Geophys. Res.
-    Atmos.*, **121** (14), 8625-8648, https://doi.org/10.1002/2015JD024663
-
-    Bruning, E. C., and D. R. MacGorman, 2013: Theory and observations of
-    controls on lightning flash size spectra. *J. Atmos. Sci.*, **70** (12),
-    4012-4029, https://doi.org/10.1175/JAS-D-12-0289.1
+    .. [1] Fuchs, B. R., E. C. Bruning, S. A. Rutledge, L. D. Carey, P. R.
+       Krehbiel, and W. Rison, 2016: Climatological analyses of LMA data
+       with an open-source lightning flash-clustering algorithm. *J.
+       Geophys. Res. Atmos.*, **121** (14), 8625-8648,
+       https://doi.org/10.1002/2015JD024663
+    .. [2] Ester, M., H.-P. Kriegel, J. Sander, and X. Xu, 1996: A
+       density-based algorithm for discovering clusters in large spatial
+       databases with noise. *Proc. Second Int. Conf. on Knowledge Discovery
+       and Data Mining (KDD-96)*, AAAI Press, 226-231 (no DOI; reference as
+       listed in [1]_).
+    .. [3] Bruning, E. C., and D. R. MacGorman, 2013: Theory and
+       observations of controls on lightning flash size spectra. *J. Atmos.
+       Sci.*, **70** (12), 4012-4029, https://doi.org/10.1175/JAS-D-12-0289.1
+    .. [4] Mach, D. M., H. J. Christian, R. J. Blakeslee, D. J. Boccippio, S.
+       J. Goodman, and W. L. Boeck, 2007: Performance assessment of the
+       Optical Transient Detector and Lightning Imaging Sensor. *J. Geophys.
+       Res.*, **112**, D09210, https://doi.org/10.1029/2006JD007787
+    .. [5] Andrew, A. M., 1979: Another efficient algorithm for convex hulls
+       in two dimensions. *Inf. Process. Lett.*, **9** (5), 216-219,
+       https://doi.org/10.1016/0020-0190(79)90072-3
+    .. [6] Barber, C. B., D. P. Dobkin, and H. Huhdanpaa, 1996: The quickhull
+       algorithm for convex hulls. *ACM Trans. Math. Softw.*, **22** (4),
+       469-483, https://doi.org/10.1145/235815.235821
     """
     use_compiled = _use_compiled(engine)
     _check_events(ds)
@@ -806,10 +927,14 @@ def grid_lightning(
         Origin of ``x``/``y``, if the grid does not give it.
     min_sources : int, optional
         Flashes with fewer sources are left out of the flash products.
-        Default 10.
+        Default 10, the minimum number of VHF sources per flash required by
+        Schultz et al. (2011) [2]_ (section 2b, p. 747) to remove spurious
+        noise points; Fuchs et al. (2016) [1]_ (p. 8629) describe such a
+        threshold on the number of points as customary.
     distance, time : float, optional
         Clustering scales if ``ds`` has no flashes (see
-        :func:`cluster_flashes`).
+        :func:`cluster_flashes`, which also states how the flashes relate
+        to Fuchs et al. 2016).
     engine : {"auto", "compiled", "numpy"}, optional
         Implementation to use. Default ``"auto"``.
     n_threads : int, optional
@@ -823,11 +948,29 @@ def grid_lightning(
         ``(time, [z,] y, x)``, with the time interval centres and
         ``time_bounds``, ``lat``/``lon`` axis coordinates and the origin.
 
+    Notes
+    -----
+    Flash extent density counts the flashes with at least one source in a
+    grid box; the product is attributed to Bruning and MacGorman (2013) [3]_,
+    not checked against the paper. The
+    5-min default interval, the box edges midway between grid centres and
+    the azimuthal equidistant projection of the sources about the grid
+    origin are radarx choices.
+
     References
     ----------
-    Bruning, E. C., and D. R. MacGorman, 2013: Theory and observations of
-    controls on lightning flash size spectra. *J. Atmos. Sci.*, **70** (12),
-    4012-4029, https://doi.org/10.1175/JAS-D-12-0289.1
+    .. [1] Fuchs, B. R., E. C. Bruning, S. A. Rutledge, L. D. Carey, P. R.
+       Krehbiel, and W. Rison, 2016: Climatological analyses of LMA data
+       with an open-source lightning flash-clustering algorithm. *J.
+       Geophys. Res. Atmos.*, **121** (14), 8625-8648,
+       https://doi.org/10.1002/2015JD024663
+    .. [2] Schultz, C. J., W. A. Petersen, and L. D. Carey, 2011: Lightning
+       and severe weather: A comparison between total and cloud-to-ground
+       lightning trends. *Wea. Forecasting*, **26** (5), 744-755,
+       https://doi.org/10.1175/WAF-D-10-05026.1
+    .. [3] Bruning, E. C., and D. R. MacGorman, 2013: Theory and
+       observations of controls on lightning flash size spectra. *J. Atmos.
+       Sci.*, **70** (12), 4012-4029, https://doi.org/10.1175/JAS-D-12-0289.1
 
     Examples
     --------
@@ -972,6 +1115,11 @@ def vertical_source_distribution(
     -------
     xarray.Dataset
         ``source_count`` and ``flash_initiation_count`` on ``(time, z)``.
+
+    Notes
+    -----
+    Flashes and the ``min_sources`` default are as in :func:`grid_lightning`
+    and :func:`cluster_flashes`, with their references.
     """
     use_compiled = _use_compiled(engine)
     _check_events(ds)
@@ -1121,6 +1269,16 @@ def cell_flash_rate(
         ``flash_count`` and ``flash_rate`` (flashes min\\ :sup:`-1`) on
         ``(cell, time)``, and with ``z`` the ``source_count`` on
         ``(cell, time, z)``; ``cell`` holds the mask labels.
+
+    Notes
+    -----
+    Flashes, ``min_sources`` and the clustering scales are as in
+    :func:`cluster_flashes` and :func:`grid_lightning` (Fuchs et al. 2016;
+    Schultz et al. 2011, with their references there). The 1-min interval,
+    the nearest-frame attribution of sources and the default ``max_offset``
+    (half the median mask spacing, or 150 s for a single frame) are radarx
+    choices without a published source. Flash rates of tracked cells are
+    the input of :func:`lightning_jump` (Schultz et al. 2009, 2011, 2016).
     """
     use_compiled = _use_compiled(engine)
     _check_events(ds)
@@ -1210,7 +1368,14 @@ def cell_flash_rate(
 
 
 def _sigma_level(dfrdt, history, ddof):
-    """DFRDT over the standard deviation of the ``history`` previous values."""
+    """
+    DFRDT over the standard deviation of the ``history`` previous values.
+
+    The standard deviation is the sample one by default (``ddof=1``), a radarx
+    choice that the papers (Schultz et al. 2009, 2011, 2016) do not settle.
+    With a zero standard deviation the level is infinite with the sign of
+    DFRDT (NaN if DFRDT is also zero).
+    """
     n = dfrdt.size
     level = np.full(n, np.nan)
     if n <= history + 1:
@@ -1226,6 +1391,10 @@ def _sigma_level(dfrdt, history, ddof):
 
 
 def _jump_series(rate, period_min, sigma, min_rate, history, group, ddof):
+    # Conventions (see the Notes of lightning_jump): the trigger
+    # uses >= although Schultz et al. (2009, 2011) say "exceeds"; a jump ends
+    # when the sigma level is below zero (Schultz et al. 2016, step 5), not at
+    # DFRDT <= 0 as in Schultz et al. (2009, p. 2550; 2011, p. 748).
     dfrdt = np.full(rate.size, np.nan)
     dfrdt[1:] = (rate[1:] - rate[:-1]) / period_min
     level = _sigma_level(dfrdt, history, ddof)
@@ -1234,7 +1403,8 @@ def _jump_series(rate, period_min, sigma, min_rate, history, group, ddof):
     start = np.zeros(rate.size, dtype=bool)
     active, last_start = False, -np.inf
     for k in range(rate.size):
-        # a jump continues until the sigma level drops below zero
+        # a jump continues until the sigma level drops below zero (2016); the
+        # 2009 and 2011 papers end it at DFRDT <= 0, i.e. also at level == 0
         active = active and level[k] >= 0
         if not active and trigger[k]:
             active = True
@@ -1264,46 +1434,103 @@ def lightning_jump(
         ``time`` dimension, e.g. ``cell_flash_rate(...).flash_rate``; other
         dimensions (cells) are processed independently.
     period : str or timedelta, optional
-        Averaging period of the flash rate. Default ``"2min"``.
+        Averaging period of the flash rate. Default ``"2min"`` (Schultz et
+        al. 2011 [2]_ step (i); 2016 [3]_ step 1).
     sigma : float, optional
-        Sigma level of a jump. Default 2.
+        Sigma level of a jump. Default 2 (the "2σ" algorithm; chosen "on a
+        trial and error basis" by Schultz et al. 2009 [1]_, p. 2550).
     min_rate : float, optional
         Flash rate (flashes min\\ :sup:`-1`) the averaged rate must reach for
-        a jump. Default 10.
+        a jump. Default 10 (Schultz et al. 2009 [1]_, p. 2550; 2011 [2]_ step
+        (ii); 2016 [3]_ step 5). Applied to the averaged rate with ``>=``,
+        see Notes.
     history : int, optional
         Number of previous ``DFRDT`` values of the standard deviation.
-        Default 5 (10 min, a 14-min spin-up with the current period).
+        Default 5 (Schultz et al. 2009 [1]_ p. 2549; 2011 [2]_ steps
+        (iii)-(v); 2016 [3]_ step 3). The sigma level is first defined at the
+        seventh period, i.e. after the 14-min spin-up of Schultz et al. 2016
+        [3]_ (six 2-min periods give the five ``DFRDT`` values, the seventh
+        period is the current one).
     group : str or timedelta, optional
         Jumps starting within this time of the start of an earlier one are
-        not new jumps. Default ``"6min"``.
+        not new jumps. Default ``"6min"`` (Schultz et al. 2009 [1]_ p. 2550;
+        2016 [3]_ step 6).
     ddof : int, optional
         Delta degrees of freedom of the standard deviation. Default 1
-        (sample standard deviation).
+        (sample standard deviation); a radarx choice, see Notes.
 
     Returns
     -------
     xarray.Dataset
         On the averaging periods (``time``: first input time of each
-        period): ``flash_rate`` (averaged), ``dfrdt`` (flashes min\\ :sup:`-2`), ``sigma_level``,
-        ``jump`` (a jump is in progress) and ``jump_start`` (first period of
-        a new jump).
+        period): ``flash_rate`` (averaged), ``dfrdt`` (flashes min\\ :sup:`-2`),
+        ``sigma_level``, ``jump`` (a jump is in progress) and ``jump_start``
+        (first period of a new jump).
+
+    Notes
+    -----
+    The steps are those listed by Schultz et al. (2011) [2]_ (section 2c,
+    pp. 747-748, appendix p. 753) and Schultz et al. (2016) [3]_ (section 2c,
+    pp. 97-98), after the "2σ" algorithm of Schultz et al. (2009) [1]_
+    (pp. 2547-2550). The papers differ in, or leave open, the following
+    points, so the conventions here are stated explicitly; they
+    only matter for exact ties and for the absolute size of the sigma level.
+
+    * *Trigger.* Schultz et al. (2009, p. 2550; 2011, step (vii)) say a jump
+      occurs once ``DFRDT`` "exceeds" the 2σ threshold, and 2016 (step 5) that
+      the flash rate "exceeds" 10 flashes min\\ :sup:`-1`, i.e. strict
+      inequalities. Schultz et al. 2016 (step 4) also call a "2σ jump" one
+      with a sigma level of 2. Here a jump needs ``sigma_level >= sigma`` and
+      ``flash_rate >= min_rate``, which differs from the strict reading only
+      when the values are exactly equal.
+    * *End of a jump.* Schultz et al. (2009, p. 2550; 2011, section 3a,
+      p. 748) end a jump once ``DFRDT`` is "less than or equal to 0", whereas
+      Schultz et al. (2016, step 5) end it once the sigma level "drops below
+      zero". Here the 2016 convention is used: the jump continues while
+      ``sigma_level >= 0`` and ends at a negative or undefined (NaN) sigma
+      level. For a perfectly constant averaged rate with a non-zero standard
+      deviation of the previous values (``DFRDT`` = 0) the jump therefore
+      continues here, where the 2009 and 2011 rule would end it.
+    * *Grouping.* Jumps "separated by 6 min or fewer" are one jump (2009,
+      p. 2550; "jump, no jump, jump in consecutive periods"), and within 6
+      min "only the first jump remains" (2016, step 6). Here a start counts
+      as a new jump (``jump_start``) only when more than ``group`` has passed
+      since the start of the most recent jump, including starts that were
+      merged; ``jump`` itself is not merged. This reading of "separated" is
+      a radarx choice.
+    * *Standard deviation.* The papers say "standard deviation" of the five
+      previous ``DFRDT`` values and do not say whether it is the sample or the
+      population one. ``ddof=1`` (sample) is a radarx choice; ``ddof=0``
+      (population) would multiply every sigma level by
+      :math:`\\sqrt{n/(n-1)} = \\sqrt{5/4} \\approx 1.118` for ``history``
+      :math:`n = 5`. This cannot be settled from the papers.
+    * *Zero standard deviation.* If the previous ``DFRDT`` values are all
+      equal (a perfectly linear ramp of the rate), the sigma level is
+      infinite with the sign of ``DFRDT``, and NaN when ``DFRDT`` is also
+      zero. A positive ``DFRDT`` then triggers (if the rate is high enough),
+      as the rule "``DFRDT`` exceeds twice the standard deviation" (zero) of
+      Schultz et al. gives.
+    * *Averaging.* The flash rate is averaged over ``period`` from the first
+      input time on; the 10 flashes min\\ :sup:`-1` activation is applied to
+      this average (2011, step (ii)), not to the 1-min rates. The standard
+      deviation uses the five values before the current one, "not including
+      the period of interest" (2009, p. 2549).
 
     References
     ----------
-    Schultz, C. J., W. A. Petersen, and L. D. Carey, 2009: Preliminary
-    development and evaluation of lightning jump algorithms for the
-    real-time detection of severe weather. *J. Appl. Meteor. Climatol.*,
-    **48** (12), 2543-2563, https://doi.org/10.1175/2009JAMC2237.1
-
-    Schultz, C. J., W. A. Petersen, and L. D. Carey, 2011: Lightning and
-    severe weather: A comparison between total and cloud-to-ground lightning
-    trends. *Wea. Forecasting*, **26** (5), 744-755,
-    https://doi.org/10.1175/WAF-D-10-05026.1
-
-    Schultz, E. V., C. J. Schultz, L. D. Carey, D. J. Cecil, and M. Bateman,
-    2016: Automated storm tracking and the lightning jump algorithm using
-    GOES-R Geostationary Lightning Mapper (GLM) proxy data. *J. Operational
-    Meteor.*, **4** (7), 92-107, https://doi.org/10.15191/nwajom.2016.0407
+    .. [1] Schultz, C. J., W. A. Petersen, and L. D. Carey, 2009: Preliminary
+       development and evaluation of lightning jump algorithms for the
+       real-time detection of severe weather. *J. Appl. Meteor. Climatol.*,
+       **48** (12), 2543-2563, https://doi.org/10.1175/2009JAMC2237.1
+    .. [2] Schultz, C. J., W. A. Petersen, and L. D. Carey, 2011: Lightning
+       and severe weather: A comparison between total and cloud-to-ground
+       lightning trends. *Wea. Forecasting*, **26** (5), 744-755,
+       https://doi.org/10.1175/WAF-D-10-05026.1
+    .. [3] Schultz, E. V., C. J. Schultz, L. D. Carey, D. J. Cecil, and M.
+       Bateman, 2016: Automated storm tracking and the lightning jump
+       algorithm using GOES-R Geostationary Lightning Mapper (GLM) proxy
+       data. *J. Operational Meteor.*, **4** (7), 92-107,
+       https://doi.org/10.15191/nwajom.2016.0407
     """
     if not isinstance(flash_rate, xr.DataArray) or "time" not in flash_rate.dims:
         raise ValueError("flash_rate must be a DataArray with a time dimension")

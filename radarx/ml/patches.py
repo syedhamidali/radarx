@@ -16,9 +16,12 @@ gate; with ``fill_value`` a patch larger than the sweep is padded.
 
 Model outputs on the patches are put back together with
 :func:`reassemble`, which averages the overlapping patches with a window
-that falls off towards the patch edges (cosine or linear), as is usual for
-tiled inference: the predictions near a tile border, where the network sees
-the least context, get the smallest weight. Both windows are evaluated at
+that falls off towards the patch edges (cosine or linear): the predictions
+near a tile border, where the network sees the least context, get the
+smallest weight. Weighting tiles towards their centres is common practice in
+tiled inference, but no source is cited for it here: the two windows, the
+default half-patch stride and the polar (instead of Cartesian) tiling are
+radarx choices, not taken from a paper. Both windows are evaluated at
 pixel centres, ``w(i) = sin^2(pi (i + 1/2) / n)`` (cosine) and
 ``w(i) = 1 - |2 (i + 1/2) / n - 1|`` (linear), so they never vanish and sum
 to one for patches overlapping by half their size. Where all patches agree
@@ -630,8 +633,12 @@ def normalize(
         Fields to normalise (each variable of a Dataset on its own).
     method : {"zscore", "minmax"}, default "zscore"
         Statistics used when ``offset`` or ``scale`` is not given: the mean
-        and standard deviation, or the minimum and range (to [0, 1]). NaN is
-        ignored. Models are normally trained with fixed values; pass them.
+        and standard deviation (the population one, NumPy ``ddof=0``), or the
+        minimum and range (to [0, 1]). NaN is ignored. Models are normally
+        trained with fixed values taken from their authors (for example the
+        fixed bounds of TorNet, see :mod:`radarx.retrieve.tornado`); pass
+        them. The two methods are the standard arithmetic definitions, not
+        taken from a particular paper.
     offset, scale : float or dict, optional
         Fixed offset and scale (per variable name for a Dataset).
     fill_value : float, optional

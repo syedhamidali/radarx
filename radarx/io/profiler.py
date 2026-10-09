@@ -16,6 +16,18 @@ above the instrument), with the scalar coordinates ``latitude``,
 
 Formats
 -------
+These readers only map netCDF variables to the radarx layout (no retrieval is
+computed here, apart from ``wind_speed`` and ``wind_direction`` from ``u``
+and ``v``, :math:`\\phi = \\mathrm{atan2}(-u, -v)`, the meteorological
+convention, and the conversion of the 999.9 missing-value code of the profiler
+files to NaN, which follows the files). The retrievals in the MRR files
+(rain rate, liquid water content, fall velocity, path-integrated attenuation,
+Doppler-spectrum noise removal and dealiasing) are those of the processing
+software IMProToo (Maahn and Kollias 2012) and of METEK's MRR-2, not of
+radarx; the consensus winds of the profiler files are the profiler's own
+consensus-averaged winds (the consensus method is described in Strauch et al.
+1984), and neither algorithm is implemented or checked in radarx.
+
 - :func:`read_mrr`: Micro Rain Radar (METEK MRR-2) averaged profiles as
   netCDF written by IMProToo (``MRR_*`` variables on ``time`` and
   ``MRR rangegate``), e.g. the UAH MAPNet RaDAPS MRR of PERiLS 2022 (Pangle
@@ -34,6 +46,15 @@ https://doi.org/10.26023/PB1C-EW31-970C
 Pangle, P., and K. Knupp, 2022b: PERiLS_2022: UAH MAPNet RaDAPS 915MHz Radar
 Wind Profiler (RWP) Data. Version 1.0. UCAR/NCAR Earth Observing Laboratory,
 https://doi.org/10.26023/F13E-70W4-5N0J
+
+Maahn, M., and P. Kollias, 2012: Improved Micro Rain Radar snow measurements
+using Doppler spectra post-processing. *Atmos. Meas. Tech.*, **5** (11),
+2661-2673, https://doi.org/10.5194/amt-5-2661-2012
+
+Strauch, R. G., D. A. Merritt, K. P. Moran, K. B. Earnshaw, and D. Van De
+Kamp, 1984: The Colorado wind-profiling network. *J. Atmos. Oceanic
+Technol.*, **1** (1), 37-49,
+https://doi.org/10.1175/1520-0426(1984)001<0037:TCWPN>2.0.CO;2
 
 .. autosummary::
    :nosignatures:
@@ -152,7 +173,8 @@ def read_mrr(path, *, latitude=None, longitude=None, altitude=None, spectra=Fals
     Parameters
     ----------
     path : str or os.PathLike
-        IMProToo netCDF file.
+        IMProToo netCDF file (Maahn and Kollias 2012). The retrieved
+        variables are read as stored, not recomputed.
     latitude, longitude, altitude : float, optional
         Instrument location (degrees, m above sea level). ``height`` is above
         sea level when ``altitude`` is given, else above the instrument.
@@ -172,6 +194,10 @@ def read_mrr(path, *, latitude=None, longitude=None, altitude=None, spectra=Fals
     Pangle, P., and K. Knupp, 2022: PERiLS_2022: UAH MAPNet Micro Rain Radar
     (MRR) Data. Version 1.0. UCAR/NCAR Earth Observing Laboratory,
     https://doi.org/10.26023/PB1C-EW31-970C
+
+    Maahn, M., and P. Kollias, 2012: Improved Micro Rain Radar snow
+    measurements using Doppler spectra post-processing. *Atmos. Meas. Tech.*,
+    **5** (11), 2661-2673, https://doi.org/10.5194/amt-5-2661-2012
     """
     with xr.open_dataset(path, decode_times=False) as raw:
         gate = raw["MRR rangegate"].values
@@ -215,7 +241,8 @@ def read_wind_profiler(path, *, min_qc=None, beams=False):
     Parameters
     ----------
     path : str or os.PathLike
-        Profiler netCDF file (``u``, ``v``, ``w``, ``qcTag``, ``epochTime``,
+        Profiler netCDF file (consensus winds as stored, cf. Strauch et al.
+        1984; ``u``, ``v``, ``w``, ``qcTag``, ``epochTime``,
         ``height``, ``latitude``, ``longitude``, ``altitude``).
     min_qc : float, optional
         Set winds whose quality tag ``qcTag`` (higher is better) is below this
@@ -235,6 +262,11 @@ def read_wind_profiler(path, *, min_qc=None, beams=False):
     Pangle, P., and K. Knupp, 2022: PERiLS_2022: UAH MAPNet RaDAPS 915MHz Radar
     Wind Profiler (RWP) Data. Version 1.0. UCAR/NCAR Earth Observing
     Laboratory, https://doi.org/10.26023/F13E-70W4-5N0J
+
+    Strauch, R. G., D. A. Merritt, K. P. Moran, K. B. Earnshaw, and D. Van De
+    Kamp, 1984: The Colorado wind-profiling network. *J. Atmos. Oceanic
+    Technol.*, **1** (1), 37-49,
+    https://doi.org/10.1175/1520-0426(1984)001<0037:TCWPN>2.0.CO;2
     """
 
     def clean(a):

@@ -38,6 +38,13 @@ constexpr double kPi = 3.14159265358979323846;  // M_PI is not standard (MSVC)
 constexpr double kDeg = kPi / 180.0;
 
 // Physical constants (SI); keep in sync with radarx/io/_sounding_numpy.py.
+// Provenance: see the "Thermodynamics and constants" section of the
+// radarx.io.sounding docstring. Rd and Rv are radarx's values (they agree with
+// R*/M of dry air and water to ~1e-5 but the source of the digits is not
+// documented); cpd and cpv are radarx's values and were not traced to an
+// equation or table of Bolton (1980) or Davies-Jones (2008); T0 and g0 are
+// defined constants; Re is the GRS80 mean radius (2a+b)/3 = 6371008.77 m
+// (Moritz 2000, doi 10.1007/s001900050278), rounded.
 constexpr double kRd = 287.04749;    // gas constant of dry air [J kg-1 K-1]
 constexpr double kRv = 461.52311;    // gas constant of water vapour [J kg-1 K-1]
 constexpr double kEps = kRd / kRv;   // ratio of the gas constants
@@ -80,7 +87,9 @@ inline int64_t bisect_right(const double* a, int64_t n, double x) {
     return lo;
 }
 
-// Saturation vapour pressure over liquid water [Pa], Bolton (1980) eq. (10).
+// Saturation vapour pressure over liquid water [Pa], Bolton (1980) eq. (10)
+// (doi 10.1175/1520-0493(1980)108<1046:TCOEPT>2.0.CO;2): 6.112 hPa -> 611.2 Pa,
+// 17.67, 243.5 degC (equation number as commonly cited; paper not re-checked).
 inline double esat(double t) {
     const double tc = t - kT0;
     return 611.2 * std::exp(17.67 * tc / (tc + 243.5));
@@ -93,7 +102,9 @@ inline double dewpoint(double e) {
     return kT0 + 243.5 * l / (17.67 - l);
 }
 
-// Latent heat of vaporization [J kg-1], Bolton (1980) eq. (2).
+// Latent heat of vaporization [J kg-1], (2.501 - 0.00237 t) 1e6 with t in degC.
+// Attributed to Bolton (1980); the equation number and the coefficients are
+// not checked against the paper.
 inline double latent_heat(double t) { return (2.501 - 0.00237 * (t - kT0)) * 1e6; }
 
 inline double mixing_ratio(double e, double p) { return kEps * e / (p - e); }

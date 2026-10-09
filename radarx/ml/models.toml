@@ -4,6 +4,12 @@
 # downloaded from the URL given here (the release of the model's authors) on
 # first use, checked against the SHA-256 hash and cached. Only add models whose
 # licence allows this use, and give the licence and the reference to cite.
+# The licence must be the one the authors state for the weights (SPDX
+# identifier, checked at the source: model card, repository LICENSE or data
+# record) and the citation must end in the DOI of the paper. The DOI must resolve to the
+# cited paper. Models whose
+# weights are converted on first use (TorNet, MistNet) are listed in
+# radarx/retrieve/_onnx_models.py with the same fields, not here.
 #
 # [models.example-model-v1]
 # url = "https://zenodo.org/records/.../files/model.onnx"   # ONNX file

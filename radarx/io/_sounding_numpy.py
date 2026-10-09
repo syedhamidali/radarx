@@ -11,22 +11,27 @@ module; used when the extension is not built and as the test oracle.
 
 import numpy as np
 
-RD = 287.04749  # gas constant of dry air [J kg-1 K-1]
-RV = 461.52311  # gas constant of water vapour [J kg-1 K-1]
+# Provenance of the constants: see the "Thermodynamics and constants" section
+# of the radarx.io.sounding docstring.
+RD = 287.04749  # gas constant of dry air [J kg-1 K-1]; radarx value, source of the digits not traced
+RV = 461.52311  # gas constant of water vapour [J kg-1 K-1]; radarx value, not traced
 EPS = RD / RV
-CPD = 1005.7  # specific heat of dry air [J kg-1 K-1]
-CPV = 1875.0  # specific heat of water vapour [J kg-1 K-1]
-T0 = 273.15
-G0 = 9.80665  # standard gravity [m s-2]
-RE = 6371008.8  # mean Earth radius [m]
+CPD = 1005.7  # specific heat of dry air [J kg-1 K-1]; radarx value, not traced to Bolton 1980 / Davies-Jones 2008
+CPV = 1875.0  # specific heat of water vapour [J kg-1 K-1]; radarx value, not traced
+T0 = 273.15  # 0 degC [K]
+G0 = 9.80665  # standard gravity [m s-2]; conventional (CGPM 1901) value
+RE = 6371008.8  # mean Earth radius [m]; GRS80 (2a+b)/3 = 6371008.77 m, Moritz (2000), rounded
 
 
 def _esat(t):
+    # Bolton (1980) eq. (10): 6.112 hPa -> 611.2 Pa, 17.67, 243.5 degC
+    # (equation number as commonly cited; paper not re-checked)
     tc = t - T0
     return 611.2 * np.exp(17.67 * tc / (tc + 243.5))
 
 
 def _dewpoint(e):
+    # algebraic inverse of _esat
     with np.errstate(divide="ignore", invalid="ignore"):
         e = np.where(e > 0, e, np.nan)
         lg = np.log(e / 611.2)
@@ -34,14 +39,20 @@ def _dewpoint(e):
 
 
 def _latent_heat(t):
+    # (2.501 - 0.00237 t) 1e6 J kg-1, t in degC: attributed to Bolton (1980);
+    # equation number and coefficients not checked against the paper
     return (2.501 - 0.00237 * (t - T0)) * 1e6
 
 
 def _mixing_ratio(e, p):
+    # r = eps e / (p - e): standard definition
     return EPS * e / (p - e)
 
 
 def _wet_bulb(p, t, td):
+    # isobaric wet bulb: (cpd + r cpv)(T - Tw) = Lv(Tw)(rs(Tw) - r), a textbook
+    # enthalpy balance (not the pseudo-adiabatic wet bulb of Davies-Jones 2008);
+    # bracketed Newton, tolerance 1e-7 K is a radarx choice
     td = np.minimum(td, t)
     r = _mixing_ratio(_esat(td), p)
     cp = CPD + r * CPV

@@ -9,13 +9,25 @@ Air Trajectories Through Multi-Doppler Winds
 Backward and forward air trajectories from the points of a 3-D grid through a
 time series of gridded winds (for example the analyses of
 :func:`radarx.retrieve.multi_doppler`), as used by the diabatic Lagrangian
-analysis of Ziegler (2013a, b; :mod:`radarx.retrieve.diabatic_lagrangian`).
+analysis of Ziegler (2013a, b) [1, 2] (:mod:`radarx.retrieve.diabatic_lagrangian`).
+
+Provenance of the numbers
+-------------------------
+Numbers in this module come from Ziegler (2013a) [1] (Z13a), Ziegler (2013b)
+[2] (Z13b) and Ziegler et al. (2007) [3] (Z07); the pointers (section,
+equation, table, page of the journal article) were checked against the
+papers. Everything given without such a pointer is a radarx choice and is
+labelled so.
 
 Integration
 -----------
-Each time step :math:`\\Delta t` (20 s by default, Ziegler 2013a) is an Euler
-predictor followed by three iterations of the trapezoidal corrector
-(Ziegler et al. 2007; Ziegler 2013a, sect. 2b)
+Each time step :math:`\\Delta t` is 20 s by default and is calculated with three
+iterations of a "first-order predictor corrector scheme as in Z07" (Z13a [1],
+sect. 2b, p. 2250; Z07 [3], p. 2422, describes a quadratic Runge-Kutta
+predictor-corrector converging in three iterations, with a 6 s step). The
+explicit form used here, an Euler predictor followed by three iterations of
+the trapezoidal corrector, is radarx's reading of that description (neither
+paper prints the formulae)
 
 .. math::
 
@@ -28,8 +40,9 @@ predictor followed by three iterations of the trapezoidal corrector
 with the sign negative for backward trajectories. The winds :math:`u, v, w`
 and the reflectivity :math:`Z_H` are interpolated trilinearly in space from
 the eight nodes of the grid cell holding the parcel and linearly in time
-between the two analyses that bracket it. The parcel height is kept between
-the lowest and the highest grid level.
+between the two analyses that bracket it (Z13a, sect. 2b, p. 2250). Keeping
+the parcel height between the lowest and the highest grid level is a radarx
+choice (Z13a does not state how the vertical boundaries are treated).
 
 Storm-motion advected grid
 --------------------------
@@ -37,23 +50,26 @@ With a constant storm motion :math:`(c_x, c_y)` each analysis is moved with
 the storm between its time :math:`t_i` and the parcel time :math:`t`: the
 value of analysis :math:`i` at :math:`(x, y)` is read at
 :math:`(x - c_x (t - t_i), y - c_y (t - t_i))` before the linear time
-interpolation (Ziegler 2013a, sect. 2b). This is the advection of the grid
+interpolation (Z13a, sect. 2b, p. 2250). This is the advection of the grid
 coordinates in a time-to-space sense described by Ziegler, evaluated directly
 at the parcel (one interpolation instead of a bilinear re-gridding followed by
 the trilinear interpolation). With ``extend_before`` / ``extend_after`` (or
 ``extend``) the first and last analyses are also moved with the storm,
 unchanged, before the first and after the last analysis time (the time
-morphing of Ziegler 2013b, sect. 2c and Fig. 1, which assumes a storm steady
-in its own frame). ``storm_motion="estimate"`` takes the motion from the
+morphing of Z13b [2], sect. 2c, p. 2268 and Fig. 1, which for multiple-Doppler
+analyses assumes a steady-state structure following the storm motion and which
+Z13b describes as a way to extend the period over which backward trajectories
+may be integrated). ``storm_motion="estimate"`` takes the motion from the
 reflectivity of the first and last analyses with
 :func:`radarx.retrieve.estimate_motion`.
 
 Surface parcels
 ---------------
 Trajectories from the lowest grid level (the ground) start at the offset
-height :math:`H_0` above it (10 m, Ziegler 2013a, Table 1). In precipitation
+height :math:`H_0` above it (0.01 km, Z13a Table 1, p. 2251; the text of
+sect. 2b says "less than 50 m AGL"). In precipitation
 downdrafts the vertical velocity at the ground is replaced by the
-parameterised surface downdraft of Ziegler (2013a, eqs. 2-3)
+parameterised surface downdraft of Z13a (eqs. 2-3, p. 2251)
 
 .. math::
 
@@ -65,22 +81,27 @@ parameterised surface downdraft of Ziegler (2013a, eqs. 2-3)
 where :math:`w_{k=2}` is the vertical velocity at the first level above the
 ground and :math:`Z_{H,k=1}` the reflectivity at the ground, with
 :math:`w_{mix0} = 0.5`, :math:`w_{mix1} = -0.75` m s\\ :sup:`-1`,
-:math:`Z_0 = 40` and :math:`Z_{DDC} = 50` dBZ (Table 1). The lowest grid
-level must be the ground.
+:math:`Z_0 = 40` and :math:`Z_{DDC} = 50` dBZ (Z13a Table 1; :math:`w_{mix0}` is a ratio of vertical velocities). In Z13a
+grid level :math:`k = 1` is the surface layer (about 50 m AGL) and :math:`k = 2`
+the first analysis level above it. Requiring the lowest grid level of the
+winds to be the ground (and using the level above it for :math:`w_{k=2}`) is
+how radarx maps the equations to a grid, not something Z13a prescribes.
 
 Termination
 -----------
 By default (``termination="ziegler2013"``) a backward trajectory has reached
-the storm environment (Ziegler 2013a, sect. 2a) when, after more than
+the storm environment (Z13a, sect. 2a, p. 2250) when, after more than
 :math:`N = 76` steps, (i) :math:`Z_H < 0` dBZ or (ii) :math:`w < 0.5`
 m s\\ :sup:`-1` for at least five consecutive steps, or (iii) when it leaves
-the domain through a lateral boundary. Test (ii) is met by any parcel that is
+the domain through a lateral boundary. The numbers 76, 0 dBZ, 0.5 m s\\ :sup:`-1`
+and five are those printed in Z13a (defaults ``min_steps``, ``env_dbz``,
+``env_w``, ``env_w_steps``). Test (ii) is met by any parcel that is
 not in an updraft, so in a long-lived cold pool (e.g. under the stratiform
 rain of a squall line) surface trajectories end after about 26 min while still
 inside the outflow.
 
-``termination="precipitation"`` (an option of radarx, not part of Ziegler
-2013a) instead requires the parcel to be outside precipitation, :math:`Z_H`
+``termination="precipitation"`` (an option of radarx, not part of Z13a)
+instead requires the parcel to be outside precipitation, :math:`Z_H`
 below ``env_dbz`` for ``env_dbz_steps`` consecutive steps (after
 ``min_steps``), *and* either at least ``cold_pool_depth`` above the ground or
 where ``environment_mask`` is true (for example the air ahead of the gust
@@ -135,17 +156,17 @@ is not built (``engine="numpy"``) and serves as its test oracle.
 
 References
 ----------
-Ziegler, C. L., 2013a: A diabatic Lagrangian technique for the analysis of
+[1] Ziegler, C. L., 2013a: A diabatic Lagrangian technique for the analysis of
 convective storms. Part I: Description and validation via an observing system
 simulation experiment. *J. Atmos. Oceanic Technol.*, **30** (10), 2248-2265,
 https://doi.org/10.1175/JTECH-D-12-00194.1
 
-Ziegler, C. L., 2013b: A diabatic Lagrangian technique for the analysis of
+[2] Ziegler, C. L., 2013b: A diabatic Lagrangian technique for the analysis of
 convective storms. Part II: Application to a radar-observed storm. *J. Atmos.
 Oceanic Technol.*, **30** (10), 2266-2280,
 https://doi.org/10.1175/JTECH-D-13-00036.1
 
-Ziegler, C. L., M. S. Buban, and E. N. Rasmussen, 2007: A Lagrangian
+[3] Ziegler, C. L., M. S. Buban, and E. N. Rasmussen, 2007: A Lagrangian
 objective analysis technique for assimilating in situ observations with
 multiple-radar-derived airflow. *Mon. Wea. Rev.*, **135** (7), 2417-2442,
 https://doi.org/10.1175/MWR3396.1
@@ -175,21 +196,26 @@ except ImportError:  # pragma: no cover - depends on the build
     _lagrangian = None
     HAS_COMPILED_KERNEL = False
 
-#: Parameters of the trajectories and the surface downdraft (Ziegler 2013a,
-#: Table 1 and sect. 2a).
+#: Parameters of the trajectories and the surface downdraft. Sources: Ziegler
+#: (2013a) Table 1 (p. 2251) for ``offset_height`` (H0 = 0.01 km), ``wmix0``,
+#: ``wmix1``, ``z0_dbz``, ``zddc_dbz``; sect. 2a (p. 2250) for ``min_steps``
+#: (N > 76), ``env_dbz`` (Z_H < 0 dBZ), ``env_w`` (w < 0.5 m s-1) and
+#: ``env_w_steps`` (five consecutive steps). ``env_dbz_steps``,
+#: ``cold_pool_depth`` and ``dbz_floor`` are radarx choices that are not in
+#: the cited papers.
 TRAJECTORY_DEFAULTS = {
-    "offset_height": 10.0,  # H0, m
-    "wmix0": 0.5,
-    "wmix1": -0.75,  # m s-1
-    "z0_dbz": 40.0,  # Z0, dBZ
-    "zddc_dbz": 50.0,  # Z_DDC, dBZ
-    "min_steps": 76,
-    "env_dbz": 0.0,
-    "env_w": 0.5,
-    "env_w_steps": 5,
-    "env_dbz_steps": 5,  # termination="precipitation"
-    "cold_pool_depth": 2000.0,  # m above the ground, termination="precipitation"
-    "dbz_floor": -30.0,
+    "offset_height": 10.0,  # H0, m (Table 1: 0.01 km)
+    "wmix0": 0.5,  # Table 1 (ratio of vertical velocities, no unit)
+    "wmix1": -0.75,  # m s-1, Table 1
+    "z0_dbz": 40.0,  # Z0, dBZ, Table 1
+    "zddc_dbz": 50.0,  # Z_DDC, dBZ, Table 1
+    "min_steps": 76,  # sect. 2a: N > 76 (steps of 20 s)
+    "env_dbz": 0.0,  # dBZ, sect. 2a test (i)
+    "env_w": 0.5,  # m s-1, sect. 2a test (ii)
+    "env_w_steps": 5,  # sect. 2a test (ii): five consecutive steps
+    "env_dbz_steps": 5,  # termination="precipitation"; radarx choice
+    "cold_pool_depth": 2000.0,  # m above the ground, termination="precipitation"; radarx choice
+    "dbz_floor": -30.0,  # dBZ given to missing reflectivity; radarx choice
 }
 
 #: Termination modes of backward trajectories.
@@ -252,10 +278,20 @@ def _reflectivity_name(ds, reflectivity):
 
 
 def surface_downdraft(w, dbz, wmix0=0.5, wmix1=-0.75, z0_dbz=40.0, zddc_dbz=50.0):
-    """Parameterised surface downdraft of Ziegler (2013a, eqs. 2-3).
+    """Parameterised surface downdraft of Ziegler (2013a, eqs. 2-3, p. 2251).
 
     ``w`` and ``dbz`` are NumPy arrays with the height on axis -3; returns the
-    vertical velocity at the lowest level.
+    vertical velocity at the lowest level. The defaults are Table 1 of Ziegler
+    (2013a) [1]; the reflectivity scale of eq. (3) uses :math:`Z_{H,k=1}` and
+    the downdraft of eq. (2) :math:`w_{k=2}`; a missing reflectivity gives
+    :math:`Z^* = 0` (radarx choice).
+
+    References
+    ----------
+    [1] Ziegler, C. L., 2013a: A diabatic Lagrangian technique for the analysis
+    of convective storms. Part I: Description and validation via an observing
+    system simulation experiment. *J. Atmos. Oceanic Technol.*, **30** (10),
+    2248-2265, https://doi.org/10.1175/JTECH-D-12-00194.1
     """
     w2 = w[..., 1, :, :]
     zs = np.clip(
@@ -612,9 +648,10 @@ def trajectories(
         Grid level indices to start from when ``start`` is not given. Default:
         all levels.
     dt : float, optional
-        Time step in s. Default 20 (Ziegler 2013a).
+        Time step in s. Default 20 (Z13a [1], sect. 2b, p. 2250).
     iterations : int, optional
-        Corrector iterations per step. Default 3.
+        Corrector iterations per step. Default 3 (Z13a [1], sect. 2b; Z07 [3],
+        p. 2422).
     max_steps : int, optional
         Maximum number of steps. Default: enough to reach the end of the wind
         time series (plus ``extend``).
@@ -628,7 +665,7 @@ def trajectories(
     extend : float or (float, float), optional
         Seconds by which the series is extended before the first and after the
         last analysis by moving those analyses with ``storm_motion`` (time
-        morphing, Ziegler 2013b, sect. 2c). Default 0.
+        morphing, Z13b [2], sect. 2c, p. 2268). Default 0.
     extend_before, extend_after : float, optional
         Seconds of time morphing before the first and after the last analysis;
         override the corresponding part of ``extend``. For backward
@@ -636,10 +673,10 @@ def trajectories(
         the wind series (e.g. a squall-line cold pool) reach the environment.
     surface_downdraft : bool, optional
         Replace the vertical velocity at the ground with the parameterised
-        surface downdraft (Ziegler 2013a, eqs. 2-3). Default True.
+        surface downdraft (Z13a [1], eqs. 2-3, p. 2251). Default True.
     termination : {True, "ziegler2013", "precipitation", False}, optional
         Environment test of backward trajectories. ``True`` or
-        ``"ziegler2013"`` (default): the tests of Ziegler (2013a, sect. 2a).
+        ``"ziegler2013"`` (default): the tests of Z13a [1] (sect. 2a, p. 2250).
         ``"precipitation"``: the parcel is outside precipitation
         (:math:`Z_H` below ``env_dbz`` for ``env_dbz_steps`` steps) and
         either above ``cold_pool_depth`` or where ``environment_mask`` is
@@ -648,7 +685,7 @@ def trajectories(
     boundary : str or sequence of str, optional
         Which exits through a lateral boundary count as reaching the
         environment (backward trajectories with a termination test).
-        ``"environment"`` (default, Ziegler 2013a, sect. 2a, test iii): every
+        ``"environment"`` (default, Z13a [1], sect. 2a, test iii): every
         exit. ``"environment_mask"``: only where ``environment_mask`` is true
         at the last point inside the domain. ``"no_echo"``: only where the
         reflectivity there is below ``env_dbz`` or the mask is true. A
@@ -657,7 +694,8 @@ def trajectories(
         exits through those sides. Other exits stop the trajectory with flag
         128 and are not environmental.
     parameters : dict, optional
-        Overrides of :data:`TRAJECTORY_DEFAULTS`: ``offset_height`` (m),
+        Overrides of :data:`TRAJECTORY_DEFAULTS` (sources of every default are
+        listed there): ``offset_height`` (m),
         ``wmix0``, ``wmix1`` (m s-1), ``z0_dbz``, ``zddc_dbz`` (dBZ),
         ``min_steps``, ``env_dbz`` (dBZ), ``env_w`` (m s-1), ``env_w_steps``,
         ``env_dbz_steps``, ``cold_pool_depth`` (m above the ground) and
@@ -699,8 +737,20 @@ def trajectories(
 
     References
     ----------
-    Ziegler, C. L., 2013a, *J. Atmos. Oceanic Technol.*, **30**, 2248-2265,
-    https://doi.org/10.1175/JTECH-D-12-00194.1
+    [1] Ziegler, C. L., 2013a: A diabatic Lagrangian technique for the analysis
+    of convective storms. Part I: Description and validation via an observing
+    system simulation experiment. *J. Atmos. Oceanic Technol.*, **30** (10),
+    2248-2265, https://doi.org/10.1175/JTECH-D-12-00194.1
+
+    [2] Ziegler, C. L., 2013b: A diabatic Lagrangian technique for the analysis
+    of convective storms. Part II: Application to a radar-observed storm.
+    *J. Atmos. Oceanic Technol.*, **30** (10), 2266-2280,
+    https://doi.org/10.1175/JTECH-D-13-00036.1
+
+    [3] Ziegler, C. L., M. S. Buban, and E. N. Rasmussen, 2007: A Lagrangian
+    objective analysis technique for assimilating in situ observations with
+    multiple-radar-derived airflow. *Mon. Wea. Rev.*, **135** (7), 2417-2442,
+    https://doi.org/10.1175/MWR3396.1
 
     Examples
     --------

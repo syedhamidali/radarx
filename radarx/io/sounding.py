@@ -42,6 +42,14 @@ converted to geometric heights, as used by radar beam heights, with
 :math:`R_e = 6371.0088` km, gravity falling off with the inverse square of
 the distance from the centre and equal to :math:`g_0 = 9.80665` m s-2 at
 the surface). The difference is about 16 m at 10 km and 63 m at 20 km.
+The formula is an elementary integral of :math:`g(z) = g_0 [R_e/(R_e+z)]^2`
+(:math:`H = \\Phi/g_0 = R_e z/(R_e + z)`), a standard definition and not taken
+from a particular paper. :math:`g_0 = 9.80665` m s-2 is the conventional
+standard gravity (defined value, 3rd CGPM 1901). :math:`R_e` is the mean
+radius :math:`(2a + b)/3` of the GRS80 ellipsoid (:math:`a = 6378137` m,
+:math:`b = 6356752.3141` m, Moritz 2000 [7]; the mean is 6371008.77 m,
+rounded here to 6371008.8 m). The ellipsoid parameters and the CGPM value
+are quoted from the standards and not checked against the source documents.
 
 Sources
 -------
@@ -55,7 +63,7 @@ Observed soundings (:func:`read_sounding`):
   ``https://weather.uwyo.edu/wsgi/sounding`` (CSV; high-resolution BUFR
   profiles when available, so slower).
 - ``"igra2"``: NOAA NCEI Integrated Global Radiosonde Archive version 2
-  (Durre et al. 2006). The whole station file is downloaded once
+  (Durre et al. 2006 [3]; Durre et al. 2018 [8]; dataset doi [9]). The whole station file is downloaded once
   (about 100 MB zipped for a long-running station) and cached.
 
 ERA5 (:func:`era5_profile`, :func:`era5_column`):
@@ -63,11 +71,12 @@ ERA5 (:func:`era5_profile`, :func:`era5_column`):
 - ``"arco"``: the analysis-ready, cloud-optimised (ARCO) ERA5 time series on
   pressure levels served by ECMWF through the Copernicus Climate Data Store
   (dataset ``reanalysis-era5-pressure-levels-timeseries``, doi
-  10.24381/af48f136). Needs a CDS account (``~/.cdsapirc``) and ``cdsapi``.
+  10.24381/af48f136 [6]). Needs a CDS account (``~/.cdsapirc``) and ``cdsapi``.
   It has 13 pressure levels (1000-50 hPa), 6-hourly times (00, 06, 12,
   18 UTC) and serves the nearest grid point or a small area.
 - ``"cds"``: the full ERA5 hourly data on 37 pressure levels from the CDS
-  (``reanalysis-era5-pressure-levels``, doi 10.24381/cds.bd0915c6). Needs a
+  (``reanalysis-era5-pressure-levels``, doi 10.24381/cds.bd0915c6 [5];
+  ERA5 itself: Hersbach et al. 2020 [4]). Needs a
   CDS account; requests are queued (typically about a minute).
 - ``"gcs"``: Google's ARCO-ERA5 Zarr store
   ``gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3``
@@ -93,12 +102,78 @@ rotation and the thermodynamic functions run in a compiled C++ kernel
 (``radarx.io._sounding``, multithreaded); an identical NumPy implementation
 is used when the kernel is not built (``engine="numpy"``).
 
-Thermodynamics: saturation vapour pressure over liquid water, its inverse
-(dew point) and the latent heat of vaporization follow Bolton (1980). The
-wet-bulb temperature is the isobaric wet-bulb temperature, the root of
-:math:`(c_{{pd}} + r c_{{pv}})(T - T_w) = L_v(T_w)\\,(r_s(T_w) - r)`; it differs
-from the pseudo-adiabatic (Normand) wet-bulb temperature by a few tenths of a
-kelvin at most (Davies-Jones 2008).
+Thermodynamics and constants (provenance of every number)
+---------------------------------------------------------
+
+All thermodynamic functions are elementwise and run in the kernels
+(``_sounding.cpp`` and its NumPy twin ``_sounding_numpy.py``, which carry the
+same constants). Formulas and constants, with what is and is not traceable:
+
+- Saturation vapour pressure over liquid water,
+  :math:`e_s(T) = 611.2 \\exp[17.67\\,t / (t + 243.5)]` Pa with
+  :math:`t = T - 273.15` in degC, and its inverse (the dew point,
+  :math:`t_d = 243.5\\,\\ln(e/611.2) / [17.67 - \\ln(e/611.2)]`). This is
+  Bolton (1980) [1], equation (10), whose original form is
+  :math:`e_s = 6.112 \\exp[17.67 t/(t + 243.5)]` hPa (coefficients 6.112 hPa,
+  17.67 and 243.5 degC); the equation number and the 611.2 Pa conversion of
+  the prefactor follow the common citation of that equation (the coefficients
+  agree with a published formula collection of NCAR/EOL; the equation number
+  is not checked against the paper).
+  The validity range of the fit is not restated here. It is applied at all
+  temperatures, i.e. also below 0 degC as an over-liquid (not over-ice) value;
+  this is a radarx choice.
+- Latent heat of vaporization, :math:`L_v(T) = (2.501 - 0.00237\\,t)
+  \\times 10^6` J kg-1 (t in degC). Attributed to Bolton (1980) [1]; the
+  coefficients and the equation number are not checked against the paper.
+- Mixing ratio :math:`r = \\epsilon e / (p - e)`, specific humidity
+  :math:`q = \\epsilon e / [p - (1 - \\epsilon) e]`, its inverse
+  :math:`e = q p / [\\epsilon + (1 - \\epsilon) q]`, relative humidity
+  :math:`e_s(T_d)/e_s(T)` and the virtual temperature
+  :math:`T_v = T [1 + (1/\\epsilon - 1) q]` with air density
+  :math:`\\rho = p/(R_d T_v)`: standard textbook definitions (no
+  paper-specific coefficients).
+- :math:`R_d = 287.04749`, :math:`R_v = 461.52311` J kg-1 K-1 (so
+  :math:`\\epsilon = R_d/R_v = 0.62198`): radarx's gas-constant values. They
+  match :math:`R^*/M` for dry air and water to about 1e-5 relative (with
+  :math:`R^* = 8.3144626` J mol-1 K-1 and molar masses of about
+  28.9655 and 18.0153 g mol-1), but the source of these exact digits is not
+  documented.
+- :math:`c_{{pd}} = 1005.7` and :math:`c_{{pv}} = 1875.0` J kg-1 K-1 in the
+  wet-bulb equation: radarx's values; neither number could be traced to an
+  equation or table of [1] or [2].
+- Wet-bulb temperature: the isobaric wet-bulb temperature, the root of
+  :math:`(c_{{pd}} + r c_{{pv}})(T - T_w) = L_v(T_w)\\,(r_s(T_w) - r)` (an
+  enthalpy balance of an isobaric evaporation to saturation, a textbook
+  definition), found by a bracketed Newton iteration to 1e-7 K (radarx
+  choice). It is *not* the pseudo-adiabatic (Normand) wet-bulb temperature
+  that Davies-Jones (2008) [2] computes by inverting Bolton's
+  equivalent-potential-temperature formula; the earlier statement that the
+  two differ by "a few tenths of a kelvin at most" is a radarx estimate that
+  [2] does not state.
+- 0 degC, isotherm and wet-bulb-zero levels, layer means: linear interpolation
+  in height between levels, the upper-most crossing by default, trapezoidal
+  rule for layer means (radarx choices, not from a paper). Pressure is
+  interpolated linearly in its logarithm, as are missing geopotential heights
+  (:func:`interpolate_profile`).
+- Wind: the meteorological convention, direction the wind blows *from*
+  clockwise from north, :math:`u = -s \\sin\\phi`, :math:`v = -s \\cos\\phi`
+  (meteorological convention). One knot is 0.514444 m s-1 (the exact value is
+  1852/3600 = 0.514444...).
+
+Data sources and formats read here:
+
+- IGRA version 2 [3], [8], fixed-column text (the format document of the
+  archive; header record starting with ``#``, pressure in Pa, geopotential
+  height in m, temperature in tenths of degC, dew-point depression in tenths
+  of degC, wind direction in degree, wind speed in tenths of m s-1, missing
+  values -9999 and -8888). The column positions were taken from the archive's
+  format description (not checked against the document).
+  Durre et al. (2018) [8] describe IGRA2; Durre et al. (2006) [3] describe
+  version 1, which IGRA2 supersedes.
+- IEM RAOB JSON and University of Wyoming CSV: web-service formats without a
+  citable paper; the archives are named in the sources above.
+- ERA5 [4] on pressure levels, from the CDS datasets [5] and [6] or Google's
+  ARCO-ERA5 copy of the ERA5 data (no peer-reviewed description is cited).
 
 Interface for multi-Doppler winds
 ---------------------------------
@@ -131,6 +206,15 @@ References
 .. [6] Copernicus Climate Change Service, 2026: ERA5 time-series data on
    pressure levels from 1940 to present. ECMWF,
    https://doi.org/10.24381/af48f136
+.. [7] Moritz, H., 2000: Geodetic Reference System 1980. J. Geodesy, 74,
+   128-133, https://doi.org/10.1007/s001900050278
+.. [8] Durre, I., X. Yin, R. S. Vose, S. Applequist, and J. Arnfield, 2018:
+   Enhancing the data coverage in the Integrated Global Radiosonde Archive.
+   J. Atmos. Oceanic Technol., 35, 1753-1770,
+   https://doi.org/10.1175/JTECH-D-17-0223.1
+.. [9] Durre, I., X. Yin, R. S. Vose, S. Applequist, and J. Arnfield, 2016:
+   Integrated Global Radiosonde Archive (IGRA), Version 2. NOAA National
+   Centers for Environmental Information, https://doi.org/10.7289/V5X63K0Q
 
 .. autosummary::
    :nosignatures:
@@ -202,14 +286,16 @@ ARCO_ERA5_ZARR = (
 )
 CDS_PRESSURE_LEVELS = "reanalysis-era5-pressure-levels"
 CDS_ARCO_TIMESERIES = "reanalysis-era5-pressure-levels-timeseries"
-GCS_PAD = 8.0  # degrees cached around a Google ARCO-ERA5 request
+GCS_PAD = 8.0  # degrees cached around a Google ARCO-ERA5 request (radarx choice)
+# the 37 standard ERA5 pressure levels [hPa] of the CDS pressure-level dataset (Copernicus
+# Climate Change Service 2018, doi 10.24381/cds.bd0915c6)
 ERA5_LEVELS = (
     [1, 2, 3, 5, 7, 10, 20, 30, 50, 70, 100, 125, 150, 175, 200, 225, 250, 300]
     + [350, 400, 450, 500, 550, 600, 650, 700, 750, 775, 800, 825, 850, 875]
     + [900, 925, 950, 975, 1000]
 )
 
-KNOT = 0.514444
+KNOT = 0.514444  # m s-1 per knot (1852 m / 3600 s = 0.5144444...)
 
 ATTRS = {
     "height": {
@@ -387,7 +473,12 @@ def saturation_vapor_pressure(temperature, *, engine="auto", n_threads=None):
     Saturation vapour pressure over liquid water.
 
     :math:`e_s = 611.2 \\exp[17.67 (T - 273.15) / (T - 29.65)]` Pa, Bolton
-    (1980) eq. (10).
+    (1980), eq. (10); written in kelvin, :math:`T - 29.65 = t + 243.5`
+    with :math:`t = T - 273.15` in degC. Coefficients: 6.112 hPa
+    (converted to 611.2 Pa), 17.67 and 243.5 degC, as in the original
+    equation (equation number not re-checked against the paper). Used at all
+    temperatures over liquid water (radarx choice; there is no over-ice
+    branch).
 
     Parameters
     ----------
@@ -422,6 +513,10 @@ def dewpoint_from_vapor_pressure(vapor_pressure, *, engine="auto", n_threads=Non
     """
     Dew point from water vapour pressure (Bolton 1980 eq. (10) inverted).
 
+    :math:`t_d = 243.5 \\ln(e/611.2) / [17.67 - \\ln(e/611.2)]` degC, the
+    algebraic inverse of :func:`saturation_vapor_pressure` (Bolton 1980;
+    coefficients and equation number as there).
+
     Parameters
     ----------
     vapor_pressure : xarray.DataArray or array-like
@@ -452,7 +547,10 @@ def dewpoint_from_specific_humidity(
     Dew point from specific humidity and pressure.
 
     The vapour pressure is :math:`e = q p / (\\epsilon + (1 - \\epsilon) q)`
-    with :math:`\\epsilon = R_d / R_v`; the dew point follows Bolton (1980).
+    with :math:`\\epsilon = R_d / R_v = 0.62198` (standard definition of
+    specific humidity; :math:`R_d = 287.04749`, :math:`R_v = 461.52311`
+    J kg-1 K-1 are radarx's values, see :mod:`radarx.io.sounding`); the dew
+    point follows from Bolton (1980) eq. (10) inverted.
 
     Parameters
     ----------
@@ -491,8 +589,8 @@ def specific_humidity_from_dewpoint(
     """
     Specific humidity from dew point and pressure.
 
-    :math:`q = \\epsilon e / (p - (1 - \\epsilon) e)` with :math:`e = e_s(T_d)`
-    (Bolton 1980).
+    :math:`q = \\epsilon e / (p - (1 - \\epsilon) e)` (standard definition)
+    with :math:`e = e_s(T_d)` from Bolton (1980) eq. (10).
 
     Parameters
     ----------
@@ -530,6 +628,10 @@ def relative_humidity_from_dewpoint(
 ):
     """
     Relative humidity with respect to liquid water, :math:`e_s(T_d) / e_s(T)`.
+
+    The ratio of vapour pressure (the saturation value at the dew point) to
+    saturation vapour pressure, a standard definition; both values use the
+    Bolton (1980) eq. (10) fit (see :func:`saturation_vapor_pressure`).
 
     Parameters
     ----------
@@ -569,9 +671,15 @@ def wet_bulb_temperature(
     Newton iteration (to 1e-7 K), where :math:`r` is the mixing ratio,
     :math:`r_s` the saturation mixing ratio over liquid water and
     :math:`L_v(T) = (2.501 - 0.00237 (T - 273.15)) \\times 10^6` J kg-1
-    (Bolton 1980, eqs. (2), (10)). It differs from the pseudo-adiabatic
-    wet-bulb temperature by a few tenths of a kelvin at most (Davies-Jones
-    2008).
+    (attributed to Bolton 1980; the equation number, formerly given as (2),
+    and the coefficients are not checked against the paper), with
+    :math:`r_s` from the Bolton (1980) eq. (10) vapour pressure. The energy
+    balance is the textbook isobaric wet-bulb definition. :math:`c_{pd} =
+    1005.7` and :math:`c_{pv} = 1875.0` J kg-1 K-1 are radarx's values and
+    are not traced to a table of the cited papers. It is not the
+    pseudo-adiabatic wet-bulb temperature of Davies-Jones (2008), which
+    inverts Bolton's equivalent potential temperature; the size of the
+    difference is not stated by Davies-Jones (2008). The Newton tolerance of 1e-7 K is a radarx choice.
 
     Parameters
     ----------
@@ -614,7 +722,11 @@ def air_density(
     """
     Density of moist air, :math:`\\rho = p / (R_d T_v)`.
 
-    The virtual temperature is :math:`T_v = T (1 + (1/\\epsilon - 1) q)`.
+    The virtual temperature is :math:`T_v = T (1 + (1/\\epsilon - 1) q)`
+    (:math:`1/\\epsilon - 1 = 0.6078`). Both relations are standard textbook
+    definitions (ideal-gas law for moist air); no paper-specific coefficient
+    is used and no reference is cited. :math:`R_d` is radarx's value (see
+    :mod:`radarx.io.sounding`).
 
     Parameters
     ----------
@@ -649,7 +761,11 @@ def geopotential_to_height(geopotential, *, engine="auto", n_threads=None):
 
     :math:`H = \\Phi / g_0` is the geopotential height and
     :math:`z = R_e H / (R_e - H)` the geometric height on a spherical Earth
-    (:math:`g_0 = 9.80665` m s-2, :math:`R_e = 6371.0088` km).
+    (:math:`g_0 = 9.80665` m s-2, :math:`R_e = 6371.0088` km). The relation
+    follows from gravity decreasing with the inverse square of the distance
+    from the Earth's centre (a standard derivation); :math:`g_0` is the
+    conventional standard gravity and :math:`R_e` the GRS80 mean radius
+    (Moritz 2000), both quoted from the standards (not checked against them).
 
     Parameters
     ----------
@@ -663,6 +779,11 @@ def geopotential_to_height(geopotential, *, engine="auto", n_threads=None):
     -------
     xarray.DataArray
         Geometric height in m.
+
+    References
+    ----------
+    Moritz, H., 2000: Geodetic Reference System 1980. J. Geodesy, 74,
+    128-133, https://doi.org/10.1007/s001900050278
     """
     out = _wrap("height", "height", geopotential, engine=engine, n_threads=n_threads)
     return out.assign_attrs(ATTRS["height"])
@@ -923,7 +1044,13 @@ def _parse_uwyo(text, station="", engine="auto"):
 
 
 def _igra2_header(line):
-    """Fields of an IGRA2 header record (fixed columns of the format document)."""
+    """
+    Fields of an IGRA2 header record (fixed columns of the format document).
+
+    The column positions follow the IGRA version 2 format description
+    distributed with the archive (Durre et al. 2006, 2018; dataset doi
+    10.7289/V5X63K0Q); they are not checked against that document. Latitude and longitude are in ten-thousandths of a degree.
+    """
     return {
         "id": line[1:12].strip(),
         "time": np.datetime64(
@@ -957,6 +1084,9 @@ def _parse_igra2_sounding(header, body, engine="auto"):
         vals[(vals == -9999) | (vals == -8888)] = np.nan
         return vals * scale
 
+    # IGRA2 data records: pressure in Pa, geopotential height in m, temperature
+    # and dew-point depression in tenths of degC, wind speed in tenths of m s-1;
+    # -9999 / -8888 are missing (columns as in the archive's format description)
     t = field(22, 27, 0.1)
     launch = h["time"]
     if h["reltime"].isdigit() and not h["reltime"].startswith("99"):
@@ -2016,7 +2146,9 @@ def wet_bulb_zero_height(profile, *, which="highest", engine="auto", n_threads=N
     The isobaric wet-bulb temperature (see :func:`wet_bulb_temperature`) is
     computed at every level from ``pressure``, ``temperature`` and
     ``dewpoint`` and its 0 degC crossing located as in
-    :func:`isotherm_height`.
+    :func:`isotherm_height`. This is the isobaric wet-bulb temperature, not
+    the pseudo-adiabatic one of Davies-Jones (2008); the choice of the top
+    crossing is a radarx convention.
 
     Parameters
     ----------
@@ -2037,6 +2169,10 @@ def wet_bulb_zero_height(profile, *, which="highest", engine="auto", n_threads=N
     Bolton, D., 1980: The computation of equivalent potential temperature.
     Mon. Wea. Rev., 108, 1046-1053,
     https://doi.org/10.1175/1520-0493(1980)108<1046:TCOEPT>2.0.CO;2
+
+    Davies-Jones, R., 2008: An efficient and accurate method for computing the
+    wet-bulb temperature along pseudoadiabats. Mon. Wea. Rev., 136,
+    2764-2785, https://doi.org/10.1175/2007MWR2224.1
     """
     tw = wet_bulb_temperature(
         profile["pressure"],

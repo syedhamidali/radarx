@@ -16,18 +16,29 @@ Potential temperatures
 :math:`r = \\varepsilon e / (p - e)`, the potential temperature
 :math:`\\theta = T (p_0 / p)^{R_d / c_{pd}}`, the virtual potential temperature
 :math:`\\theta_v = \\theta (1 + r / \\varepsilon) / (1 + r)` and the
-equivalent potential temperature of Bolton (1980, eq. 43) with the temperature
+equivalent potential temperature of Bolton [2]_ (eq. 43) with the temperature
 at the lifting condensation level of Bolton's eq. (15). The vapour pressure
 :math:`e` is the saturation vapour pressure over water at the dew point
-(Bolton 1980, eq. 10), :math:`p_0` = 1000 hPa, :math:`R_d` = 287.047 and
-:math:`c_{pd}` = 1005.7 J kg\\ :sup:`-1` K\\ :sup:`-1`, :math:`\\varepsilon =
-R_d / R_v` (as in :mod:`radarx.io.sounding`).
+(Bolton [2]_, eq. 10: 6.112 exp[17.67 T / (T + 243.5)] hPa with T in degrees
+Celsius; radarx uses it without an enhancement factor and also outside the
+temperature range for which Bolton fitted it). The numerical coefficients of
+eqs. (10), (15) and (43) (17.67, 243.5, 56, 800, 0.2854, 0.28e-3, 3.376,
+0.00254, 0.81e-3, with the mixing ratio in g kg\\ :sup:`-1`) are those of
+Bolton's paper as implemented; they and the equation numbers are not checked against
+its text.
+:math:`p_0` = 1000 hPa, :math:`R_d` = 287.047 and :math:`c_{pd}` = 1005.7
+J kg\\ :sup:`-1` K\\ :sup:`-1`, :math:`\\varepsilon = R_d / R_v` (as in
+:mod:`radarx.io.sounding`) are standard constants, not taken from a specific
+table of the cited papers. A dew point above the temperature is set to the
+temperature (radarx choice, to keep the air at most saturated).
 
 Buoyancy and cold-pool intensity
 --------------------------------
 Relative to a reference state :math:`\\overline{\\theta_v}` (the pre-storm
 environment: an earlier time window at a station, or a sounding ahead of the
-storm), the buoyancy is (e.g. Markowski and Richardson 2010, eq. 2.80)
+storm), the buoyancy is the usual virtual-potential-temperature form with
+hydrometeor loading (e.g. Markowski and Richardson [5]_; equation number not checked
+against the book)
 
 .. math::
 
@@ -35,7 +46,7 @@ storm), the buoyancy is (e.g. Markowski and Richardson 2010, eq. 2.80)
         - g\\, r_c ,
 
 where :math:`r_c` is the condensate (hydrometeor) mixing ratio, if known.
-Rotunno et al. (1988) measure the strength of a cold pool by
+Rotunno et al. [6]_ measure the strength of a cold pool by
 
 .. math::
 
@@ -44,9 +55,14 @@ Rotunno et al. (1988) measure the strength of a cold pool by
 the speed of the density current whose depth is :math:`H`; RKW theory
 predicts the most upright and long-lived squall lines when :math:`C` balances
 the line-normal low-level shear, :math:`C / \\Delta u \\approx 1` (Rotunno et
-al. 1988; Weisman and Rotunno 2004). Bryan et al. (2006) compare this
+al. [6]_; Weisman and Rotunno [8]_). Bryan et al. [3]_ compare this
 "RKW ratio" across numerical models and discuss how sensitive :math:`C` is to
-the choice of :math:`H` and of the shear layer. :func:`cold_pool_intensity`
+the choice of :math:`H` and of the shear layer. The equation numbers and the
+layer depths of those papers (Rotunno et al. used the lowest 2.5 km for the
+shear) are not checked against the papers; the
+definitions above are those implemented, and the zero default of ``threshold``
+is a radarx choice (the level where the buoyancy deficit vanishes), not a
+published threshold. :func:`cold_pool_intensity`
 integrates :math:`-B` (trapezoidal rule between valid levels) from the lowest
 valid level up to the first height at which :math:`B` rises to ``threshold``
 (linearly interpolated, default 0), or over a fixed ``depth``.
@@ -54,8 +70,9 @@ valid level up to the first height at which :math:`B` rises to ``threshold``
 With hydrostatic balance the surface pressure excess under the cold pool is
 :math:`\\Delta p_h = \\int_0^H \\rho (-B)\\, dz`, so that
 :math:`C = \\sqrt{2 \\Delta p_h / \\rho}` (the speed of a density current of
-Benjamin 1968; Wakimoto 1982 relates gust-front speeds to surface pressure
-jumps in the same way); :func:`cold_pool_intensity_from_pressure` uses it
+Benjamin [1]_; Wakimoto [7]_ relates gust-front speeds to surface pressure
+jumps in the same way; the forms in those papers are not checked);
+:func:`cold_pool_intensity_from_pressure` uses it
 for the pressure rise at a surface station.
 :func:`cold_pool_intensity_from_surface` assumes instead a depth :math:`H` and
 a deficit that decreases linearly from the surface value to zero at
@@ -74,11 +91,13 @@ gradients of buoyancy,
 
 which in a vertical cross-section normal to a squall line is the
 :math:`\\partial \\eta / \\partial t = -\\partial B / \\partial x` of Rotunno et
-al. (1988). :func:`baroclinic_generation` evaluates these on a grid (centred
+al. [6]_. :func:`baroclinic_generation` evaluates these on a grid (centred
 differences, one-sided next to missing values and at the edges) and, given
 the winds (e.g. multi-Doppler winds) and a storm motion, splits the
 generation into its streamwise and crosswise parts relative to the
-storm-relative wind (Davies-Jones 1984).
+storm-relative wind (streamwise and crosswise vorticity as in
+Davies-Jones [4]_; the split is the projection of the generation rate on the
+unit storm-relative wind and on the direction 90 degrees to its left).
 
 The integrals, the gradients and the potential temperatures run in a compiled
 kernel (``radarx.retrieve._coldpool``, multithreaded over all columns, rows
@@ -87,36 +106,37 @@ fallback.
 
 References
 ----------
-Benjamin, T. B., 1968: Gravity currents and related phenomena. *J. Fluid
-Mech.*, **31** (2), 209-248, https://doi.org/10.1017/S0022112068000133
+.. [1] Benjamin, T. B., 1968: Gravity currents and related phenomena. *J. Fluid
+   Mech.*, **31** (2), 209-248, https://doi.org/10.1017/S0022112068000133
 
-Bolton, D., 1980: The computation of equivalent potential temperature. *Mon.
-Wea. Rev.*, **108** (7), 1046-1053,
-https://doi.org/10.1175/1520-0493(1980)108<1046:TCOEPT>2.0.CO;2
+.. [2] Bolton, D., 1980: The computation of equivalent potential temperature.
+   *Mon. Wea. Rev.*, **108** (7), 1046-1053,
+   https://doi.org/10.1175/1520-0493(1980)108<1046:TCOEPT>2.0.CO;2
 
-Bryan, G. H., J. C. Knievel, and M. D. Parker, 2006: A multimodel assessment
-of RKW theory's relevance to squall-line characteristics. *Mon. Wea. Rev.*,
-**134** (10), 2772-2792, https://doi.org/10.1175/MWR3226.1
+.. [3] Bryan, G. H., J. C. Knievel, and M. D. Parker, 2006: A multimodel
+   assessment of RKW theory's relevance to squall-line characteristics. *Mon.
+   Wea. Rev.*, **134** (10), 2772-2792, https://doi.org/10.1175/MWR3226.1
 
-Davies-Jones, R., 1984: Streamwise vorticity: The origin of updraft rotation
-in supercell storms. *J. Atmos. Sci.*, **41** (20), 2991-3006,
-https://doi.org/10.1175/1520-0469(1984)041<2991:SVTOOU>2.0.CO;2
+.. [4] Davies-Jones, R., 1984: Streamwise vorticity: The origin of updraft
+   rotation in supercell storms. *J. Atmos. Sci.*, **41** (20), 2991-3006,
+   https://doi.org/10.1175/1520-0469(1984)041<2991:SVTOOU>2.0.CO;2
 
-Markowski, P., and Y. Richardson, 2010: *Mesoscale Meteorology in
-Midlatitudes*. Wiley-Blackwell, 407 pp.,
-https://doi.org/10.1002/9780470682104
+.. [5] Markowski, P., and Y. Richardson, 2010: *Mesoscale Meteorology in
+   Midlatitudes*. Wiley-Blackwell, 407 pp.,
+   https://doi.org/10.1002/9780470682104
 
-Rotunno, R., J. B. Klemp, and M. L. Weisman, 1988: A theory for strong,
-long-lived squall lines. *J. Atmos. Sci.*, **45** (3), 463-485,
-https://doi.org/10.1175/1520-0469(1988)045<0463:ATFSLL>2.0.CO;2
+.. [6] Rotunno, R., J. B. Klemp, and M. L. Weisman, 1988: A theory for strong,
+   long-lived squall lines. *J. Atmos. Sci.*, **45** (3), 463-485,
+   https://doi.org/10.1175/1520-0469(1988)045<0463:ATFSLL>2.0.CO;2
 
-Wakimoto, R. M., 1982: The life cycle of thunderstorm gust fronts as viewed
-with Doppler radar and rawinsonde data. *Mon. Wea. Rev.*, **110** (8),
-1060-1082, https://doi.org/10.1175/1520-0493(1982)110<1060:TLCOTG>2.0.CO;2
+.. [7] Wakimoto, R. M., 1982: The life cycle of thunderstorm gust fronts as
+   viewed with Doppler radar and rawinsonde data. *Mon. Wea. Rev.*, **110**
+   (8), 1060-1082,
+   https://doi.org/10.1175/1520-0493(1982)110<1060:TLCOTG>2.0.CO;2
 
-Weisman, M. L., and R. Rotunno, 2004: "A theory for strong long-lived squall
-lines" revisited. *J. Atmos. Sci.*, **61** (4), 361-382,
-https://doi.org/10.1175/1520-0469(2004)061<0361:ATFSLS>2.0.CO;2
+.. [8] Weisman, M. L., and R. Rotunno, 2004: "A theory for strong long-lived
+   squall lines" revisited. *J. Atmos. Sci.*, **61** (4), 361-382,
+   https://doi.org/10.1175/1520-0469(2004)061<0361:ATFSLS>2.0.CO;2
 
 .. autosummary::
    :nosignatures:
@@ -338,6 +358,14 @@ def potential_temperatures(
     Mixing ratio and potential, virtual potential and equivalent potential
     temperature.
 
+    The equivalent potential temperature is Bolton's [1]_ eq. (43) with the
+    lifting-condensation-level temperature of his eq. (15) and the vapour
+    pressure of his eq. (10). The coefficients are those of the paper as
+    implemented; they are not checked against the paper (see the module
+    docstring). Mixing ratio, potential and virtual potential temperature are
+    the textbook definitions (:math:`p_0` = 1000 hPa, :math:`R_d / c_{pd}` =
+    287.047 / 1005.7), not taken from a table of a cited paper.
+
     Parameters
     ----------
     ds : xarray.Dataset
@@ -362,9 +390,9 @@ def potential_temperatures(
 
     References
     ----------
-    Bolton, D., 1980: The computation of equivalent potential temperature.
-    *Mon. Wea. Rev.*, **108** (7), 1046-1053,
-    https://doi.org/10.1175/1520-0493(1980)108<1046:TCOEPT>2.0.CO;2
+    .. [1] Bolton, D., 1980: The computation of equivalent potential
+           temperature. *Mon. Wea. Rev.*, **108** (7), 1046-1053,
+           https://doi.org/10.1175/1520-0493(1980)108<1046:TCOEPT>2.0.CO;2
     """
     t, p = xr.broadcast(ds[temperature], ds[pressure])
     td = _dewpoint(ds, temperature, dewpoint, relative_humidity)
@@ -401,7 +429,9 @@ def buoyancy(theta_v, reference, *, condensate=None):
     Buoyancy from the virtual potential temperature.
 
     :math:`B = g (\\theta_v - \\overline{\\theta_v}) / \\overline{\\theta_v}
-    - g r_c`.
+    - g r_c`, the standard form with hydrometeor loading (e.g. Markowski and
+    Richardson [1]_; equation number not checked against the book). :math:`g` = 9.80665 m s-2 is the standard
+    gravity, a radarx choice of constant.
 
     Parameters
     ----------
@@ -422,9 +452,9 @@ def buoyancy(theta_v, reference, *, condensate=None):
 
     References
     ----------
-    Markowski, P., and Y. Richardson, 2010: *Mesoscale Meteorology in
-    Midlatitudes*. Wiley-Blackwell, 407 pp.,
-    https://doi.org/10.1002/9780470682104
+    .. [1] Markowski, P., and Y. Richardson, 2010: *Mesoscale Meteorology in
+           Midlatitudes*. Wiley-Blackwell, 407 pp.,
+           https://doi.org/10.1002/9780470682104
     """
     b = G * (theta_v - reference) / reference
     if condensate is not None:
@@ -445,6 +475,10 @@ def cold_pool_perturbation(
 ):
     """
     Perturbations from a reference state and the buoyancy.
+
+    The buoyancy is that of :func:`buoyancy` (Markowski and Richardson [1]_,
+    without condensate loading). The choice of reference (a pre-storm window
+    or sounding) is the caller's; no published threshold is applied.
 
     Parameters
     ----------
@@ -474,6 +508,12 @@ def cold_pool_perturbation(
         ``<name>_perturbation`` for every variable (the observation minus the
         reference), the reference ``virtual_potential_temperature_reference``
         and ``buoyancy`` from the virtual potential temperature.
+
+    References
+    ----------
+    .. [1] Markowski, P., and Y. Richardson, 2010: *Mesoscale Meteorology in
+           Midlatitudes*. Wiley-Blackwell, 407 pp.,
+           https://doi.org/10.1002/9780470682104
     """
     ds = _with_thermo(ds, engine, n_threads)
     if isinstance(reference, slice):
@@ -547,53 +587,62 @@ def cold_pool_intensity(
     n_threads=None,
 ):
     """
-    Cold-pool intensity :math:`C = \\sqrt{2 \\int_0^H (-B)\\, dz}` and depth.
+        Cold-pool intensity :math:`C = \\sqrt{2 \\int_0^H (-B)\\, dz}` and depth.
 
-    Parameters
-    ----------
-    buoyancy : xarray.DataArray
-        Buoyancy (m s-2) with a vertical dimension ``dim``, e.g. from
-        :func:`cold_pool_perturbation` of a post-storm sounding, or gridded
-        (``z``, ``y``, ``x``) with any other dimensions (all columns are
-        computed in one kernel call).
-    dim : str, optional
-        Vertical dimension. Default ``"height"``.
-    height : str or xarray.DataArray, optional
-        Heights (m) of the levels if not the ``dim`` coordinate (e.g. a 3-D
-        height coordinate).
-    threshold : float, optional
-        Buoyancy (m s-2) that marks the top of the cold pool: the depth is the
-        lowest height above the lowest valid level where ``B >= threshold``
-        (linearly interpolated). Default 0. A slightly negative value (e.g.
-        -0.005) ignores weak deficits above the cold pool.
-    depth : float, optional
-        Integrate over this fixed depth (m) above the lowest valid level
-        instead of searching the top; NaN if the profile is shorter.
-    bottom : float or xarray.DataArray, optional
-        Ignore levels below this height (m), e.g. the ground. Default: start
-        at the lowest valid level.
-    engine : {"auto", "compiled", "numpy"}, optional
-        Kernel implementation.
-    n_threads : int, optional
-        Threads for the compiled kernel. Default: all cores.
+        :math:`C` is the cold-pool strength of Rotunno et al. [1]_ (the speed of
+        the density current of depth :math:`H` with the same buoyancy integral);
+        Bryan et al. [2]_ use it to compare simulated squall lines. The integral is
+        evaluated with the trapezoidal rule between valid levels. The cold-pool
+        top is the first level where :math:`B \\ge` ``threshold`` (linear
+        interpolation); this top criterion, the default threshold of 0 and the
+        example value -0.005 m s-2 are radarx choices, not thresholds of the cited
+        papers (whose definitions of :math:`H` differ; not checked against them).
 
-    Returns
-    -------
-    xarray.Dataset
-        ``cold_pool_intensity`` (m s-1), ``cold_pool_depth`` (m) and
-        ``cold_pool_top_found`` (bool) per column. Columns whose lowest level
-        is not negatively buoyant have zero intensity and depth.
+        Parameters
+        ----------
+        buoyancy : xarray.DataArray
+            Buoyancy (m s-2) with a vertical dimension ``dim``, e.g. from
+            :func:`cold_pool_perturbation` of a post-storm sounding, or gridded
+            (``z``, ``y``, ``x``) with any other dimensions (all columns are
+            computed in one kernel call).
+        dim : str, optional
+            Vertical dimension. Default ``"height"``.
+        height : str or xarray.DataArray, optional
+            Heights (m) of the levels if not the ``dim`` coordinate (e.g. a 3-D
+            height coordinate).
+        threshold : float, optional
+            Buoyancy (m s-2) that marks the top of the cold pool: the depth is the
+            lowest height above the lowest valid level where ``B >= threshold``
+            (linearly interpolated). Default 0. A slightly negative value (e.g.
+            -0.005) ignores weak deficits above the cold pool.
+        depth : float, optional
+            Integrate over this fixed depth (m) above the lowest valid level
+            instead of searching the top; NaN if the profile is shorter.
+        bottom : float or xarray.DataArray, optional
+            Ignore levels below this height (m), e.g. the ground. Default: start
+            at the lowest valid level.
+        engine : {"auto", "compiled", "numpy"}, optional
+            Kernel implementation.
+        n_threads : int, optional
+            Threads for the compiled kernel. Default: all cores.
 
-    References
-    ----------
-    Rotunno, R., J. B. Klemp, and M. L. Weisman, 1988: A theory for strong,
-    long-lived squall lines. *J. Atmos. Sci.*, **45** (3), 463-485,
-    https://doi.org/10.1175/1520-0469(1988)045<0463:ATFSLL>2.0.CO;2
+        Returns
+        -------
+        xarray.Dataset
+            ``cold_pool_intensity`` (m s-1), ``cold_pool_depth`` (m) and
+            ``cold_pool_top_found`` (bool) per column. Columns whose lowest level
+            is not negatively buoyant have zero intensity and depth.
 
-    Bryan, G. H., J. C. Knievel, and M. D. Parker, 2006: A multimodel
-    assessment of RKW theory's relevance to squall-line characteristics.
-    *Mon. Wea. Rev.*, **134** (10), 2772-2792,
-    https://doi.org/10.1175/MWR3226.1
+        References
+        ----------
+    .. [1] Rotunno, R., J. B. Klemp, and M. L. Weisman, 1988: A theory for strong,
+           long-lived squall lines. *J. Atmos. Sci.*, **45** (3), 463-485,
+           https://doi.org/10.1175/1520-0469(1988)045<0463:ATFSLL>2.0.CO;2
+
+        .. [2] Bryan, G. H., J. C. Knievel, and M. D. Parker, 2006: A multimodel
+               assessment of RKW theory's relevance to squall-line
+               characteristics. *Mon. Wea. Rev.*, **134** (10), 2772-2792,
+               https://doi.org/10.1175/MWR3226.1
     """
     z = _height_of(buoyancy, dim, height)
     (b,), zc, other, coords, shape = _columns([buoyancy], dim, z)
@@ -625,7 +674,10 @@ def cold_pool_intensity_from_pressure(pressure_perturbation, density=1.2):
 
     :math:`C = \\sqrt{2 \\Delta p / \\rho}`, which equals
     :math:`\\sqrt{2 \\int_0^H (-B) dz}` when the pressure excess under the
-    cold pool is hydrostatic. Non-hydrostatic (dynamic) pressure, e.g. the
+    cold pool is hydrostatic (density-current speed of Benjamin [1]_;
+    gust-front speed against surface pressure jump, Wakimoto [2]_). The
+    equations of those papers are not checked; the relation is
+    derived here from hydrostatic balance. Non-hydrostatic (dynamic) pressure, e.g. the
     jump at the gust front, should be excluded from ``pressure_perturbation``.
 
     Parameters
@@ -633,7 +685,8 @@ def cold_pool_intensity_from_pressure(pressure_perturbation, density=1.2):
     pressure_perturbation : xarray.DataArray
         Pressure excess over the reference (Pa); values <= 0 give zero.
     density : float or xarray.DataArray, optional
-        Air density (kg m-3). Default 1.2.
+        Air density (kg m-3). Default 1.2 (a typical near-surface value; radarx
+        choice, not from the cited papers).
 
     Returns
     -------
@@ -642,13 +695,14 @@ def cold_pool_intensity_from_pressure(pressure_perturbation, density=1.2):
 
     References
     ----------
-    Benjamin, T. B., 1968: Gravity currents and related phenomena. *J. Fluid
-    Mech.*, **31** (2), 209-248, https://doi.org/10.1017/S0022112068000133
+    .. [1] Benjamin, T. B., 1968: Gravity currents and related phenomena.
+           *J. Fluid Mech.*, **31** (2), 209-248,
+           https://doi.org/10.1017/S0022112068000133
 
-    Wakimoto, R. M., 1982: The life cycle of thunderstorm gust fronts as
-    viewed with Doppler radar and rawinsonde data. *Mon. Wea. Rev.*, **110**
-    (8), 1060-1082,
-    https://doi.org/10.1175/1520-0493(1982)110<1060:TLCOTG>2.0.CO;2
+    .. [2] Wakimoto, R. M., 1982: The life cycle of thunderstorm gust fronts as
+           viewed with Doppler radar and rawinsonde data. *Mon. Wea. Rev.*,
+           **110** (8), 1060-1082,
+           https://doi.org/10.1175/1520-0493(1982)110<1060:TLCOTG>2.0.CO;2
     """
     c = np.sqrt(2.0 * pressure_perturbation.clip(min=0.0) / density)
     c = c.rename("cold_pool_intensity")
@@ -659,31 +713,36 @@ def cold_pool_intensity_from_pressure(pressure_perturbation, density=1.2):
 
 def cold_pool_intensity_from_surface(buoyancy, depth, *, shape="linear"):
     """
-    Cold-pool intensity from the surface buoyancy and an assumed depth.
+        Cold-pool intensity from the surface buoyancy and an assumed depth.
 
-    Parameters
-    ----------
-    buoyancy : xarray.DataArray
-        Surface buoyancy (m s-2), e.g. from :func:`cold_pool_perturbation`
-        of a station network; values >= 0 give zero.
-    depth : float or xarray.DataArray
-        Cold-pool depth (m), e.g. from soundings
-        (:func:`cold_pool_intensity`).
-    shape : {"linear", "uniform"}, optional
-        Buoyancy decreasing linearly from the surface value to zero at
-        ``depth`` (:math:`C^2 = -B_s H`, default) or constant up to ``depth``
-        (:math:`C^2 = -2 B_s H`).
+        Evaluates the cold-pool strength :math:`C^2 = 2 \\int_0^H (-B)\\, dz` of
+        Rotunno et al. [1]_ for an assumed buoyancy profile: linear decrease
+        (:math:`\\int = -B_s H / 2`) or uniform (:math:`\\int = -B_s H`). Both
+        profile shapes are radarx assumptions, not profiles taken from the paper.
 
-    Returns
-    -------
-    xarray.DataArray
-        ``cold_pool_intensity`` (m s-1).
+        Parameters
+        ----------
+        buoyancy : xarray.DataArray
+            Surface buoyancy (m s-2), e.g. from :func:`cold_pool_perturbation`
+            of a station network; values >= 0 give zero.
+        depth : float or xarray.DataArray
+            Cold-pool depth (m), e.g. from soundings
+            (:func:`cold_pool_intensity`).
+        shape : {"linear", "uniform"}, optional
+            Buoyancy decreasing linearly from the surface value to zero at
+            ``depth`` (:math:`C^2 = -B_s H`, default) or constant up to ``depth``
+            (:math:`C^2 = -2 B_s H`).
 
-    References
-    ----------
-    Rotunno, R., J. B. Klemp, and M. L. Weisman, 1988: A theory for strong,
-    long-lived squall lines. *J. Atmos. Sci.*, **45** (3), 463-485,
-    https://doi.org/10.1175/1520-0469(1988)045<0463:ATFSLL>2.0.CO;2
+        Returns
+        -------
+        xarray.DataArray
+            ``cold_pool_intensity`` (m s-1).
+
+        References
+        ----------
+    .. [1] Rotunno, R., J. B. Klemp, and M. L. Weisman, 1988: A theory for strong,
+           long-lived squall lines. *J. Atmos. Sci.*, **45** (3), 463-485,
+           https://doi.org/10.1175/1520-0469(1988)045<0463:ATFSLL>2.0.CO;2
     """
     factors = {"linear": 1.0, "uniform": 2.0}
     if shape not in factors:
@@ -697,33 +756,39 @@ def cold_pool_intensity_from_surface(buoyancy, depth, *, shape="linear"):
 
 def rkw_ratio(intensity, shear):
     """
-    RKW ratio :math:`C / \\Delta u`.
+        RKW ratio :math:`C / \\Delta u`.
 
-    Parameters
-    ----------
-    intensity : xarray.DataArray or float
-        Cold-pool intensity :math:`C` (m s-1).
-    shear : xarray.DataArray or float
-        Line-normal bulk wind difference over the low-level layer (m s-1),
-        positive when the low-level shear points toward the inflow (the
-        direction the cold pool spreads), e.g. ``shear_normal`` of
-        :func:`radarx.retrieve.bulk_shear`.
+        The ratio of the cold-pool strength to the line-normal low-level wind
+        difference, the quantity that RKW theory (Rotunno et al. [1]_; revisited
+        by Weisman and Rotunno [2]_) takes to be near 1 for the optimal state. The
+        layer over which :math:`\\Delta u` is taken (the papers use the lowest few
+        kilometres; the depth is not checked against them) is chosen by the caller.
 
-    Returns
-    -------
-    xarray.DataArray
-        ``rkw_ratio``; about 1 is the optimal state of Rotunno et al. (1988),
-        > 1 a cold pool that dominates the shear (upshear-tilted system).
+        Parameters
+        ----------
+        intensity : xarray.DataArray or float
+            Cold-pool intensity :math:`C` (m s-1).
+        shear : xarray.DataArray or float
+            Line-normal bulk wind difference over the low-level layer (m s-1),
+            positive when the low-level shear points toward the inflow (the
+            direction the cold pool spreads), e.g. ``shear_normal`` of
+            :func:`radarx.retrieve.bulk_shear`.
 
-    References
-    ----------
-    Rotunno, R., J. B. Klemp, and M. L. Weisman, 1988: A theory for strong,
-    long-lived squall lines. *J. Atmos. Sci.*, **45** (3), 463-485,
-    https://doi.org/10.1175/1520-0469(1988)045<0463:ATFSLL>2.0.CO;2
+        Returns
+        -------
+        xarray.DataArray
+            ``rkw_ratio``; about 1 is the optimal state of Rotunno et al. (1988),
+            > 1 a cold pool that dominates the shear (upshear-tilted system).
 
-    Weisman, M. L., and R. Rotunno, 2004: "A theory for strong long-lived
-    squall lines" revisited. *J. Atmos. Sci.*, **61** (4), 361-382,
-    https://doi.org/10.1175/1520-0469(2004)061<0361:ATFSLS>2.0.CO;2
+        References
+        ----------
+    .. [1] Rotunno, R., J. B. Klemp, and M. L. Weisman, 1988: A theory for strong,
+           long-lived squall lines. *J. Atmos. Sci.*, **45** (3), 463-485,
+           https://doi.org/10.1175/1520-0469(1988)045<0463:ATFSLL>2.0.CO;2
+
+        .. [2] Weisman, M. L., and R. Rotunno, 2004: "A theory for strong
+               long-lived squall lines" revisited. *J. Atmos. Sci.*, **61** (4),
+               361-382, https://doi.org/10.1175/1520-0469(2004)061<0361:ATFSLS>2.0.CO;2
     """
     r = xr.DataArray(intensity) / shear
     r = r.rename("rkw_ratio")
@@ -748,53 +813,61 @@ def baroclinic_generation(
     n_threads=None,
 ):
     """
-    Baroclinic generation of horizontal vorticity, :math:`\\partial B /
-    \\partial y` and :math:`-\\partial B / \\partial x`.
+        Baroclinic generation of horizontal vorticity, :math:`\\partial B /
+        \\partial y` and :math:`-\\partial B / \\partial x`.
 
-    Parameters
-    ----------
-    buoyancy : xarray.DataArray
-        Buoyancy (m s-2) on a grid with horizontal dimensions ``y`` and ``x``
-        (coordinates in m), and any others (height, time), e.g.
-        ``buoyancy(theta_v, reference)`` of a radarx grid, or
-        :math:`g\\,\\Delta T / T` of the accumulated evaporative cooling of
-        :func:`radarx.retrieve.integrate_evaporation`. A vertical cross-section
-        without ``y`` gives only :math:`-\\partial B / \\partial x`.
-    x, y : str, optional
-        Horizontal dimensions. Default ``"x"`` and ``"y"``.
-    u, v : xarray.DataArray, optional
-        Wind components along ``x`` and ``y`` (m s-1), e.g. multi-Doppler
-        winds, broadcastable against ``buoyancy``. With them the generation is
-        split into streamwise and crosswise parts relative to the
-        storm-relative wind.
-    storm_motion : tuple of float or xarray.Dataset, optional
-        Storm motion ``(cx, cy)`` (m s-1) subtracted from ``u`` and ``v``, or
-        a Dataset with ``u`` and ``v`` (e.g.
-        :func:`radarx.retrieve.bunkers_storm_motion`). Default (0, 0).
-    engine : {"auto", "compiled", "numpy"}, optional
-        Kernel implementation.
-    n_threads : int, optional
-        Threads for the compiled kernel. Default: all cores.
+        The Boussinesq vorticity equations whose cross-section form is
+        :math:`\\partial\\eta/\\partial t = -\\partial B/\\partial x` in Rotunno
+        et al. [1]_ (equation number not checked against the paper).
+        The streamwise/crosswise split follows the streamwise-vorticity concept of
+        Davies-Jones [2]_; the projection onto the storm-relative wind is the
+        radarx implementation.
 
-    Returns
-    -------
-    xarray.Dataset
-        ``dB_dx`` and ``dB_dy`` (s-2), the generation rates
-        ``vorticity_x_generation`` (:math:`\\partial B/\\partial y`),
-        ``vorticity_y_generation`` (:math:`-\\partial B/\\partial x`) and
-        ``horizontal_vorticity_generation`` (their magnitude), all in s-2,
-        and, with winds, ``streamwise_vorticity_generation`` and
-        ``crosswise_vorticity_generation`` (s-2).
+        Parameters
+        ----------
+        buoyancy : xarray.DataArray
+            Buoyancy (m s-2) on a grid with horizontal dimensions ``y`` and ``x``
+            (coordinates in m), and any others (height, time), e.g.
+            ``buoyancy(theta_v, reference)`` of a radarx grid, or
+            :math:`g\\,\\Delta T / T` of the accumulated evaporative cooling of
+            :func:`radarx.retrieve.integrate_evaporation`. A vertical cross-section
+            without ``y`` gives only :math:`-\\partial B / \\partial x`.
+        x, y : str, optional
+            Horizontal dimensions. Default ``"x"`` and ``"y"``.
+        u, v : xarray.DataArray, optional
+            Wind components along ``x`` and ``y`` (m s-1), e.g. multi-Doppler
+            winds, broadcastable against ``buoyancy``. With them the generation is
+            split into streamwise and crosswise parts relative to the
+            storm-relative wind.
+        storm_motion : tuple of float or xarray.Dataset, optional
+            Storm motion ``(cx, cy)`` (m s-1) subtracted from ``u`` and ``v``, or
+            a Dataset with ``u`` and ``v`` (e.g.
+            :func:`radarx.retrieve.bunkers_storm_motion`). Default (0, 0).
+        engine : {"auto", "compiled", "numpy"}, optional
+            Kernel implementation.
+        n_threads : int, optional
+            Threads for the compiled kernel. Default: all cores.
 
-    References
-    ----------
-    Rotunno, R., J. B. Klemp, and M. L. Weisman, 1988: A theory for strong,
-    long-lived squall lines. *J. Atmos. Sci.*, **45** (3), 463-485,
-    https://doi.org/10.1175/1520-0469(1988)045<0463:ATFSLL>2.0.CO;2
+        Returns
+        -------
+        xarray.Dataset
+            ``dB_dx`` and ``dB_dy`` (s-2), the generation rates
+            ``vorticity_x_generation`` (:math:`\\partial B/\\partial y`),
+            ``vorticity_y_generation`` (:math:`-\\partial B/\\partial x`) and
+            ``horizontal_vorticity_generation`` (their magnitude), all in s-2,
+            and, with winds, ``streamwise_vorticity_generation`` and
+            ``crosswise_vorticity_generation`` (s-2).
 
-    Davies-Jones, R., 1984: Streamwise vorticity: The origin of updraft
-    rotation in supercell storms. *J. Atmos. Sci.*, **41** (20), 2991-3006,
-    https://doi.org/10.1175/1520-0469(1984)041<2991:SVTOOU>2.0.CO;2
+        References
+        ----------
+    .. [1] Rotunno, R., J. B. Klemp, and M. L. Weisman, 1988: A theory for strong,
+           long-lived squall lines. *J. Atmos. Sci.*, **45** (3), 463-485,
+           https://doi.org/10.1175/1520-0469(1988)045<0463:ATFSLL>2.0.CO;2
+
+        .. [2] Davies-Jones, R., 1984: Streamwise vorticity: The origin of updraft
+               rotation in supercell storms. *J. Atmos. Sci.*, **41** (20),
+               2991-3006,
+               https://doi.org/10.1175/1520-0469(1984)041<2991:SVTOOU>2.0.CO;2
     """
     if x not in buoyancy.dims:
         raise ValueError(f"dimension {x!r} not found in {buoyancy.dims}")

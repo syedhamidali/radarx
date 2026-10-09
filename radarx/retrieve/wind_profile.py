@@ -25,9 +25,14 @@ Definitions
 -----------
 - bulk shear: the vector wind difference :math:`\\mathbf{V}(z_t) -
   \\mathbf{V}(z_b)`; its component along a direction, e.g. normal to a squall
-  line, is the :math:`\\Delta u` of RKW theory (Rotunno et al. 1988; Weisman
-  and Rotunno 2004).
-- storm-relative helicity (Davies-Jones 1984),
+  line, is the :math:`\\Delta u` of RKW theory (Rotunno et al. [3]_; Weisman and
+  Rotunno [4]_). The default layer of 0-6 km in :func:`bulk_shear` is the
+  conventional deep-layer shear; it is a radarx default, not a layer taken
+  from the cited papers (RKW theory uses the lowest few kilometres; pass
+  ``bottom`` and ``top`` for it).
+- storm-relative helicity, defined from the streamwise-vorticity framework of
+  Davies-Jones [2]_ (equation numbers not checked against the paper; the discrete
+  sum is derived here),
 
   .. math::
 
@@ -36,17 +41,23 @@ Definitions
       = \\sum_k (u_{k+1} - c_x)(v_k - c_y) - (u_k - c_x)(v_{k+1} - c_y),
 
   exact for winds varying linearly between levels.
-- velocity-azimuth display (VAD, Browning and Wexler 1968): on every range
+- velocity-azimuth display (VAD, Browning and Wexler [1]_): on every range
   ring of a radar sweep the radial velocity is fitted by least squares with
   :math:`v_r = a_0 + u \\cos\\phi \\sin\\alpha + v \\cos\\phi \\cos\\alpha`
   (azimuth :math:`\\alpha`, elevation :math:`\\phi`), assuming a horizontally
   uniform wind across the ring; :func:`vad_profile` averages the ring winds
   of all sweeps in height bins into a profile usable by the functions here.
-- Bunkers et al. (2000) "internal dynamics" storm motion: the 0-6 km
-  (non-pressure-weighted) mean wind plus a deviation of 7.5 m s-1 at right
-  angles to the 0-6 km shear vector, taken between the 0-0.5 km and the
-  5.5-6 km mean winds; to the right of the shear for right movers, to the
-  left for left movers.
+  The defaults of :func:`vad_profile` (at least 50 gates per ring, azimuthal
+  spread 0.1, 100-m bins up to 12 km, 1-45 degree elevations) are radarx
+  choices; none comes from Browning and Wexler [1]_.
+- Bunkers et al. [5]_ "internal dynamics" storm motion as implemented: the
+  0-6 km (non-pressure-weighted, height-weighted here) mean wind plus a
+  deviation of 7.5 m s-1 at right angles to the shear vector between the
+  0-0.5 km and the 5.5-6 km mean winds; to the right of the shear for right
+  movers, to the left for left movers. These layers and the 7.5 m s-1 are the
+  values the implementation uses for that method; they and the choice of a
+  height-weighted mean are not checked against the text or tables of the
+  paper.
 
 The layer integrals run in the compiled kernel ``radarx.retrieve._coldpool``
 (multithreaded over columns) with an identical NumPy implementation as
@@ -54,26 +65,27 @@ fallback.
 
 References
 ----------
-Browning, K. A., and R. Wexler, 1968: The determination of kinematic
-properties of a wind field using Doppler radar. *J. Appl. Meteor.*, **7** (1),
-105-113, https://doi.org/10.1175/1520-0450(1968)007<0105:TDOKPO>2.0.CO;2
+.. [1] Browning, K. A., and R. Wexler, 1968: The determination of kinematic
+   properties of a wind field using Doppler radar. *J. Appl. Meteor.*, **7**
+   (1), 105-113,
+   https://doi.org/10.1175/1520-0450(1968)007<0105:TDOKPO>2.0.CO;2
 
-Bunkers, M. J., B. A. Klimowski, J. W. Zeitler, R. L. Thompson, and
-M. L. Weisman, 2000: Predicting supercell motion using a new hodograph
-technique. *Wea. Forecasting*, **15** (1), 61-79,
-https://doi.org/10.1175/1520-0434(2000)015<0061:PSMUAN>2.0.CO;2
+.. [2] Davies-Jones, R., 1984: Streamwise vorticity: The origin of updraft
+   rotation in supercell storms. *J. Atmos. Sci.*, **41** (20), 2991-3006,
+   https://doi.org/10.1175/1520-0469(1984)041<2991:SVTOOU>2.0.CO;2
 
-Davies-Jones, R., 1984: Streamwise vorticity: The origin of updraft rotation
-in supercell storms. *J. Atmos. Sci.*, **41** (20), 2991-3006,
-https://doi.org/10.1175/1520-0469(1984)041<2991:SVTOOU>2.0.CO;2
+.. [3] Rotunno, R., J. B. Klemp, and M. L. Weisman, 1988: A theory for strong,
+   long-lived squall lines. *J. Atmos. Sci.*, **45** (3), 463-485,
+   https://doi.org/10.1175/1520-0469(1988)045<0463:ATFSLL>2.0.CO;2
 
-Rotunno, R., J. B. Klemp, and M. L. Weisman, 1988: A theory for strong,
-long-lived squall lines. *J. Atmos. Sci.*, **45** (3), 463-485,
-https://doi.org/10.1175/1520-0469(1988)045<0463:ATFSLL>2.0.CO;2
+.. [4] Weisman, M. L., and R. Rotunno, 2004: "A theory for strong long-lived
+   squall lines" revisited. *J. Atmos. Sci.*, **61** (4), 361-382,
+   https://doi.org/10.1175/1520-0469(2004)061<0361:ATFSLS>2.0.CO;2
 
-Weisman, M. L., and R. Rotunno, 2004: "A theory for strong long-lived squall
-lines" revisited. *J. Atmos. Sci.*, **61** (4), 361-382,
-https://doi.org/10.1175/1520-0469(2004)061<0361:ATFSLS>2.0.CO;2
+.. [5] Bunkers, M. J., B. A. Klimowski, J. W. Zeitler, R. L. Thompson, and
+   M. L. Weisman, 2000: Predicting supercell motion using a new hodograph
+   technique. *Wea. Forecasting*, **15** (1), 61-79,
+   https://doi.org/10.1175/1520-0434(2000)015<0061:PSMUAN>2.0.CO;2
 
 .. autosummary::
    :nosignatures:
@@ -104,6 +116,8 @@ import xarray as xr
 from .._registry import accessor_method
 from .coldpool import _columns, _f64, _height_of, _kernel, _per_column, _threads
 
+# Deviation of the Bunkers et al. (2000) method [m s-1]; value as used by the
+# method, not checked against the paper.
 BUNKERS_DEVIATION = 7.5  # m s-1
 
 
@@ -193,6 +207,11 @@ def bulk_shear(
     """
     Bulk wind difference (bulk shear) over a layer.
 
+    The vector difference of the (linearly interpolated) winds at ``top`` and
+    ``bottom``; its component along ``normal`` is the :math:`\\Delta u` of
+    RKW theory (Weisman and Rotunno [1]_; Rotunno et al. [2]_). The 0-6 km
+    default layer is a radarx choice, not a layer prescribed by those papers.
+
     Parameters
     ----------
     profile : xarray.Dataset
@@ -225,9 +244,14 @@ def bulk_shear(
 
     References
     ----------
-    Weisman, M. L., and R. Rotunno, 2004: "A theory for strong long-lived
-    squall lines" revisited. *J. Atmos. Sci.*, **61** (4), 361-382,
-    https://doi.org/10.1175/1520-0469(2004)061<0361:ATFSLS>2.0.CO;2
+    .. [1] Weisman, M. L., and R. Rotunno, 2004: "A theory for strong
+           long-lived squall lines" revisited. *J. Atmos. Sci.*, **61** (4),
+           361-382, https://doi.org/10.1175/1520-0469(2004)061<0361:ATFSLS>2.0.CO;2
+
+    .. [2] Rotunno, R., J. B. Klemp, and M. L. Weisman, 1988: A theory for
+           strong, long-lived squall lines. *J. Atmos. Sci.*, **45** (3),
+           463-485,
+           https://doi.org/10.1175/1520-0469(1988)045<0463:ATFSLL>2.0.CO;2
     """
     res, other, coords, shape = _layer(
         profile,
@@ -266,6 +290,10 @@ def layer_mean_wind(
 ):
     """
     Height-weighted (non-pressure-weighted) mean wind of a layer.
+
+    The trapezoidal integral of the winds over height divided by the layer
+    depth. The 0-6 km default is a radarx choice (it is the layer of the mean
+    wind in the Bunkers et al. method, :func:`bunkers_storm_motion`).
 
     Parameters
     ----------
@@ -311,7 +339,13 @@ def bunkers_storm_motion(
     n_threads=None,
 ):
     """
-    Supercell motion of Bunkers et al. (2000) ("internal dynamics" method).
+    Supercell motion of Bunkers et al. [1]_ ("internal dynamics" method).
+
+    Mean wind of 0-6 km plus (right mover) or minus (left mover) a deviation
+    of 7.5 m s-1 perpendicular to the shear vector from the 0-0.5 km mean wind
+    to the 5.5-6 km mean wind. The layers, the 7.5 m s-1 and the use of
+    height-weighted rather than pressure-weighted means are as implemented
+    for the method; they are not checked against the text of the paper (the pressure-weighted variant is not offered).
 
     Parameters
     ----------
@@ -321,7 +355,8 @@ def bunkers_storm_motion(
     mover : {"right", "left", "mean"}, optional
         Right mover (default), left mover or the 0-6 km mean wind.
     deviation : float, optional
-        Deviation from the mean wind (m s-1). Default 7.5.
+        Deviation from the mean wind (m s-1). Default 7.5 (the value of the
+        Bunkers et al. method as implemented; not checked, see above).
     dim, height, ground, engine, n_threads : optional
         As in :func:`bulk_shear`.
 
@@ -333,10 +368,10 @@ def bunkers_storm_motion(
 
     References
     ----------
-    Bunkers, M. J., B. A. Klimowski, J. W. Zeitler, R. L. Thompson, and
-    M. L. Weisman, 2000: Predicting supercell motion using a new hodograph
-    technique. *Wea. Forecasting*, **15** (1), 61-79,
-    https://doi.org/10.1175/1520-0434(2000)015<0061:PSMUAN>2.0.CO;2
+    .. [1] Bunkers, M. J., B. A. Klimowski, J. W. Zeitler, R. L. Thompson, and
+           M. L. Weisman, 2000: Predicting supercell motion using a new
+           hodograph technique. *Wea. Forecasting*, **15** (1), 61-79,
+           https://doi.org/10.1175/1520-0434(2000)015<0061:PSMUAN>2.0.CO;2
     """
     sign = {"right": 1.0, "left": -1.0, "mean": 0.0}
     if mover not in sign:
@@ -406,6 +441,15 @@ def storm_relative_helicity(
     """
     Storm-relative helicity of a layer.
 
+    :math:`H = \\sum_k (u_{k+1} - c_x)(v_k - c_y) - (u_k - c_x)(v_{k+1} -
+    c_y)` over the layer (see the module docstring), the discrete form of the
+    storm-relative helicity built on the streamwise vorticity of
+    Davies-Jones [1]_ (the sum is exact for winds linear between levels).
+    The 0-3 km default layer is the conventional low-level layer, a radarx
+    default not taken from that paper; the ``"right"``/``"left"`` motions are
+    those of Bunkers et al. [2]_ (:func:`bunkers_storm_motion`). The paper
+    equations are not checked.
+
     Parameters
     ----------
     profile : xarray.Dataset
@@ -428,9 +472,15 @@ def storm_relative_helicity(
 
     References
     ----------
-    Davies-Jones, R., 1984: Streamwise vorticity: The origin of updraft
-    rotation in supercell storms. *J. Atmos. Sci.*, **41** (20), 2991-3006,
-    https://doi.org/10.1175/1520-0469(1984)041<2991:SVTOOU>2.0.CO;2
+    .. [1] Davies-Jones, R., 1984: Streamwise vorticity: The origin of updraft
+           rotation in supercell storms. *J. Atmos. Sci.*, **41** (20),
+           2991-3006,
+           https://doi.org/10.1175/1520-0469(1984)041<2991:SVTOOU>2.0.CO;2
+
+    .. [2] Bunkers, M. J., B. A. Klimowski, J. W. Zeitler, R. L. Thompson, and
+           M. L. Weisman, 2000: Predicting supercell motion using a new
+           hodograph technique. *Wea. Forecasting*, **15** (1), 61-79,
+           https://doi.org/10.1175/1520-0434(2000)015<0061:PSMUAN>2.0.CO;2
     """
     if isinstance(storm_motion, str):
         storm_motion = bunkers_storm_motion(
@@ -522,6 +572,12 @@ def vad_profile(
     """
     Wind profile from radar radial velocities by the velocity-azimuth display.
 
+    The ring fit is the linear VAD of Browning and Wexler [1]_ (uniform wind
+    across the ring, first harmonic only; the paper's equation numbers are
+    not checked). The sweep selection and rejection thresholds
+    (``min_gates``, ``min_spread``, ``max_rms``, elevation limits) and the
+    height binning are radarx choices, not values from that paper.
+
     Parameters
     ----------
     obj : xarray.Dataset or xarray.DataTree
@@ -565,10 +621,10 @@ def vad_profile(
 
     References
     ----------
-    Browning, K. A., and R. Wexler, 1968: The determination of kinematic
-    properties of a wind field using Doppler radar. *J. Appl. Meteor.*,
-    **7** (1), 105-113,
-    https://doi.org/10.1175/1520-0450(1968)007<0105:TDOKPO>2.0.CO;2
+    .. [1] Browning, K. A., and R. Wexler, 1968: The determination of
+           kinematic properties of a wind field using Doppler radar.
+           *J. Appl. Meteor.*, **7** (1), 105-113,
+           https://doi.org/10.1175/1520-0450(1968)007<0105:TDOKPO>2.0.CO;2
     """
     if isinstance(obj, xr.Dataset):
         datasets = [obj]
