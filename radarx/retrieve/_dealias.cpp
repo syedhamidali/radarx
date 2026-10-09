@@ -2,8 +2,8 @@
 // Distributed under the MIT License. See LICENSE for more info.
 //
 // Region-based Doppler velocity dealiasing kernel for PPI sweeps. The method
-// is radarx's own combination of published concepts (cited below; none of the
-// papers was available to check the details), not an implementation of one
+// is radarx's own combination of published concepts (cited below; details not
+// checked against the papers), not an implementation of one
 // paper. Thresholds and limits are radarx choices.
 //
 // region_folds (all sweeps of a volume in one call, in parallel):

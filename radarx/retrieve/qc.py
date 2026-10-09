@@ -15,7 +15,7 @@ The classification is a weighted fuzzy-logic scheme in the spirit of
 Gourley et al. (2007) [1] and Krause (2016) [2]: local features of the
 polarimetric variables and of the reflectivity are mapped to a membership in
 [0, 1] ("how meteorological"), and the weighted mean of the memberships is
-compared with a threshold. **It is not an implementation of either paper.**
+compared with a threshold. It is not an implementation of either paper.
 Only the form of the aggregation, :math:`A = \\sum_j W_j P_j / \\sum_j W_j`
 (Krause 2016 [2], p. 1876), and the idea that the variability of
 :math:`Z_{DR}` and :math:`\\Phi_{DP}` is small in precipitation (both papers)
@@ -36,8 +36,7 @@ centred on the gate:
     Mean differential reflectivity. The biological-scatterer class of Park
     et al. (2009) [3] has :math:`Z_{DR}` between 0 and 12 dB, with full
     membership from 2 to 10 dB (their Table 1, p. 733); Tang et al. (2014)
-    [5] describe the same behaviour but the paper was not available for
-    checking. Krause (2016) [2] leaves the mean :math:`Z_{DR}` out
+    [5] describe the same behaviour (not checked against the paper). Krause (2016) [2] leaves the mean :math:`Z_{DR}` out
     "because of possible radar miscalibration" (p. 1880); radarx uses it
     with a trapezoid of its own.
 ``zdr_texture``, ``phidp_texture``
@@ -52,14 +51,14 @@ centred on the gate:
     Mean squared difference of the reflectivity of adjacent gates
     (:math:`\\mathrm{dB}^2`), large for ground clutter and anomalous
     propagation. After the reflectivity texture of Steiner and Smith (2002)
-    [4]; the paper was not available for checking, and the corners and the
-    weight are radarx's own.
+    [4] (not checked against the paper). The corners and the weight are
+    radarx's own.
 ``spin``
     Share (%) of gates at which the reflectivity gradient along the ray
     changes sign with jumps of at least ``spin_threshold`` dB on both sides,
     the "spin change" of Steiner and Smith (2002) [4], large for clutter
-    (definition and 2 dB threshold not checked against the paper; the
-    corners and the weight are radarx's own).
+    (definition and 2 dB threshold not checked against the paper). The
+    corners and the weight are radarx's own.
 
 Each membership is a trapezoid ``(a, b, c, d)``: 0 below ``a`` and above
 ``d``, 1 between ``b`` and ``c``, linear in between (``limits``). Features of
@@ -168,8 +167,8 @@ _INF = np.inf
 #: 10 deg and 0 at 20 deg. Only the SD(ZDR) full-membership limit (1 dB)
 #: coincides. The ``zdr`` trapezoid has no counterpart in either paper (Krause
 #: excludes the mean ZDR, p. 1880); ``dbz_texture`` and ``spin`` follow the
-#: features of Steiner and Smith (2002) with corners of radarx (the paper was
-#: not available for checking).
+#: features of Steiner and Smith (2002) with corners of radarx (not checked
+#: against the paper).
 DEFAULT_LIMITS = {
     "rhohv": (0.80, 0.95, _INF, _INF),
     "zdr": (-4.0, -2.0, 3.0, 6.0),
@@ -718,8 +717,8 @@ def echo_mask(
         :data:`radarx.retrieve.qc.DEFAULT_WEIGHTS` (radarx's own, see Notes).
     spin_threshold : float, optional
         Smallest reflectivity jump (dB) counted in the spin feature.
-        Default 2 (radarx choice; the value of Steiner and Smith 2002 [4] was
-        not checked).
+        Default 2 (radarx choice; not checked against Steiner and Smith
+        2002 [4]).
     min_size : int, optional
         Connected meteorological regions with fewer gates are speckle.
         Default 10 (radarx choice, not from the cited papers); 1 or less
@@ -765,7 +764,7 @@ def echo_mask(
 
     Notes
     -----
-    The scheme is **not** an implementation of Gourley et al. (2007) [1] or
+    The scheme is not an implementation of Gourley et al. (2007) [1] or
     Krause (2016) [2]. Only the form of the weighted-mean aggregation
     (Krause 2016 [2], p. 1876) and the use of the variability of
     :math:`Z_{DR}` and :math:`\\Phi_{DP}` as indicators of non-meteorological
@@ -839,7 +838,7 @@ def echo_mask(
     here; see the open issues on the weights, the threshold, the missing
     rules and the aggregation):
 
-    - *Weights.* All polarimetric features have weight 1.0, the same as
+    - Weights. All polarimetric features have weight 1.0, the same as
       rhohv. Krause (2016) gives SD(PhiDP) and SD(ZDR) twice the weight of
       rhohv because they discriminate best (Table 1, p. 1876), and Gourley
       et al. (2007) derive weights from the overlap areas 0.243 (rhohv),

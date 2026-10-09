@@ -14,13 +14,13 @@ profile and a sequence of volumes gives a time-height display. Ryzhkov et al.
 (2016) average at elevations exceeding 10 to 20 degrees (p. 552); the idea
 of azimuthal averaging at high elevation to reduce the noise of the melting
 layer signatures goes back to Trömel et al. (2013) [2] (as summarised by
-Ryzhkov et al. 2016, p. 552; the 2013 paper itself was not checked).
+Ryzhkov et al. 2016, p. 552; not checked against the 2013 paper).
 
 Following Ryzhkov et al. (2016) [1], p. 553, only gates with ``rhohv > 0.6``
 and ``Z > -10 dBZ`` (both strict inequalities, as in the paper) are used. The
 paper requires that the number of valid gates along the circle "should
 exceed 30" for an estimate; radarx defines a value where the number of valid
-gates is **at least** ``min_count`` (default 30), so a circle with exactly 30
+gates is at least ``min_count`` (default 30), so a circle with exactly 30
 valid gates gives a value here although it does not in the paper (``min_count=31``
 reproduces the paper). Quantities in decibels (reflectivity, differential
 reflectivity) are averaged in linear units and converted back; the other
@@ -440,7 +440,7 @@ _QVP_PARAMS = """
         a test is skipped if no field is found or the name is ``None``.
     min_count : int, optional
         Minimum number of valid gates on the circle for a defined value: the
-        value is defined where the number of valid gates is **at least**
+        value is defined where the number of valid gates is at least
         ``min_count``. Default 30. Ryzhkov et al. (2016, p. 553) require the
         number of valid gates to *exceed* 30, i.e. at least 31, so the default
         accepts one gate fewer than the paper; use ``min_count=31`` for the
@@ -1049,7 +1049,7 @@ def melting_layer(
     with maxima of ZDR and Z, and the ρhv signature discriminates best
     (Giangrande et al. 2008 [1]). This function looks for that co-located
     signature in each profile, measures its depth, and checks the result for
-    consistency along a time series. It is **not** an implementation of the
+    consistency along a time series. It is not an implementation of the
     algorithm of Giangrande et al. (2008) or of Ryzhkov and Krause (2022)
     [4]: the signature test is loosely modelled on the former, with
     different thresholds and window (see Notes), and every default below
@@ -1075,8 +1075,8 @@ def melting_layer(
          height where ρhv is back at its background: within
          ``onset_fraction`` (10 %) of the dip depth from the background,
          the largest ρhv within ``depth`` on that side. Griffin et al. (2020)
-         use a fixed background, ρhv ``>= 0.97`` in S-band QVPs (value
-         from their paper as reported here, not checked); pass
+         use a fixed background, ρhv ``>= 0.97`` in S-band QVPs (not checked against their
+         paper); pass
          ``rhohv_onset=0.97`` for their definition (the edge is then
          wherever either test is met first). Heights are interpolated
          linearly between gates. If ρhv does not rise on one side, the ZDR
@@ -1144,7 +1144,7 @@ def melting_layer(
         p. 1357). radarx accepts lower values because the azimuthal mean of
         ρhv in a QVP (over gates with ρhv > 0.6) and gates that mix
         melting and non-melting echo can fall below 0.90; this is a
-        deliberate radarx choice that was not tested against the paper. Pass
+        radarx choice, not tested against the paper. Pass
         ``(0.90, 0.97)`` for the paper's range.
     zdr_min : float, optional
         Minimum ZDR peak, default 0.5 dB (radarx choice; Giangrande et al.
@@ -1204,7 +1204,7 @@ def melting_layer(
     -----
     *Giangrande et al. (2008) [1]* (Sect. 2b, p. 1356, steps 1 to 3 of their
     algorithm) flag individual radar gates with 0.90 < ρhv < 0.97 (below
-    6 km), search for the maxima of Z and ZDR in a 500 m window **above** each
+    6 km), search for the maxima of Z and ZDR in a 500 m window above each
     such gate and call the gate a melting-layer point if the maximum of Z lies
     between 30 and 47 dBZ and the maximum of ZDR between 0.8 and 2.5 dB. They
     then take the heights below which 80 % (top) and 20 % (bottom) of the
@@ -1213,7 +1213,7 @@ def melting_layer(
 
     - the search is anchored on the largest ZDR value (not on the ρhv gates)
       and looks for the ρhv minimum and the Z maximum within ``window`` metres
-      on **both** sides of it;
+      on both sides of it;
     - ``rhohv_range`` is (0.80, 0.97), not (0.90, 0.97) (see that parameter);
     - ``zdr_min=0.5`` dB and ``dbz_min=20`` dBZ replace 0.8 dB and 30 dBZ,
       and there is no upper limit of 2.5 dB and 47 dBZ. The lower defaults
@@ -1226,8 +1226,8 @@ def melting_layer(
     layer in S-band QVPs by searching upward and downward from the ρhv
     minimum for the first ρhv ``>= 0.97``; they report that the
     reflectivity-curvature method of Fabry and Zawadzki (1995) [5] gave tops
-    about 200 m higher and bottoms within about 50 m (as understood by the
-    radarx authors; the paper was not available for checking). Where the
+    about 200 m higher and bottoms within about 50 m (not checked against the
+    paper). Where the
     background is close to 1, as at S band, a fixed 0.97 is reached well
     inside the dip; the default relative test finds where ρhv first departs
     from its background, wherever that background lies (it is lower at C and

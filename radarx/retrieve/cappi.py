@@ -28,8 +28,8 @@ three ways to build one from the sweeps of a georeferenced volume:
 
 None of these is an implementation of a published CAPPI algorithm: apart
 from the inverse-distance weighting concept of Shepard (1968), which is
-cited for the weighting only, the methods and **every default above and
-below** (``k``, search radius, ``power``, ``vertical_scale``,
+cited for the weighting only, the methods and every default above and
+below (``k``, search radius, ``power``, ``vertical_scale``,
 ``min_neighbors``, the two default vertical tolerances, the 50-gate window,
 the threshold rule and the -10 to 75 dBZ limits of the gate filter) are
 radarx's own choices, not values from a paper, and have not been tuned

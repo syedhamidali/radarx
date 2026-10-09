@@ -21,8 +21,8 @@ neighbours, Jing and Wiener 1993 [1]), the reference wind (Eilts and Smith
 1990 [2]), the volume continuity (James and Houze 2001 [3]) and the VAD fit
 (Browning and Wexler 1968 [4]) are the published concepts; the region graph,
 spanning tree, coordinate descent and the gate check are radarx's
-implementation, and all thresholds below are radarx choices. None of the
-papers was available to check the details of the concepts quoted here.
+implementation, and all thresholds below are radarx choices. The details of the
+concepts quoted here are not checked against the papers.
 
 1. **Regions.** Neighbouring gates (along the ray and between adjacent rays)
    whose velocities differ by less than ``threshold * Vn`` are joined with a

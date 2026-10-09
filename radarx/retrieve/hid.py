@@ -40,9 +40,8 @@ Methods
     intervals of beam height relative to the melting layer bottom and top,
     accounting for the beam width (their Fig. 2 and Eq. 24, p. 736), are
     enforced. Classes: dry snow, wet snow, ice crystals, graupel, big drops,
-    light and moderate rain, heavy rain and rain-hail mixture. The numbers of
-    Tables 1 to 3 and Eqs. 4, 5, 24 were checked against the paper; what
-    radarx leaves out of the paper's algorithm is listed in the Notes.
+    light and moderate rain, heavy rain and rain-hail mixture. What radarx
+    leaves out of the paper's algorithm is listed in the Notes.
 ``"dolan"`` (default for ``band="C"`` and ``"X"``)
     Theory-based beta membership functions
     :math:`\\beta = 1 / (1 + [((x - m)/a)^2]^b)` (Dolan and Rutledge 2009
@@ -57,7 +56,7 @@ Methods
     the seven classes of Dolan and Rutledge (2009) with the variable ranges
     of their X-band (XMBF) and S-band (SMBF) membership functions (Tables
     3-9, pp. 2078-2079; :math:`m` and :math:`a` are the middle and half the
-    width of the printed minimum and maximum). **This is not the algorithm of
+    width of the printed minimum and maximum). This is not the algorithm of
     the 2009 paper.** There the beta score :math:`\\beta` of every variable
     "is calculated ... and then multiplied by a weight, and the result for
     each variable is then added together to define a score" (Sect. 3a,
@@ -67,7 +66,7 @@ Methods
     last two low because of the data quality of that campaign (Sect. 3b,
     p. 2081). radarx instead applies the hybrid rule of the 2013 C-band paper
     (:math:`T` and :math:`Z_H` multiply the polarimetric score) with the
-    weights 0.8, 1.0 and 0.1 to **all** bands, so at X and S band the scores
+    weights 0.8, 1.0 and 0.1 to all bands, so at X and S band the scores
     and class boundaries differ from those of the 2009 algorithm although the
     :math:`m` and :math:`a` values match its Tables 3-9. The 2009 paper gives
     the ranges but not the slopes :math:`b` or temperature membership
@@ -126,7 +125,7 @@ Notes
   drops temperature function (centre 48 °C), which would rule out big drops
   below 27 °C and contradicts the range :math:`T > -3` °C of their Table A1
   (p. 2182). The half-width of 51 °C used for rain, which matches Table A1,
-  is used instead (a deliberate deviation from the printed Table A2).
+  is used instead (a deviation from the printed Table A2).
 - Table 5 of Thompson et al. (2014) [4] repeats the reflectivity parameters
   in the wet snow :math:`Z_{DR}` row; the wet snow :math:`Z_{DR}` function
   (:math:`3 \\pm 5` dB, :math:`b = 10`) is read from their Fig. 6. The
@@ -233,7 +232,7 @@ def _zfunc(sel, z):
 # number or (offset, "f1".."g2")) and Table 2 (p. 734; weights of Z, ZDR, rhohv,
 # LKdp). Only the rows of the eight meteorological classes and the four
 # variables are used; the GC/AP and BS classes and the SD(Z), SD(PhiDP)
-# columns are not. All numbers checked against the paper.
+# columns are not. Numbers as printed in the paper.
 _P = "f1", "f2", "f3", "g1", "g2"
 _PARK = [
     # abbr, name, Z, ZDR, RHOHV, LKdp, weights (Z, ZDR, RHOHV, LKdp)
@@ -291,7 +290,7 @@ _PARK_ZONES = [
 ]
 
 # Dolan et al. (2013), Table A2 (p. 2183): (m, a, b) of Z, ZDR, KDP, rhohv,
-# T [degC] (every entry checked against the rendered table). Big drops T: half-width 51
+# T [degC] (entries as printed). Big drops T: half-width 51
 # instead of the 21 printed (deviation, see module notes).
 _DOLAN_C = [
     ("DZ", "drizzle", (1.75, 29, 10.0), (0.46, 0.46, 5.0), (0.03, 0.03, 2.0),
@@ -346,8 +345,8 @@ _DOLAN_RANGES = {
 }
 _DOLAN_2009_CLASSES = ("DZ", "RN", "AG", "CR", "LDG", "HDG", "VI")
 
-# Thompson et al. (2014), Table 5 (p. 1470; every entry checked against the
-# rendered table, except the printed wet snow ZDR row, see the module notes):
+# Thompson et al. (2014), Table 5 (p. 1470; entries as printed,
+# except the printed wet snow ZDR row, see the module notes):
 # per class the weight, b, m, a of each
 # variable (KDP m, a per band); group 0: melting-layer detection, 1: below,
 # 2: above the melting layer.
@@ -1215,7 +1214,7 @@ def hid(
         ``"auto"`` (default) uses ``"park"`` (Park et al. 2009 [1]) at S band
         and ``"dolan"`` at C and X band: the membership functions of Dolan et
         al. (2013) [3] at C band, and the variable ranges of Dolan and
-        Rutledge (2009) [2] at X and S band, **both with the aggregation of
+        Rutledge (2009) [2] at X and S band, both with the aggregation of
         Dolan et al. (2013)** and not the additive weighted sum of the 2009
         paper (see :mod:`radarx.retrieve.hid`). ``"thompson"`` is the winter
         classification of Thompson et al. (2014) [4].

@@ -49,7 +49,7 @@ Every ray is processed independently along range:
    they cite Ryzhkov and Zrnic 1996, not checked); radarx applies the short
    window at :math:`Z \\geq 40` dBZ. The trade-off between resolution and noise
    is discussed by Wang and Chandrasekar (2009) [2] (not checked against the
-   paper, which is not on disk). It is given at valid gates whose window
+   paper). It is given at valid gates whose window
    holds at least ``min_valid_fraction`` valid gates.
 
 Methods
@@ -64,21 +64,21 @@ Methods
     backscatter phase :math:`\\delta` superposed is the one described by
     Bringi and Chandrasekar (2001) [5] (Sect. 6.6.1, pp. 369-372), who show a
     20th-order finite-impulse-response low-pass filter (their Fig. 6.32b)
-    and 1 to 13 iterations (Fig. 6.34d). **Differences:** the low-pass filter
+    and 1 to 13 iterations (Fig. 6.34d). The low-pass filter
     here is three passes of a moving average of length ``filter_window`` (a
     cubic B-spline kernel, close to a Gaussian), each computed with running
     sums in O(N); it is radarx's substitute for the published filter and not
     the published coefficients. The defaults ``n_iter=10``,
     ``delta_threshold=4`` degrees and ``filter_window=2`` km are radarx's
-    own; the original paper [1] was not available to check them.
+    own (not checked against Hubbert and Bringi 1995 [1]).
 ``"vulpiani"``
     Iterative :math:`K_{DP}` estimation in the manner of Vulpiani et al.
     (2012) [4]: :math:`K_{DP}` is estimated from :math:`\\Phi_{DP}`, values
     outside ``kdp_bounds`` are set to zero, :math:`\\Phi_{DP}` is rebuilt by
     integrating :math:`2 K_{DP}` in range, and the two steps are repeated
     ``n_iter`` times. The integration constant is the least-squares fit of
-    the rebuilt profile to the measured gates. The paper was not available
-    to check this description; the defaults ``n_iter=4`` and
+    the rebuilt profile to the measured gates. This description is not
+    checked against the paper. The defaults ``n_iter=4`` and
     ``kdp_bounds=(-2, 20)`` degrees/km are radarx's own.
 ``"monotone"``
     Monotone :math:`\\Phi_{DP}` as assumed by Maesaka et al. (2012) [6] for
@@ -87,8 +87,8 @@ Methods
     same low-pass filter. :math:`K_{DP}` is then never negative. Maesaka et
     al. solve a variational problem under this constraint; the monotone fit
     used here is radarx's own simplification that enforces the same
-    assumption in a single O(N) pass (the conference paper was not available
-    to check; its details are not reproduced). Use it only
+    assumption in a single O(N) pass (not checked against the
+    conference paper). Use it only
     for rain; hail or ice above the melting layer can have negative
     :math:`K_{DP}`.
 ``"ml"``
@@ -138,8 +138,7 @@ References
 .. [6] Maesaka, T., K. Iwanami, and M. Maki, 2012: Non-negative KDP
    estimation by monotone increasing PhiDP assumption below melting layer.
    *Proc. Seventh European Conf. on Radar in Meteorology and Hydrology
-   (ERAD 2012)*, Toulouse, France (conference paper, no DOI; citation not
-   verifiable with Crossref).
+   (ERAD 2012)*, Toulouse, France (conference paper, no DOI).
 
 .. autosummary::
    :nosignatures:
@@ -973,8 +972,7 @@ def estimate_kdp(
     .. [6] Maesaka, T., K. Iwanami, and M. Maki, 2012: Non-negative KDP
        estimation by monotone increasing PhiDP assumption below melting
        layer. *Proc. Seventh European Conf. on Radar in Meteorology and
-       Hydrology (ERAD 2012)*, Toulouse, France (conference paper, no DOI;
-       citation not verifiable with Crossref).
+       Hydrology (ERAD 2012)*, Toulouse, France (conference paper, no DOI).
 
     Examples
     --------
