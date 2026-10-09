@@ -160,6 +160,29 @@ def test_clear_keeps_levels_below_the_lowest_valid_unavailable(engine):
 
 
 @pytest.mark.parametrize("engine", ENGINES)
+def test_top_truncation_flag(engine):
+    z = np.arange(0, 5000.0, 1000.0)
+    # echo to the highest level: the part above is missing
+    up = vil(column(np.array([30.0, 35.0, 30.0, 25.0, 20.0]), z), engine=engine)
+    assert int(up.VIL_TOP_TRUNCATED.squeeze()) == 1
+    # the highest sample has no echo: the column is complete at the top
+    done = vil(column(np.array([30.0, 35.0, 30.0, 5.0, -np.inf]), z), engine=engine)
+    assert int(done.VIL_TOP_TRUNCATED.squeeze()) == 0
+    # the threshold is min_dbz
+    flag = vil(
+        column(np.array([30.0, 35.0, 30.0, 5.0, 3.0]), z), min_dbz=2.0, engine=engine
+    )
+    assert int(flag.VIL_TOP_TRUNCATED.squeeze()) == 1
+    off = vil(
+        column(np.array([30.0, 35.0, 30.0, 5.0, 3.0]), z), min_dbz=None, engine=engine
+    )
+    assert int(off.VIL_TOP_TRUNCATED.squeeze()) == 1
+    empty = vil(column(np.full(5, np.nan), z), engine=engine)
+    assert int(empty.VIL_TOP_TRUNCATED.squeeze()) == 0
+    assert up.VIL_TOP_TRUNCATED.attrs["flag_meanings"] == "complete top_truncated"
+
+
+@pytest.mark.parametrize("engine", ENGINES)
 def test_too_few_samples(engine):
     z = np.array([0.0, 1000.0, 2000.0])
     only_one = column(np.array([np.nan, 40.0, np.nan]), z)

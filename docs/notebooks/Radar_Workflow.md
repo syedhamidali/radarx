@@ -41,7 +41,8 @@ multi-radar steps.
 | 11 | storm motion, common analysis time, time interpolation | `estimate_motion`, `advect`, `interpolate_time` |
 | 12 | multi-radar grid, radar bias, ERA5 on the grid, three-dimensional wind | `grid_radars`, `network_bias`, `multi_doppler` |
 | 13 | evaporation and evaporative cooling | `evaporation`, `integrate_evaporation` |
-| 14 | runtime summary and one `DataTree` with all products | |
+| 14 | VIL, liquid VIL, echo top, VIL density and liquid water content | `vil`, `echo_top`, `vil_density`, `liquid_water_content` |
+| 15 | runtime summary and one `DataTree` with all products | |
 | | function index of the whole package | |
 
 The [second part](Radar_Workflow_Advanced) of this notebook shows the rest of
@@ -113,6 +114,7 @@ from radarx.retrieve import (
     dsd_bayesian,
     dsd_prior,
     echo_mask,
+    echo_top,
     estimate_kdp,
     estimate_motion,
     evaporation,
@@ -122,6 +124,7 @@ from radarx.retrieve import (
     integrate_evaporation,
     interpolate_time,
     layer_mean_wind,
+    liquid_water_content,
     llsd,
     melting_layer,
     multi_doppler_input,
@@ -132,6 +135,8 @@ from radarx.retrieve import (
     storm_relative_helicity,
     storm_relative_wind,
     vad_profile,
+    vil,
+    vil_density,
 )
 from radarx.vis import (
     RadarxDataArrayPlotAccessor,
@@ -1292,7 +1297,65 @@ temperature by about 0.2 K. This is the cooling that the air would feel if it
 stayed under the rain; the heavier rain of the convective line itself falls
 outside the QVP circle.
 
-## 14. Summary
+## 14. VIL, echo tops and water content
+
+Column products of the reflectivity of the volume. `vil` integrates the liquid
+water of rain over height with the relation of Greene and Clark (1972),
+$\mathrm{VIL} = 3.44\times10^{-6}\sum[(Z_i+Z_{i+1})/2]^{4/7}\Delta h$ in
+kg m$^{-2}$, for every (azimuth, ground range) column of the volume: each sweep
+contributes its value at the beam height, the layer under the lowest beam is left
+out (a lower bound) and nothing is assumed above the highest. `echo_top` is the
+height of the highest 18 dBZ echo, interpolated in dBZ between the beams that
+bracket the threshold (Lakshmanan et al. 2013), and `vil_density` is the VIL
+divided by the echo top (Amburn and Wolf 1997). With a melting level, `vil` also
+returns the VIL of the rain below it, here the ERA5 0 °C height of step 3.
+`liquid_water_content` gives the water content of rain gate by gate, from the
+power law of the VIL formula or from the gamma DSD of step 7; it is meaningful in
+rain only, so the rain gates of the hydrometeor classification select it. The
+[VIL and water content notebook](VIL_and_Water_Content) shows the products on a
+cone grid, on CSAPR2 and in a QVP.
+
+```{code-cell} ipython3
+with timed("14. VIL, echo top, VIL density, water content"):
+    vil_vol = vil(kgwx, melting=freezing_level)
+    top = echo_top(kgwx)
+    density = vil_density(kgwx)
+    lwc_dsd = liquid_water_content(surv, "dsd", kdp="KDP", mask=rain, band="S")
+    lwc_zm = liquid_water_content(surv, mask=rain)
+    vil_acc = kgwx.radarx.vil(melting=freezing_level)  # the accessors of the volume
+    top_acc = kgwx.radarx.echo_top()
+    density_acc = kgwx.radarx.vil_density()
+    lwc_acc = surv.radarx.liquid_water_content(mask=rain)  # and of the sweep
+vil_qvp = vil(tqvp, melting=ml)  # the VIL of the QVPs, below the melting layer
+print("accessors agree:", bool(vil_acc.VIL.equals(vil_vol.VIL)), bool(top_acc.equals(top)),
+      bool(density_acc.equals(density)), bool(lwc_acc.equals(lwc_zm)))
+print(f"VIL of the volume: maximum {float(vil_vol.VIL.max()):.1f} kg m-2, "
+      f"{float(vil_vol.VIL_LIQUID.max()):.1f} below the 0 °C level; "
+      f"QVP VIL {vil_qvp.VIL.values.round(2)} kg m-2 (rain: {vil_qvp.VIL_LIQUID.values.round(2)})")
+```
+
+```{code-cell} ipython3
+fig, axes = plt.subplots(1, 4, figsize=(19, 4.8), sharey=True, layout="constrained")
+panels = [
+    (vil_vol.VIL, "VIL (kg m$^{-2}$)", dict(cmap="viridis", vmin=0, vmax=30)),
+    (top / 1e3, "18 dBZ echo top (km)", dict(cmap="cividis", vmin=0, vmax=16)),
+    (density, "VIL density (g m$^{-3}$)", dict(cmap="plasma", vmin=0, vmax=3.5)),
+    (lwc_dsd, "LWC of the rain, gamma DSD (g m$^{-3}$)", dict(cmap="viridis", vmin=0, vmax=6)),
+]
+for ax, (da, label, style) in zip(axes, panels):
+    pm = ppi(ax, surv.assign(field=da), "field", extent=150, **style)
+    fig.colorbar(pm, ax=ax, label=label, shrink=0.85)
+axes[0].set_ylabel("north of KGWX (km)")
+fig.suptitle("VIL, echo top, VIL density and rain water content, KGWX, 00:00 UTC")
+plt.show()
+```
+
+The VIL of the line is 10 to 25 kg m$^{-2}$ with echo tops of 8 to 10 km;
+the water content is for the rain gates of the lowest sweep only. Within about
+10 km of the radar the highest beam is only a few km high, so the VIL and
+the echo top there are truncated (`VIL_TOP_TRUNCATED`).
+
+## 15. Summary
 
 The runtime of each step:
 
@@ -1304,7 +1367,7 @@ summary
 
 All products of the case in one `DataTree`: the environment profiles,
 the 00:00 UTC polar volume with every derived field, the DSD, the QVPs and melting
-layer, the grids as observed and at the common analysis time, the storm
+layer, the VIL products, the grids as observed and at the common analysis time, the storm
 motion, the interpolated frames, the two-radar grid and the wind.
 
 ```{code-cell} ipython3
@@ -1316,6 +1379,7 @@ nodes["/environment/radiosonde"] = raob
 nodes["/dsd"] = dsd
 nodes["/qvp"] = tqvp
 nodes["/melting_layer"] = ml
+nodes["/vil"] = vil_vol.assign(ECHO_TOP=top, VIL_DENSITY=density)
 for i, (observed, advected) in enumerate(zip(grids, common)):
     nodes[f"/grid/observed/volume_{i}"] = observed
     nodes[f"/grid/analysis_time/volume_{i}"] = advected
@@ -1590,6 +1654,10 @@ notebooks or from this index.
 | `melting_layer` | `radarx.retrieve.vertical_profiles` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `qvp` | `radarx.retrieve.vertical_profiles` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `qvp_timeseries` | `radarx.retrieve.vertical_profiles` | [core](Radar_Workflow): 8. QVP time series and melting layer |
+| `echo_top` | `radarx.retrieve.vil` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
+| `liquid_water_content` | `radarx.retrieve.vil` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
+| `vil` | `radarx.retrieve.vil` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
+| `vil_density` | `radarx.retrieve.vil` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `bulk_shear` | `radarx.retrieve.wind_profile` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
 | `bunkers_storm_motion` | `radarx.retrieve.wind_profile` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
 | `layer_mean_wind` | `radarx.retrieve.wind_profile` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
@@ -1633,6 +1701,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.dsd` | [core](Radar_Workflow): 7. Rain drop size distribution |
 | `.radarx.dsd_bayesian` | [core](Radar_Workflow): 7. Rain drop size distribution |
 | `.radarx.echo_mask` | [core](Radar_Workflow): 2. Remove non-meteorological echo |
+| `.radarx.echo_top` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.estimate_motion` | [core](Radar_Workflow): 11. Storm motion, common analysis time and time interpolation |
 | `.radarx.evaporation` | [core](Radar_Workflow): 13. Evaporation |
 | `.radarx.grid_lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
@@ -1643,6 +1712,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.interpolate_time` | [core](Radar_Workflow): 11. Storm motion, common analysis time and time interpolation |
 | `.radarx.kdp` | [core](Radar_Workflow): 5. ΦDP processing and KDP |
 | `.radarx.lightning_jump` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
+| `.radarx.liquid_water_content` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.llsd` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `.radarx.melting_layer` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `.radarx.merge_radars` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
@@ -1667,21 +1737,27 @@ The methods of the `.radarx` accessors:
 | `.radarx.tornado_probability` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
 | `.radarx.trajectories` | [part 2](Radar_Workflow_Advanced): 9. Diabatic Lagrangian analysis |
 | `.radarx.vad_profile` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
+| `.radarx.vil` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
+| `.radarx.vil_density` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 
 ## References
 
 - Dawson, D., M. Biggerstaff, and S. Waugh, 2025: PERiLS_2022: Portable In Situ Precipitation Stations (PIPS) Data. Version 1.0. NSF NCAR Earth Observing Laboratory, https://doi.org/10.26023/HFBG-7W5M-WA00.
 - Kosiba, K. A., and Coauthors, 2024: The Propagation, Evolution, and Rotation in Linear Storms (PERiLS) Project. Bull. Amer. Meteor. Soc., 105, E1768-E1799, https://doi.org/10.1175/BAMS-D-22-0064.1.
 
+- Amburn, S. A., and P. L. Wolf, 1997: VIL Density as a Hail Indicator. *Weather and Forecasting*, **12**, 473-478, <https://doi.org/10.1175/1520-0434(1997)012<0473:VDAAHI>2.0.CO;2>
 - Browning, K. A., and R. Wexler, 1968: The Determination of Kinematic Properties of a Wind Field Using Doppler Radar. *Journal of Applied Meteorology*, **7**, 105-113, <https://doi.org/10.1175/1520-0450(1968)007<0105:TDOKPO>2.0.CO;2>
 - Bunkers, M. J., B. A. Klimowski, J. W. Zeitler, R. L. Thompson, and M. L. Weisman, 2000: Predicting Supercell Motion Using a New Hodograph Technique. *Weather and Forecasting*, **15**, 61-79, <https://doi.org/10.1175/1520-0434(2000)015<0061:PSMUAN>2.0.CO;2>
 - Cao, Q., G. Zhang, E. Brandes, T. Schuur, A. Ryzhkov, and K. Ikeda, 2008: Analysis of Video Disdrometer and Polarimetric Radar Data to Characterize Rain Microphysics in Oklahoma. *Journal of Applied Meteorology and Climatology*, **47**, 2238-2255, <https://doi.org/10.1175/2008JAMC1732.1>
 - Gao, J., M. Xue, A. Shapiro, and K. K. Droegemeier, 1999: A Variational Method for the Analysis of Three-Dimensional Wind Fields from Two Doppler Radars. *Monthly Weather Review*, **127**, 2128-2142, <https://doi.org/10.1175/1520-0493(1999)127<2128:AVMFTA>2.0.CO;2>
 - Gourley, J. J., P. Tabary, and J. Parent du Chatelet, 2007: A Fuzzy Logic Algorithm for the Separation of Precipitating from Nonprecipitating Echoes Using Polarimetric Radar Observations. *Journal of Atmospheric and Oceanic Technology*, **24**, 1439-1451, <https://doi.org/10.1175/JTECH2035.1>
+- Greene, D. R., and R. A. Clark, 1972: Vertically Integrated Liquid Water: A New Analysis Tool. *Monthly Weather Review*, **100**, 548-552, <https://doi.org/10.1175/1520-0493(1972)100<0548:VILWNA>2.3.CO;2>
 - Hersbach, H., and Coauthors, 2020: The ERA5 global reanalysis. *Quarterly Journal of the Royal Meteorological Society*, **146**, 1999-2049, <https://doi.org/10.1002/qj.3803>
 - Krause, J. M., 2016: A Simple Algorithm to Discriminate between Meteorological and Nonmeteorological Radar Echoes. *Journal of Atmospheric and Oceanic Technology*, **33**, 1875-1885, <https://doi.org/10.1175/JTECH-D-15-0239.1>
 - Kumjian, M. R., and A. V. Ryzhkov, 2010: The Impact of Evaporation on Polarimetric Characteristics of Rain: Theoretical Model and Practical Implications. *Journal of Applied Meteorology and Climatology*, **49**, 1247-1267, <https://doi.org/10.1175/2010JAMC2243.1>
+- Lakshmanan, V., K. Hondl, C. K. Potvin, and D. Preignitz, 2013: An Improved Method for Estimating Radar Echo-Top Height. *Weather and Forecasting*, **28**, 481-488, <https://doi.org/10.1175/WAF-D-12-00084.1>
 - Park, H. S., A. V. Ryzhkov, D. S. Zrnić, and K.-E. Kim, 2009: The Hydrometeor Classification Algorithm for the Polarimetric WSR-88D: Description and Application to an MCS. *Weather and Forecasting*, **24**, 730-748, <https://doi.org/10.1175/2008WAF2222205.1>
 - Seo, B.-C., W. F. Krajewski, and J. A. Smith, 2014: Four-dimensional reflectivity data comparison between two ground-based radars: methodology and statistical analysis. *Hydrological Sciences Journal*, **59**, 1320-1334, <https://doi.org/10.1080/02626667.2013.839872>
+- Seo, B.-C., W. F. Krajewski, and Y. Qi, 2020: Utility of vertically integrated liquid water content for radar-rainfall estimation: Quality control and precipitation type classification. *Atmospheric Research*, **236**, 104800, <https://doi.org/10.1016/j.atmosres.2019.104800>
 - Zhang, G., J. Vivekanandan, and E. Brandes, 2001: A method for estimating rain rate and drop size distribution from polarimetric radar measurements. *IEEE Transactions on Geoscience and Remote Sensing*, **39**, 830-841, <https://doi.org/10.1109/36.917906>
 - Zhang, J., K. Howard, and J. J. Gourley, 2005: Constructing Three-Dimensional Multiple-Radar Reflectivity Mosaics: Examples of Convective Storms and Stratiform Rain Echoes. *Journal of Atmospheric and Oceanic Technology*, **22**, 30-42, <https://doi.org/10.1175/JTECH-1689.1>

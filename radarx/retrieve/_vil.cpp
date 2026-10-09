@@ -67,7 +67,8 @@ void parallel_blocks(int64_t total, int n_threads, F&& body) {
 }  // namespace
 
 // h, h_top: (nk,) when shared, else (nk, nc); v: (nk, nc); ceiling: (nc,).
-// Returns (5, nc): VIL, liquid VIL, lowest height, highest height, echo top.
+// Returns (6, nc): VIL, liquid VIL, lowest height, highest height, echo top and the
+// reflectivity (dBZ) of the highest sample.
 py::array_t<double> columns_py(const DArray& h, const DArray& h_top, const DArray& v,
                                const DArray& ceiling, bool shared, double dbz_cap,
                                double min_dbz, double top_threshold, double no_echo_dbz,
@@ -91,7 +92,7 @@ py::array_t<double> columns_py(const DArray& h, const DArray& h_top, const DArra
     const double floor_dbz = std::isnan(min_dbz) ? -kInf : min_dbz;
     const bool have_base = std::isfinite(base_height);
 
-    py::array_t<double> out({static_cast<py::ssize_t>(5), static_cast<py::ssize_t>(nc)});
+    py::array_t<double> out({static_cast<py::ssize_t>(6), static_cast<py::ssize_t>(nc)});
     double* o = out.mutable_data();
     const double* hp = h.data();
     const double* tp = h_top.data();
@@ -121,10 +122,11 @@ py::array_t<double> columns_py(const DArray& h, const DArray& h_top, const DArra
                     st[i] = tk;
                     sv[i] = vk;
                 }
-                double vil = kNaN, liquid = kNaN, lowest = kNaN, highest = kNaN, top = kNaN;
+                double vil = kNaN, liquid = kNaN, lowest = kNaN, highest = kNaN, top = kNaN, last = kNaN;
                 if (n > 0) {
                     lowest = sh[0];
                     highest = sh[n - 1];
+                    last = sv[n - 1];
                     for (int64_t i = 0; i < n; ++i)
                         sz[i] = (sv[i] < floor_dbz) ? 0.0 : std::pow(10.0, std::min(sv[i], cap) / 10.0);
 
@@ -187,6 +189,7 @@ py::array_t<double> columns_py(const DArray& h, const DArray& h_top, const DArra
                 o[2 * nc + c] = lowest;
                 o[3 * nc + c] = highest;
                 o[4 * nc + c] = top;
+                o[5 * nc + c] = last;
             }
         });
     }

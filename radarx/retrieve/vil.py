@@ -44,9 +44,11 @@ exponent and the units of the underlying relation ``LWC = 3.44e-6 Z^(4/7)``
 the one quoted for Greene and Clark (1972); neither could be checked against
 the original paper.
 
-Integration limits. Nothing is assumed above the highest valid sample. Below
-the lowest valid sample the column is left out by default, so the VIL is a
-lower bound, and ``VIL_LOWER_BOUND`` flags it. With ``fill_below=True`` the
+Integration limits. Nothing is assumed above the highest valid sample;
+``VIL_TOP_TRUNCATED`` flags the columns where echo is still present there (the
+part of a storm above the highest beam near the radar). Below the lowest valid
+sample the column is left out by default, so the VIL is a lower bound, and
+``VIL_LOWER_BOUND`` flags it. With ``fill_below=True`` the
 lowest value is extended down to the base height (compare the pseudo-CAPPI).
 Between two samples (the tilts of a volume, or a gap of missing levels) the
 reflectivity varies linearly with height; a column needs two samples.
@@ -171,9 +173,9 @@ def _columns_numpy(
     NumPy implementation of the kernel ``_vil.columns`` (same results).
 
     ``v`` has the shape (levels, columns); ``h`` and ``h_top`` are (levels,)
-    when ``shared`` and (levels, columns) otherwise. Returns the array
-    (VIL, liquid VIL, lowest height, highest height, echo top) of shape
-    (5, columns).
+    when ``shared`` and (levels, columns) otherwise. Returns the array (VIL,
+    liquid VIL, lowest height, highest height, echo top, reflectivity of the
+    highest sample) of shape (6, columns).
     """
     nk, nc = v.shape
     h = np.broadcast_to(h[:, None], v.shape) if shared else h
@@ -248,7 +250,10 @@ def _columns_numpy(
     else:
         top = tb
     top = np.where(has_top, top, np.nan)
-    return np.stack([vil, liquid, lowest, highest, top])
+    last = np.where(
+        n > 0, np.take_along_axis(vs, np.maximum(n - 1, 0)[None], 0)[0], np.nan
+    )
+    return np.stack([vil, liquid, lowest, highest, top, last])
 
 
 def _columns(
@@ -513,7 +518,7 @@ def _column_products(
     """
     Run the column integrals.
 
-    Returns the 5 products as a list of arrays on ``template`` plus
+    Returns the 6 products as a list of arrays on ``template`` plus
     ``template`` (a DataArray with the output dims and coordinates) and the
     base height used.
     """
@@ -532,7 +537,7 @@ def _column_products(
         )
         base = altitude if base_height is None else float(base_height)
         ceiling = _ceiling(melting, template).reshape(-1)
-        out = np.full((5, template.size), np.nan)
+        out = np.full((6, template.size), np.nan)
         ns = ground.size
         for rows, h, h_top, v in blocks():
             cols = (rows[:, None] * ns + np.arange(ns)[None, :]).reshape(-1)
@@ -586,7 +591,7 @@ def _column_products(
             n_threads,
         )
         attrs = dict(da.attrs)
-    products = [out[i].reshape(template.shape) for i in range(5)]
+    products = [out[i].reshape(template.shape) for i in range(6)]
     return products, template, base, attrs
 
 
@@ -639,6 +644,26 @@ def _flag(template, vil, lowest, base, fill_below):
         "flag_meanings": "complete lower_bound",
     }
     out.name = "VIL_LOWER_BOUND"
+    return out
+
+
+def _top_flag(template, vil, last, min_dbz):
+    """1 where echo is still present at the highest sample, so that part is missing."""
+    floor = -np.inf if min_dbz is None else min_dbz
+    with np.errstate(invalid="ignore"):
+        cut = np.isfinite(vil) & np.isfinite(last) & (last >= floor)
+    out = template.copy(data=cut.astype(np.int8))
+    out.attrs = {
+        "long_name": "echo continues above the highest sample",
+        "comment": (
+            "1: the reflectivity of the highest valid sample is not below the "
+            "echo threshold, so the VIL above it (e.g. above the highest beam "
+            "near the radar) is not included"
+        ),
+        "flag_values": np.array([0, 1], dtype=np.int8),
+        "flag_meanings": "complete top_truncated",
+    }
+    out.name = "VIL_TOP_TRUNCATED"
     return out
 
 
@@ -749,10 +774,13 @@ def vil(
         ``VIL_LOWEST_HEIGHT`` (m)
             Height of the lowest sample used, the lower integration limit.
         ``VIL_LOWER_BOUND``
-            1 where the VIL is a lower bound because the layer between
-            ``base_height`` and the lowest sample is left out (always with
-            ``fill_below=False`` unless that sample is at the base). Nothing
-            is assumed above the highest valid sample, which is not flagged.
+            1 where the layer between ``base_height`` and the lowest sample is
+            left out, so the VIL is a lower bound; always 0 with
+            ``fill_below=True``.
+        ``VIL_TOP_TRUNCATED``
+            1 where the highest valid sample still has echo (reflectivity
+            not below ``min_dbz``), so the part of the column above it is
+            missing; near the radar, above the highest beam.
 
     Raises
     ------
@@ -767,7 +795,8 @@ def vil(
     -----
     Near the radar the beams of a volume are far apart in height and the
     lowest one starts at a height well above the ground, so the VIL there is
-    low (the "cone of silence"); ``VIL_LOWER_BOUND`` marks it. The VIL of a
+    low (the "cone of silence"); ``VIL_LOWER_BOUND`` and ``VIL_TOP_TRUNCATED``
+    mark it. The VIL of a
     quasi-vertical profile is the VIL of the azimuthal-mean profile. For a
     profile that is the mean in linear Z it is not lower than the mean of the
     VIL of the columns of the same volume, since ``Z**(4/7)`` is concave
@@ -778,8 +807,8 @@ def vil(
 
     References
     ----------
-    Greene, D. R., and R. A. Clark, 1972: Vertically integrated liquid water
-    --- a new analysis tool. *Mon. Wea. Rev.*, **100** (7), 548-552,
+    Greene, D. R., and R. A. Clark, 1972: Vertically integrated liquid water: a new
+    analysis tool. *Mon. Wea. Rev.*, **100** (7), 548-552,
     https://doi.org/10.1175/1520-0493(1972)100<0548:VILWNA>2.3.CO;2
     (sum over layers and the 3.44e-6 coefficient as quoted by the studies
     below; not checked against the paper).
@@ -815,7 +844,7 @@ def vil(
         n_threads,
         engine,
     )
-    vil_, liquid, lowest, _, _ = products
+    vil_, liquid, lowest, _, _, last = products
     cap = "none" if dbz_cap is None else f"{dbz_cap:g} dBZ"
     comment = (
         "Greene and Clark (1972) sum of 3.44e-6 ((Z_i + Z_i+1) / 2)^(4/7) dh; "
@@ -860,6 +889,7 @@ def vil(
         },
     )
     out["VIL_LOWER_BOUND"] = _flag(template, vil_, lowest, base, fill_below)
+    out["VIL_TOP_TRUNCATED"] = _top_flag(template, vil_, last, min_dbz)
     out.attrs["vil_base_height"] = base
     return out
 
@@ -1069,7 +1099,7 @@ def vil_density(
         n_threads,
         engine,
     )
-    vil_, _, _, _, top = products
+    vil_, _, _, _, top, _ = products
     depth = top - base
     with np.errstate(invalid="ignore", divide="ignore"):
         density = np.where(depth > 0, 1000.0 * vil_ / depth, np.nan)
@@ -1218,8 +1248,8 @@ def liquid_water_content(
     control and precipitation type classification. *Atmos. Res.*, **236**,
     104800, https://doi.org/10.1016/j.atmosres.2019.104800 (Eq. 3)
 
-    Greene, D. R., and R. A. Clark, 1972: Vertically integrated liquid water
-    --- a new analysis tool. *Mon. Wea. Rev.*, **100** (7), 548-552,
+    Greene, D. R., and R. A. Clark, 1972: Vertically integrated liquid water: a new
+    analysis tool. *Mon. Wea. Rev.*, **100** (7), 548-552,
     https://doi.org/10.1175/1520-0493(1972)100<0548:VILWNA>2.3.CO;2
     (not checked against the paper)
 
