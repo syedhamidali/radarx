@@ -36,6 +36,28 @@ Usage Examples
 
 This sub-module contains functions necessary to grid the radar data.
 
+Only the bucket names are encoded here; the module implements no scientific
+algorithm and applies no corrections or conversions to the files. The
+buckets are public Amazon Web Services (Open Data) copies of NOAA data. The
+NEXRAD Level II archive on AWS is described in Ansari et al. (2018); the
+MRMS product system, the source of the ``noaa-mrms-pds`` files, in Zhang et
+al. (2016). The bucket names and their contents (including the description
+of the real-time ``-chunks`` and Level III buckets, for which no
+peer-reviewed reference is cited) are not checked against the services.
+
+References
+----------
+Ansari, S., S. Del Greco, E. Kearns, O. Brown, S. Wilkins, M. Ramamurthy,
+J. Weber, R. May, J. Sundwall, J. Layton, A. Gold, A. Pasch, and V.
+Lakshmanan, 2018: Unlocking the potential of NEXRAD data through NOAA's Big
+Data Partnership. *Bull. Amer. Meteor. Soc.*, **99** (1), 189-204,
+https://doi.org/10.1175/BAMS-D-16-0021.1
+
+Zhang, J., and Coauthors, 2016: Multi-Radar Multi-Sensor (MRMS) quantitative
+precipitation estimation: Initial operating capabilities. *Bull. Amer.
+Meteor. Soc.*, **97** (4), 621-638,
+https://doi.org/10.1175/BAMS-D-14-00174.1
+
 .. autosummary::
    :nosignatures:
    :toctree: generated/

@@ -7,9 +7,27 @@ Lightning Mapping Array Data
 ============================
 
 Reader of the VHF source ("event") files of a Lightning Mapping Array (LMA;
-Rison et al. 1999; Thomas et al. 2004): the ASCII ``.dat`` files written by
-the New Mexico Tech ``lma_analysis`` program (``LYLOUT_YYMMDD_HHMMSS_SSSS.dat``,
-optionally gzip- or bzip2-compressed).
+Rison et al. 1999 [1]_; Thomas et al. 2004 [2]_): the ASCII ``.dat`` files
+written by the New Mexico Tech ``lma_analysis`` program
+(``LYLOUT_YYMMDD_HHMMSS_SSSS.dat``, optionally gzip- or bzip2-compressed).
+
+An LMA detects the very high frequency (VHF) radiation bursts ("sources") of
+the discontinuous propagation of lightning channels in an unused local
+television channel (usually 60-66 MHz), and several stations locate each
+source with a time-of-arrival method (Fuchs et al. 2016 [3]_, section 1, pp.
+8626-8627, after Rison et al. 1999 [1]_). Each source has a chi-square value
+of the over-determined time-of-arrival solution and the number of stations
+that contributed to it (Thomas et al. 2004 [2]_, as described by [3]_, p.
+8628).
+
+Source of the file layout. The ASCII layout is that of files written by
+``lma_analysis``. Rison et al. (1999) and Thomas et al. (2004) were not
+consulted for it, and no published format specification is cited. The column set
+and header lines below were taken from sample ``lma_analysis`` files, and the
+output was compared with the xlma-python package (variable names and
+flash-density products); this is a description of what the reader accepts,
+not a citation of a specification. The CF variable names follow xlma-python
+(https://github.com/deeplycloudy/xlma-python, MIT licence).
 
 Every file has a header (analysis program, start time, network centre,
 station table, station statistics, and a ``Data:`` line naming the columns),
@@ -48,14 +66,17 @@ multithreaded over chunks of the text) with a NumPy fallback.
 
 References
 ----------
-Rison, W., R. J. Thomas, P. R. Krehbiel, T. Hamlin, and J. Harlin, 1999: A
-GPS-based three-dimensional lightning mapping system: Initial observations
-in central New Mexico. *Geophys. Res. Lett.*, **26** (23), 3573-3576,
-https://doi.org/10.1029/1999GL010856
-
-Thomas, R. J., P. R. Krehbiel, W. Rison, S. J. Hunyady, W. P. Winn,
-T. Hamlin, and J. Harlin, 2004: Accuracy of the Lightning Mapping Array.
-*J. Geophys. Res.*, **109**, D14207, https://doi.org/10.1029/2004JD004549
+.. [1] Rison, W., R. J. Thomas, P. R. Krehbiel, T. Hamlin, and J. Harlin,
+   1999: A GPS-based three-dimensional lightning mapping system: Initial
+   observations in central New Mexico. *Geophys. Res. Lett.*, **26** (23),
+   3573-3576, https://doi.org/10.1029/1999GL010856
+.. [2] Thomas, R. J., P. R. Krehbiel, W. Rison, S. J. Hunyady, W. P. Winn,
+   T. Hamlin, and J. Harlin, 2004: Accuracy of the Lightning Mapping Array.
+   *J. Geophys. Res.*, **109**, D14207, https://doi.org/10.1029/2004JD004549
+.. [3] Fuchs, B. R., E. C. Bruning, S. A. Rutledge, L. D. Carey, P. R.
+   Krehbiel, and W. Rison, 2016: Climatological analyses of LMA data with an
+   open-source lightning flash-clustering algorithm. *J. Geophys. Res.
+   Atmos.*, **121** (14), 8625-8648, https://doi.org/10.1002/2015JD024663
 
 .. autosummary::
    :nosignatures:
@@ -286,12 +307,17 @@ def read_lma(
         LMA ASCII ``.dat`` files (``.gz`` and ``.bz2`` are decompressed).
         Several files are concatenated in time order.
     max_chi2 : float, optional
-        Keep only sources with a reduced chi-square at most this value
-        (commonly 1 to 5). Default: keep all.
+        Keep only sources with a reduced chi-square at most this value.
+        Fuchs et al. (2016) [3]_ (p. 8628) discard sources with a chi-square
+        above 1.0 and report that flash counts and characteristics are "not
+        very sensitive" to this choice. Other values are user choices
+        without a source here. Default: keep all.
     min_stations : int, optional
-        Keep only sources located by at least this many stations (commonly
-        6, or 5 for small networks). Needs the station mask or a station
-        count column. Default: keep all.
+        Keep only sources located by at least this many stations. Fuchs et
+        al. (2016) [3]_ (p. 8628) discard sources detected by fewer than six
+        stations ("by default"); other values are user choices without a
+        source here. Needs the station mask or a station count column.
+        Default: keep all.
     altitude : (float, float), optional
         Keep only sources with ``altitude[0] <= alt <= altitude[1]`` (m above
         mean sea level), e.g. ``(0, 20e3)``. Default: keep all.
@@ -314,11 +340,31 @@ def read_lma(
     ValueError
         If a file is not an LMA ASCII file or its columns are not recognised.
 
+    Notes
+    -----
+    The sources are those of a Lightning Mapping Array (Rison et al. 1999
+    [1]_). The reader returns every source as written by the analysis
+    program, after the optional filters; it does not itself group sources into flashes
+    (see :func:`radarx.retrieve.cluster_flashes`). The chi-square is that of
+    the time-of-arrival solution (Thomas et al. 2004 [2]_, as described by
+    Fuchs et al. 2016 [3]_). The file layout is not defined by a publication
+    (see the module documentation).
+
     References
     ----------
-    Thomas, R. J., P. R. Krehbiel, W. Rison, S. J. Hunyady, W. P. Winn,
-    T. Hamlin, and J. Harlin, 2004: Accuracy of the Lightning Mapping Array.
-    *J. Geophys. Res.*, **109**, D14207, https://doi.org/10.1029/2004JD004549
+    .. [1] Rison, W., R. J. Thomas, P. R. Krehbiel, T. Hamlin, and J.
+       Harlin, 1999: A GPS-based three-dimensional lightning mapping system:
+       Initial observations in central New Mexico. *Geophys. Res. Lett.*,
+       **26** (23), 3573-3576, https://doi.org/10.1029/1999GL010856
+    .. [2] Thomas, R. J., P. R. Krehbiel, W. Rison, S. J. Hunyady, W. P. Winn,
+       T. Hamlin, and J. Harlin, 2004: Accuracy of the Lightning Mapping
+       Array. *J. Geophys. Res.*, **109**, D14207,
+       https://doi.org/10.1029/2004JD004549
+    .. [3] Fuchs, B. R., E. C. Bruning, S. A. Rutledge, L. D. Carey, P. R.
+       Krehbiel, and W. Rison, 2016: Climatological analyses of LMA data
+       with an open-source lightning flash-clustering algorithm. *J.
+       Geophys. Res. Atmos.*, **121** (14), 8625-8648,
+       https://doi.org/10.1002/2015JD024663
 
     Examples
     --------

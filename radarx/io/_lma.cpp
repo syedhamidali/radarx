@@ -3,6 +3,13 @@
 //
 // Parser of the data section of Lightning Mapping Array ASCII files.
 //
+// The files are written by the New Mexico Tech lma_analysis program; their
+// layout comes from sample files, not from a published specification (the
+// instrument papers Rison et al. 1999, Geophys. Res. Lett. 26, 3573-3576, and
+// Thomas et al. 2004, J. Geophys. Res. 109, D14207, were not consulted for
+// it), see radarx/io/lma.py. The number parsing below is plain engineering
+// (exact for up to 15 significant digits, see below), with no scientific source.
+//
 // The data section is one source per line, whitespace-separated columns, one
 // of which may be a hexadecimal station mask (0x...). The text is cut into
 // chunks at line ends; threads count the lines of every chunk, a prefix sum

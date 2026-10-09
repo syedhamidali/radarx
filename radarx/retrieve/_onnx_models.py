@@ -13,16 +13,44 @@ for the conversion, no deep-learning framework. Weights are never re-hosted
 by radarx.
 
 ``tornet-baseline-v1``
-    The CNN baseline of the TorNet benchmark (Veillette et al. 2025), Keras 3
-    file ``tornado_detector_baseline.keras`` of the Hugging Face repository
-    ``tornet-ml/tornado_detector_baseline_v1`` (MIT licence).
+    The CNN baseline of the TorNet benchmark (Veillette et al. 2025 [1]_),
+    Keras 3 file ``tornado_detector_baseline.keras`` of the Hugging Face
+    repository ``tornet-ml/tornado_detector_baseline_v1`` (revision
+    ``b4d103aa``). Licence: MIT, as stated in the model card (tags
+    ``license:mit`` of the Hugging Face API, checked 2026-10-09); the code
+    (github.com/mit-ll/tornet) is MIT, "Copyright (c) 2024 MIT Lincoln
+    Laboratory" in its ``LICENSE``; the TorNet data are on Zenodo (e.g.
+    https://doi.org/10.5281/zenodo.12636522) under Creative Commons
+    Attribution 4.0 per DataCite. The model was trained on the TorNet data.
 ``mistnet-nexrad``
-    MistNet (Lin et al. 2019), the TorchScript file ``mistnet_nexrad.pt`` of
-    the GitHub repository ``adokter/MistNet`` (MIT licence).
+    MistNet (Lin et al. 2019 [2]_), the TorchScript file ``mistnet_nexrad.pt``
+    of the GitHub repository ``adokter/MistNet`` (commit ``908f5c05``).
+    Licence: MIT (GitHub API ``license`` of the repository, checked
+    2026-10-09). The README of that repository gives Lin et al. (2019),
+    https://doi.org/10.1111/2041-210X.13280, as the publication.
 
 The graphs reproduce the upstream forward passes operation by operation;
 ``ml/models/<name>/verify_onnx.py`` in the radarx repository compares them
-with Keras and PyTorch.
+with Keras and PyTorch. The ``citation`` of each entry below is the text that
+radarx writes to the ``ml_model_citation`` attribute of its outputs; both
+entries carry the DOI of the paper. The checks against the papers are described in
+:mod:`radarx.retrieve.tornado` (TorNet, arXiv preprint) and
+:mod:`radarx.retrieve.biology` (MistNet, paper not checked, upstream code
+checked).
+
+References
+----------
+.. [1] Veillette, M. S., J. M. Kurdzo, P. M. Stepanian, J. Y. N. Cho, T.
+   Reis, S. Samsi, J. McDonald, and N. Chisler, 2025: A benchmark dataset
+   for tornado detection and prediction using full-resolution polarimetric
+   weather radar data. *Artif. Intell. Earth Syst.*, **4** (1),
+   https://doi.org/10.1175/AIES-D-24-0006.1
+.. [2] Lin, T.-Y., K. Winner, G. Bernstein, A. Mittal, A. M. Dokter, K. G.
+   Horton, C. Nilsson, B. M. Van Doren, A. Farnsworth, F. A. La Sorte, S.
+   Maji, and D. Sheldon, 2019: MistNet: Measuring historical bird migration
+   in the US using archived weather radar data and convolutional neural
+   networks. *Methods Ecol. Evol.*, **10** (11), 1908-1922,
+   https://doi.org/10.1111/2041-210X.13280
 """
 
 from __future__ import annotations
@@ -94,6 +122,8 @@ MODELS = {
     },
 }
 
+# ONNX operator set and IR version of the files written here: engineering
+# choices (opset 17 covers every operator used), not from the papers.
 _OPSET = 17
 _IR_VERSION = 8
 
@@ -231,6 +261,9 @@ def read_tornet_keras(path):
     fill = [
         layer["config"]["fill_val"] for layer in layers if "fill_val" in layer["config"]
     ]
+    # -3: value of gates without data and of range-folded gates (Veillette et
+    # al. 2025, section 3b; ``background_flag`` of tornet/models/keras/
+    # cnn_baseline.py), used if the file has no ``fill_val`` layer
     background = float(fill[0]) if fill else -3.0
     # the block structure: CoordConv layers between max-pooling layers
     blocks, current = [], []
@@ -275,13 +308,35 @@ def read_tornet_keras(path):
 
 def tornet_graph(params):
     """
-    ONNX graph of the TorNet CNN (Veillette et al. 2025).
+    ONNX graph of the TorNet CNN (Veillette et al. 2025 [1]_).
+
+    The operations are those of the released Keras model: per-variable
+    normalization layers with the mean and variance stored in the file
+    (min-max bounds mapped to about [-1, 1] by the TorNet code, not the
+    [0, 1] of the preprint text), the -3 fill of gates without data, the
+    range-folded mask as a 13th channel, CoordConv blocks (range and inverse
+    range concatenated to the input of each convolution; CoordConv of Liu et
+    al. 2018 [2]_, as described in [1]_ section 3b) separated by 2 x 2 max pooling, and 1 x 1
+    convolutions to the logit map. The layer sizes are read from the file.
 
     Inputs are the upstream ones (channels last, ``[N, azimuth, range, 2]``):
     the six radar variables, ``range_folded_mask`` and ``coordinates``.
     Outputs are ``logit`` ``[N, 1]``, the upstream output (maximum of the
     heatmap), and ``heatmap`` ``[N, h, w]``, the logit map on a grid 16 times
     coarser than the input.
+
+    References
+    ----------
+    .. [1] Veillette, M. S., J. M. Kurdzo, P. M. Stepanian, J. Y. N. Cho, T.
+       Reis, S. Samsi, J. McDonald, and N. Chisler, 2025: A benchmark dataset
+       for tornado detection and prediction using full-resolution
+       polarimetric weather radar data. *Artif. Intell. Earth Syst.*, **4**
+       (1), https://doi.org/10.1175/AIES-D-24-0006.1
+    .. [2] Liu, R., J. Lehman, P. Molino, F. Petroski Such, E. Frank, A.
+       Sergeev, and J. Yosinski, 2018: An intriguing failing of convolutional
+       neural networks and the CoordConv solution. *Advances in Neural
+       Information Processing Systems 31 (NeurIPS 2018)*, arXiv:1807.03247,
+       https://doi.org/10.48550/arXiv.1807.03247
     """
     g = _Graph()
     n_tilts = len(params["mean"][0])
@@ -378,7 +433,15 @@ _MISTNET_BLOCKS = {
 
 def mistnet_graph(params):
     """
-    ONNX graph of MistNet (Lin et al. 2019).
+    ONNX graph of MistNet (Lin et al. 2019 [1]_).
+
+    The operations are those of the TorchScript code of the upstream file
+    (``misnet_v4/code/misnet_v4.py``): NaN replaced by -33 (reflectivity) or 0
+    (velocity, spectrum width), subtraction of the stored offset, an input
+    convolution, 13 convolutions with ReLU in five blocks with 2 x 2 max
+    pooling, two more convolutions, then for each scan predictions at strides
+    32, 16 and 8 combined by transposed convolutions (2x, 2x, 8x) and a
+    softmax. These are not checked against the description in the paper.
 
     Input ``x`` ``[N, 15, H, W]``: reflectivity, radial velocity and spectrum
     width of five scans (channel ``5 * product + scan``), NaN where there is
@@ -386,6 +449,15 @@ def mistnet_graph(params):
     ``[N, 3, 5, H, W]``: per scan the softmax probabilities of biology
     (index 1) and weather (index 2); index 0 (background) is 1 where the
     reflectivity is missing and 0 elsewhere, as upstream.
+
+    References
+    ----------
+    .. [1] Lin, T.-Y., K. Winner, G. Bernstein, A. Mittal, A. M. Dokter, K.
+       G. Horton, C. Nilsson, B. M. Van Doren, A. Farnsworth, F. A. La Sorte,
+       S. Maji, and D. Sheldon, 2019: MistNet: Measuring historical bird
+       migration in the US using archived weather radar data and
+       convolutional neural networks. *Methods Ecol. Evol.*, **10** (11),
+       1908-1922, https://doi.org/10.1111/2041-210X.13280
     """
     g = _Graph()
     p = {k: np.asarray(v, dtype=np.float32) for k, v in params.items()}

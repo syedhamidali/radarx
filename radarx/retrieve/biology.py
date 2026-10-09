@@ -7,26 +7,57 @@ Biological Echo Segmentation (MistNet)
 ======================================
 
 Separate biological scatterers (birds, bats, insects) from precipitation with
-MistNet (Lin et al. 2019), a fully convolutional network (VGG-16 backbone
-with FCN-8s heads) trained on 239 000 WSR-88D volumes labelled with dual-pol
+MistNet (Lin et al. 2019 [1]_), a fully convolutional network trained on
+archived WSR-88D volumes with labels derived from dual-polarization
 products. It sees reflectivity, radial velocity and spectrum width of the
 0.5°, 1.5°, 2.5°, 3.5° and 4.5° sweeps of a volume, each rendered on a
 608 x 608 Cartesian grid of 500 m cells centred on the radar (±152 km), and
-returns, per sweep and cell, the probabilities of biology and of weather.
-As in Lin et al. (2019), a gate is weather when the weather probability of
-its sweep, or the mean weather probability of the five sweeps, exceeds 0.45;
-all other gates with reflectivity are biological.
+returns, per sweep and cell, the probabilities of biology and of weather. A
+gate is weather when the weather probability of its sweep, or the mean weather
+probability of the five sweeps, exceeds 0.45; all other gates with
+reflectivity are biological.
 
-This module renders the sweeps exactly as the reference implementation in
-vol2bird (Dokter et al. 2011) feeds the network: for each cell centre the
-nearest gate on a 4/3 effective earth, NaN where the gate has no data. The
-probabilities are mapped back to the polar gates of the five sweeps by
-their nearest cell.
+Where the numbers come from. The paper of Lin et al. (2019) was not consulted,
+so none of its statements (the training data, the labelling, the architecture
+description, skill scores) is repeated as checked. The numbers are checked
+against the reference implementation, the vol2bird
+package (Dokter et al. 2011 [2]_ for the algorithm it implements; MIT licence;
+file ``lib/constants.h`` and ``lib/librender.c`` of github.com/adokter/vol2bird
+at commit ``b1e591a`` of the master branch, 2025-09-06) and the upstream
+weights file:
 
-The upstream TorchScript weights (MIT licence, GitHub ``adokter/MistNet``)
-are converted to ONNX on first use (needs the ``onnx`` package once) and
-cached; inference needs ``onnxruntime`` (``pip install radarx[ml]``). The
-network was trained on S-band data; use with other wavelengths is untested.
+* 608 cells of 500 m (``MISTNET_DIMENSION``, ``MISTNET_RESOLUTION``; "including
+  a 4 pixel padding around the image", ``MISTNET_BLEED`` = 8), five elevation
+  scans (``MISTNET_N_ELEV``) at 0.5°, 1.5°, 2.5°, 3.5° and 4.5°
+  (``MISTNET_ELEVS``);
+* weather where the weather probability exceeds 0.45
+  (``MISTNET_WEATHER_THRESHOLD``) or the mean over the five elevations
+  exceeds 0.45 (``MISTNET_SCAN_AVERAGE_WEATHER_THRESHOLD``); the threshold
+  therefore comes from vol2bird, not from a statement in the paper;
+* the rendering of a sweep onto the grid: for each cell centre the nearest
+  gate on a 4/3 effective earth of radius 6 371 200 m
+  (``REFRACTION_COEFFICIENT``, ``EARTH_RADIUS``), NaN where the gate has no
+  data (``librender.c``);
+* the network: gates without data are set to -33 (reflectivity) or 0
+  (velocity, spectrum width) and a per-channel offset is subtracted, then an
+  input ("adaptor") convolution, 13 convolutions in five blocks
+  (VGG-16-like), two further convolutions, and for each of the five scans a head with predictions at
+  strides 32, 16 and 8 added after 2x, 2x and 8x transposed convolutions
+  (FCN-8s-like), followed by a softmax over background, biology and weather;
+  this was read from the TorchScript code ``misnet_v4/code/misnet_v4.py`` in
+  the upstream file ``mistnet_nexrad.pt`` of github.com/adokter/MistNet (MIT
+  licence, commit ``908f5c05``). The "VGG-16" and "FCN-8s" names are
+  descriptions of that structure, not quotations from the paper.
+
+The probabilities are mapped back to the polar gates of the five sweeps by
+their nearest cell (a radarx choice).
+
+The upstream TorchScript weights (MIT licence, GitHub ``adokter/MistNet``;
+the SHA-256 is recorded in :mod:`radarx.retrieve._onnx_models`) are converted
+to ONNX on first use (needs the ``onnx`` package once) and cached; inference
+needs ``onnxruntime`` (``pip install radarx[ml]``). The network was trained
+on S-band data; use with other wavelengths is untested. Cite Lin et al.
+(2019) [1]_ when using the model.
 
 Compare with :func:`radarx.retrieve.echo_mask`, the fuzzy-logic
 meteorological / non-meteorological classification from the polarimetric
@@ -34,17 +65,16 @@ variables.
 
 References
 ----------
-Lin, T.-Y., K. Winner, G. Bernstein, A. Mittal, A. M. Dokter, K. G. Horton,
-C. Nilsson, B. M. Van Doren, A. Farnsworth, F. A. La Sorte, S. Maji, and
-D. Sheldon, 2019: MistNet: Measuring historical bird migration in the US
-using archived weather radar data and convolutional neural networks.
-*Methods Ecol. Evol.*, **10** (11), 1908-1922,
-https://doi.org/10.1111/2041-210X.13280
-
-Dokter, A. M., F. Liechti, H. Stark, L. Delobbe, P. Tabary, and I. Holleman,
-2011: Bird migration flight altitudes studied by a network of operational
-weather radars. *J. R. Soc. Interface*, **8** (54), 30-43,
-https://doi.org/10.1098/rsif.2010.0116
+.. [1] Lin, T.-Y., K. Winner, G. Bernstein, A. Mittal, A. M. Dokter, K. G.
+   Horton, C. Nilsson, B. M. Van Doren, A. Farnsworth, F. A. La Sorte, S.
+   Maji, and D. Sheldon, 2019: MistNet: Measuring historical bird migration
+   in the US using archived weather radar data and convolutional neural
+   networks. *Methods Ecol. Evol.*, **10** (11), 1908-1922,
+   https://doi.org/10.1111/2041-210X.13280
+.. [2] Dokter, A. M., F. Liechti, H. Stark, L. Delobbe, P. Tabary, and I.
+   Holleman, 2011: Bird migration flight altitudes studied by a network of
+   operational weather radars. *J. R. Soc. Interface*, **8** (54), 30-43,
+   https://doi.org/10.1098/rsif.2010.0116
 
 .. autosummary::
    :nosignatures:
@@ -68,22 +98,37 @@ from .tornado import _clean, _first, _fixed_angle, _sweeps
 #: Name of the default model, converted on first use.
 DEFAULT_MODEL = "mistnet-nexrad"
 
-#: Elevations (degrees) of the five MistNet input sweeps.
+#: Elevations (degrees) of the five MistNet input sweeps: ``MISTNET_ELEVS`` in
+#: lib/constants.h of vol2bird (github.com/adokter/vol2bird).
 ELEVATIONS = (0.5, 1.5, 2.5, 3.5, 4.5)
 
-_EARTH_RADIUS = 6371200.0 * 4.0 / 3.0  # 4/3 effective earth radius, m
-_BLEED = 8  # cells at the grid edge that are not mapped back
+# 4/3 effective earth radius, m: EARTH_RADIUS = 6371200 and
+# REFRACTION_COEFFICIENT = 4/3 in lib/constants.h of vol2bird
+_EARTH_RADIUS = 6371200.0 * 4.0 / 3.0
+# cells at the grid edge that are not mapped back: MISTNET_BLEED in
+# lib/constants.h of vol2bird (the 608 grid has a 4 cell padding on each side)
+_BLEED = 8
 
 
 def _slant_range(distance, elev):
-    """Slant range (m) of a ground distance (m) at elevation ``elev`` (rad)."""
+    """
+    Slant range (m) of a ground distance (m) at elevation ``elev`` (rad).
+
+    The 4/3 effective-earth beam geometry of ``librender.c`` in vol2bird
+    (spherical earth, law of sines).
+    """
     gamma = distance / _EARTH_RADIUS
     beta = np.pi / 2 - elev - gamma
     return _EARTH_RADIUS * np.sin(gamma) / np.sin(beta)
 
 
 def _ground_distance(rng, elev):
-    """Ground distance (m) of a slant range (m) at elevation ``elev`` (rad)."""
+    """
+    Ground distance (m) of a slant range (m) at elevation ``elev`` (rad).
+
+    Inverse of :func:`_slant_range` (4/3 effective earth, ``librender.c`` of
+    vol2bird).
+    """
     height = (
         np.sqrt(rng**2 + _EARTH_RADIUS**2 + 2 * _EARTH_RADIUS * rng * np.sin(elev))
         - _EARTH_RADIUS
@@ -192,10 +237,15 @@ def biological_echo(
         The five input elevations (degrees). Default 0.5° to 4.5° in 1° steps.
     weather_threshold : float, optional
         Weather probability above which a gate is weather, on its own sweep
-        or on the mean of the five sweeps. Default 0.45 (Lin et al. 2019).
+        or on the mean of the five sweeps. Default 0.45, the value of
+        ``MISTNET_WEATHER_THRESHOLD`` and
+        ``MISTNET_SCAN_AVERAGE_WEATHER_THRESHOLD`` in vol2bird
+        (``lib/constants.h``), the reference implementation of Lin et al.
+        (2019) [1]_; not checked against the paper.
     size, resolution : int, float, optional
         Cells per side and cell size (m) of the Cartesian input grid.
-        Default 608 and 500 m, the grid MistNet was trained on.
+        Default 608 and 500 m, ``MISTNET_DIMENSION`` and
+        ``MISTNET_RESOLUTION`` of vol2bird, the grid of the network input.
     providers : list of str, optional
         ONNX Runtime execution providers. Default: CPU.
 
@@ -210,14 +260,23 @@ def biological_echo(
         Attributes ``ml_model``, ``ml_model_version``, ``ml_model_licence``
         and ``ml_model_citation``.
 
+    Notes
+    -----
+    Inputs, grid, thresholds and the network follow the vol2bird
+    implementation and the upstream weights, see the module documentation
+    for what was checked against which file; the paper of Lin et al. (2019)
+    [1]_ was not checked. Model licence: MIT (github.com/adokter/
+    MistNet); the licence and citation are written to the ``ml_model_licence``
+    and ``ml_model_citation`` attributes of the output.
+
     References
     ----------
-    Lin, T.-Y., K. Winner, G. Bernstein, A. Mittal, A. M. Dokter,
-    K. G. Horton, C. Nilsson, B. M. Van Doren, A. Farnsworth, F. A. La Sorte,
-    S. Maji, and D. Sheldon, 2019: MistNet: Measuring historical bird
-    migration in the US using archived weather radar data and convolutional
-    neural networks. *Methods Ecol. Evol.*, **10** (11), 1908-1922,
-    https://doi.org/10.1111/2041-210X.13280
+    .. [1] Lin, T.-Y., K. Winner, G. Bernstein, A. Mittal, A. M. Dokter, K.
+       G. Horton, C. Nilsson, B. M. Van Doren, A. Farnsworth, F. A. La Sorte,
+       S. Maji, and D. Sheldon, 2019: MistNet: Measuring historical bird
+       migration in the US using archived weather radar data and
+       convolutional neural networks. *Methods Ecol. Evol.*, **10** (11),
+       1908-1922, https://doi.org/10.1111/2041-210X.13280
 
     Examples
     --------

@@ -4,7 +4,17 @@
 // Compiled kernel of radarx.retrieve.lagrangian and
 // radarx.retrieve.diabatic_lagrangian: gridpoint air trajectories through
 // time-dependent 3-D winds and the diabatic Lagrangian analysis (DLA) of
-// Ziegler (2013a, b). The NumPy reference implementation in
+// Ziegler (2013a, b). The sources of the numbers are given, with equation, table
+// and page pointers, in the documentation of the Python modules
+// radarx/retrieve/lagrangian.py and diabatic_lagrangian.py and in
+// _lagrangian_numpy.py; here Z13a = Ziegler (2013a, J. Atmos. Oceanic Technol.
+// 30, 2248-2265, doi:10.1175/JTECH-D-12-00194.1), Z07 = Ziegler et al. (2007,
+// Mon. Wea. Rev. 135, 2417-2442, doi:10.1175/MWR3396.1) and LFO83 = Lin, Farley
+// and Orville (1983, J. Climate Appl. Meteor. 22, 1065-1092,
+// doi:10.1175/1520-0450(1983)022<1065:BPOTSF>2.0.CO;2). The LFO83 rates are
+// implemented from LFO83 itself, not from the "modified LFO" supplement of
+// Gilmore et al. (2004a), which was not consulted. Numbers without a pointer
+// are radarx choices. The NumPy reference implementation in
 // radarx/retrieve/_lagrangian_numpy.py follows the same steps in the same
 // order and is the test oracle of this file.
 //
@@ -71,29 +81,30 @@ constexpr double kT0 = 273.15;
 constexpr double kP0 = 1.0e5;
 constexpr double kRd = 287.04;             // Ziegler (2013a), sect. 2a
 constexpr double kKappa = 0.2854;          // Ziegler (2013a), sect. 2a
-constexpr double kCp = kRd / kKappa;
+constexpr double kCp = kRd / kKappa;      // radarx choice (1005.8; LFO83 list 1005)
 constexpr double kRv = 461.5;              // LFO83 appendix (R_w)
 constexpr double kEps = kRd / kRv;
-constexpr double kEs0 = 611.2;             // Bolton (1980), e_s(0 degC), Pa
+constexpr double kEs0 = 611.2;             // Bolton (1980) fit, e_s(0 degC), Pa; not re-checked against the paper
 
-// LFO83 constants (appendix), SI
-constexpr double kLvL = 2.5e6;
-constexpr double kLfL = 3.336e5;
-constexpr double kLsL = 2.8336e6;
-constexpr double kCw = 4.187e3;
-constexpr double kAR = 841.99;            // a = 2115 cm^0.2 s^-1 in m^0.2 s^-1, eq. (7)
+// LFO83 constants (appendix, pp. 1089-1092), SI
+constexpr double kLvL = 2.5e6;     // L_v, J kg^-1
+constexpr double kLfL = 3.336e5;   // L_f
+constexpr double kLsL = 2.8336e6;  // L_s
+constexpr double kCw = 4.187e3;    // C_w, J kg^-1 K^-1
+constexpr double kAR = 841.99;            // a = 2115 cm^0.2 s^-1 in m^0.2 s^-1, eq. (7), p. 1069
 constexpr double kBR = 0.8;               // b, eq. (7)
-constexpr double kCD = 0.6;               // C_D, eq. (9)
+constexpr double kCD = 0.6;               // C_D, eq. (9), p. 1069
 constexpr double kG = 9.805;              // g = 980.5 cm s^-2
 constexpr double kApr = 0.66;             // A', Bigg freezing, eq. (45)
 constexpr double kBpr = 100.0;            // B' (m^-3 s^-1), eq. (45)
 constexpr double kRhoW = 1000.0;
 
-// Tao, Simpson and McCumber (1989), eqs. (3a), (3b): b = 3.8 / P (P in mb)
+// Tao, Simpson and McCumber (1989), eqs. (3a), (3b), p. 232: a = 17.2693882 and
+// 21.8745584, b = 3.8 / P (P in mb)
 constexpr double kTaoA1 = 17.2693882;
 constexpr double kTaoA2 = 21.8745584;
 constexpr double kTaoB = 3.8;
-constexpr double kTHom = 233.15;  // homogeneous freezing at T <= -40 degC (Hsie et al. 1980)
+constexpr double kTHom = 233.15;  // homogeneous freezing at T <= -40 degC (LFO83 sect. 3f, p. 1077; Hsie et al. 1980, p. 956)
 
 // ---------------------------------------------------------------------------
 // Gridded field sampling: trilinear in space, linear in time, on a grid that
@@ -247,8 +258,9 @@ inline int boundary_flag(const PathParams& p, int sides, const double* vlast) {
 }
 
 // One trajectory from (x0, y0, z0) at t = 0: predictor (Euler) plus n_iter
-// trapezoidal corrector iterations per step (Ziegler et al. 2007; Ziegler
-// 2013a, sect. 2b). pos[4 * n] = (x, y, z, t), val[kNW * n] = the wind pack
+// trapezoidal corrector iterations per step: radarx's reading of the
+// "first-order predictor corrector scheme as in Z07" with three iterations
+// (Z13a sect. 2b, p. 2250; Z07 p. 2422). pos[4 * n] = (x, y, z, t), val[kNW * n] = the wind pack
 // at each stored point. Returns the number of stored points.
 int64_t build_path(const Grid& g, const PathParams& p, double x0, double y0, double z0,
                    double* pos, double* val, int& flags) {
@@ -540,7 +552,8 @@ struct Props {
 };
 
 // Thermal conductivity, vapour diffusivity and kinematic viscosity of air
-// (Kumjian and Ryzhkov 2010, appendix, after Rasmussen and Heymsfield 1987).
+// (as listed in the appendix of Kumjian and Ryzhkov 2010; not checked against
+// that paper).
 inline Props air_props(double t, double p, double rho) {
     Props r;
     r.ka = (0.441635 + 0.0071 * t) * 1.0e-2;
@@ -560,7 +573,7 @@ Rates lfo_rates(double t, double p, double rho, double qv, double qc, double qr,
     const double tc = t - kT0;
     double lr = 0.0, n0r = 0.0, lg = 0.0, n0g = 0.0;
     if (rain) {
-        lr = std::cbrt(kPi * kRhoW * nr / (rho * qr));  // eqs. (4), (5): q = pi rho_w N / (rho lambda^3)
+        lr = std::cbrt(kPi * kRhoW * nr / (rho * qr));  // eqs. (4), (6), p. 1068, with n0 = N lambda: lambda^3 = pi rho N / (rho_air q)
         n0r = nr * lr;
     }
     if (graupel) {

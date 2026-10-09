@@ -3,6 +3,14 @@
 //
 // Cold-pool, wind-profile and baroclinity kernel.
 //
+// Sources (full references in radarx/retrieve/coldpool.py and wind_profile.py):
+// Bolton (1980, Mon. Wea. Rev. 108, 1046-1053) eqs. (10), (15), (43);
+// Rotunno, Klemp and Weisman (1988, J. Atmos. Sci. 45, 463-485) for
+// C^2 = 2 int(-B) dz; Davies-Jones (1984, J. Atmos. Sci. 41, 2991-3006) for
+// the storm-relative helicity; Browning and Wexler (1968, J. Appl. Meteor. 7,
+// 105-113) for the VAD fit. The equation numbers are not checked
+// against the papers.
+//
 // thermo():    potential temperatures of every sample (elementwise).
 // cold_pool(): column integral C^2 = 2 int (-B) dz up to the top of the cold
 //              pool, per column.
@@ -109,6 +117,9 @@ DArray thermo_py(DArray t, DArray p, DArray td, int n_threads) {
 
 // One column: z ascending is not required; levels are visited in the given
 // order and must increase (callers sort). Returns C, depth, open-top flag.
+// C^2 = 2 int(-B) dz (Rotunno et al. 1988), trapezoidal rule; the top is where
+// B first reaches `threshold` (radarx definition of the depth, not a published
+// threshold).
 inline void cold_pool_column(const double* z, const double* b, int64_t nz,
                              double bottom, double threshold, double top,
                              double* c_out, double* h_out, double* open_out) {

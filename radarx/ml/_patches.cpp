@@ -13,7 +13,8 @@
 //
 // Reassembly is the weighted mean of every patch pixel that covers an output
 // gate, with separable weights wa[i] * wr[j] (cosine, linear or uniform
-// windows built by the Python layer). It is written as a gather: each work
+// windows built by the Python layer; these windows are radarx choices without
+// a published source, see radarx/ml/patches.py). It is written as a gather: each work
 // item is one output ray of one field of one sweep and visits the (patch,
 // patch row) pairs covering that ray, so threads never write to the same
 // memory and no locks are needed. Sums are accumulated in double precision.

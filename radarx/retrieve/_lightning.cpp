@@ -6,14 +6,25 @@
 // cluster(): VHF sources, sorted by time, are grouped into flashes. Two
 // sources are linked when their normalized space-time separation
 // (d / distance)^2 + (dt / time)^2 <= 1; flashes are the connected components
-// of these links (DBSCAN with a minimum of one point). Every source only looks
-// forward in time up to `time` seconds, so the sources form one pool of work
-// that threads take in blocks from an atomic counter; links go into a
-// lock-free union-find (compare-and-swap, root of the smaller index wins), so
-// the components do not depend on the thread schedule.
+// of these links (single linkage). This is the DBSCAN clustering (Ester et
+// al. 1996) with eps = 1 on the normalized coordinates and a minimum number of
+// points of 1 or 2. Fuchs et al. (2016, J. Geophys. Res. Atmos. 121, 8625,
+// pp. 8628-8629) used DBSCAN with N_min = 2 (Alabama, D.C.) and N_min = 10
+// (Colorado) and a default maximum flash duration of 3 s (their streamed
+// processing can split longer flashes): this kernel equals their N_min = 2
+// case, not the N_min = 10 case, and imposes no maximum duration (issue 178).
+// Every source only looks forward in time up to `time` seconds, so the
+// sources form one pool of work that threads take in blocks from an atomic
+// counter; links go into a lock-free union-find (compare-and-swap, root of the
+// smaller index wins), so the components do not depend on the thread
+// schedule.
 //
 // flash_stats(): per flash, the number of sources, its first and last source
-// and the area of the convex hull of its sources (Andrew's monotone chain).
+// and the area of the convex hull of its sources (Andrew's monotone chain,
+// Andrew 1979, Inf. Process. Lett. 9, 216-219,
+// https://doi.org/10.1016/0020-0190(79)90072-3). The plan area is the area
+// enclosed by a rubber band around the flash seen from above (Fuchs et al.
+// 2016, p. 8626).
 //
 // grid(): source density (sources per pixel), flash extent density (flashes
 // with at least one source in the pixel) and flash initiation density (first
@@ -156,7 +167,8 @@ struct PixelScratch {
     std::vector<int64_t> keys;
 };
 
-// Andrew's monotone chain: area of the convex hull of the points (2-D).
+// Andrew's monotone chain (Andrew 1979): area of the convex hull of the points
+// (2-D).
 struct HullScratch {
     std::vector<std::pair<double, double>> pts, hull;
 };

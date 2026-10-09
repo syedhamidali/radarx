@@ -28,13 +28,27 @@ Stations with different sampling times share the union of their times
 ``platform``, ``deployment`` and ``array_type`` on ``station``, so networks
 from different readers combine with
 ``xarray.concat([a, b], dim="station", join="outer")``. The dew point is
-derived from temperature and relative humidity (Bolton 1980, as in
-:mod:`radarx.io.sounding`). These datasets feed
+derived from temperature and relative humidity with the Bolton (1980)
+saturation vapour pressure fit, equation (10), :math:`e_s = 6.112
+\\exp[17.67 t/(t + 243.5)]` hPa with :math:`t` in degC (equation number as
+commonly cited; not checked against the paper), as in
+:mod:`radarx.io.sounding`; the dew point is the algebraic inverse applied to
+:math:`e = RH\\,e_s(T)` (liquid-water saturation at all temperatures, a radarx
+choice). These datasets feed
 :func:`radarx.retrieve.potential_temperatures` and
 :func:`radarx.retrieve.cold_pool_perturbation`.
 
 Formats
 -------
+No scientific algorithm beyond the dew point above is implemented: the
+readers convert units (degC to K, hPa to Pa, % to a fraction, wind speed
+and direction to ``u`` and ``v`` with :math:`u = -s\\sin\\phi`,
+:math:`v = -s\\cos\\phi`, the meteorological convention) and apply the
+data providers' own QC flags. Column names and units below are those of the
+data files as read by the code; their meaning is taken from the dataset
+documentation of Weiss and McDonald (2022), which is not checked against the data.
+For the PIPS no peer-reviewed or dataset reference is cited.
+
 - :func:`read_sticknet`: Texas Tech University StickNet text files, e.g. the PERiLS 2022 archive (Weiss and McDonald 2022):
   ``<ID>_IOP<n>_level<k>.txt`` with the columns ``Time, T, RH, P, WS, WD``
   (degC, %, hPa, m s-1, degree; level 1 at 10 Hz with the QC flags ``TFLAG``
@@ -322,7 +336,8 @@ def read_sticknet(
 
     Notes
     -----
-    The StickNet documentation lists, per deployment, stations whose
+    As stated in the StickNet documentation (Weiss and McDonald 2022; not
+    checked against the data), it lists, per deployment, stations whose
     temperature or wind direction could not be calibrated after the
     deployment, and two stations (104A and 109A) with a slower temperature
     and humidity sensor (time constant 42 s instead of 10 s); check it before
