@@ -1,16 +1,25 @@
-"""Check that public functions of published-method modules carry References.
+#!/usr/bin/env python
+# Copyright (c) 2024-2026, Radarx developers.
+# Distributed under the MIT License. See LICENSE for more info.
 
-A module counts as implementing a published method when its module docstring
-cites literature (an "et al." citation or a ``doi.org`` link).  For such a
-module every public top-level function (listed in ``__all__`` when the module
-defines it, otherwise every name not starting with an underscore) must have a
-``References`` section in its own docstring, or the docstring must point to
-the function it wraps with ``See Also`` or ``Same as`` wording and carry no
-scientific content of its own (put such a function in the ``EXEMPT`` set).
+"""
+Check that public functions cite the published methods they implement.
 
-The check is offline and only parses the source with ``ast``.
+For every public module of ``radarx.retrieve``, ``radarx.grid`` and
+``radarx.io`` whose module docstring says that it implements a published
+method (it has a numpy-style ``References`` section), every public function
+of the module (the names in ``__all__``, or the public functions defined in
+the module if there is no ``__all__``) must have a ``References`` section in
+its own docstring. The check is offline and only looks at the source files
+with :mod:`ast`; it does not import radarx or check the references against
+Crossref (do that by hand with ``https://api.crossref.org/works/<doi>``,
+anonymously).
 
-Usage: ``python ci/check_references.py`` (exit status 1 on failure).
+Run from the repository root::
+
+    python ci/check_references.py
+
+The exit status is 1 if a function is missing its ``References`` section.
 """
 
 from __future__ import annotations
@@ -20,86 +29,63 @@ import re
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
 PACKAGES = ("retrieve", "grid", "io")
-# "module.function" names that are exempt: thin wrappers, I/O helpers and
-# functions that apply a documented standard definition without a method of
-# their own (their docstrings point to the function that carries the
-# references). Keep this list short and justified.
-EXEMPT: set[str] = {
-    "lightning.vertical_source_distribution",  # binning; flash rules: grid_lightning
-    "lightning.cell_flash_rate",  # binning; flash rules: grid_lightning
-    "wind_profile.layer_mean_wind",  # trapezoidal mean, no published method
-    "wind_profile.storm_relative_wind",  # vector subtraction
-    "aws_data.get_s3_client",
-    "aws_data.list_available_files",
-    "aws_data.download_file",
-    "sounding.air_density",  # ideal-gas law, standard definition
-    "sounding.open_sounding_file",
-    "sounding.station_list",
-    "sounding.nearest_station",
-    "sounding.interpolate_profile",
-    "sounding.isotherm_height",
-    "sounding.mean_wind",
-    "sounding.profile_to_grid",
-    "surface.read_sticknet_locations",
-    "surface.read_pips",
-}
-# Modules of other topic groups that have not yet been through the citation
-# pass; remove an entry when its module is done.
-PENDING_MODULES = {
-    "disdrometer",
-    "dsd",
-    "dsd_bayes",
-    "hid",
-    "multidoppler",
-    "qc",
-    "rain_trajectories",
-    "shear",
-}
-
-CITES_LITERATURE = re.compile(r"et al\.|doi\.org/")
-HAS_REFERENCES = re.compile(r"^\s*References\s*\n\s*-{3,}", re.MULTILINE)
+_SECTION = re.compile(r"^\s*References\s*\n\s*-{3,}\s*$", re.MULTILINE)
 
 
-def public_functions(tree: ast.Module) -> list[ast.FunctionDef]:
-    exported = None
+def has_references(docstring):
+    """Whether a docstring has a numpy-style ``References`` section."""
+    return bool(docstring and _SECTION.search(docstring))
+
+
+def public_names(tree):
+    """Names listed in ``__all__`` (None if the module has none)."""
     for node in tree.body:
         if isinstance(node, ast.Assign) and any(
             isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets
         ):
             try:
-                exported = set(ast.literal_eval(node.value))
-            except ValueError:
-                exported = None
-    funcs = [n for n in tree.body if isinstance(n, ast.FunctionDef)]
-    if exported is not None:
-        return [f for f in funcs if f.name in exported]
-    return [f for f in funcs if not f.name.startswith("_")]
+                return set(ast.literal_eval(node.value))
+            except ValueError:  # computed __all__, check every public function
+                return None
+    return None
 
 
-def main() -> int:
-    missing: list[str] = []
-    for pkg in PACKAGES:
-        for path in sorted((ROOT / "radarx" / pkg).glob("*.py")):
+def check_module(path):
+    """Names of public functions of ``path`` without a References section."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    if not has_references(ast.get_docstring(tree, clean=False)):
+        return []
+    names = public_names(tree)
+    missing = []
+    for node in tree.body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if node.name.startswith("_"):
+            continue
+        if names is not None and node.name not in names:
+            continue
+        if not has_references(ast.get_docstring(node, clean=False)):
+            missing.append(node.name)
+    return missing
+
+
+def main(root=None):
+    root = Path(root) if root else Path(__file__).resolve().parents[1]
+    failures = []
+    for package in PACKAGES:
+        for path in sorted((root / "radarx" / package).glob("*.py")):
             if path.name.startswith("_"):
                 continue
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-            module_doc = ast.get_docstring(tree) or ""
-            if not CITES_LITERATURE.search(module_doc):
-                continue
-            for func in public_functions(tree):
-                key = f"{path.stem}.{func.name}"
-                if key in EXEMPT or path.stem in PENDING_MODULES:
-                    continue
-                if not HAS_REFERENCES.search(ast.get_docstring(func) or ""):
-                    missing.append(f"radarx/{pkg}/{path.name}: {func.name}")
-    if missing:
-        print("Public functions without a 'References' section:")
-        for line in missing:
-            print("  " + line)
+            for name in check_module(path):
+                failures.append(f"{path.relative_to(root)}: {name}")
+    if failures:
+        print("public functions without a References section in a module that")
+        print("implements a published method:")
+        for line in failures:
+            print(f"  {line}")
         return 1
-    print("All public functions of published-method modules carry References.")
+    print("all checked public functions have a References section")
     return 0
 
 

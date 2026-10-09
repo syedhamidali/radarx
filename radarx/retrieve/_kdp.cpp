@@ -10,9 +10,13 @@
 //    sums of cos/sin) and the phasor sum of the first valid gates per ray;
 // 2. system offset per ray or per sweep (circular mean);
 // 3. per ray: unfolding, gap filling, range filtering (iterative low-pass
-//    filter after Hubbert and Bringi 1995, iterative KDP after Vulpiani et
-//    al. 2012, or a monotone fit as assumed by Maesaka et al. 2012) and KDP
-//    as half the least-squares slope over a reflectivity-dependent window.
+//    filter in the manner of Hubbert and Bringi 1995 (with a moving-average
+//    low-pass filter instead of their FIR filter), iterative KDP in the
+//    manner of Vulpiani et al. 2012, or a monotone fit that enforces the
+//    assumption of Maesaka et al. 2012) and KDP as half the least-squares
+//    slope over a reflectivity-dependent window (2 km / 6 km, 40 dBZ switch,
+//    as in Park et al. 2009, p. 732). Defaults of the thresholds and
+//    iteration counts are radarx's own; see the docstring in kdp.py.
 //
 // All windows use running (prefix) sums, so each pass is O(N) in the number
 // of gates regardless of the window length. Every step follows the NumPy
@@ -317,8 +321,10 @@ int64_t unfold_ray(const double* x, const uint8_t* v, int64_t ng, double sign,
     return static_cast<int64_t>(s.idx.size());
 }
 
-// Hubbert and Bringi (1995): replace gates that depart from the filtered
-// profile (and masked gates) by the filtered values, iterate, filter.
+// Iterative filter in the manner of Hubbert and Bringi (1995): replace gates
+// that depart from the filtered profile (and masked gates) by the filtered
+// values, iterate, filter. The low-pass filter (smooth) is a moving average,
+// not the published FIR filter.
 void filter_hubbert(const Params& p, const Sweep& sw, const uint8_t* v, RayScratch& s,
                     double* o) {
     const int64_t ng = sw.ngate;
@@ -335,8 +341,9 @@ void filter_hubbert(const Params& p, const Sweep& sw, const uint8_t* v, RayScrat
     smooth(o, ng, sw.hf, s);
 }
 
-// Vulpiani et al. (2012): KDP from PhiDP, implausible values set to zero,
-// PhiDP rebuilt by integration; leaves the last KDP in s.kdp.
+// In the manner of Vulpiani et al. (2012) (paper not checked): KDP from PhiDP,
+// implausible values set to zero, PhiDP rebuilt by integration; leaves the
+// last KDP in s.kdp.
 void filter_vulpiani(const Params& p, const Sweep& sw, const double* zr, int64_t nv,
                      RayScratch& s, double* o) {
     const int64_t ng = sw.ngate;

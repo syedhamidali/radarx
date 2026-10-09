@@ -11,36 +11,54 @@ echo (insects, birds, ground clutter, anomalous propagation, sea clutter,
 second-trip echo, noise) gate by gate, before KDP, hydrometeor
 classification, rain rates or gridding.
 
-The classification follows the fuzzy-logic approach of Gourley et al. (2007)
-and Krause (2016): local features of the polarimetric variables and of the
-reflectivity are mapped to a membership in [0, 1] ("how meteorological"),
-and the weighted mean of the memberships is compared with a threshold. Every
-feature is computed along the ray over a window of ``window`` km centred on
-the gate:
+The classification is a weighted fuzzy-logic scheme in the spirit of
+Gourley et al. (2007) [1] and Krause (2016) [2]: local features of the
+polarimetric variables and of the reflectivity are mapped to a membership in
+[0, 1] ("how meteorological"), and the weighted mean of the memberships is
+compared with a threshold. It is not an implementation of either paper.
+Only the form of the aggregation, :math:`A = \\sum_j W_j P_j / \\sum_j W_j`
+(Krause 2016 [2], p. 1876), and the idea that the variability of
+:math:`Z_{DR}` and :math:`\\Phi_{DP}` is small in precipitation (both papers)
+are taken from them. The membership corners, weights, threshold, window,
+smoothing and speckle filter are radarx's own choices; see the Notes of
+:func:`echo_mask` for the number-by-number comparison with the two papers.
+Every feature is computed along the ray over a window of ``window`` km
+centred on the gate:
 
 ``rhohv``
-    Mean copolar correlation coefficient. Rain, snow and ice have
-    :math:`\\rho_{hv} > 0.95`; biological scatterers and clutter much lower
-    values (Gourley et al. 2007; Park et al. 2009; Tang et al. 2014). Values
-    above 1, which occur only at low signal-to-noise ratio, are reflected
-    about 1 (1.05 counts as 0.95).
+    Mean copolar correlation coefficient. Precipitation has a mode of
+    :math:`\\rho_{hv} = 0.97` in the C-band data of Gourley et al. (2007)
+    [1] (p. 1443, Fig. 3a), who suppress the precipitation class below 0.7
+    (their Table 1, p. 1446); biological scatterers and clutter have much
+    lower values. Values above 1, which occur only at low signal-to-noise
+    ratio, are reflected about 1 (1.05 counts as 0.95; radarx choice).
 ``zdr``
-    Mean differential reflectivity. Insects and birds have :math:`Z_{DR}` of
-    several dB up to more than 10 dB at low reflectivity, rarely seen in
-    precipitation (Park et al. 2009; Tang et al. 2014).
+    Mean differential reflectivity. The biological-scatterer class of Park
+    et al. (2009) [3] has :math:`Z_{DR}` between 0 and 12 dB, with full
+    membership from 2 to 10 dB (their Table 1, p. 733); Tang et al. (2014)
+    [5] describe the same behaviour (not checked against the paper). Krause (2016) [2] leaves the mean :math:`Z_{DR}` out
+    "because of possible radar miscalibration" (p. 1880); radarx uses it
+    with a trapezoid of its own.
 ``zdr_texture``, ``phidp_texture``
     Standard deviation of :math:`Z_{DR}` and circular standard deviation of
-    :math:`\\Phi_{DP}`. Both are small in precipitation, where the
-    scatterers in neighbouring gates are alike, and large for clutter,
-    biological echo and noise (Gourley et al. 2007; Krause 2016).
+    :math:`\\Phi_{DP}` along the ray. Both are small in precipitation, where
+    the scatterers in neighbouring gates are alike, and large for clutter,
+    biological echo and noise. Krause (2016) [2] uses the standard
+    deviations over nine range bins along the radial (p. 1876); Gourley et
+    al. (2007) [1] use the root-mean-square difference to the 3 x 3
+    neighbouring gates instead (their Eq. 1, p. 1441).
 ``dbz_texture``
     Mean squared difference of the reflectivity of adjacent gates
     (:math:`\\mathrm{dB}^2`), large for ground clutter and anomalous
-    propagation (Steiner and Smith 2002).
+    propagation. After the reflectivity texture of Steiner and Smith (2002)
+    [4] (not checked against the paper). The corners and the weight are
+    radarx's own.
 ``spin``
     Share (%) of gates at which the reflectivity gradient along the ray
     changes sign with jumps of at least ``spin_threshold`` dB on both sides,
-    the "spin change" of Steiner and Smith (2002), large for clutter.
+    the "spin change" of Steiner and Smith (2002) [4], large for clutter
+    (definition and 2 dB threshold not checked against the paper). The
+    corners and the weight are radarx's own.
 
 Each membership is a trapezoid ``(a, b, c, d)``: 0 below ``a`` and above
 ``d``, 1 between ``b`` and ``c``, linear in between (``limits``). Features of
@@ -71,30 +89,28 @@ is the fallback.
 
 References
 ----------
-Gourley, J. J., P. Tabary, and J. Parent du Chatelet, 2007: A fuzzy logic
-algorithm for the separation of precipitating from nonprecipitating echoes
-using polarimetric radar observations. *J. Atmos. Oceanic Technol.*,
-**24** (8), 1439-1451, https://doi.org/10.1175/JTECH2035.1
-
-Krause, J. M., 2016: A simple algorithm to discriminate between
-meteorological and nonmeteorological radar echoes. *J. Atmos. Oceanic
-Technol.*, **33** (9), 1875-1885, https://doi.org/10.1175/JTECH-D-15-0239.1
-
-Park, H. S., A. V. Ryzhkov, D. S. Zrnić, and K.-E. Kim, 2009: The
-hydrometeor classification algorithm for the polarimetric WSR-88D:
-Description and application to an MCS. *Wea. Forecasting*, **24** (3),
-730-748, https://doi.org/10.1175/2008WAF2222205.1
-
-Steiner, M., and J. A. Smith, 2002: Use of three-dimensional reflectivity
-structure for automated detection and removal of nonprecipitating echoes in
-radar data. *J. Atmos. Oceanic Technol.*, **19** (5), 673-686,
-https://doi.org/10.1175/1520-0426(2002)019<0673:UOTDRS>2.0.CO;2
-
-Tang, L., J. Zhang, C. Langston, J. Krause, K. Howard, and V. Lakshmanan,
-2014: A physically based precipitation-nonprecipitation radar echo
-classifier using polarimetric and environmental data in a real-time
-national system. *Wea. Forecasting*, **29** (5), 1106-1119,
-https://doi.org/10.1175/WAF-D-13-00072.1
+.. [1] Gourley, J. J., P. Tabary, and J. Parent du Chatelet, 2007: A fuzzy
+   logic algorithm for the separation of precipitating from nonprecipitating
+   echoes using polarimetric radar observations. *J. Atmos. Oceanic
+   Technol.*, **24** (8), 1439-1451, https://doi.org/10.1175/JTECH2035.1
+.. [2] Krause, J. M., 2016: A simple algorithm to discriminate between
+   meteorological and nonmeteorological radar echoes. *J. Atmos. Oceanic
+   Technol.*, **33** (9), 1875-1885,
+   https://doi.org/10.1175/JTECH-D-15-0239.1
+.. [3] Park, H. S., A. V. Ryzhkov, D. S. Zrnić, and K.-E. Kim, 2009: The
+   hydrometeor classification algorithm for the polarimetric WSR-88D:
+   Description and application to an MCS. *Wea. Forecasting*, **24** (3),
+   730-748, https://doi.org/10.1175/2008WAF2222205.1
+.. [4] Steiner, M., and J. A. Smith, 2002: Use of three-dimensional
+   reflectivity structure for automated detection and removal of
+   nonprecipitating echoes in radar data. *J. Atmos. Oceanic Technol.*,
+   **19** (5), 673-686,
+   https://doi.org/10.1175/1520-0426(2002)019<0673:UOTDRS>2.0.CO;2
+.. [5] Tang, L., J. Zhang, C. Langston, J. Krause, K. Howard, and V.
+   Lakshmanan, 2014: A physically based precipitation-nonprecipitation radar
+   echo classifier using polarimetric and environmental data in a real-time
+   national system. *Wea. Forecasting*, **29** (5), 1106-1119,
+   https://doi.org/10.1175/WAF-D-13-00072.1
 
 .. autosummary::
    :nosignatures:
@@ -144,7 +160,15 @@ FEATURES = (
 
 _INF = np.inf
 
-#: Default trapezoid membership ``(a, b, c, d)`` of every feature.
+#: Default trapezoid membership ``(a, b, c, d)`` of every feature. These are
+#: radarx's own choices, not values of Gourley et al. (2007) or Krause (2016):
+#: the nearest paper values are Krause (2016), Fig. 2 (p. 1877): rhohv 0 at
+#: 0.75 and 1 at 0.90, SD(ZDR) 1 up to 1 dB and 0 at 2 dB, SD(PhiDP) 1 up to
+#: 10 deg and 0 at 20 deg. Only the SD(ZDR) full-membership limit (1 dB)
+#: coincides. The ``zdr`` trapezoid has no counterpart in either paper (Krause
+#: excludes the mean ZDR, p. 1880); ``dbz_texture`` and ``spin`` follow the
+#: features of Steiner and Smith (2002) with corners of radarx (not checked
+#: against the paper).
 DEFAULT_LIMITS = {
     "rhohv": (0.80, 0.95, _INF, _INF),
     "zdr": (-4.0, -2.0, 3.0, 6.0),
@@ -154,7 +178,12 @@ DEFAULT_LIMITS = {
     "spin": (-_INF, -_INF, 30.0, 60.0),
 }
 
-#: Default weight of every feature.
+#: Default weight of every feature: radarx's own choice. Krause (2016), Table 1
+#: (p. 1876), uses 1.0 for Zh, rhohv, V and SD(rhohv) and 2.0 for SD(PhiDP) and
+#: SD(ZDR); Gourley et al. (2007), Eqs. 3-4 (p. 1444), derive weights from the
+#: overlap areas 0.243, 0.203 and 0.081 of rhohv, texture(ZDR) and
+#: texture(PhiDP), i.e. 1 : 1.2 : 3.0. The 0.25 of the two Steiner and Smith
+#: (2002) features is not from any paper.
 DEFAULT_WEIGHTS = {
     "rhohv": 1.0,
     "zdr": 1.0,
@@ -669,28 +698,34 @@ def echo_mask(
         ``PHI``; ``SNRH``, ``SNR``, ``signal_to_noise_ratio``. Missing
         optional fields are left out of the classification.
     window : float, optional
-        Length (km) of the window along the ray for the features. Default 1.5.
+        Length (km) of the window along the ray for the features. Default 1.5
+        (radarx choice; Krause 2016 [2] uses nine range bins, p. 1876).
     threshold : float, optional
         Gates whose score (weighted mean membership, averaged over 3 x 3
-        gates) is at least this are meteorological. Default 0.6.
+        gates) is at least this are meteorological. Default 0.6, radarx's
+        own choice, lower than the 0.8 (warm season) and 0.7 (cold season) of
+        Krause (2016) [2] (p. 1876), whose memberships and weights differ
+        (see Notes).
     limits : dict, optional
         Trapezoid ``(a, b, c, d)`` of any of the features ``"rhohv"``,
         ``"zdr"`` (dB), ``"zdr_texture"`` (dB), ``"phidp_texture"``
         (degrees), ``"dbz_texture"`` (dB²), ``"spin"`` (%): membership 0
         below ``a`` and above ``d``, 1 between ``b`` and ``c``. Defaults in
-        :data:`radarx.retrieve.qc.DEFAULT_LIMITS`.
+        :data:`radarx.retrieve.qc.DEFAULT_LIMITS` (radarx's own, see Notes).
     weights : dict, optional
         Weights of the features (0 drops one). Defaults in
-        :data:`radarx.retrieve.qc.DEFAULT_WEIGHTS`.
+        :data:`radarx.retrieve.qc.DEFAULT_WEIGHTS` (radarx's own, see Notes).
     spin_threshold : float, optional
         Smallest reflectivity jump (dB) counted in the spin feature.
-        Default 2.
+        Default 2 (radarx choice; not checked against Steiner and Smith
+        2002 [4]).
     min_size : int, optional
         Connected meteorological regions with fewer gates are speckle.
-        Default 10; 1 or less disables the filter.
+        Default 10 (radarx choice, not from the cited papers); 1 or less
+        disables the filter.
     snr_min : float, optional
         Gates with an SNR below this (dB) have no echo, if an SNR field is
-        used. Default 3.
+        used. Default 3 (radarx choice).
     nodata : {"auto", "nexrad"}, dict or None, optional
         No-data floors: values at or below them are flags, not data.
         ``"auto"`` (default) uses the NEXRAD Level II codes as decoded by
@@ -727,34 +762,132 @@ def echo_mask(
     ImportError
         If ``engine="compiled"`` and the compiled kernel is not available.
 
+    Notes
+    -----
+    The scheme is not an implementation of Gourley et al. (2007) [1] or
+    Krause (2016) [2]. Only the form of the weighted-mean aggregation
+    (Krause 2016 [2], p. 1876) and the use of the variability of
+    :math:`Z_{DR}` and :math:`\\Phi_{DP}` as indicators of non-meteorological
+    echo come from them. Which numbers are theirs and which are not (the
+    paper values are read from the figures and tables on the pages given;
+    ``-`` means not used):
+
+    .. list-table::
+       :header-rows: 1
+       :widths: 14 20 9 33 24
+
+       * - feature
+         - radarx ``DEFAULT_LIMITS`` ``(a, b, c, d)``
+         - radarx weight
+         - Krause (2016) [2], Fig. 2 (p. 1877), weights in Table 1 (p. 1876)
+         - Gourley et al. (2007) [1]
+       * - ``rhohv``
+         - 0.80, 0.95, inf, inf
+         - 1.0
+         - 0 at 0.75, 1 at 0.90; weight 1.0
+         - Gaussian-kernel density estimate (Fig. 3, Eq. 2), no trapezoid
+       * - ``zdr``
+         - -4, -2, 3, 6 dB
+         - 1.0
+         - not used (mean :math:`Z_{DR}` excluded, p. 1880)
+         - not used
+       * - ``zdr_texture``
+         - 1 up to 1.0 dB, 0 at 2.5 dB
+         - 1.0
+         - SD(ZDR): 1 up to 1 dB, 0 at 2 dB; weight 2.0
+         - texture of ZDR (Eq. 1), density estimate
+       * - ``phidp_texture``
+         - 1 up to 12 deg, 0 at 30 deg
+         - 1.0
+         - SD(PhiDP): 1 up to 10 deg, 0 at 20 deg; weight 2.0
+         - texture of PhiDP (Eq. 1), density estimate
+       * - ``dbz_texture``
+         - 1 up to 30 dB2, 0 at 70 dB2
+         - 0.25
+         - not used
+         - not used
+       * - ``spin``
+         - 1 up to 30 %, 0 at 60 %
+         - 0.25
+         - not used
+         - not used
+       * - not computed by radarx
+         - -
+         - -
+         - Z_h: 0 at 10, 1 at 30 dBZ (weight 1.0); V: 1 for abs(V) >= 1.5 m/s,
+           0 for abs(V) <= 1.0 m/s (weight 1.0); SD(rhohv): 1 up to 0.03, 0 at
+           0.04 (weight 1.0)
+         - pulse-to-pulse variability of Z and radial velocity only as
+           suppression thresholds (Table 1, p. 1446)
+       * - threshold
+         - 0.6 (on the 3 x 3 averaged score)
+         - -
+         - 0.8 (warm season), 0.7 (cold season), p. 1876
+         - none: the class with the largest aggregation value wins (p. 1445)
+
+    The only corner shared with a paper is the full membership of SD(ZDR)
+    up to 1 dB (Krause 2016 [2]). All other corners, all weights, the
+    threshold, the 1.5 km window (Krause: nine range bins), the
+    3 x 3 averaging of the score, the ``min_size`` speckle filter, ``snr_min``
+    (3 dB), ``spin_threshold`` (2 dB), the NEXRAD no-data floors and the
+    reflection of rhohv above 1 are radarx's own choices and are not taken
+    from these papers. They have not been tuned against the published
+    algorithms or a labelled data set.
+
+    Behavioural differences from the two papers (documented, not changed
+    here; see the open issues on the weights, the threshold, the missing
+    rules and the aggregation):
+
+    - Weights. All polarimetric features have weight 1.0, the same as
+      rhohv. Krause (2016) gives SD(PhiDP) and SD(ZDR) twice the weight of
+      rhohv because they discriminate best (Table 1, p. 1876), and Gourley
+      et al. (2007) derive weights from the overlap areas 0.243 (rhohv),
+      0.203 (texture of ZDR) and 0.081 (texture of PhiDP) that make the
+      PhiDP texture count three times rhohv (Eq. 3 and 4, p. 1444).
+    - *Threshold.* 0.6 is more permissive than either of the 0.8 and 0.7 of
+      Krause (2016), who needed 0.8 to limit false detections owing to
+      birds (p. 1882). Gourley et al. (2007) do not use a threshold at all.
+    - *Missing rules.* Krause's post-processing rules are not applied: gates
+      with :math:`|Z_{DR}| > 4.5` dB or :math:`\\rho_{hv} < 0.65` are
+      non-meteorological, and gates with :math:`Z_h > 11` dBZ at 3 km height
+      in the previous volume are meteorological (pp. 1875-1876). Radial
+      velocity, :math:`Z_h` and SD(:math:`\\rho_{hv}`) are not features, so
+      stationary clutter is not penalised by its velocity. A mean
+      :math:`Z_{DR}` of 5 dB still has a membership of 0.33 here.
+    - *Texture and aggregation of Gourley et al.* The texture is computed
+      along the ray over ``window`` instead of as the root-mean-square
+      difference to the 3 x 3 neighbours with the range correction of their
+      Eq. 1; the memberships are trapezoids instead of density estimates;
+      there is one meteorological score, not the maximum over the classes
+      precipitation, ground clutter and clear air (their Eq. 3); their
+      suppression thresholds (Table 1, p. 1446) and their despeckling of
+      precipitation pixels on a 1 km grid (p. 1446) have no counterpart.
+
     References
     ----------
-    Gourley, J. J., P. Tabary, and J. Parent du Chatelet, 2007: A fuzzy
-    logic algorithm for the separation of precipitating from
-    nonprecipitating echoes using polarimetric radar observations. *J.
-    Atmos. Oceanic Technol.*, **24** (8), 1439-1451,
-    https://doi.org/10.1175/JTECH2035.1
-
-    Krause, J. M., 2016: A simple algorithm to discriminate between
-    meteorological and nonmeteorological radar echoes. *J. Atmos. Oceanic
-    Technol.*, **33** (9), 1875-1885, https://doi.org/10.1175/JTECH-D-15-0239.1
-
-    Park, H. S., A. V. Ryzhkov, D. S. Zrnić, and K.-E. Kim, 2009: The
-    hydrometeor classification algorithm for the polarimetric WSR-88D:
-    Description and application to an MCS. *Wea. Forecasting*, **24** (3),
-    730-748, https://doi.org/10.1175/2008WAF2222205.1
-
-    Steiner, M., and J. A. Smith, 2002: Use of three-dimensional
-    reflectivity structure for automated detection and removal of
-    nonprecipitating echoes in radar data. *J. Atmos. Oceanic Technol.*,
-    **19** (5), 673-686,
-    https://doi.org/10.1175/1520-0426(2002)019<0673:UOTDRS>2.0.CO;2
-
-    Tang, L., J. Zhang, C. Langston, J. Krause, K. Howard, and V.
-    Lakshmanan, 2014: A physically based precipitation-nonprecipitation
-    radar echo classifier using polarimetric and environmental data in a
-    real-time national system. *Wea. Forecasting*, **29** (5), 1106-1119,
-    https://doi.org/10.1175/WAF-D-13-00072.1
+    .. [1] Gourley, J. J., P. Tabary, and J. Parent du Chatelet, 2007: A
+       fuzzy logic algorithm for the separation of precipitating from
+       nonprecipitating echoes using polarimetric radar observations. *J.
+       Atmos. Oceanic Technol.*, **24** (8), 1439-1451,
+       https://doi.org/10.1175/JTECH2035.1
+    .. [2] Krause, J. M., 2016: A simple algorithm to discriminate between
+       meteorological and nonmeteorological radar echoes. *J. Atmos. Oceanic
+       Technol.*, **33** (9), 1875-1885,
+       https://doi.org/10.1175/JTECH-D-15-0239.1
+    .. [3] Park, H. S., A. V. Ryzhkov, D. S. Zrnić, and K.-E. Kim, 2009: The
+       hydrometeor classification algorithm for the polarimetric WSR-88D:
+       Description and application to an MCS. *Wea. Forecasting*, **24** (3),
+       730-748, https://doi.org/10.1175/2008WAF2222205.1
+    .. [4] Steiner, M., and J. A. Smith, 2002: Use of three-dimensional
+       reflectivity structure for automated detection and removal of
+       nonprecipitating echoes in radar data. *J. Atmos. Oceanic Technol.*,
+       **19** (5), 673-686,
+       https://doi.org/10.1175/1520-0426(2002)019<0673:UOTDRS>2.0.CO;2
+    .. [5] Tang, L., J. Zhang, C. Langston, J. Krause, K. Howard, and V.
+       Lakshmanan, 2014: A physically based precipitation-nonprecipitation
+       radar echo classifier using polarimetric and environmental data in a
+       real-time national system. *Wea. Forecasting*, **29** (5), 1106-1119,
+       https://doi.org/10.1175/WAF-D-13-00072.1
 
     Examples
     --------
@@ -886,6 +1019,14 @@ def apply_mask(obj, mask=None, fields=None, *, nodata="auto", **kwargs):
     -------
     xarray.Dataset or xarray.DataTree
         A copy of ``obj`` with the masked fields (attributes kept).
+
+    References
+    ----------
+    No published method is implemented here: the function applies the mask
+    of :func:`echo_mask`, whose Notes and References state how that
+    classification relates to Gourley et al. (2007), Krause (2016), Park et
+    al. (2009) and Steiner and Smith (2002). The NEXRAD no-data codes it
+    masks are those decoded by xradar, not values from a paper.
 
     Examples
     --------
