@@ -288,15 +288,14 @@ def fall_speed(
     1973). The factor :math:`(\\rho_0 / \\rho)^{0.4}` corrects for the lower
     air density aloft (Foote and du Toit 1969 [2]_).
 
-    Verified pointers. The rain relation with its density factor is given in
+    Pointers. The rain relation with its density factor is given in
     Doviak and Zrnić (1993) [3]_, Eq. 9.2 (p. 289) as the empirical expression
     of Atlas et al. (1973); the same book gives the density factor
     :math:`(\\rho_0/\\rho)^{0.4}` in Eq. 8.5 (p. 217) and notes that Eq. 9.2
     holds to within about 1 m s-1 for liquid water but can be wrong by several
     m s-1 in hail. The snow coefficients (0.817, 0.063) and the table/equation
-    of Atlas et al. (1973) they come from were not checked against that paper
-    (not on disk). The cap of the reflectivity at 70 dBZ before applying the
-    relations and the default reference density of 1.2 kg m-3 are radarx
+    of Atlas et al. (1973) they come from are not checked against that paper.
+    The cap of the reflectivity at 70 dBZ before applying the relations and the default reference density of 1.2 kg m-3 are radarx
     choices.
 
     Parameters
@@ -527,7 +526,7 @@ def multi_doppler_input(
     -----
     Moving the radars to a common time with ``time`` and ``motion`` is the
     frame-of-reference correction of Gal-Chen (1982) [1]_ (equations not
-    checked; it assumes a steadily translating pattern, see
+    checked against the paper; it assumes a steadily translating pattern, see
     :func:`radarx.retrieve.advect`). Interpolating the radial velocity from
     the polar grid can create gridding artifacts that affect the retrieved
     vertical velocity (Collis et al. 2010 [2]_; see :func:`multi_doppler`).
@@ -1269,9 +1268,9 @@ def multi_doppler(
     (2009) [2]_ and Potvin et al. (2012) [3]_ describe a cost function of the
     discrepancies between observed and analysed radial winds, errors in the
     anelastic mass conservation equation, errors in the anelastic vertical
-    vorticity equation and spatial smoothness constraints, as used here. The
-    papers' equations were not available on disk and were not checked term by
-    term: the forms of :math:`J_o`, :math:`J_m`, :math:`J_s`, :math:`J_b` and
+    vorticity equation and spatial smoothness constraints, as used here. Their
+    equations are not checked term by term. The forms of :math:`J_o`,
+    :math:`J_m`, :math:`J_s`, :math:`J_b` and
     :math:`J_v` above, the scaling by :math:`h`, :math:`h^2/U` and the grid
     spacing (so that the weights are dimensionless), the choice of second
     differences for the smoothness term, the background term :math:`J_b`
@@ -1306,8 +1305,8 @@ def multi_doppler(
     terrain near sea level as in grids built with ``z = np.arange(500, 12e3,
     500)``, the true ``w`` there is generally not zero and the anelastic
     integration carries the error up the whole column as a column-wide
-    offset of the order of the true ``w`` at ``z[0]``. In a test described in
-    issue #171 (two radars, analytic anelastic flow ``u = 5 + a x``, ``v = 2 +
+    offset of the order of the true ``w`` at ``z[0]``. In a test
+    (two radars, analytic anelastic flow ``u = 5 + a x``, ``v = 2 +
     a y``, ``w = -2 a H (exp(z/H) - 1)``, ``a = 2e-4 s-1``, ``H = 10 km``, no
     noise) the root-mean-square error of ``w`` was 0.05 m s-1 for levels
     0, 500, ..., 10000 m but 0.37 m s-1 (mean error 0.35 m s-1) for levels 500,
@@ -1315,8 +1314,8 @@ def multi_doppler(
     ``z[0]`` at the terrain height, or use ``w_boundary=None`` or
     ``"top"``/``"echo_top"`` and judge ``w`` accordingly. The statement that
     the condition belongs at the ground is the standard one for
-    dual-Doppler analyses; it was not checked against the text of Gao et
-    al. (1999) or Potvin et al. (2012) (not on disk). There is no terrain
+    dual-Doppler analyses; it is not checked against the text of Gao et
+    al. (1999) or Potvin et al. (2012). There is no terrain
     following option and no ``w_bottom`` value yet.
 
     References

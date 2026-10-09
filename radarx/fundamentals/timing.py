@@ -6,9 +6,7 @@ Functions for radar timing-related calculations: PRF, duty cycle, blind range, e
 
 Sources: duty cycle ``f = tau * PRF`` from Rinehart [2]_ (Chapter 13,
 p. 193); unambiguous range and velocity from Doviak and Zrnic [1]_,
-Eqs. (3.40a) and (3.40b), pp. 60-61. The previous pointers to "Doviak and
-Zrnic (1993), Eq. 3.3.1-3.3.4, Section 3.3, Eq. 6.3.5" do not exist in the
-2nd edition (1993) on disk and were removed.
+Eqs. (3.40a) and (3.40b), pp. 60-61.
 
 References
 ----------

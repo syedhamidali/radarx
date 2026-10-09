@@ -190,9 +190,9 @@ def pulse_duration_from_length(pulse_length):
 
     ``tau = 2 L / c``. Note ``pulse_length`` is interpreted as the
     range depth ``c tau / 2`` (the round-trip convention of
-    :func:`pulse_length_from_duration`), NOT the pulse length in space
+    :func:`pulse_length_from_duration`), not the pulse length in space
     ``c tau`` (the thickness of the transmitted shell, Section 3.1 of [1]_,
-    p. 34). Definition, no equation number claimed.
+    p. 34). Definition.
 
     Parameters
     ----------
@@ -226,9 +226,9 @@ def pulse_length_from_duration(pulse_duration):
 
     Returns ``c tau / 2``, the range depth of a pulse (the range resolution
     of a rectangular pulse in the infinite-bandwidth limit, Section 4.4.1 of
-    [1]_, p. 75), NOT the pulse length in space ``c tau``. Feeding this into
+    [1]_, p. 75), not the pulse length in space ``c tau``. Feeding this into
     :func:`radarx.fundamentals.geometry.sample_volume_gaussian` therefore
-    yields half of the effective volume (issue #173).
+    yields half of the effective volume.
 
     Parameters
     ----------
@@ -262,12 +262,10 @@ def radar_const(power_t, gain, tau, wavelength, bw_h, bw_v, aloss, rloss):
     Gaussian circular beam, generalized here to ``theta phi``) and
     ``eta = pi**5 |K|**2 Z / lambda**4``, Eq. (4.31), of [1]_ gives
     ``P_r = [pi**3 c tau P_t G**2 theta phi / (1024 ln 2 lambda**2)]
-    |K|**2 Z / r**2`` (``1024 = 64 * 16``; the algebra was checked, the
-    printed Eq. 4.34/4.35 of [1]_ were not legible in the text extraction).
-    The Gaussian-beam, ``ln 2`` form originates from [2]_ (not checked here).
-    The code was previously described as "adapted from CSU Radar Meteorology
-    tools (AT741 notes)"; the lecture notes are not a citable source and no
-    code was taken from them.
+    |K|**2 Z / r**2`` (``1024 = 64 * 16``). This is derived here from Eqs.
+    (3.24), (4.14) and (4.31); the equation numbers of the final form in
+    [1]_ (Eqs. 4.34, 4.35) are not cited. The Gaussian-beam ``ln 2`` form is
+    that of [2]_ (content not checked against the original paper).
 
     Units: with ``c`` in m/s, ``tau`` in s and ``P_t`` in W the result has the
     unit W/m (not unitless) and gives ``P_r`` in W for ``Z`` in m^3
@@ -277,11 +275,11 @@ def radar_const(power_t, gain, tau, wavelength, bw_h, bw_v, aloss, rloss):
     path attenuation are not included unless entered through ``aloss`` and
     ``rloss``.
 
-    Sign convention of the losses: ``aloss`` and ``rloss`` MULTIPLY the
-    constant by ``10**(loss/10)``. A loss that reduces the received power must
-    therefore be entered as NEGATIVE dB (a positive value raises the
+    Sign convention of the losses: ``aloss`` and ``rloss`` multiply the
+    constant by ``10**(loss/10)``. A loss that reduces the received power
+    must therefore be entered as negative dB (a positive value raises the
     constant). In [1]_ all loss factors (``l``, ``l_r``) are >= 1 and sit in
-    the denominator of the radar equation (issue #173).
+    the denominator of the radar equation.
 
     Parameters
     ----------

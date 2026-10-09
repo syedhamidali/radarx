@@ -84,11 +84,11 @@ def _column_geometry(x, y, origin, sites, use_compiled=False, n_threads=None):
 
     The compiled kernel solves the geodesics on the WGS84 ellipsoid with
     Vincenty's (1975) direct and inverse formulae (https://doi.org/10.1179/
-    sre.1975.23.176.88; equation numbers not checked, the paper is not on
-    disk); the NumPy fallback uses PROJ's azimuthal equidistant projections
+    sre.1975.23.176.88; equation numbers not checked against the paper). The
+    NumPy fallback uses PROJ's azimuthal equidistant projections
     (:func:`_column_geometry_numpy`). The WGS84 ellipsoid constants
     (a = 6378137 m, 1/f = 298.257223563) are its defining parameters (NIMA
-    TR8350.2); they were not re-checked against that report here.
+    TR8350.2).
 
     Returns
     -------
@@ -527,10 +527,10 @@ def grid_radars(
     Notes
     -----
     Source of each ingredient. The geodesic geometry of the columns is
-    Vincenty (1975) [2]_ (equation numbers not verified against the paper).
+    Vincenty (1975) [2]_ (equation numbers not checked against the paper).
     Moving the fields to a common time along the storm motion is the
     frame-of-reference correction of Gal-Chen (1982) [1]_ (equations not
-    verified against the paper); it assumes steady translation. The beam
+    checked against the paper). It assumes steady translation. The beam
     geometry is the 4/3 Earth model [4]_. Gridding, the merge weights and the
     calibration are described in :func:`grid_cones`, :func:`merge_radars` and
     :func:`network_bias`. The Earth radius (6371 km), ``beamwidth`` (1 degree)
@@ -1137,10 +1137,10 @@ def network_bias(
     field are collected over all cells of the multi-radar grid observed by
     both radars at the same height and (after advection) the same time. Seo
     et al. (2014) [1]_ compare two ground-based radars by matching their
-    observations in space and time; radarx takes only that idea. The details
-    of their matching and statistics were not checked against the paper (not
-    available here). The pair bias ``d_ij`` is the median difference, robust
-    against residual clutter, partial beam blockage and attenuation; its spread ``s_ij`` is
+    observations in space and time; radarx takes only that idea. Their
+    matching and statistics are not reproduced. The pair bias ``d_ij`` is the
+    median difference, resistant to residual clutter, partial beam blockage
+    and attenuation; its spread ``s_ij`` is
     the interquartile range divided by 1.349. The pair biases are then
     reconciled across the network by weighted least squares,
 

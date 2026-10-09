@@ -14,11 +14,6 @@ Name clashes: :func:`doppler_frequency_shift` here has the signature
 after ``doppler``, ``radarx.fundamentals.doppler_frequency_shift`` is the
 function of this module. Use the explicit module path to be sure.
 
-The earlier pointers to "Rinehart (2004), Eq. 2.1 / 2.6" and "Doviak and
-Zrnic (1993), Eq. 6.2.1 / Section 6.3.1 / Eq. 3.1.12" could not be matched to
-the books on disk (2nd edition 1991 and 2nd edition 1993) and were replaced by
-the equations found there.
-
 References
 ----------
 .. [1] Doviak, R. J., and D. S. Zrnic, 1993: *Doppler Radar and Weather

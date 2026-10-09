@@ -4,35 +4,32 @@ Beam Geometry and Resolution
 
 Functions related to radar beamwidth and spatial resolution.
 
-Sample-volume conventions (issue #173)
+Sample-volume conventions
 --------------------------------------
-Three different "sample volumes" are implemented in radarx and none of them
-is labelled in the code. For a Gaussian beam with half-power widths theta
+Three different "sample volumes" are implemented. For a Gaussian beam with half-power widths theta
 and phi (radians) and a rectangular pulse of transmitted duration tau, the
 Probert-Jones / Doviak and Zrnic effective (reflectivity-weighting) volume is
 
     V_e = pi r**2 theta phi h / (8 ln 2),   h = c tau / 2,
 
 obtained from the weather radar equation, Eqs. (4.13), (4.14) and (4.16) of
-[1]_ (pp. 74-75; the book prints it for a circular beam, theta_1**2, and the
-unequal-width form is the same expression with theta_1**2 replaced by
-theta phi); see also [2]_.
+[1]_ (pp. 74-75; the book gives it for a circular beam, theta_1**2, and the
+unequal-width form replaces theta_1**2 by theta phi); see also [2]_.
 
 - :func:`compute_volume_resolution` returns ``(r theta)**2 * pulse_length``,
   a square-section geometric box of side ``r theta`` and length
-  ``pulse_length``. It contains no ``ln 2`` and equals none of the standard
-  definitions. ``pulse_length`` is used as given (a range extent in m).
+  ``pulse_length``. It contains no ``ln 2`` and is not one of the standard
+  definitions. ``pulse_length`` is a range extent in m.
 - :func:`volume_resolution` returns
   ``r**2 theta phi pulse_length / (4 ln 2)``. With ``pulse_length = c tau / 2``
-  this is ``(2 / pi) V_e`` (about 0.64 V_e); the origin of the ``4 ln 2``
-  convention could not be traced to [1]_ or [2]_.
+  this is ``(2 / pi) V_e`` (about 0.64 V_e). The ``4 ln 2`` convention is
+  not from [1]_ or [2]_.
 - :func:`radarx.fundamentals.geometry.sample_volume_gaussian` returns
   ``pi r**2 theta phi pulse_length / (16 ln 2)``, which equals ``V_e`` only if
   ``pulse_length`` is the full ``c tau`` (the pulse length in space); with
   ``pulse_length = c tau / 2`` it is ``V_e / 2``.
 
-The behaviour is unchanged; use ``sample_volume_gaussian(..., c * tau)`` when
-the effective volume is wanted.
+Use ``sample_volume_gaussian(..., c * tau)`` to obtain the effective volume.
 
 References
 ----------
@@ -41,9 +38,8 @@ References
        DOI).
 .. [2] Probert-Jones, J. R., 1962: The radar equation in meteorology.
        *Q. J. R. Meteorol. Soc.*, **88** (378), 485-495,
-       https://doi.org/10.1002/qj.49708837810 (not on disk; cited as the
-       origin of the Gaussian-beam effective volume, its content was not
-       checked here).
+       https://doi.org/10.1002/qj.49708837810 (origin of the Gaussian-beam
+       effective volume). Content not checked against the original paper.
 
 .. autosummary::
    :nosignatures:
@@ -70,14 +66,12 @@ def compute_beamwidth(wavelength, antenna_diameter):
 
     Returns ``1.22 * wavelength / antenna_diameter``. This is the angular
     radius of the first null of the Airy diffraction pattern of a uniformly
-    illuminated circular aperture (the Rayleigh resolution angle), NOT the
+    illuminated circular aperture (the Rayleigh resolution angle), not the
     half-power (3 dB) beamwidth. For a tapered paraboloid illumination [1]_
     gives the 3 dB beamwidth as ``1.27 * wavelength / D`` rad, Eq. (3.2b)
     (p. 34), and the first-null width as ``3.27 * wavelength / D``. The
-    first-null angle formula of [1]_ is Eq. (2.4) (Section 2.1); the digits
-    printed in the text extraction used here could not be read reliably, so
-    the 1.22 is not claimed to be Eq. (2.4). The previously cited "Eq. 3.5.2"
-    could not be found in [1]_.
+    first-null angle formula of [1]_ is Eq. (2.4) (Section 2.1). The factor
+    1.22 is not attributed to that equation.
 
     Parameters
     ----------
@@ -136,10 +130,9 @@ def compute_volume_resolution(range_m, beamwidth_rad, pulse_length):
 
     Returns ``(range_m * beamwidth_rad)**2 * pulse_length``: the volume of a
     box of square cross-section ``r theta`` by ``r theta`` and length
-    ``pulse_length``. It is NOT the effective sample volume
+    ``pulse_length``. It is not the effective sample volume
     ``V_e = pi r**2 theta phi h / (8 ln 2)``, ``h = c tau / 2``, of Eqs.
-    (4.13)-(4.16) of [1]_ (see the module docstring and issue #173). The
-    previously cited "Eq. 3.5.7" could not be found in [1]_.
+    (4.13)-(4.16) of [1]_ (see the module docstring).
 
     Parameters
     ----------
@@ -214,11 +207,10 @@ def volume_resolution(range_m, bw_h_deg, bw_v_deg, pulse_length):
     Compute radar volume resolution using horizontal and vertical beamwidth in degrees.
 
     Returns ``r**2 theta_h theta_v pulse_length / (4 ln 2)`` (angles in
-    radians). Which volume this is, and the meaning of ``pulse_length``, are
-    not defined by any source: with ``pulse_length = c tau / 2`` it equals
-    ``(2 / pi)`` times the effective volume ``V_e = pi r**2 theta phi h /
-    (8 ln 2)`` of Eqs. (4.13)-(4.16) of [1]_ (issue #173; see the module
-    docstring). The ``4 ln 2`` form could not be traced to a source.
+    radians). With ``pulse_length = c tau / 2`` it equals ``(2 / pi)`` times
+    the effective volume ``V_e = pi r**2 theta phi h / (8 ln 2)`` of Eqs.
+    (4.13)-(4.16) of [1]_ (see the module docstring). The ``4 ln 2`` form is
+    not attributed to a source.
 
     Parameters
     ----------

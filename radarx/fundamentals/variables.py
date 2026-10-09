@@ -126,11 +126,11 @@ def linear_depolarization_ratio(z_h, z_v):
 
     Returns ``10 log10(z_v / z_h)``. This is ``-ZDR``, not the LDR of [1]_:
     Eq. (3.169) defines ``LDR_vh = 10 log10(eta_vh / eta_hh)`` as the ratio
-    of the CROSS-polar return (transmit H, receive V) to the co-polar
+    of the cross-polar return (transmit H, receive V) to the co-polar
     return (Eq. 2.55 for a single particle). The result equals ``LDR_vh``
     only if ``z_v`` is the cross-polar reflectivity ``eta_vh`` and ``z_h``
     the co-polar ``eta_hh``; with horizontal and vertical co-polar
-    reflectivities as named, it is simply ``-ZDR``. Behaviour unchanged.
+    reflectivities as named, it is simply ``-ZDR``.
 
     Parameters
     ----------

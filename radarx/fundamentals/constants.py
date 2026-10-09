@@ -21,9 +21,8 @@ References
 ----------
 .. [1] BIPM, 2019: *The International System of Units (SI)*, 9th ed.
        Bureau International des Poids et Mesures, Sevres,
-       https://www.bipm.org/en/publications/si-brochure (document, no DOI;
-       not checked against Crossref). Defines c exactly (metre, 1983) and k
-       exactly (2019 revision).
+       https://www.bipm.org/en/publications/si-brochure (document, no DOI).
+       Defines c (metre, 1983) and k (2019 revision) by exact values.
 .. [2] Newell, D. B., F. Cabiati, J. Fischer, K. Fujii, S. G. Karshenboim,
        H. S. Margolis, E. de Mirandes, P. J. Mohr, F. Nez, K. Pachucki,
        T. J. Quinn, B. N. Taylor, M. Wang, B. M. Wood, and Z. Zhang, 2018:
@@ -76,7 +75,7 @@ C = 299_792_458  # [m/s]
 # Radar band central wavelengths: radarx choice, nominal rounded values (S
 # 3 GHz, C 6 GHz, X 10 GHz, K 20 GHz, Ka 35 GHz, W 94 GHz), not the exact
 # wavelengths of any particular radar and not taken from a publication. The
-# band letter limits of IEEE Std 521 were not checked. "K" at 1.5 cm is
+# band letter limits of IEEE Std 521 are not used here. "K" at 1.5 cm is
 # ambiguous between the K, Ku and Ka sub-bands.
 RADAR_BANDS = {
     "S": 0.10,  # [m] ~10 cm
@@ -122,7 +121,7 @@ EARTH_RADIUS = 6371000.0  # [m]
 EFFECTIVE_RADIUS_4_3 = EARTH_RADIUS * 4 / 3  # [m]
 
 # Dielectric factors |K|^2 = |(eps - 1)/(eps + 2)|^2 of the Rayleigh
-# backscatter law (NOT dielectric constants; the old comment was wrong).
+# backscatter law (not dielectric constants).
 # Water 0.93 and solid ice 0.176 (density 920 kg/m3): Fabry (2015), Table 3.1,
 # p. 34 [5]. Bringi and Chandrasekar (2001), Section 7.4, text after
 # Eq. (7.82) [6]: |K_w|^2 ~ 0.93 and |K_ice|^2 ~ 0.17 at 3 GHz and 0 C.
@@ -143,6 +142,6 @@ DBZ_TO_Z_FACTOR = __import__("numpy").log(10) / 10.0  # ~0.2303
 # Standard system temperature for thermal noise calculations: T0 = 290 K.
 # D&Z (1993, p. 56) set the temperatures of radome, line and T/R switch to
 # 290 K "which approximates the temperature of the environment" [3]. The
-# IEEE standard reference temperature T0 = 290 K was not checked against a
-# standard here.
+# conventional standard reference temperature T0 = 290 K is not cited to a
+# standard.
 T_STANDARD = 290.0  # [K]

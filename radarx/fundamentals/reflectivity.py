@@ -8,8 +8,8 @@ meteorological principles and are commonly used in radar meteorology.
 
 The Marshall-Palmer Z-R pair (Z = 200 R^1.6) is attributed to Marshall and
 Palmer [1]_ by Rinehart [2]_ and Bringi and Chandrasekar [3]_; the paper [1]_
-itself is not on disk and the pair was not checked against it.
-:func:`dbz_attenuation_correction` is NOT a published method (see its
+itself was not consulted for the pair.
+:func:`dbz_attenuation_correction` is not a published method (see its
 docstring).
 
 References
@@ -51,8 +51,8 @@ def z_to_r_marshall_palmer(dbz):
     ``R = (Z / 200)**(1 / 1.6)``. The relation is attributed to Marshall and
     Palmer [1]_ and described as "the most commonly used Z-R relationship" in
     Chapter 9 of [2]_; [3]_ Eq. (8.8b) gives the equivalent
-    ``R = 0.0365 Z**0.625`` (200**-0.625 = 0.0365). The constants were
-    checked against [2]_ and [3]_ but not against the original paper [1]_.
+    ``R = 0.0365 Z**0.625`` (200**-0.625 = 0.0365). The constants
+    follow [2]_ and [3]_; not checked against the original paper [1]_.
     The relation applies to rain only; no hail cap is applied.
 
     Parameters
@@ -128,7 +128,8 @@ def dbz_attenuation_correction(dbz, alpha=0.01, beta=0.85):
     the correction depends only on the local value, not on the path-integrated
     attenuation along the ray, so it is not a physically based correction.
     For a range-recursive method see Hitschfeld and Bordan [1]_ (not
-    implemented here; cited only as the classic reference, not checked).
+    implemented here; cited as the classic reference, content not checked
+    against the original paper).
 
     Parameters
     ----------

@@ -57,11 +57,11 @@ def backscatter_cross_section(diameter, wavelength, dielectric=0.93):
     backscatter cross section is ``pi**5 |K|**2 D**6 / lambda**4`` with
     ``|K|**2 = |(eps - 1)/(eps + 2)|**2`` (about 0.93 for water), Eq. (1.51b)
     of [1]_ (p. 17; Eq. 3.6 of [2]_, p. 35-36). Here ``dielectric`` is
-    SQUARED, so the function equals the textbook value only if the argument is
+    squared, so the function equals the textbook value only if the argument is
     ``|K|`` (about 0.96 for water). The default 0.93 and the description
     "dielectric factor" are the literature value of ``|K|**2`` [2]_, so
     with the default the result is 0.93 times the textbook cross section
-    (about 0.3 dB low). Known inconsistency, behaviour unchanged.
+    (about 0.3 dB low).
 
     Parameters
     ----------
@@ -223,8 +223,7 @@ def absorption_coefficient(radius, wavelength, refractive_index):
     ``Qa = 4 x Im(K)``, clipped at zero, with ``x = 2 pi a / lambda``. This is
     the absorption cross section ``sigma_a = 9 k0 V eps'' / |eps + 2|**2``,
     Eq. (1.59) of [1]_ (consistent with Eq. 2.134c), divided by ``pi a**2``
-    (derivation checked algebraically; the ``4 x Im(K)`` form is not printed
-    in [1]_). Requires the ``m = n + j k`` convention (``Im(K) > 0``), the
+    (the ``4 x Im(K)`` form is derived here and is not printed in [1]_). Requires the ``m = n + j k`` convention (``Im(K) > 0``), the
     opposite of [1]_ (``eps = eps' - j eps''``); with ``n - j k`` the clip
     returns 0.
 

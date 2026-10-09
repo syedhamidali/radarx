@@ -96,11 +96,10 @@ inline double beam_weight(double e, const std::vector<double>& el, double beamwi
 // Vincenty, T., 1975: Direct and inverse solutions of geodesics on the
 // ellipsoid with application of nested equations. Survey Review 23(176),
 // 88-93, https://doi.org/10.1179/sre.1975.23.176.88. The series for A and B,
-// the constant C and the iteration for lambda below are that paper's; its
-// equation numbers were not checked here (paper not on disk). The convergence
-// tolerance (1e-13 rad) and the 200-iteration cap are radarx choices.
-// a and f are the defining WGS84 parameters (NIMA TR8350.2), not re-checked
-// against that report here.
+// the constant C and the iteration for lambda below are that paper's;
+// equation numbers not checked against the paper. The convergence tolerance
+// (1e-13 rad) and the 200-iteration cap are radarx choices. a and f are the
+// defining WGS84 parameters (NIMA TR8350.2).
 
 constexpr double kA = 6378137.0;
 constexpr double kF = 1.0 / 298.257223563;

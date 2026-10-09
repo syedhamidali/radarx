@@ -284,8 +284,7 @@ def grid_radar(
         The grid defaults and the three smoothing factors are radarx choices,
         not taken from Barnes (1964) or Zürcher (2023). The settings passed to
         fast-barnes-py (``max_dist=4`` and ``num_iter=4``) are radarx choices
-        too and were not checked against the recommendations of Zürcher
-        (2023).
+        too; they are not taken from Zürcher (2023).
     method : {"cone", "barnes"}, optional
         Interpolation method. Default ``"cone"``.
     n_threads : int, optional

@@ -5,9 +5,7 @@ Radar Power Calculations
 Functions for computing peak power, average power, and minimum detectable signal.
 
 Sources: average power and duty cycle follow Rinehart [1]_; the thermal noise
-power ``k T B`` follows Doviak and Zrnic [2]_. The earlier citations of "Rinehart
-(2004), Ch. 2" and "Doviak and Zrnic (1993), Eq. 3.1.12" could not be matched
-to the books on disk (2nd edition 1991 and 2nd edition 1993) and were removed.
+power ``k T B`` follows Doviak and Zrnic [2]_.
 
 References
 ----------
@@ -43,8 +41,7 @@ def compute_peak_power(voltage, impedance):
     ``P = V**2 / Z`` (Ohm's law for a constant, or rms, voltage). If
     ``voltage`` is the peak amplitude of a sinusoid the mean power over a
     cycle is ``V**2 / (2 Z)``; the function does not include that factor of
-    2. Elementary circuit relation, no radar source (the earlier "Rinehart
-    (2004), Ch. 2" pointer could not be verified).
+    2. Elementary circuit relation, no radar source.
 
     Parameters
     ----------

@@ -7,8 +7,7 @@ spherical particles in the Rayleigh limit (particle diameter much smaller than
 the wavelength).
 
 The three ``*_coefficient`` functions return cross sections in m^2, not
-dimensionless efficiencies (the docstrings used to say "unitless"; D^3/lambda
-and D^6/lambda^4 have units of m^2). The same-named functions in
+dimensionless efficiencies (D^3/lambda and D^6/lambda^4 have units of m^2). The same-named functions in
 :mod:`radarx.fundamentals.scattering` take the radius and return efficiencies,
 and :mod:`radarx.fundamentals` exports the ``scattering`` versions (they are
 imported later). Sign convention: these functions use the engineering
@@ -80,9 +79,8 @@ def absorption_coefficient(diameter, wavelength, m):
     Implements ``Qa = pi**2 * D**3 / lambda * Im(-K)`` with
     ``K = (m**2 - 1) / (m**2 + 2)``. This is the absorption cross section of
     Eq. (1.59) of [1]_, ``9 k0 V eps'' / |eps + 2|**2``, rewritten with the
-    sphere volume ``V = pi D**3 / 6`` and ``k0 = 2 pi / lambda``; the
-    equivalence was checked algebraically, it is not printed in this form in
-    the book. The result is a cross section in m^2, not a dimensionless
+    sphere volume ``V = pi D**3 / 6`` and ``k0 = 2 pi / lambda``; this form
+    is derived here and is not printed in the book. The result is a cross section in m^2, not a dimensionless
     efficiency.
 
     Parameters
@@ -117,8 +115,8 @@ def scattering_coefficient(diameter, wavelength, m):
     Implements ``Qs = 2 pi**5 D**6 |K|**2 / (3 lambda**4)``, which equals
     the total scattering cross section of Eq. (1.52) / (2.132b) of [1]_,
     ``3 k0**4 V**2 |K|**2 / (2 pi)``, with ``V = pi D**3 / 6`` and
-    ``k0 = 2 pi / lambda`` (algebraic equivalence checked, not printed in
-    this form). The result is a cross section in m^2, not a dimensionless
+    ``k0 = 2 pi / lambda`` (this form is derived here and is not printed in
+    the book). The result is a cross section in m^2, not a dimensionless
     efficiency; compare ``sigma_b = pi**5 |K|**2 D**6 / lambda**4``
     (Eq. 1.51b).
 

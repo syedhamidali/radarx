@@ -7,7 +7,7 @@ Shared helper functions for internal use across radarx.fundamentals modules.
 Unit conventions: reflectivity is converted with ``10 log10 Z`` for ``Z`` in
 mm^6 m^-3 [1]_ [2]_. Length conversions use the exact factor 1000. The
 knot conversion uses 1 kn = 1852 m/h exactly (international nautical mile;
-BIPM SI brochure [3]_, not re-checked), i.e. 0.514444... m/s, and this module
+BIPM SI brochure [3]_), i.e. 0.514444... m/s, and this module
 uses the rounded factor 0.514444 whereas :mod:`radarx.core.conversion` uses
 the rounded 1/1.943844 (the two agree to about 1e-6 relative).
 
@@ -23,7 +23,7 @@ References
 .. [3] BIPM, 2019: *The International System of Units (SI)*, 9th ed.
        Bureau International des Poids et Mesures, Sevres,
        https://www.bipm.org/en/publications/si-brochure (document, no DOI;
-       not checked against Crossref).
+       document, no DOI).
 
 .. module:: radarx.fundamentals.common
    :synopsis: Shared helper functions for unit conversion and internal use across radarx.fundamentals modules.
@@ -221,7 +221,7 @@ def knots_to_mps(knots):
     .. [1] BIPM, 2019: *The International System of Units (SI)*, 9th ed.
            Bureau International des Poids et Mesures, Sevres,
            https://www.bipm.org/en/publications/si-brochure (document, no
-           DOI; not checked against Crossref).
+           DOI).
     """
     return np.asarray(knots) * 0.514444
 
@@ -247,7 +247,7 @@ def mps_to_knots(mps):
     .. [1] BIPM, 2019: *The International System of Units (SI)*, 9th ed.
            Bureau International des Poids et Mesures, Sevres,
            https://www.bipm.org/en/publications/si-brochure (document, no
-           DOI; not checked against Crossref).
+           DOI).
     """
     return np.asarray(mps) / 0.514444
 

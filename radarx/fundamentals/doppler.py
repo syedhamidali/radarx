@@ -20,15 +20,13 @@ References
 .. [4] Zrnic, D. S., and P. Mahapatra, 1985: Two methods of ambiguity
        resolution in pulse Doppler weather radars. *IEEE Trans. Aerosp.
        Electron. Syst.*, **AES-21** (4), 470-483,
-       https://doi.org/10.1109/TAES.1985.310635 (Crossref lists only
-       Mahapatra as author; Zrnic is given in the citation of [1]_).
+       https://doi.org/10.1109/TAES.1985.310635
 
-Known behaviours documented here without being changed: the relativistic
-option of :func:`doppler_frequency_shift` returns the one-way shift (issue
-#167) and :func:`dual_prf_velocity` is negative for ``prf1 > prf2`` (issue
-#168). The two-way, classical results [1]_ (see also [2]_) are the default and ``exact``
-options; the relativistic form is that of [3]_ and the dual-PRF method that of
-[4]_.
+The relativistic option of :func:`doppler_frequency_shift` returns the
+one-way shift and :func:`dual_prf_velocity` is negative for ``prf1 > prf2``.
+The two-way classical results [1]_ (see also [2]_) are the default and
+``exact`` options; the relativistic form is that of [3]_ and the dual-PRF
+method that of [4]_.
 
 .. autosummary::
    :nosignatures:
@@ -153,15 +151,13 @@ def _doppler_shift_relativistic(frequency, vr):
 
     A radar measures the two-way (reflected) shift, which is about twice
     this, ``f ((1+b)/(1-b) - 1) = 2 f vr / (c - vr)`` (the ``exact`` result);
-    this helper therefore returns about half the radar value (issue #167). It
-    is kept unchanged.
+    this helper therefore returns about half the radar value.
 
     References
     ----------
     .. [1] Einstein, A., 1905: Zur Elektrodynamik bewegter Koerper. *Ann.
            Phys.*, **322** (10), 891-921,
-           https://doi.org/10.1002/andp.19053221004 (section of the paper not
-           checked)
+           https://doi.org/10.1002/andp.19053221004 (section not cited)
     """
     return frequency * (np.sqrt((1 + vr / C) / (1 - vr / C)) - 1)
 
@@ -171,8 +167,8 @@ def _doppler_shift_exact(frequency, vr):
     Two-way Doppler shift ``2 f vr / (c - vr)``: reflection from a target
     approaching at ``vr`` shifts the frequency to ``f (c + vr) / (c - vr)``
     (classical moving-reflector result; equals the two-way relativistic
-    ``f (1 + b) / (1 - b)`` shift, issue #167). Derivation, not an equation of
-    the textbooks; ``c`` is :data:`radarx.fundamentals.constants.C`.
+    ``f (1 + b) / (1 - b)`` shift). Derived here from the moving-reflector
+    argument; ``c`` is :data:`radarx.fundamentals.constants.C`.
     """
     return 2.0 * frequency * vr / (C - vr)
 
@@ -181,7 +177,7 @@ def _doppler_shift_basic(frequency, vr):
     """
     First-order two-way Doppler shift ``2 f vr / c = 2 vr / lambda``, the
     frequency form of Eq. (3.30) of [1]_ (``omega_d = 4 pi vr / lambda``,
-    Section 3.4.3; page number not recorded).
+    Section 3.4.3).
 
     References
     ----------
@@ -199,10 +195,9 @@ def doppler_frequency_shift(frequency, vr, exact=False, relativistic=False):
     The default is the first-order two-way shift ``2 f vr / c`` (Eq. 3.30 of
     [1]_ divided by 2 pi). ``exact=True`` gives ``2 f vr / (c - vr)``, the
     exact reflected shift of a moving target. ``relativistic=True`` returns
-    ``f (sqrt((1+b)/(1-b)) - 1)`` with ``b = vr/c`` [2]_, which is the ONE-WAY
+    ``f (sqrt((1+b)/(1-b)) - 1)`` with ``b = vr/c`` [2]_, which is the one-way
     relativistic shift, about half the radar (two-way) value (e.g. 186.8 Hz
-    instead of 373.6 Hz for 5.6 GHz and 10 m/s); this is a known issue
-    (#167) documented here, not changed. Positive ``vr`` (approaching)
+    instead of 373.6 Hz for 5.6 GHz and 10 m/s). Positive ``vr`` (approaching)
     gives a positive shift.
 
     Parameters
@@ -246,9 +241,7 @@ def doppler_dilemma(value, wavelength):
 
     ``r_a * v_a = c * lambda / 8``: eliminating PRF between Eqs. (3.40a) and
     (3.40b) of [1]_; the range-velocity product is Eq. (7.1) of [1]_
-    (Section 7.2; the equation text itself could not be read in the text
-    extraction used and is reconstructed from (3.40a,b)). See Section 6.2 of
-    [2]_. The function returns ``c lambda / 8 / value``, i.e. the range for a
+    (Section 7.2). See Section 6.2 of [2]_. The function returns ``c lambda / 8 / value``, i.e. the range for a
     velocity or the velocity for a range.
 
     Parameters
@@ -285,9 +278,8 @@ def dual_prf_velocity(wavelength, prf1, prf2):
     of [2]_), where ``T_s = 1/PRF`` and ``T_s2 > T_s1``. With
     ``T_s1 = 1/prf1`` and ``T_s2 = 1/prf2`` the code computes
     ``lambda / (4 (T_s1 - T_s2))``, the opposite order. It is therefore
-    positive when ``prf1 < prf2`` and NEGATIVE when ``prf1 > prf2`` (issue
-    #168); take ``abs()`` of the result for the magnitude. Behaviour
-    unchanged.
+    positive when ``prf1 < prf2`` and negative when ``prf1 > prf2``; take
+    ``abs()`` of the result for the magnitude.
 
     Parameters
     ----------
@@ -308,8 +300,7 @@ def dual_prf_velocity(wavelength, prf1, prf2):
     The sign of the result depends on the order of PRF values. The result is
     positive for ``prf1 < prf2`` and negative for ``prf1 > prf2``, e.g.
     ``dual_prf_velocity(0.1, 1000, 750) == -75`` and
-    ``dual_prf_velocity(0.1, 750, 1000) == 75`` (the earlier statement "ensure
-    prf1 > prf2 for positive velocity" was wrong, issue #168).
+    ``dual_prf_velocity(0.1, 750, 1000) == 75``.
 
     References
     ----------

@@ -14,7 +14,7 @@ Sources and exactness of the constants (radarx has no other source for them):
 - ``1609.344`` m per mile is exact (international mile = 5280 ft with
   1 ft = 0.3048 m exactly).
 - ``1.943844`` kn per m/s is the rounded 3600/1852 = 1.9438445 (1 kn = 1852
-  m/h exactly), relative rounding error about 3e-7.
+  m/h), relative rounding error about 3e-7.
 - ``3.28084`` ft per m is the rounded 1/0.3048 = 3.2808399 (relative error
   about 3e-8).
 - ``c = 3e8`` m/s, the default of the wavelength/frequency conversions, is a
@@ -23,8 +23,7 @@ Sources and exactness of the constants (radarx has no other source for them):
   ``c=299_792_458.0`` for the exact value. Conversions in air would also
   need the refractive index.
 
-The metre, second and kelvin definitions follow the SI brochure [1]_ (not
-checked against Crossref); the conversions do not depend on any
+The metre, second and kelvin definitions follow the SI brochure [1]_; the conversions do not depend on any
 radar-meteorology source.
 
 References

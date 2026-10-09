@@ -15,14 +15,14 @@ least squares in a window that keeps a nearly constant width in metres, its
 reading as half the vertical vorticity and half the horizontal divergence for
 a symmetric wind field, and the default window (3 range gates of 250 m deep,
 about 2500 m wide) are those of the extended abstract of Smith and Elmore
-(2004), which was checked. Not taken from it: the exact solution of the
+(2004). Not taken from it: the exact solution of the
 2 x 2 normal equations for windows that are not symmetric (Smith and Elmore
 assume symmetric windows and weights, which makes the normal equations
 diagonal), the Gaussian weights, the ``min_valid_fraction`` and the minimum of
 three valid gates, which are radarx choices; Smith and Elmore also apply a
 3 x 3 median filter first, which radarx does not. Miller et al. (2013) and
-Mahalik et al. (2019) were not available for checking, so nothing in this
-module is attributed to them beyond their use of the LLSD derivatives.
+Mahalik et al. (2019) use the LLSD derivatives; nothing else in this module
+is attributed to them.
 
 At every gate, the radial velocity of the gates in a window of fixed
 physical size is fitted by weighted least squares with the plane
@@ -350,8 +350,7 @@ def llsd(
     approximation that holds for a symmetric wind field (mesocyclone, symmetric
     downburst) and breaks down for asymmetric features such as gust fronts. For
     solid-body rotation :math:`v_\\theta = \\Omega r` one gets :math:`\\partial v /
-    \\partial s = \\Omega = \\zeta / 2`, which is elementary and not from a
-    paper.
+    \\partial s = \\Omega = \\zeta / 2`, which follows from elementary geometry.
 
     What is taken from the literature. The fitted plane, the arc coordinate
     :math:`s = r\\,\\Delta\\theta`, the weighted least-squares fit and the
@@ -362,7 +361,7 @@ def llsd(
     smallest kernel of that paper. The window was set in metres, so for other
     gate spacings the depth is not 3 gates. Miller et al. (2013) [2]_ and
     Mahalik et al. (2019) [3]_ apply and evaluate the LLSD derivatives; their
-    window sizes and weights were not checked here. The Gaussian weights (a
+    window sizes and weights are not used here. The Gaussian weights (a
     standard deviation of a quarter of the window), ``min_valid_fraction``
     (0.5) and the requirement of at least 3 valid gates are radarx choices.
     {references}

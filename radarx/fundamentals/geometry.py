@@ -4,9 +4,9 @@ Radar Geometry Calculations
 
 Functions related to beam propagation, height, and sampling volume estimation.
 
-The beam path uses the 4/3 effective Earth radius model [1]_ [2]_ (variability of the gradient: [3]_). The sample
-volume convention is discussed in :mod:`radarx.fundamentals.beam` (issue
-#173).
+The beam path uses the 4/3 effective Earth radius model [1]_ [2]_ (variability
+of the gradient: [3]_). The sample volume convention is discussed in
+:mod:`radarx.fundamentals.beam`.
 
 References
 ----------
@@ -21,8 +21,8 @@ References
        correction to variability in the vertical refractivity gradient.
        *J. Atmos. Oceanic Technol.*, **20** (6), 845-855,
        https://doi.org/10.1175/1520-0426(2003)020<0845:TSOSPW>2.0.CO;2
-       (cited for the variability of dn/dh only; not on disk, content not
-       checked).
+       (cited for the variability of dn/dh only; content not checked
+       against the original paper).
 
 .. autosummary::
    :nosignatures:
@@ -130,14 +130,14 @@ def sample_volume_gaussian(range_m, beamwidth_h_deg, beamwidth_v_deg, pulse_leng
     Compute radar sample volume assuming Gaussian beam shape.
 
     Returns ``pi r**2 theta_h theta_v L / (16 ln 2)`` with ``L`` =
-    ``pulse_length_m`` (issue #173). The effective volume of a Gaussian beam
+    ``pulse_length_m``. The effective volume of a Gaussian beam
     and rectangular pulse is ``V_e = pi r**2 theta phi h / (8 ln 2)`` with
     ``h = c tau / 2`` (Eqs. 4.13, 4.14, 4.16 of [1]_, pp. 74-75). Hence this
     function equals ``V_e`` only if ``pulse_length_m`` is the full pulse
     length in space ``c tau``; if the range depth ``c tau / 2`` is passed the
     result is ``V_e / 2``. See also [2]_ for the original Gaussian-beam
-    derivation (content not checked here). The beamwidths are the half-power
-    (3 dB, one-way) widths.
+    derivation (content not checked against the original paper). The
+    beamwidths are the half-power (3 dB, one-way) widths.
 
     Parameters
     ----------
@@ -148,7 +148,7 @@ def sample_volume_gaussian(range_m, beamwidth_h_deg, beamwidth_v_deg, pulse_leng
     beamwidth_v_deg : float
         Vertical beamwidth [degrees]
     pulse_length_m : float
-        Pulse length in space ``c * tau`` [m] (NOT the range depth
+        Pulse length in space ``c * tau`` [m] (not the range depth
         ``c * tau / 2``) for the result to equal the effective volume
 
     Returns

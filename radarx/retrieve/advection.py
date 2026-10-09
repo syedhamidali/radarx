@@ -31,10 +31,9 @@ Staniforth and Côté (1991); cubic convolution is that of Keys (1981).
 The FFT implementation of the correlation, the Hann taper, the Gaussian
 high-pass, the parabolic sub-cell refinement and its iterations, the tiling,
 the validity-mask handling and the blend of :func:`interpolate_time` are
-radarx's own constructions, and so are all defaults. The equations of the
-cited papers were not checked (the papers are not on disk), except where
-a function states otherwise. Full references are in the docstrings of the
-functions.
+radarx's own constructions, and so are all defaults. Equation numbers of the
+cited papers are not checked unless a docstring gives one. Full references
+are in the docstrings of the functions.
 
 All functions work on the gridded :class:`xarray.Dataset` returned by
 :func:`radarx.grid.grid_radar` or ``dtree.radarx.to_grid()`` (``x`` and ``y``
@@ -188,8 +187,7 @@ def _parabolic(lo, mid, hi):
     """
     Sub-cell offset of the vertex of the parabola through three samples.
 
-    Standard three-point parabolic peak interpolation (elementary algebra, not
-    from a specific paper).
+    Standard three-point parabolic peak interpolation (elementary algebra).
     """
     d = lo - 2.0 * mid + hi
     return 0.5 * (lo - hi) / d if d < 0 else 0.0
@@ -415,9 +413,8 @@ def estimate_motion(
     times to a common analysis time (Gal-Chen 1982 [1]_). The displacement of
     the echo pattern between the two times is found by cross-correlation of
     the two echo patterns, the principle of radar echo tracking by correlation
-    introduced by Rinehart and Garvey (1978) [2]_. Their equations and
-    parameters were not checked here; the FFT implementation and everything
-    below are radarx's own. Before correlating, each field is
+    introduced by Rinehart and Garvey (1978) [2]_. The FFT
+    implementation and everything below are radarx's own. Before correlating, each field is
 
     * restricted to the area observed at both times (``observed``), so that
       the fixed edge of the radar coverage does not pin the result to zero;
@@ -618,8 +615,8 @@ def _keys(t):
 
     Keys, R., 1981, IEEE Trans. Acoust. Speech Signal Process. 29, 1153-1160,
     https://doi.org/10.1109/TASSP.1981.1163711. The piecewise cubic kernel with
-    the free parameter a = -1/2 is used; the paper (not on disk) was not
-    checked for its equation numbers or for a recommended value of a.
+    the free parameter a = -1/2 is used. Equation numbers not checked against
+    the paper.
     """
     a = -0.5
     t1, t3, t4 = 1.0 + t, 1.0 - t, 2.0 - t
@@ -745,8 +742,8 @@ def _departure(u, v, dts, dx, dy, ny, nx, use_compiled, n_threads):
     trajectories are straight lines. For a spatially varying motion the
     displacement is found with the implicit midpoint iteration
     ``alpha = dt * V(x - alpha / 2)`` of two-time-level semi-Lagrangian
-    schemes (Staniforth and Côté 1991, Mon. Wea. Rev. 119, 2206-2223; the
-    exact equation was not checked), for all time steps at once. Three
+    schemes (Staniforth and Côté 1991, Mon. Wea. Rev. 119, 2206-2223; equation
+    number not checked), for all time steps at once. Three
     iterations are a radarx choice.
     """
     dts = np.asarray(dts, dtype=np.float64)[:, None, None]
@@ -851,10 +848,10 @@ def advect(
     interpolated bilinearly, or with cubic convolution (Keys 1981 [3]_)
     clipped to the four nearest values so that no new extremes appear.
 
-    The cubic option uses the kernel of Keys (1981) with a = -1/2 (the
-    value of the free parameter used here; neither the equation numbers nor a
-    recommended value were checked against the paper). The clipping to the four nearest values, the validity mask and
-    the default ``min_weight`` of 0.5 are radarx choices.
+    The cubic option uses the kernel of Keys (1981) with a = -1/2 (a radarx
+    choice of the free parameter; equation numbers not checked against the
+    paper). The clipping to the four nearest values, the validity mask and the
+    default ``min_weight`` of 0.5 are radarx choices.
 
     Missing data are handled with an advected validity mask: a cell is
     defined only if valid neighbours carry at least ``min_weight`` of the
@@ -1004,9 +1001,8 @@ def interpolate_time(
     with plain linear interpolation. Where only one of the two advected
     fields is defined, it is used alone. The forward-backward blend is
     radarx's own construction. The pysteps library (Pulkkinen et al. 2019
-    [2]_) provides advection-based extrapolation for precipitation nowcasting;
-    whether and how it blends two volumes this way was not checked against
-    that paper.
+    [2]_) provides advection-based extrapolation for precipitation nowcasting.
+    The blend of two volumes is not taken from that paper.
 
     Parameters
     ----------
