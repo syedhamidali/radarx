@@ -1485,7 +1485,9 @@ notebooks or from this index.
 | `nyquist_velocity` | `radarx.fundamentals.doppler` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `unambiguous_range` | `radarx.fundamentals.doppler` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `beam_center_height` | `radarx.fundamentals.geometry` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
+| `beam_height_at_ground_range` | `radarx.fundamentals.geometry` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `effective_radius` | `radarx.fundamentals.geometry` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
+| `ground_range` | `radarx.fundamentals.geometry` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `half_power_radius` | `radarx.fundamentals.geometry` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `sample_volume_gaussian` | `radarx.fundamentals.geometry` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `compute_average_power` | `radarx.fundamentals.power` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |

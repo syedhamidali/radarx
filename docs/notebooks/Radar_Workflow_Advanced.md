@@ -222,6 +222,8 @@ beam.volume_resolution(100e3, 1.0, 1.0, 450.0)
 geometry.effective_radius()
 geometry.beam_center_height(100e3, 0.5, 30.0)
 geometry.half_power_radius(100e3, 0.5)
+ground = geometry.ground_range(100e3, 0.5)  # arc length under the beam
+geometry.beam_height_at_ground_range(ground, 0.5, 30.0)  # back to the beam height
 geometry.sample_volume_gaussian(100e3, 1.0, 1.0, 450.0)
 reflectivity.z_to_r_marshall_palmer(40.0)
 reflectivity.z_to_r_custom(40.0, 300.0, 1.4)

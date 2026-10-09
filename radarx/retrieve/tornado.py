@@ -122,6 +122,7 @@ __all__ = ["tornado_probability", "tornet_inputs", "rotation_couplets"]
 import numpy as np
 import xarray as xr
 
+from .._polar import nearest_ray
 from .._registry import accessor_method
 from . import _onnx_models
 from ._products import product_tree
@@ -194,23 +195,11 @@ def _clean(da):
     return da.where(da > floor + 0.25 * scale), folded
 
 
-def _nearest_rays(azimuth, target):
-    """Index of the ray nearest to every target azimuth (circular)."""
-    azimuth = np.mod(np.asarray(azimuth, dtype=np.float64), 360.0)
-    order = np.argsort(azimuth)
-    az = azimuth[order]
-    ext = np.concatenate([az[-1:] - 360.0, az, az[:1] + 360.0])
-    idx = np.clip(np.searchsorted(ext, target), 1, len(ext) - 1)
-    left = target - ext[idx - 1] < ext[idx] - target
-    pick = np.where(left, idx - 1, idx) - 1
-    return order[np.mod(pick, len(az))]
-
-
 def _regrid(da, azimuth, rng):
     """Nearest-neighbour values of a sweep field on the target grid."""
     ray_dim = [d for d in da.dims if d != "range"][0]
     values = da.transpose(ray_dim, "range").values
-    rays = _nearest_rays(da["azimuth"].values, azimuth)
+    rays = nearest_ray(da["azimuth"].values, azimuth)
     src = np.asarray(da["range"].values, dtype=np.float64)
     step = src[1] - src[0] if src.size > 1 else _GATE
     gates = np.rint((rng - src[0]) / step).astype(np.int64)

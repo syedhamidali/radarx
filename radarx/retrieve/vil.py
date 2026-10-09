@@ -109,9 +109,9 @@ __doc__ = __doc__.replace("{}", "\n   ".join(__all__))
 import numpy as np
 import xarray as xr
 
+from .._polar import beam_width, nearest_ray
 from .._registry import accessor_method
-from ..fundamentals.constants import EFFECTIVE_RADIUS_4_3
-from ..fundamentals.geometry import beam_center_height
+from ..fundamentals.geometry import beam_height_at_ground_range, ground_range
 from ..grid.cone import _select_sweeps, _sweep_dataset, _sweep_names
 
 try:
@@ -131,7 +131,6 @@ _DBZ_NAMES = ("DBZH", "DBZ", "reflectivity", "corrected_reflectivity")
 _VERTICAL_NAMES = ("z", "altitude", "height", "level")
 _MAX_GAP = 2.0  # sweeps are matched to a ray within this many ray spacings
 _CHUNK = 2_000_000  # samples per kernel call of a polar volume
-_BEAMWIDTH = 1.0  # degrees, used when the volume does not give one
 
 
 # --------------------------------------------------------------------------
@@ -284,53 +283,6 @@ def _columns(
 # --------------------------------------------------------------------------
 
 
-def _ground_range(rng, elevation):
-    """Ground distance (arc on the 4/3 Earth) of the gates of a beam [m]."""
-    height = beam_center_height(rng, elevation, 0.0)
-    reff = EFFECTIVE_RADIUS_4_3
-    cos_e = np.cos(np.deg2rad(elevation))
-    return reff * np.arcsin(rng * cos_e / (reff + height))
-
-
-def _height_at_ground_range(ground, elevation, altitude):
-    """
-    Height above sea level of the beam of elevation ``elevation`` [degrees] at
-    ground distance ``ground`` [m]: ``h = a_e cos(e) / cos(e + s / a_e) - a_e``
-    (the inverse of the beam geometry of
-    :func:`radarx.fundamentals.geometry.beam_center_height`).
-    """
-    reff = EFFECTIVE_RADIUS_4_3
-    e = np.deg2rad(elevation)
-    return altitude + reff * (np.cos(e) / np.cos(e + ground / reff) - 1.0)
-
-
-def _nearest_ray(sweep_azimuth, azimuth):
-    """Index of the ray nearest to each ``azimuth`` and the angular distance."""
-    a = np.mod(np.asarray(sweep_azimuth, dtype=np.float64), 360.0)
-    order = np.argsort(a, kind="stable")
-    a = a[order]
-    ext = np.r_[a[-1] - 360.0, a, a[0] + 360.0]
-    ray = np.r_[order[-1], order, order[0]]
-    az = np.mod(np.asarray(azimuth, dtype=np.float64), 360.0)
-    j = np.clip(np.searchsorted(ext, az), 1, ext.size - 1)
-    pick = np.where(az - ext[j - 1] <= ext[j] - az, j - 1, j)
-    return ray[pick], np.abs(ext[pick] - az)
-
-
-def _beamwidth(dtree, beamwidth):
-    """Vertical beam width [degrees]: the argument, the volume, or 1 degree."""
-    if beamwidth is not None:
-        return float(beamwidth)
-    nodes = [dtree.root.to_dataset()]
-    if "radar_parameters" in dtree.children:
-        nodes.append(dtree["radar_parameters"].to_dataset())
-    for ds in nodes:
-        for key in ("radar_beam_width_v", "radar_beam_width_h"):
-            if key in ds and np.isfinite(float(ds[key])):
-                return float(ds[key])
-    return _BEAMWIDTH
-
-
 class _Sweep:
     """A sweep matched to the (azimuth, ground range) columns of the lowest one."""
 
@@ -342,10 +294,10 @@ class _Sweep:
             np.broadcast_to(ds["elevation"].values, az.shape), dtype=np.float64
         )
         spacing = float(np.median(np.diff(np.sort(np.mod(az, 360.0)))))
-        self.ray, distance = _nearest_ray(az, azimuth)
+        self.ray, distance = nearest_ray(az, azimuth, distance=True)
         self.in_azimuth = distance <= _MAX_GAP * max(spacing, 1e-6)
         rng = np.asarray(ds["range"].values, dtype=np.float64)
-        g = _ground_range(rng, float(np.nanmedian(self.elevation)))
+        g = ground_range(rng, float(np.nanmedian(self.elevation)))
         edges = 0.5 * (g[1:] + g[:-1])
         self.gate = np.clip(np.searchsorted(edges, ground), 0, rng.size - 1)
         self.covered = (ground >= g[0] - 0.5 * (g[1] - g[0])) & (
@@ -383,14 +335,14 @@ def _polar_columns(dtree, variable, tolerance, beamwidth, clear):
     elevation = np.broadcast_to(low["elevation"].values, low["azimuth"].shape).astype(
         np.float64
     )
-    ground = _ground_range(
+    ground = ground_range(
         np.asarray(low["range"].values, dtype=np.float64),
         float(np.nanmedian(elevation)),
     )
     azimuth = np.asarray(low["azimuth"].values, dtype=np.float64)
     matched = [_Sweep(ds, variable, azimuth, ground) for ds in selected]
     altitude = float(low["altitude"]) if "altitude" in low else 0.0
-    half = 0.5 * _beamwidth(dtree, beamwidth)
+    half = 0.5 * (float(beamwidth) if beamwidth is not None else beam_width(dtree))
     nk = len(matched)
 
     def blocks():
@@ -402,8 +354,10 @@ def _polar_columns(dtree, variable, tolerance, beamwidth, clear):
             v = np.empty_like(h)
             for k, sw in enumerate(matched):
                 el = sw.elevation[sw.ray[rows]][:, None]
-                h[k] = _height_at_ground_range(ground[None, :], el, altitude)
-                h_top[k] = _height_at_ground_range(ground[None, :], el + half, altitude)
+                h[k] = beam_height_at_ground_range(ground[None, :], el, altitude)
+                h_top[k] = beam_height_at_ground_range(
+                    ground[None, :], el + half, altitude
+                )
                 v[k] = sw.block(rows, clear)
             yield (
                 rows,
