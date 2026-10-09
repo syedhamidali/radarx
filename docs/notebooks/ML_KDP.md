@@ -71,8 +71,11 @@ from radarx import ml
 from radarx.retrieve import estimate_kdp
 from radarx.retrieve.kdp import ML_FEATURES
 
-# the training code lives in the repository, next to the package
-sys.path.insert(0, str(Path(radarx.__file__).parents[1] / "ml" / "models" / "kdp"))
+# the training code lives in the repository (not in the installed package):
+# find it from the folder the notebook runs in
+here = Path.cwd().resolve()
+repo = next(p for p in [here, *here.parents] if (p / "ml" / "models" / "kdp").is_dir())
+sys.path.insert(0, str(repo / "ml" / "models" / "kdp"))
 import simulate
 ```
 

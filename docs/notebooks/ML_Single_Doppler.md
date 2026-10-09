@@ -77,8 +77,11 @@ from radarx.io import sounding
 from radarx.io.aws_data import download_file
 from radarx.retrieve.single_doppler import FEATURE_VERSION, FEATURES, WIND_SCALE, _features
 
-# the training code lives in the repository, next to the package
-sys.path.insert(0, str(Path(rx.__file__).parents[1] / "ml" / "models" / "single_doppler"))
+# the training code lives in the repository (not in the installed package):
+# find it from the folder the notebook runs in
+here = Path.cwd().resolve()
+repo = next(p for p in [here, *here.parents] if (p / "ml" / "models" / "single_doppler").is_dir())
+sys.path.insert(0, str(repo / "ml" / "models" / "single_doppler"))
 import synthetic
 
 print(FEATURES)
