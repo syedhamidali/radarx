@@ -62,6 +62,15 @@ the overpass. Radar samples are linear-Z averages of the gates within 1 km
 
 ## Data
 
+The PIPS spectra are from the PERiLS 2022 data set of Dawson et al. (2025), collected in
+the campaign described by Kosiba et al. (2024). No quality control beyond the processing of
+the drop size distributions in that data set was applied. The `"perils2022"` prior was
+learned from these spectra; the spectra are not distributed with radarx. We thank the
+PERiLS investigators and the NSF NCAR Earth Observing Laboratory for these data.
+
+- Dawson, D., M. Biggerstaff, and S. Waugh, 2025: PERiLS_2022: Portable In Situ Precipitation Stations (PIPS) Data. Version 1.0. NSF NCAR Earth Observing Laboratory, https://doi.org/10.26023/HFBG-7W5M-WA00.
+- Kosiba, K. A., and Coauthors, 2024: The Propagation, Evolution, and Rotation in Linear Storms (PERiLS) Project. Bull. Amer. Meteor. Soc., 105, E1768-E1799, https://doi.org/10.1175/BAMS-D-22-0064.1.
+
 - PIPS (OTT Parsivel2) from PERiLS 2022: IOP1 (22 March, 4 probes), IOP2
   (30-31 March, 4 probes, 14-23 km from KGWX), IOP3 (5 April, 6 probes); 10-s
   spectra with the quality control of the PIPS processing (strong wind,

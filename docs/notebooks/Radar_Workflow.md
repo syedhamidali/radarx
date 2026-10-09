@@ -694,22 +694,21 @@ rates; the trailing stratiform rain has smaller drops.
 normalized gamma parameters instead, with the uncertainty of every gate. It
 takes the polarimetric variables with their measurement errors, the forward
 model of T-matrix scattering tables (`forward_grid`) and a prior learned from
-disdrometers (`dsd_prior`; here the prior learned from PERiLS 2022 Parsivel
-disdrometers in squall lines of the south-eastern United States, described in
-the [Bayesian DSD notebook](Bayesian_DSD)). KDP fixes $N_w$ independently of the
+disdrometers (`dsd_prior`; here the generic prior, with the option of one learned from
+PERiLS 2022 Parsivel disdrometers, see the [Bayesian DSD notebook](Bayesian_DSD)). KDP fixes $N_w$ independently of the
 $Z_H$ calibration, so the uncertainty of the rain rate is smallest in the
 convective line:
 
 ```{code-cell} ipython3
 rain_near = rain & (surv.range <= 120e3)
-prior = dsd_prior("perils2022")
+prior = dsd_prior("generic")
 forward = forward_grid("S")
 with timed("7b. Bayesian DSD retrieval (0.5°)"):
-    post = dsd_bayesian(surv, kdp="KDP", mask=rain_near, band="S", prior="perils2022")
+    post = dsd_bayesian(surv, kdp="KDP", mask=rain_near, band="S", prior="generic")
 det = radarx.retrieve.dsd(surv, "normalized", kdp="KDP", mask=rain_near, band="S")
 subset = slice(0, 60)  # the accessor on a few rays
 post_acc = surv.isel(azimuth=subset).radarx.dsd_bayesian(
-    kdp="KDP", mask=rain_near.isel(azimuth=subset), band="S", prior="perils2022"
+    kdp="KDP", mask=rain_near.isel(azimuth=subset), band="S", prior="generic"
 )
 print("accessor and function agree:", bool(np.allclose(post_acc.DM, post.DM.isel(azimuth=subset), equal_nan=True)))
 q = post.RAIN_RATE_QUANTILES
@@ -1670,6 +1669,9 @@ The methods of the `.radarx` accessors:
 | `.radarx.vad_profile` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
 
 ## References
+
+- Dawson, D., M. Biggerstaff, and S. Waugh, 2025: PERiLS_2022: Portable In Situ Precipitation Stations (PIPS) Data. Version 1.0. NSF NCAR Earth Observing Laboratory, https://doi.org/10.26023/HFBG-7W5M-WA00.
+- Kosiba, K. A., and Coauthors, 2024: The Propagation, Evolution, and Rotation in Linear Storms (PERiLS) Project. Bull. Amer. Meteor. Soc., 105, E1768-E1799, https://doi.org/10.1175/BAMS-D-22-0064.1.
 
 - Browning, K. A., and R. Wexler, 1968: The Determination of Kinematic Properties of a Wind Field Using Doppler Radar. *Journal of Applied Meteorology*, **7**, 105-113, <https://doi.org/10.1175/1520-0450(1968)007<0105:TDOKPO>2.0.CO;2>
 - Bunkers, M. J., B. A. Klimowski, J. W. Zeitler, R. L. Thompson, and M. L. Weisman, 2000: Predicting Supercell Motion Using a New Hodograph Technique. *Weather and Forecasting*, **15**, 61-79, <https://doi.org/10.1175/1520-0434(2000)015<0061:PSMUAN>2.0.CO;2>

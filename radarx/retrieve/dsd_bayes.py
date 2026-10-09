@@ -498,6 +498,16 @@ def dsd_prior(source="generic", *, weights=None, defensive=0.01, bandwidth=None)
         Gaussian prior of :math:`\\log_{10} N_w` at each node. It can be
         passed as ``prior`` to :func:`dsd_bayesian`.
 
+    References
+    ----------
+    The ``"perils2022"`` prior was learned from PIPS spectra of the PERiLS
+    2022 data set, with no quality control beyond the processing of the
+    drop size distributions in that data set.
+
+    Dawson, D., M. Biggerstaff, and S. Waugh, 2025: PERiLS_2022: Portable In Situ Precipitation Stations (PIPS) Data. Version 1.0. NSF NCAR Earth Observing Laboratory, https://doi.org/10.26023/HFBG-7W5M-WA00.
+
+    Kosiba, K. A., and Coauthors, 2024: The Propagation, Evolution, and Rotation in Linear Storms (PERiLS) Project. Bull. Amer. Meteor. Soc., 105, E1768-E1799, https://doi.org/10.1175/BAMS-D-22-0064.1.
+
     Examples
     --------
     >>> fits = radarx.retrieve.fit_gamma_moments(nd)  # doctest: +SKIP

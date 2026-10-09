@@ -582,7 +582,7 @@ plt.show()
 gate and treats $Z_H$, $Z_{DR}$ and $K_{DP}$ as exact. `dsd_bayesian` returns
 the posterior distribution of the normalized gamma parameters $(\log_{10} N_w,
 D_m, \mu)$ instead, with the measurement errors and a prior of disdrometer DSDs.
-`dsd_prior` builds that prior on a $(D_m, \mu)$ grid, and `forward_grid` is the
+`dsd_prior` builds that prior on a $(D_m, \mu)$ grid (the `"perils2022"` prior was learned from the PIPS spectra of Dawson et al. 2025), and `forward_grid` is the
 forward model, the radar variables of every node of the grid from the T-matrix
 tables.
 
@@ -1471,8 +1471,8 @@ with their licence and citation (`list_models`, `register_model`,
 cuts sweeps into tiles in radar coordinates (wrapping around north) and
 `reassemble` puts model outputs back together with a blending window. A tiny
 network built right here, a 5 by 5 box filter as an ONNX convolution, stands
-in for a real one, and the sweep is a synthetic reflectivity field with
-convective cells in polar coordinates.
+in for a real one (it only shows how a model file is registered and run) and
+the sweep is the real KGWX reflectivity of the tornado section.
 
 ```{code-cell} ipython3
 import hashlib
@@ -1480,19 +1480,8 @@ import hashlib
 import onnx
 from onnx import TensorProto, helper
 
-az = np.arange(0.5, 360.0, 1.0)
-rng_m = np.arange(250.0, 150e3, 500.0)
-A, R = np.meshgrid(np.radians(az), rng_m / 1e3, indexing="ij")
-px_, py_ = R * np.sin(A), R * np.cos(A)
-field = np.full(A.shape, -5.0)
-for cx0, cy0, amp, size in [(30, 40, 55, 12), (-40, 20, 45, 9), (10, -60, 50, 15), (-20, -30, 38, 7)]:
-    field = np.maximum(field, amp * np.exp(-((px_ - cx0) ** 2 + (py_ - cy0) ** 2) / size**2) - 5.0)
-field += np.random.default_rng(3).normal(0, 3.0, field.shape)
-sweep_ml = xr.Dataset(
-    {"DBZH": (("azimuth", "range"), field)},
-    coords={"azimuth": az, "range": rng_m, "x": (("azimuth", "range"), px_ * 1e3),
-            "y": (("azimuth", "range"), py_ * 1e3)},
-)
+sweep_ml = sweep[["DBZH"]]  # the 0.9 degree KGWX sweep of the tornado section
+sweep_ml = sweep_ml.assign(DBZH=sweep_ml.DBZH.where(sweep_ml.DBZH > -32.0))
 
 k = 5
 inp = helper.make_tensor_value_info("x", TensorProto.FLOAT, ["N", 1, None, None])
@@ -1526,7 +1515,7 @@ print(f"{len(patches)} patches, array shape {patches.shape}; the PatchIndex reme
 fig, axes = plt.subplots(1, 3, figsize=(14, 4.6), layout="constrained")
 for ax, (da, title, cmap, lim) in zip(
     axes,
-    [(sweep_ml.DBZH, "simulated reflectivity (dBZ)", "ChaseSpectral", (-10, 60)),
+    [(sweep_ml.DBZH, "KGWX reflectivity (dBZ)", "ChaseSpectral", (-10, 60)),
      (smoothed, "after the network (dBZ)", "ChaseSpectral", (-10, 60)),
      (smoothed - sweep_ml.DBZH, "difference (dB)", "RdBu_r", (-10, 10))],
 ):
@@ -1539,6 +1528,7 @@ plt.show()
 
 ## References
 
+- Dawson, D., M. Biggerstaff, and S. Waugh, 2025: PERiLS_2022: Portable In Situ Precipitation Stations (PIPS) Data. Version 1.0. NSF NCAR Earth Observing Laboratory, https://doi.org/10.26023/HFBG-7W5M-WA00.
 - Bruning, E. C., and D. R. MacGorman, 2013: Theory and Observations of Controls on Lightning Flash Size Spectra. *Journal of the Atmospheric Sciences*, **70**, 4012-4029, <https://doi.org/10.1175/JAS-D-12-0289.1>
 - Fuchs, B. R., E. C. Bruning, S. A. Rutledge, L. D. Carey, P. R. Krehbiel, and W. Rison, 2016: Climatological analyses of LMA data with an open-source lightning flash-clustering algorithm. *Journal of Geophysical Research: Atmospheres*, **121**, 8625-8648, <https://doi.org/10.1002/2015JD024663>
 - Gao, J., M. Xue, A. Shapiro, and K. K. Droegemeier, 1999: A Variational Method for the Analysis of Three-Dimensional Wind Fields from Two Doppler Radars. *Monthly Weather Review*, **127**, 2128-2142, <https://doi.org/10.1175/1520-0493(1999)127<2128:AVMFTA>2.0.CO;2>

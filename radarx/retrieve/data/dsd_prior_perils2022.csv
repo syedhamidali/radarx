@@ -3,6 +3,8 @@
 # 30-31 March, IOP3 5 April 2022; northern Mississippi and Alabama). Moments give Dm and Nw,
 # the 2-4-6 moment fit gives mu; minutes with R >= 0.5 mm/h and >= 50 drops m-3.
 # Built by ml/models/bayesian_dsd/prior_samples.py; read by radarx.retrieve.dsd_prior("perils2022").
+# Data: Dawson, D., M. Biggerstaff, and S. Waugh, 2025: PERiLS_2022: Portable In Situ Precipitation Stations (PIPS) Data. Version 1.0. NSF NCAR Earth Observing Laboratory, https://doi.org/10.26023/HFBG-7W5M-WA00.
+# Campaign: Kosiba, K. A., and Coauthors, 2024: The Propagation, Evolution, and Rotation in Linear Storms (PERiLS) Project. Bull. Amer. Meteor. Soc., 105, E1768-E1799, https://doi.org/10.1175/BAMS-D-22-0064.1.
 # columns: log10_nw [log10 m-3 mm-1], dm [mm], mu, iop
 3.3967,1.3483,4.157,1
 3.5805,1.2780,7.957,1
