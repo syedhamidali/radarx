@@ -52,6 +52,7 @@ written to ONNX with the `onnx` package.
 
 ```{code-cell} ipython3
 import hashlib
+import os
 import sys
 import time
 from pathlib import Path
@@ -71,10 +72,13 @@ from radarx import ml
 from radarx.retrieve import estimate_kdp
 from radarx.retrieve.kdp import ML_FEATURES
 
-# the training code lives in the repository (not in the installed package):
-# find it from the folder the notebook runs in
-here = Path.cwd().resolve()
-repo = next(p for p in [here, *here.parents] if (p / "ml" / "models" / "kdp").is_dir())
+# the training code lives in the repository, not in the installed package: look
+# for the checkout from the package, the Python path (pytest adds the project
+# root) and the folders the docs builds are run from
+candidates = [Path(p) for p in sys.path if p]
+candidates += [Path(os.environ[k]) for k in ("READTHEDOCS_REPOSITORY_PATH", "GITHUB_WORKSPACE") if k in os.environ]
+candidates += [Path(__import__("radarx").__file__).parents[1], Path.cwd()]
+repo = next(p for c in candidates for p in [c, *c.parents] if (p / "ml" / "models" / "kdp").is_dir())
 sys.path.insert(0, str(repo / "ml" / "models" / "kdp"))
 import simulate
 ```
