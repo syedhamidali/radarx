@@ -583,3 +583,12 @@ def test_nexrad_volume_round_trip(kgwx):
             kgwx, (64, 128), variables=["DBZH", "ZDR"], engine="numpy"
         )
         np.testing.assert_array_equal(np_patches, patches)
+
+
+def test_datatree_node_without_sweep_fields():
+    az, rng = np.arange(8.0), np.arange(6.0)
+    bare = xr.Dataset({"scalar": 1.0}, coords={"azimuth": az, "range": rng})
+    good = xr.Dataset({"DBZH": (("azimuth", "range"), np.ones((8, 6)))})
+    tree = xr.DataTree.from_dict({"/": xr.Dataset(), "bare": bare, "good": good})
+    _, index = ml.polar_patches(tree, (4, 4))
+    assert index.paths == ["/good"]
