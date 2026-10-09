@@ -16,6 +16,17 @@
 // point is as accurate as the step itself. All drops form one pool of work
 // that threads take in small blocks from an atomic counter.
 //
+// Sources (details, references and radarx choices in the docstring of
+// radarx/retrieve/rain_trajectories.py): drops follow the wind and fall at
+// their terminal speed without inertia (the approach of Dawson et al. 2015);
+// the
+// terminal speed is the Atlas et al. (1973) law times (rho0 / rho)^0.4
+// (Foote and du Toit 1969); the evaporation is the single-drop law of
+// Kumjian and Ryzhkov (2010) as in evaporation.py, with e_s of Buck (1981);
+// d(D^2)/dt is derived from dm/dt for numerical stability (a radarx choice);
+// the minimum diameter kDFloor, the number of Newton and bisection steps
+// and the Hermite end-of-path interpolation are radarx numerical choices.
+//
 // Every operation follows the NumPy reference in
 // radarx/retrieve/rain_trajectories.py in the same order.
 

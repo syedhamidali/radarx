@@ -15,9 +15,11 @@ the same coordinates).
 Single drop
 -----------
 A drop of diameter :math:`D` falling through air with the saturation ratio
-:math:`S = e/e_s` changes its mass by diffusion of water vapour as
-(Rogers and Yau 1989, in the form given by Kumjian and Ryzhkov 2010,
-appendix)
+:math:`S = e/e_s` changes its mass by diffusion of water vapour (Rogers and
+Yau 1989; Pruppacher and Klett 1997). The form used here is that of
+Kumjian and Ryzhkov (2010, their Eq. 2 and Appendix Eqs. A1-A2, written
+there for the radius, :math:`r\\,dr/dt = (S - 1)/(F_K + F_D)`), rewritten
+for the mass of the drop
 
 .. math::
 
@@ -25,50 +27,113 @@ appendix)
     F_K = \\left(\\frac{L_v}{R_v T} - 1\\right) \\frac{L_v}{K T},\\qquad
     F_D = \\frac{R_v T}{D_v e_s(T)},
 
-with the ventilation coefficient of Pruppacher and Klett (as used by Li and
-Srivastava 2001 and Kumjian and Ryzhkov 2010)
+with the ventilation coefficient of Pruppacher and Klett (1997), as given
+by Li and Srivastava (2001, their Eq. 2), Kumjian and Ryzhkov (2010,
+Appendix Eq. A3) and Seifert (2008, his Eq. 8, who uses the same 0.78 and
+0.308)
 
 .. math::
 
     f_v = 0.78 + 0.308\\, N_{Sc}^{1/3} N_{Re}^{1/2},\\qquad
     N_{Sc} = \\nu / D_v,\\quad N_{Re} = V(D) D / \\nu .
 
-The drop is assumed at its equilibrium (wet-bulb) temperature, and the
-ventilation coefficients for vapour and heat equal.
+The drop is assumed at its equilibrium (wet-bulb) temperature, which is what
+the single-drop law of Rogers and Yau (1989) is derived for, and the
+ventilation coefficients for vapour and heat are taken equal (so that
+:math:`f_v` multiplies both :math:`F_K` and :math:`F_D`). The numbers 0.78 and
+0.308 are those printed in the three papers above (they are Pruppacher and
+Klett's; the equation is not checked in the book).
+
+Differences from Kumjian and Ryzhkov (2010)
+-------------------------------------------
+radarx takes the single-drop law and the thermodynamic fits of Kumjian and
+Ryzhkov (2010) but integrates it over a gamma DSD in closed form instead of
+following size bins down a rain shaft with feedback on the sounding. It
+deviates from the paper in these points (the first four change the numbers):
+
+- the ventilation coefficient for heat is set equal to that for vapour
+  (Kumjian and Ryzhkov, Eq. A3, use the Prandtl number for heat);
+- the saturation vapour pressure is Buck (1981) instead of their
+  :math:`e_s = A \\exp(-5420/T)`, :math:`A = 2.53\\times10^9` hPa (Eq. A8);
+- the fall speed is the exponential fit to Atlas et al. (1973), below,
+  instead of the power law :math:`3.78 D^{0.67} (\\rho_0/\\rho)^{0.4}` m
+  s\\ :sup:`-1` of Atlas and Ulbrich (1977) in their Eq. 3;
+- the air temperature and humidity are those of the profile at the cell
+  (or stepped by :func:`integrate_evaporation`), not the layer-by-layer
+  feedback of their model;
+- collision, coalescence and breakup are absent in both.
 
 Thermodynamic properties
 ------------------------
-- saturation vapour pressure over water, Buck (1981):
-  :math:`e_s = 611.21 \\exp[17.502\\, t / (240.97 + t)]` Pa, :math:`t` in °C
-  (the enhancement factor of moist air, about 1.004, is neglected);
+- saturation vapour pressure over water, Buck (1981, his Eq. 8 for liquid
+  water; equation number and constants not checked against the paper):
+  :math:`e_s = 611.21 \\exp[17.502\\, t / (240.97 + t)]` Pa, :math:`t` in °C.
+  Buck's enhancement factor of moist air, :math:`1.0007 + 3.46\\times10^{-8}
+  p` with :math:`p` in Pa (about 1.004 at 1000 hPa), is neglected (radarx
+  choice);
 - latent heat of vaporization, thermal conductivity of air :math:`K`,
   diffusivity of water vapour :math:`D_v` and dynamic viscosity of air
-  :math:`\\eta` as functions of temperature and pressure as listed by Kumjian
-  and Ryzhkov (2010, appendix, after Rasmussen and Heymsfield 1987):
+  :math:`\\eta` as functions of temperature (:math:`T` in K) and pressure,
+  copied from the Appendix of Kumjian and Ryzhkov (2010), who state that
+  the dependence on :math:`T` follows Rasmussen and Heymsfield (1987,
+  Part I) and give the equations in SI units:
   :math:`L_v = 2.499 \\times 10^6 (273.15/T)^{0.167 + 3.67\\times10^{-4} T}`
-  J kg\\ :sup:`-1`, :math:`K = (0.441635 + 0.0071 T) \\times 10^{-2}`
-  W m\\ :sup:`-1` K\\ :sup:`-1`,
+  J kg\\ :sup:`-1` (Eqs. A4-A5),
+  :math:`K = (0.441635 + 0.0071 T) \\times 10^{-2}`
+  W m\\ :sup:`-1` K\\ :sup:`-1` (Eq. A6),
   :math:`D_v = 2.11 \\times 10^{-5} (T / 273.15)^{1.94} (p_0/p)`
-  m\\ :sup:`2` s\\ :sup:`-1` (:math:`p_0` = 1000 hPa),
+  m\\ :sup:`2` s\\ :sup:`-1` (Eq. A7),
   :math:`\\eta = (0.379565 + 0.0049 T) \\times 10^{-5}` kg m\\ :sup:`-1`
-  s\\ :sup:`-1`;
-- air density of moist air from the ideal gas law, specific heat
-  :math:`c_p = 1005.7 (1 - q_v) + 1870 q_v` J kg\\ :sup:`-1` K\\ :sup:`-1`.
+  s\\ :sup:`-1` (Eq. A10, stated for :math:`T > 273` K; radarx applies it
+  at all temperatures);
+- air density of moist air from the ideal gas law (as in Kumjian and Ryzhkov
+  2010, after Eq. A10), specific heat
+  :math:`c_p = 1005.7 (1 - q_v) + 1870 q_v` J kg\\ :sup:`-1` K\\ :sup:`-1`
+  and the gas constants 287.04 and 461.5 J kg\\ :sup:`-1` K\\ :sup:`-1`
+  are common textbook values chosen by radarx, not taken from the cited
+  papers.
+
+Reference pressure of :math:`D_v`
+---------------------------------
+Eq. A7 of Kumjian and Ryzhkov (2010) states that :math:`p_0` "is the
+reference level pressure, taken as 1000 hPa in this study", and radarx uses
+that value (``1.0e5 / p`` in ``_air``). The fit of Pruppacher and Klett
+(1997), from which this form originates, is defined for
+:math:`p_0 = 1013.25` hPa (not checked in the book). With 1013.25 hPa :math:`D_v` would be 1.3 % larger,
+:math:`F_D` 1.3 % smaller and the evaporation rates larger by 0.3-0.8 %
+(computed for 0-30 °C at 800-1000 hPa and :math:`q_v` = 5 g kg\\ :sup:`-1`;
+the larger the colder the air, as :math:`F_D` is a larger part of
+:math:`F_K + F_D` there). radarx rates are therefore, if that reading of the
+fit is right, up to 0.8 % too small. This is smaller than the uncertainty of the
+ventilation coefficient and of the DSD, and the value is kept for
+consistency with Kumjian and Ryzhkov (2010).
 
 Fall speed
 ----------
 The terminal fall speed of Atlas et al. (1973),
-:math:`V = 9.65 - 10.3 e^{-0.6 D}` m s\\ :sup:`-1` (:math:`D` in mm), does
+:math:`V = 9.65 - 10.3 e^{-0.6 D}` m s\\ :sup:`-1` (:math:`D` in mm; the law
+is quoted at sea level as Eq. 7.65b of Bringi and Chandrasekar 2001, where
+it is described as a fit to the Gunn and Kinzer 1949 measurements), does
 not integrate in closed form under the square root of the ventilation term.
+The Atlas et al. law is negative below :math:`D` = 0.109 mm and its range of
+validity in the original paper is not checked. radarx uses the exponential
+fit below, which is meant for 0.5-7 mm; its extrapolation to small drops is a
+radarx choice.
 It is therefore represented by :math:`V = a D^b e^{-f D}` with
 :math:`a = 4.643` m s\\ :sup:`-1` mm\\ :sup:`-b`, :math:`b = 0.9496`,
 :math:`f = 0.1671` mm\\ :sup:`-1`, a least-squares fit (relative error) to
-the Atlas et al. (1973) law for 0.5-7 mm: 2 % r.m.s. and at most 9.5 % (at
-the ends of the range), i.e. at most 5 % on :math:`V^{1/2}`. Other
-coefficients can be given (``fall_speed=(a, b, f)``). Fall speeds aloft are
-increased by :math:`(\\rho_0 / \\rho)^{0.4}` (Foote and du Toit 1969) with
-:math:`\\rho_0` = 1.204 kg m\\ :sup:`-3`, the density at which the sea-level
-fall speeds hold (1013 hPa, 20 °C).
+the Atlas et al. (1973) law for 0.5-7 mm (radarx's own fit, not from the
+cited papers): 2 % r.m.s. and at most 9.5 % (at 0.5 mm; -3.7 % at 7 mm), i.e. at most 5 %
+on :math:`V^{1/2}`. Other coefficients can be given
+(``fall_speed=(a, b, f)``). Fall speeds aloft are increased by
+:math:`(\\rho_0 / \\rho)^{0.4}`, the correction attributed to Foote and
+du Toit (1969) in Li and Srivastava (2001, text after their Eq. 4:
+:math:`V = V_m (\\rho_m/\\rho)^{0.4}`) and Kumjian and Ryzhkov (2010, Eq.
+3); the equation and range of densities of the original paper are not
+checked. :math:`\\rho_0` = 1.204 kg
+m\\ :sup:`-3` is the density of dry air at 1013.25 hPa and 20 °C, the
+density at which the sea-level fall speeds are taken to hold (a radarx
+choice; the cited papers only call it the surface reference density).
 
 Bulk rates
 ----------
@@ -89,10 +154,15 @@ are closed-form gamma-function moments. Writing
 evaporation), the cooling rate :math:`L_v E / c_p` (K s\\ :sup:`-1`), and the
 tendency of the (Rayleigh) reflectivity factor
 :math:`dZ/dt = 6 \\int D^5 (dD/dt) N\\, dD \\propto (S - 1) I_4`, which does
-not depend on :math:`N_0`. This is the same analytic integration of the
-ventilated single-drop law over a gamma DSD as in bulk microphysics schemes
-(e.g. Ferrier 1994; Milbrandt and Yau 2005). Supersaturated air gives
-negative rates (growth by condensation); saturated air none.
+not depend on :math:`N_0` (the last two expressions are derived here from the
+single-drop law, not taken from a paper). The closed-form integration of the
+ventilated single-drop law over a gamma DSD is the one of bulk microphysics
+schemes: the ventilation factor integrated over a gamma DSD is Eq. 8 (with
+the thermodynamic function of Eq. 9) of Milbrandt and Yau (2005, Part II),
+and the same approach is used by Ferrier (1994; equation number not checked).
+radarx's moment :math:`I_1` is the same integral with the fall-speed law of
+this module. Supersaturated air gives negative rates (growth by
+condensation, a radarx extension); saturated air none.
 
 Time integration
 ----------------
@@ -105,7 +175,7 @@ with :math:`q_v \\mathrel{+}= E \\Delta t` and
 properties every sub-step; each sub-step is a Heun (trapezoidal
 predictor-corrector) step, second-order accurate in time. A sub-step never
 evaporates more than brings the air to saturation (linearized saturation
-adjustment). Pressure is constant,
+adjustment; a radarx choice, not from the cited papers). Pressure is constant,
 and there is no advection, mixing or vertical motion: the result is the
 cooling a column would feel if it stayed under the observed rain.
 
@@ -119,6 +189,15 @@ Atlas, D., R. C. Srivastava, and R. S. Sekhon, 1973: Doppler radar
 characteristics of precipitation at vertical incidence. *Rev. Geophys.*,
 **11** (1), 1-35, https://doi.org/10.1029/RG011i001p00001
 
+Atlas, D., and C. W. Ulbrich, 1977: Path- and area-integrated rainfall
+measurement by microwave attenuation in the 1-3 cm band. *J. Appl. Meteor.*,
+**16** (12), 1322-1331,
+https://doi.org/10.1175/1520-0450(1977)016<1322:PAAIRM>2.0.CO;2
+
+Bringi, V. N., and V. Chandrasekar, 2001: *Polarimetric Doppler Weather
+Radar: Principles and Applications*. Cambridge University Press, 636 pp.,
+https://doi.org/10.1017/CBO9780511541094
+
 Buck, A. L., 1981: New equations for computing vapor pressure and
 enhancement factor. *J. Appl. Meteor.*, **20** (12), 1527-1532,
 https://doi.org/10.1175/1520-0450(1981)020<1527:NEFCVP>2.0.CO;2
@@ -130,6 +209,10 @@ https://doi.org/10.1175/1520-0469(1994)051<0249:ADMMPF>2.0.CO;2
 Foote, G. B., and P. S. du Toit, 1969: Terminal velocity of raindrops aloft.
 *J. Appl. Meteor.*, **8** (2), 249-253,
 https://doi.org/10.1175/1520-0450(1969)008<0249:TVORA>2.0.CO;2
+
+Gunn, R., and G. D. Kinzer, 1949: The terminal velocity of fall for water
+droplets in stagnant air. *J. Meteor.*, **6** (4), 243-248,
+https://doi.org/10.1175/1520-0469(1949)006<0243:TTVOFF>2.0.CO;2
 
 Kumjian, M. R., and A. V. Ryzhkov, 2010: The impact of evaporation on
 polarimetric characteristics of rain: Theoretical model and practical
@@ -145,6 +228,23 @@ Milbrandt, J. A., and M. K. Yau, 2005: A multimoment bulk microphysics
 parameterization. Part II: A proposed three-moment closure and scheme
 description. *J. Atmos. Sci.*, **62** (9), 3065-3081,
 https://doi.org/10.1175/JAS3535.1
+
+Pruppacher, H. R., and J. D. Klett, 1997: *Microphysics of Clouds and
+Precipitation*. 2nd rev. and enl. ed., Kluwer Academic Publishers (reprinted by
+Springer, 2010), https://doi.org/10.1007/978-0-306-48100-0
+
+Rasmussen, R. M., and A. J. Heymsfield, 1987: Melting and shedding of
+graupel and hail. Part I: Model physics. *J. Atmos. Sci.*, **44** (19),
+2754-2763,
+https://doi.org/10.1175/1520-0469(1987)044<2754:MASOGA>2.0.CO;2
+
+Rogers, R. R., and M. K. Yau, 1989: *A Short Course in Cloud Physics*. 3rd
+ed., Elsevier (Butterworth-Heinemann), 290 pp., ISBN 978-0-7506-3215-7 (no
+DOI).
+
+Seifert, A., 2008: On the parameterization of evaporation of raindrops as
+simulated by a one-dimensional rainshaft model. *J. Atmos. Sci.*, **65** (11),
+3608-3619, https://doi.org/10.1175/2008JAS2586.1
 
 .. autosummary::
    :nosignatures:
@@ -182,9 +282,16 @@ CPD = 1005.7  # J kg-1 K-1
 CPV = 1870.0  # J kg-1 K-1
 RHO_W = 1000.0  # kg m-3
 T0 = 273.15
-VENTILATION = (0.78, 0.308)  # Pruppacher and Klett
-RHO0 = 1.204  # kg m-3, air density of the sea-level fall speeds
-# V = a D^b exp(-f D) (D in mm, V in m s-1): fit to Atlas et al. (1973), 0.5-7 mm
+# ventilation coefficient f_v = 0.78 + 0.308 N_Sc^(1/3) N_Re^(1/2): Pruppacher
+# and Klett (1997) as printed in Li and Srivastava (2001), Eq. 2, Kumjian and
+# Ryzhkov (2010), Eq. A3 and Seifert (2008), Eq. 8
+VENTILATION = (0.78, 0.308)
+# kg m-3, dry air at 1013.25 hPa and 20 degC: the density at which the sea-level
+# fall speeds are taken to hold (radarx choice; Foote and du Toit 1969 call it
+# the surface reference density)
+RHO0 = 1.204
+# V = a D^b exp(-f D) (D in mm, V in m s-1): radarx least-squares fit (relative
+# error) to Atlas et al. (1973), V = 9.65 - 10.3 exp(-0.6 D), over 0.5-7 mm
 FALL_SPEED = {"atlas1973": (4.643, 0.9496, 0.1671)}
 
 _OUT_NAMES = (
@@ -250,7 +357,10 @@ _DSD_NAMES = ("N0", "MU", "LAMBDA")
 
 
 def _saturation_vapor_pressure(t):
-    """Buck (1981) saturation vapour pressure over water [Pa], ``t`` in K."""
+    """Buck (1981), Eq. 8, saturation vapour pressure over water [Pa], ``t`` in K.
+
+    The enhancement factor of moist air is neglected (radarx choice).
+    """
     tc = t - T0
     return 611.21 * np.exp(17.502 * tc / (240.97 + tc))
 
@@ -260,8 +370,11 @@ def _air(t, p, qv):
     es = _saturation_vapor_pressure(t)
     e = qv * p / (EPS + (1.0 - EPS) * qv)
     rho = p / (RD * t * (1.0 + (1.0 / EPS - 1.0) * qv))
+    # Kumjian and Ryzhkov (2010), Eqs. A4-A5 (L_v), A6 (K), A10 (eta, below)
     lv = 2.499e6 * (T0 / t) ** (0.167 + 3.67e-4 * t)
     k = (0.441635 + 0.0071 * t) * 1.0e-2
+    # Kumjian and Ryzhkov (2010), Eq. A7, with their p0 = 1000 hPa (see the
+    # module docstring: the fit of Pruppacher and Klett uses 1013.25 hPa)
     dv = 2.11e-5 * (t / T0) ** 1.94 * (1.0e5 / p)
     nu = (0.379565 + 0.0049 * t) * 1.0e-5 / rho
     fkd = (lv / (RV * t) - 1.0) * lv / (k * t) + RV * t / (dv * es)
@@ -453,12 +566,39 @@ def drop_evaporation_rate(
         ``mass_rate`` :math:`dm/dt` (kg s-1, negative for evaporation) and
         ``diameter_rate`` :math:`dD/dt` (mm s-1), broadcast over the inputs.
 
+    Notes
+    -----
+    The single-drop law (Rogers and Yau 1989, in the form of Kumjian and
+    Ryzhkov 2010), the ventilation coefficient (Pruppacher and Klett 1997),
+    the thermodynamic fits (Rasmussen and Heymsfield 1987, as given by Kumjian
+    and Ryzhkov), the fall-speed fit to Atlas et al. (1973) and the
+    differences from the cited papers are described in
+    :mod:`radarx.retrieve.evaporation` (the :math:`D_v` reference pressure is
+    1000 hPa as in Kumjian and Ryzhkov 2010, Eq. A7).
+
     References
     ----------
     Kumjian, M. R., and A. V. Ryzhkov, 2010: The impact of evaporation on
     polarimetric characteristics of rain: Theoretical model and practical
     implications. *J. Appl. Meteor. Climatol.*, **49** (6), 1247-1267,
     https://doi.org/10.1175/2010JAMC2243.1
+
+    Rogers, R. R., and M. K. Yau, 1989: *A Short Course in Cloud Physics*. 3rd
+    ed., Elsevier (Butterworth-Heinemann), 290 pp., ISBN 978-0-7506-3215-7.
+
+    Pruppacher, H. R., and J. D. Klett, 1997: *Microphysics of Clouds and
+    Precipitation*. 2nd rev. and enl. ed., Kluwer Academic Publishers
+    (reprinted by Springer, 2010),
+    https://doi.org/10.1007/978-0-306-48100-0
+
+    Rasmussen, R. M., and A. J. Heymsfield, 1987: Melting and shedding of
+    graupel and hail. Part I: Model physics. *J. Atmos. Sci.*, **44** (19),
+    2754-2763,
+    https://doi.org/10.1175/1520-0469(1987)044<2754:MASOGA>2.0.CO;2
+
+    Atlas, D., R. C. Srivastava, and R. S. Sekhon, 1973: Doppler radar
+    characteristics of precipitation at vertical incidence. *Rev.
+    Geophys.*, **11** (1), 1-35, https://doi.org/10.1029/RG011i001p00001
 
     Examples
     --------
@@ -606,7 +746,9 @@ def _attrs(fall, rho0):
         "references": (
             "Kumjian and Ryzhkov (2010), doi:10.1175/2010JAMC2243.1; "
             "Buck (1981), doi:10.1175/1520-0450(1981)020<1527:NEFCVP>2.0.CO;2; "
-            "Atlas et al. (1973), doi:10.1029/RG011i001p00001"
+            "Atlas et al. (1973), doi:10.1029/RG011i001p00001; "
+            "Rasmussen and Heymsfield (1987), "
+            "doi:10.1175/1520-0469(1987)044<2754:MASOGA>2.0.CO;2"
         ),
     }
 
@@ -690,6 +832,18 @@ def evaporation(
     ValueError
         For unknown options.
 
+    Notes
+    -----
+    The rates integrate the single-drop law of Rogers and Yau (1989), as
+    written by Kumjian and Ryzhkov (2010) with the ventilation coefficient of
+    Pruppacher and Klett (1997) and the thermodynamic fits of Rasmussen and
+    Heymsfield (1987), over a gamma DSD in closed form, with the saturation
+    vapour pressure of Buck (1981) and the fall speed of Atlas et al. (1973)
+    (fit and density correction as described in
+    :mod:`radarx.retrieve.evaporation`). The :math:`D_v` reference pressure is
+    1000 hPa, as in Kumjian and Ryzhkov (2010, Eq. A7); with 1013.25 hPa the
+    rates would be 0.3-0.8 % larger.
+
     References
     ----------
     Kumjian, M. R., and A. V. Ryzhkov, 2010: The impact of evaporation on
@@ -704,6 +858,19 @@ def evaporation(
     Atlas, D., R. C. Srivastava, and R. S. Sekhon, 1973: Doppler radar
     characteristics of precipitation at vertical incidence. *Rev.
     Geophys.*, **11** (1), 1-35, https://doi.org/10.1029/RG011i001p00001
+
+    Rogers, R. R., and M. K. Yau, 1989: *A Short Course in Cloud Physics*. 3rd
+    ed., Elsevier (Butterworth-Heinemann), 290 pp., ISBN 978-0-7506-3215-7.
+
+    Pruppacher, H. R., and J. D. Klett, 1997: *Microphysics of Clouds and
+    Precipitation*. 2nd rev. and enl. ed., Kluwer Academic Publishers
+    (reprinted by Springer, 2010),
+    https://doi.org/10.1007/978-0-306-48100-0
+
+    Rasmussen, R. M., and A. J. Heymsfield, 1987: Melting and shedding of
+    graupel and hail. Part I: Model physics. *J. Atmos. Sci.*, **44** (19),
+    2754-2763,
+    https://doi.org/10.1175/1520-0469(1987)044<2754:MASOGA>2.0.CO;2
 
     Examples
     --------
@@ -816,12 +983,23 @@ def integrate_evaporation(
     ValueError
         If ``dsd`` has no ``time_dim`` or times do not increase.
 
+    Notes
+    -----
+    The single-drop law (Rogers and Yau 1989, in the form of Kumjian and
+    Ryzhkov 2010), the thermodynamic fits and the departures from the cited
+    papers are listed in :mod:`radarx.retrieve.evaporation`. The
+    sub-stepping (Heun step, saturation limit) is a radarx numerical choice,
+    not taken from a paper.
+
     References
     ----------
     Kumjian, M. R., and A. V. Ryzhkov, 2010: The impact of evaporation on
     polarimetric characteristics of rain: Theoretical model and practical
     implications. *J. Appl. Meteor. Climatol.*, **49** (6), 1247-1267,
     https://doi.org/10.1175/2010JAMC2243.1
+
+    Rogers, R. R., and M. K. Yau, 1989: *A Short Course in Cloud Physics*. 3rd
+    ed., Elsevier (Butterworth-Heinemann), 290 pp., ISBN 978-0-7506-3215-7.
 
     Examples
     --------

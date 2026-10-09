@@ -20,8 +20,9 @@ bin.
 Equations
 ---------
 A drop of equal-volume diameter :math:`D` follows the air horizontally and
-falls through it at its terminal speed (drops reach it within about a second,
-so inertia is neglected as in Dawson et al. 2015),
+falls through it at its terminal speed (inertia is neglected, as in
+Dawson et al. 2015; the statement that drops reach their terminal speed
+within about a second is a rule of thumb, not checked against a paper),
 
 .. math::
 
@@ -31,7 +32,7 @@ so inertia is neglected as in Dawson et al. 2015),
 
 where :math:`(u, v, w)` is the wind at the position of the drop and
 :math:`(u', v', w')` an optional turbulent perturbation. The squared diameter
-is integrated instead of :math:`D` because :math:`\\dot D \\propto 1/D` is
+is integrated instead of :math:`D` (a radarx numerical choice) because :math:`\\dot D \\propto 1/D` is
 singular for vanishing drops while :math:`d(D^2)/dt` stays smooth, so the
 integration is stable up to complete evaporation.
 
@@ -39,10 +40,13 @@ Fall speed
 ----------
 By default :math:`V_t = V_0(D) (\\rho_0/\\rho)^{0.4}` with the sea-level speed
 of Atlas et al. (1973), :math:`V_0 = 9.65 - 10.3 e^{-0.6 D}` m s\\ :sup:`-1`
-(:math:`D` in mm, at least zero; the same as
-:func:`radarx.retrieve.terminal_fall_speed`), and the air-density correction
-of Foote and du Toit (1969), where :math:`\\rho` is the density of moist air
-at the height of the drop and :math:`\\rho_0` = 1.204 kg m\\ :sup:`-3`.
+(:math:`D` in mm, at least zero, negative below 0.109 mm; the same as
+:func:`radarx.retrieve.terminal_fall_speed`, where the source of the formula
+and its range of validity are discussed), and the air-density
+correction of Foote and du Toit (1969) as quoted by Li and Srivastava (2001)
+and Kumjian and Ryzhkov (2010, Eq. 3), where :math:`\\rho` is the density of
+moist air at the height of the drop and :math:`\\rho_0` = 1.204 kg
+m\\ :sup:`-3` (dry air at 1013.25 hPa and 20 °C, a radarx choice).
 ``fall_speed=(a, b, f)`` gives :math:`V_0 = a D^b e^{-f D}` (the form of
 :func:`radarx.retrieve.drop_evaporation_rate`) and
 ``fall_speed=("polynomial", c0, c1, ...)`` the polynomial
@@ -74,9 +78,13 @@ Evaporation
 -----------
 With humidity in the profile, every drop evaporates by ventilated diffusion
 of water vapour exactly as in :func:`radarx.retrieve.drop_evaporation_rate`
-(Kumjian and Ryzhkov 2010), with the fall speed of the drop at its current
-size and height in the ventilation coefficient; the saturation vapour
-pressure is that of Buck (1981). The temperature and humidity of the profile
+(Kumjian and Ryzhkov 2010; Appendix Eqs. A1-A10, with the ventilation
+coefficient of Pruppacher and Klett 1997 as in
+:mod:`radarx.retrieve.evaporation`, where the departures from the paper
+and the 1000 hPa reference pressure of :math:`D_v` are described), with the
+fall speed of the drop at its current size and height in the ventilation
+coefficient; the saturation vapour pressure is that of Buck (1981, Eq. 8,
+without the enhancement factor). The temperature and humidity of the profile
 are not changed by the evaporation (no cooling or moistening feedback; see
 :func:`radarx.retrieve.integrate_evaporation` for that). A drop smaller than
 ``evaporated_diameter`` has evaporated.
@@ -115,7 +123,8 @@ Turbulent dispersion
 With ``dispersion=(sigma_h, sigma_w, timescale)`` every drop is released
 ``members`` times with velocity perturbations that follow a first-order
 autoregressive (Langevin) process for homogeneous, stationary Gaussian
-turbulence (Thomson 1987; Wilson and Sawford 1996),
+turbulence (Thomson 1987; Wilson and Sawford 1996: the standard discretization; equation numbers
+not checked; there are no default parameters),
 :math:`u'_{n+1} = a u'_n + \\sqrt{1 - a^2}\\,\\sigma \\xi_n` with
 :math:`a = e^{-\\Delta t / T_L}`, standard deviations ``sigma_h`` (horizontal)
 and ``sigma_w`` (vertical) and Lagrangian time scale ``timescale``. The random
@@ -190,6 +199,23 @@ Wilson, J. D., and B. L. Sawford, 1996: Review of Lagrangian stochastic
 models for trajectories in the turbulent atmosphere. *Bound.-Layer Meteor.*,
 **78** (1-2), 191-210, https://doi.org/10.1007/BF00122492
 
+Beard, K. V., 1976: Terminal velocity and shape of cloud and precipitation
+drops aloft. *J. Atmos. Sci.*, **33** (5), 851-864,
+https://doi.org/10.1175/1520-0469(1976)033<0851:TVASOC>2.0.CO;2
+
+Gunn, R., and G. D. Kinzer, 1949: The terminal velocity of fall for water
+droplets in stagnant air. *J. Meteor.*, **6** (4), 243-248,
+https://doi.org/10.1175/1520-0469(1949)006<0243:TTVOFF>2.0.CO;2
+
+Li, X., and R. C. Srivastava, 2001: An analytical solution for raindrop
+evaporation and its application to radar rainfall measurements. *J. Appl.
+Meteor.*, **40** (9), 1607-1616,
+https://doi.org/10.1175/1520-0450(2001)040<1607:AASFRE>2.0.CO;2
+
+Pruppacher, H. R., and J. D. Klett, 1997: *Microphysics of Clouds and
+Precipitation*. 2nd rev. and enl. ed., Kluwer Academic Publishers (reprinted
+by Springer, 2010), https://doi.org/10.1007/978-0-306-48100-0
+
 Gal-Chen, T., 1982: Errors in fixed and moving frame of references:
 Applications for conventional and Doppler radar analysis. *J. Atmos. Sci.*,
 **39** (10), 2279-2300,
@@ -234,8 +260,13 @@ except ImportError:  # pragma: no cover - depends on the build
     _rain_trajectories = None
     HAS_COMPILED_KERNEL = False
 
-RHO0 = 1.204  # kg m-3, air density of the sea-level fall speeds
-VENTILATION = (0.78, 0.308)  # Pruppacher and Klett, as in evaporation.py
+# kg m-3, air density of the sea-level fall speeds: dry air at 1013.25 hPa and
+# 20 degC (radarx choice, as in evaporation.py)
+RHO0 = 1.204
+# ventilation coefficient 0.78 + 0.308 N_Sc^(1/3) N_Re^(1/2): Pruppacher and
+# Klett (1997) as printed in Kumjian and Ryzhkov (2010), Eq. A3, as in
+# evaporation.py
+VENTILATION = (0.78, 0.308)
 SCHEMES = {"rk2": 2, "rk4": 4}
 STATUS = {"aloft": 0, "reached": 1, "evaporated": 2, "invalid": 3}
 _MAX_PATH_SAMPLES = 50_000_000
@@ -1063,11 +1094,54 @@ def rain_trajectories(
         evaporated, 3 invalid input) and the start of every path as
         ``start_x``, ``start_y``, ``start_z`` and ``start_time``.
 
+    Notes
+    -----
+    Sources (Dawson et al. 2015 for the trajectory model; Kumjian and Ryzhkov
+    2010 for the evaporation; Atlas et al. 1973 and Foote and du Toit 1969 for
+    the fall speed; Buck 1981 for the saturation vapour pressure; Thomson
+    1987 and Wilson and Sawford 1996 for the turbulent dispersion; Gal-Chen
+    1982 for the moving frame). Defaults that are radarx choices, not from a
+    paper: ``time_step`` 5 s,
+    ``max_time`` 3600 s, ``evaporated_diameter`` 0.12 mm, the RK4 scheme and
+    the Hermite landing interpolation. The fall speed, density correction,
+    evaporation and turbulence formulations are described, with their
+    sources, in the module docstring.
+
     References
     ----------
     Dawson, D. T., E. R. Mansell, and M. R. Kumjian, 2015: Does wind shear
     cause hydrometeor size sorting? *J. Atmos. Sci.*, **72** (1), 340-348,
     https://doi.org/10.1175/JAS-D-14-0084.1
+
+    Kumjian, M. R., and A. V. Ryzhkov, 2010: The impact of evaporation on
+    polarimetric characteristics of rain: Theoretical model and practical
+    implications. *J. Appl. Meteor. Climatol.*, **49** (6), 1247-1267,
+    https://doi.org/10.1175/2010JAMC2243.1
+
+    Atlas, D., R. C. Srivastava, and R. S. Sekhon, 1973: Doppler radar
+    characteristics of precipitation at vertical incidence. *Rev. Geophys.*,
+    **11** (1), 1-35, https://doi.org/10.1029/RG011i001p00001
+
+    Foote, G. B., and P. S. du Toit, 1969: Terminal velocity of raindrops
+    aloft. *J. Appl. Meteor.*, **8** (2), 249-253,
+    https://doi.org/10.1175/1520-0450(1969)008<0249:TVORA>2.0.CO;2
+
+    Buck, A. L., 1981: New equations for computing vapor pressure and
+    enhancement factor. *J. Appl. Meteor.*, **20** (12), 1527-1532,
+    https://doi.org/10.1175/1520-0450(1981)020<1527:NEFCVP>2.0.CO;2
+
+    Thomson, D. J., 1987: Criteria for the selection of stochastic models of
+    particle trajectories in turbulent flows. *J. Fluid Mech.*, **180**,
+    529-556, https://doi.org/10.1017/S0022112087001940
+
+    Wilson, J. D., and B. L. Sawford, 1996: Review of Lagrangian stochastic
+    models for trajectories in the turbulent atmosphere. *Bound.-Layer
+    Meteor.*, **78** (1-2), 191-210, https://doi.org/10.1007/BF00122492
+
+    Gal-Chen, T., 1982: Errors in fixed and moving frame of references:
+    Applications for conventional and Doppler radar analysis. *J. Atmos.
+    Sci.*, **39** (10), 2279-2300,
+    https://doi.org/10.1175/1520-0469(1982)039<2279:EIFAMF>2.0.CO;2
 
     Examples
     --------
@@ -1331,11 +1405,23 @@ def rain_source_points(
         ``fall_speed_start`` (at the target), ``fall_speed_end`` (at the
         source), ``status``, and ``ND`` with ``source_dsd``.
 
+    Notes
+    -----
+    The backward integration of the trajectory equations (Dawson et al. 2015;
+    Kumjian and Ryzhkov 2010 for the evaporation) and the sampling of
+    ``source_dsd`` are radarx constructions: no paper gives this backward
+    scheme, and its defaults are those of :func:`rain_trajectories`.
+
     References
     ----------
     Dawson, D. T., E. R. Mansell, and M. R. Kumjian, 2015: Does wind shear
     cause hydrometeor size sorting? *J. Atmos. Sci.*, **72** (1), 340-348,
     https://doi.org/10.1175/JAS-D-14-0084.1
+
+    Kumjian, M. R., and A. V. Ryzhkov, 2010: The impact of evaporation on
+    polarimetric characteristics of rain: Theoretical model and practical
+    implications. *J. Appl. Meteor. Climatol.*, **49** (6), 1247-1267,
+    https://doi.org/10.1175/2010JAMC2243.1
     """
     _check_threads(n_threads)
     if source_height is None and source_surface is None:
@@ -1416,6 +1502,12 @@ def size_sorting(result, reference_diameter=2.0, *, axis=None):
         that arrive earlier than the reference), and the reference end point
         ``reference_x``, ``reference_y``, ``reference_time`` (dimension
         ``diameter`` removed).
+
+    Notes
+    -----
+    Size sorting follows the concept of Kumjian and Ryzhkov (2012); the
+    displacement and arrival offset relative to a reference size are radarx
+    definitions.
 
     References
     ----------
@@ -1580,6 +1672,23 @@ def surface_dsd(
         ``ND`` (m-3 mm-1) on ``(time, y, x, diameter)``, the total
         concentration ``NT`` (m-3) and the mass-weighted mean diameter
         ``DM`` (mm). Drops landing outside the grid are not counted.
+
+    Notes
+    -----
+    The number-flux bookkeeping above is a radarx construction (the
+    conservation of the number flux, with the bin widths of the source
+    diameters); it is motivated by the size sorting of Kumjian and Ryzhkov
+    (2012) and Dawson et al. (2015), who do not give this accumulation.
+
+    References
+    ----------
+    Kumjian, M. R., and A. V. Ryzhkov, 2012: The impact of size sorting on
+    the polarimetric radar variables. *J. Atmos. Sci.*, **69** (6),
+    2042-2060, https://doi.org/10.1175/JAS-D-11-0125.1
+
+    Dawson, D. T., E. R. Mansell, and M. R. Kumjian, 2015: Does wind shear
+    cause hydrometeor size sorting? *J. Atmos. Sci.*, **72** (1), 340-348,
+    https://doi.org/10.1175/JAS-D-14-0084.1
     """
     for name in ("landing_x", "landing_y", "landing_time", "landing_diameter"):
         if name not in trajectories:
@@ -1805,6 +1914,23 @@ def trajectory_matched_times(
         ``release_offset`` (s), ``cross_miss`` (m, to the left of the motion),
         ``fall_time`` (s), ``landing_diameter``, ``evaporated_mass_fraction``,
         ``concentration_ratio``, ``status`` and ``converged``.
+
+    Notes
+    -----
+    The secant search for the release offset (``tolerance`` 1e-3 m and
+    ``max_iterations`` 12 are radarx choices) is a radarx construction on top
+    of :func:`rain_trajectories` (Dawson et al. 2015; Kumjian and Ryzhkov
+    2012 for size sorting).
+
+    References
+    ----------
+    Dawson, D. T., E. R. Mansell, and M. R. Kumjian, 2015: Does wind shear
+    cause hydrometeor size sorting? *J. Atmos. Sci.*, **72** (1), 340-348,
+    https://doi.org/10.1175/JAS-D-14-0084.1
+
+    Kumjian, M. R., and A. V. Ryzhkov, 2012: The impact of size sorting on
+    the polarimetric radar variables. *J. Atmos. Sci.*, **69** (6),
+    2042-2060, https://doi.org/10.1175/JAS-D-11-0125.1
     """
     _check_threads(n_threads)
     cx, cy = _motion(storm_motion)

@@ -19,6 +19,18 @@
 //    water content and the rain rate in closed form. Gates whose Nw is
 //    outside [nw_min, nw_max] are inconsistent with rain and left empty.
 //
+// Sources (details, references and radarx choices in the docstring of
+// radarx/retrieve/dsd.py): the moments, Dm = (4 + mu) / Lambda and
+// D0 ~ (3.67 + mu) / Lambda of the gamma DSD of Ulbrich (1983) (Bringi and
+// Chandrasekar 2001, Eqs. 7.12-7.13); Nw = 4^4 W / (pi rho_w Dm^4) of Testud
+// et al. (2001); the rain rate 6e-4 pi int v D^3 N dD (Bringi and
+// Chandrasekar 2001, Eq. 7.66a) with the sea-level fall speed of Atlas et al.
+// (1973) (Eq. 7.65b there), integrated over 0 < D < infinity (it is negative
+// below 0.109 mm, a radarx simplification). The lookup tables use Cao et al.
+// (2008), Eq. 7, or Zhang et al. (2001) for mu(Lambda), or the normalized
+// gamma DSD of Testud et al. (2001) with a fixed mu. The scattering tables
+// assume horizontal incidence (see the docstring).
+//
 // Every step follows the NumPy reference in radarx/retrieve/dsd.py, in the
 // same order of operations.
 

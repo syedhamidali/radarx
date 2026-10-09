@@ -6,22 +6,33 @@
 Quasi-Vertical Profiles
 =======================
 
-Quasi-vertical profiles (QVPs, Ryzhkov et al. 2016) are azimuthal averages of
-the polarimetric variables measured on a high-elevation PPI. Each range gate
-of the sweep is reduced over all rays to a single value and assigned to the
-beam height of that gate, so one sweep gives one vertical profile and a
-sequence of volumes gives a time-height display.
+Quasi-vertical profiles (QVPs, Ryzhkov et al. 2016 [1]) are azimuthal
+averages of the polarimetric variables measured on a high-elevation PPI.
+Each range gate of the sweep is reduced over all rays to a single value and
+assigned to the beam height of that gate, so one sweep gives one vertical
+profile and a sequence of volumes gives a time-height display. Ryzhkov et al.
+(2016) average at elevations exceeding 10 to 20 degrees (p. 552); the idea
+of azimuthal averaging at high elevation to reduce the noise of the melting
+layer signatures goes back to Trömel et al. (2013) [2] (as summarised by
+Ryzhkov et al. 2016, p. 552; not checked against the 2013 paper).
 
-Following Ryzhkov et al. (2016), only gates with ``rhohv > 0.6`` and
-``Z > -10 dBZ`` are used, and a value is defined only where at least 30 gates
-on the circle are valid. Quantities in decibels (reflectivity, differential
+Following Ryzhkov et al. (2016) [1], p. 553, only gates with ``rhohv > 0.6``
+and ``Z > -10 dBZ`` (both strict inequalities, as in the paper) are used. The
+paper requires that the number of valid gates along the circle "should
+exceed 30" for an estimate; radarx defines a value where the number of valid
+gates is at least ``min_count`` (default 30), so a circle with exactly 30
+valid gates gives a value here although it does not in the paper (``min_count=31``
+reproduces the paper). Quantities in decibels (reflectivity, differential
 reflectivity) are averaged in linear units and converted back; the other
 variables are averaged as they are. A median is available as a robust
-alternative. The melting layer can be detected in the profiles from the
-co-located rhohv minimum and ZDR / Z maxima (after Giangrande et al. 2008),
-its top and bottom placed where rhohv returns to its background (Griffin et
-al. 2020), compared with the 0 °C and wet-bulb 0 °C heights of a sounding or
-ERA5 profile, and checked for consistency along the time series.
+alternative. Linear averaging of decibel quantities and the median are
+radarx's own choices, not statements of the paper. The melting layer can be
+detected in the profiles from the co-located rhohv minimum and ZDR / Z
+maxima (after Giangrande et al. 2008 [3]; see :func:`melting_layer` for what
+differs), its top and bottom placed where rhohv returns to its background
+(Griffin et al. 2020 [4]), compared with the 0 °C and wet-bulb 0 °C heights
+of a sounding or ERA5 profile, and checked for consistency along the time
+series (radarx).
 
 The reductions over (time, azimuth, range) are done by a compiled C++ kernel
 in a single multithreaded pass; if it is not available, an equivalent NumPy
@@ -35,24 +46,22 @@ implementation is used.
 
 References
 ----------
-Ryzhkov, A., P. Zhang, H. Reeves, M. Kumjian, T. Tschallener, S. Trömel, and
-C. Simmer, 2016: Quasi-vertical profiles—A new way to look at polarimetric
-radar data. *J. Atmos. Oceanic Technol.*, **33**, 551–562,
-https://doi.org/10.1175/JTECH-D-15-0020.1
-
-Trömel, S., M. R. Kumjian, A. V. Ryzhkov, C. Simmer, and M. Diederich, 2013:
-Backscatter differential phase—Estimation and variability. *J. Appl. Meteor.
-Climatol.*, **52**, 2529–2548, https://doi.org/10.1175/JAMC-D-13-0124.1
-
-Giangrande, S. E., J. M. Krause, and A. V. Ryzhkov, 2008: Automatic
-designation of the melting layer with a polarimetric prototype of the WSR-88D
-radar. *J. Appl. Meteor. Climatol.*, **47**, 1354–1364,
-https://doi.org/10.1175/2007JAMC1634.1
-
-Griffin, E. M., T. J. Schuur, and A. V. Ryzhkov, 2020: A polarimetric radar
-analysis of ice microphysical processes in melting layers of winter storms
-using S-band quasi-vertical profiles. *J. Appl. Meteor. Climatol.*, **59**,
-751–767, https://doi.org/10.1175/JAMC-D-19-0128.1
+.. [1] Ryzhkov, A., P. Zhang, H. Reeves, M. Kumjian, T. Tschallener, S.
+   Trömel, and C. Simmer, 2016: Quasi-vertical profiles—A new way to look at
+   polarimetric radar data. *J. Atmos. Oceanic Technol.*, **33** (3),
+   551–562, https://doi.org/10.1175/JTECH-D-15-0020.1
+.. [2] Trömel, S., M. R. Kumjian, A. V. Ryzhkov, C. Simmer, and M.
+   Diederich, 2013: Backscatter differential phase—Estimation and
+   variability. *J. Appl. Meteor. Climatol.*, **52** (11), 2529–2548,
+   https://doi.org/10.1175/JAMC-D-13-0124.1
+.. [3] Giangrande, S. E., J. M. Krause, and A. V. Ryzhkov, 2008: Automatic
+   designation of the melting layer with a polarimetric prototype of the
+   WSR-88D radar. *J. Appl. Meteor. Climatol.*, **47** (5), 1354–1364,
+   https://doi.org/10.1175/2007JAMC1634.1
+.. [4] Griffin, E. M., T. J. Schuur, and A. V. Ryzhkov, 2020: A polarimetric
+   radar analysis of ice microphysical processes in melting layers of winter
+   storms using S-band quasi-vertical profiles. *J. Appl. Meteor. Climatol.*,
+   **59** (4), 751–767, https://doi.org/10.1175/JAMC-D-19-0128.1
 """
 
 from __future__ import annotations
@@ -421,17 +430,21 @@ _QVP_PARAMS = """
         variable of the sweep.
     min_rhohv : float or None, optional
         Only gates with ``rhohv > min_rhohv`` are used. Default 0.6
-        (Ryzhkov et al. 2016). ``None`` disables the test.
+        (Ryzhkov et al. 2016, p. 553). ``None`` disables the test.
     min_dbz : float or None, optional
         Only gates with reflectivity ``> min_dbz`` are used. Default -10 dBZ
-        (Ryzhkov et al. 2016). ``None`` disables the test.
+        (Ryzhkov et al. 2016, p. 553). ``None`` disables the test.
     rhohv, dbz : str or None, optional
         Names of the fields used for the two tests. ``"auto"`` (default) looks
         for common names (``RHOHV``, ``DBZH``, ...) and the CF standard name;
         a test is skipped if no field is found or the name is ``None``.
     min_count : int, optional
-        Minimum number of valid gates on the circle for a defined value.
-        Default 30, the number Ryzhkov et al. (2016) require to be exceeded.
+        Minimum number of valid gates on the circle for a defined value: the
+        value is defined where the number of valid gates is at least
+        ``min_count``. Default 30. Ryzhkov et al. (2016, p. 553) require the
+        number of valid gates to *exceed* 30, i.e. at least 31, so the default
+        accepts one gate fewer than the paper; use ``min_count=31`` for the
+        paper's rule.
     min_fraction : float, optional
         Minimum fraction of the rays that must be valid. Default 0. The
         stricter of ``min_count`` and ``min_fraction`` applies.
@@ -482,8 +495,8 @@ def qvp(
         sweep on ``(azimuth, range)``.
     sweep : int or str, optional
         Sweep of a volume to use, by number or group name. By default the
-        sweep with the highest elevation (Ryzhkov et al. 2016 recommend
-        elevations of 10°–20° or more).
+        sweep with the highest elevation (Ryzhkov et al. 2016 [1] average at
+        elevations exceeding 10°–20°, p. 552).
     elevation : float, optional
         Use the sweep whose elevation is closest to this angle (degrees)
         instead.
@@ -502,15 +515,26 @@ def qvp(
     --------
     qvp_timeseries, melting_layer
 
+    Notes
+    -----
+    The filters (``rhohv > 0.6``, ``Z > -10`` dBZ) are those of the initial
+    QVP methodology of Ryzhkov et al. (2016) [1] (p. 553). The count rule
+    differs by one gate (see ``min_count``), and the heights of the gates are
+    those of the 4/3 Earth model, not a statement of the paper. The diameter
+    of the averaging circle grows with height (Ryzhkov et al. 2016, p. 553),
+    whose radius is returned as ``ground_range``. Azimuthal averaging at high
+    elevation was suggested for the backscatter differential phase by Trömel
+    et al. (2013) [2].
+
     References
     ----------
     .. [1] Ryzhkov, A., P. Zhang, H. Reeves, M. Kumjian, T. Tschallener,
        S. Trömel, and C. Simmer, 2016: Quasi-vertical profiles—A new way to
-       look at polarimetric radar data. *J. Atmos. Oceanic Technol.*, **33**,
-       551–562, https://doi.org/10.1175/JTECH-D-15-0020.1
+       look at polarimetric radar data. *J. Atmos. Oceanic Technol.*, **33**
+       (3), 551–562, https://doi.org/10.1175/JTECH-D-15-0020.1
     .. [2] Trömel, S., M. R. Kumjian, A. V. Ryzhkov, C. Simmer, and
        M. Diederich, 2013: Backscatter differential phase—Estimation and
-       variability. *J. Appl. Meteor. Climatol.*, **52**, 2529–2548,
+       variability. *J. Appl. Meteor. Climatol.*, **52** (11), 2529–2548,
        https://doi.org/10.1175/JAMC-D-13-0124.1
 
     Examples
@@ -619,8 +643,8 @@ def qvp_timeseries(
     ----------
     .. [1] Ryzhkov, A., P. Zhang, H. Reeves, M. Kumjian, T. Tschallener,
        S. Trömel, and C. Simmer, 2016: Quasi-vertical profiles—A new way to
-       look at polarimetric radar data. *J. Atmos. Oceanic Technol.*, **33**,
-       551–562, https://doi.org/10.1175/JTECH-D-15-0020.1
+       look at polarimetric radar data. *J. Atmos. Oceanic Technol.*, **33**
+       (3), 551–562, https://doi.org/10.1175/JTECH-D-15-0020.1
 
     Examples
     --------
@@ -1023,9 +1047,13 @@ def melting_layer(
 
     The melting layer shows up in polarimetric data as a ρhv minimum together
     with maxima of ZDR and Z, and the ρhv signature discriminates best
-    (Giangrande et al. 2008). This function looks for that co-located
+    (Giangrande et al. 2008 [1]). This function looks for that co-located
     signature in each profile, measures its depth, and checks the result for
-    consistency along a time series:
+    consistency along a time series. It is not an implementation of the
+    algorithm of Giangrande et al. (2008) or of Ryzhkov and Krause (2022)
+    [4]: the signature test is loosely modelled on the former, with
+    different thresholds and window (see Notes), and every default below
+    that is not attributed to a paper is radarx's own choice:
 
     1. **Signature.** Within the search range (``height_range``, or
        ``freezing_level_window`` around the reference height, and always
@@ -1038,14 +1066,17 @@ def melting_layer(
     2. **Top and bottom.** ``boundaries`` selects the definition:
 
        - ``"onset"`` (default): where the signature begins and ends. The ρhv
-         dip is the most objective marker of melting: its top is at the
-         0 °C wet-bulb level, where melting starts, and its bottom where the
-         snow has melted (Ryzhkov and Krause 2022). Going up and down from
-         the ρhv minimum, as Griffin et al. (2020) do, the edge is the first
+         dip is the most objective marker of melting; Ryzhkov and Krause
+         (2022) [4] (p. 533) state that its top corresponds to the freezing
+         level or the height of the wet-bulb 0 °C level and its bottom, on
+         average, to a temperature of about +3 °C, citing an earlier study.
+         Going up and down from
+         the ρhv minimum, as Griffin et al. (2020) [3] do, the edge is the first
          height where ρhv is back at its background: within
          ``onset_fraction`` (10 %) of the dip depth from the background,
          the largest ρhv within ``depth`` on that side. Griffin et al. (2020)
-         use a fixed background, ρhv ``>= 0.97`` in S-band QVPs; pass
+         use a fixed background, ρhv ``>= 0.97`` in S-band QVPs (not checked against their
+         paper); pass
          ``rhohv_onset=0.97`` for their definition (the edge is then
          wherever either test is met first). Heights are interpolated
          linearly between gates. If ρhv does not rise on one side, the ZDR
@@ -1093,7 +1124,9 @@ def melting_layer(
     height_range : tuple of float, optional
         Heights (m above sea level) searched for the ZDR peak without a
         reference height (and where the reference height is missing).
-        Default 1–6 km (Giangrande et al. 2008 only flag gates below 6 km).
+        Default 1–6 km: the upper limit is the 6 km below which Giangrande
+        et al. (2008) [1] (p. 1356, step 1) identify melting snow; the 1 km
+        lower limit is radarx's choice.
     freezing_level : float or xarray.DataArray, optional
         Reference height for the search (m above sea level), e.g. the 0 °C
         level, a scalar or one value per profile (e.g. on ``time``). If
@@ -1101,35 +1134,53 @@ def melting_layer(
         it; it overrides the reference height from ``environment``.
     freezing_level_window : tuple of float, optional
         Search range for the ZDR peak relative to the reference height,
-        default −1000 to +500 m (melting happens below the 0 °C level).
+        default −1000 to +500 m (radarx choice: melting happens below the
+        0 °C level).
     rhohv_range : tuple of float, optional
         Range for the ρhv minimum near the ZDR peak, default (0.80, 0.97).
+        The upper bound is the 0.97 of Giangrande et al. (2008) [1] (p. 1356),
+        but the lower bound deviates from their 0.90, which they chose to
+        mitigate contamination by non-meteorological scatterers (Sect. 2d,
+        p. 1357). radarx accepts lower values because the azimuthal mean of
+        ρhv in a QVP (over gates with ρhv > 0.6) and gates that mix
+        melting and non-melting echo can fall below 0.90; this is a
+        radarx choice, not tested against the paper. Pass
+        ``(0.90, 0.97)`` for the paper's range.
     zdr_min : float, optional
-        Minimum ZDR peak, default 0.5 dB.
+        Minimum ZDR peak, default 0.5 dB (radarx choice; Giangrande et al.
+        2008 [1] require a ZDR maximum between 0.8 and 2.5 dB, and there is no
+        upper limit here).
     dbz_min : float, optional
-        Minimum Z maximum near the ZDR peak, default 20 dBZ.
+        Minimum Z maximum near the ZDR peak, default 20 dBZ (radarx choice;
+        Giangrande et al. 2008 [1] require a Z maximum between 30 and 47 dBZ,
+        and there is no upper limit here).
     window : float, optional
         Co-location distance of the ρhv minimum and Z maximum from the ZDR
-        peak, default 500 m.
+        peak, default 500 m, on both sides of the peak (the 500 m of
+        Giangrande et al. 2008 [1] is a window above the gate of the ρhv
+        signature).
     depth : float, optional
         How far above and below the peak the background is sought, default
-        1000 m.
+        1000 m (radarx choice).
     rhohv_onset : float, optional
         A fixed background ρhv for ``boundaries="onset"``, e.g. 0.97 as in
         Griffin et al. (2020). Default None: only ``onset_fraction``.
     onset_fraction : float, optional
         With ``boundaries="onset"``, the edge is where ρhv is within this
-        fraction of the dip depth from the background, default 0.1.
+        fraction of the dip depth from the background, default 0.1 (radarx
+        choice).
     edge_fraction : float, optional
         Fraction of the prominence the anomaly must fall by at the edges with
-        ``boundaries="half_prominence"``, default 0.5.
+        ``boundaries="half_prominence"``, default 0.5 (radarx choice).
     median_window : int, optional
-        Profiles in the running median, default 5. 1 disables the check.
+        Profiles in the running median, default 5 (radarx choice). 1 disables
+        the check.
     max_jump : float, optional
-        Largest accepted distance from the running median, default 500 m.
+        Largest accepted distance from the running median, default 500 m
+        (radarx choice).
     max_fill : int, optional
-        Longest gap (in profiles) filled by interpolation, default 3; 0
-        disables filling.
+        Longest gap (in profiles) filled by interpolation, default 3 (radarx
+        choice); 0 disables filling.
     n_threads : int, optional
         Threads for the compiled kernel. Default: all cores.
     engine : {"auto", "compiled", "numpy"}, optional
@@ -1151,49 +1202,78 @@ def melting_layer(
 
     Notes
     -----
-    Giangrande et al. (2008) flag individual radar gates with
-    0.90 < ρhv < 0.97 and nearby Z of 30–47 dBZ and ZDR > 0.8 dB. Azimuthal
-    averaging in a QVP smooths and weakens these extremes (Z is averaged over
-    the whole circle, including weaker echo), so the defaults here are lower.
-    Tune them for other radars and elevations.
+    *Giangrande et al. (2008) [1]* (Sect. 2b, p. 1356, steps 1 to 3 of their
+    algorithm) flag individual radar gates with 0.90 < ρhv < 0.97 (below
+    6 km), search for the maxima of Z and ZDR in a 500 m window above each
+    such gate and call the gate a melting-layer point if the maximum of Z lies
+    between 30 and 47 dBZ and the maximum of ZDR between 0.8 and 2.5 dB. They
+    then take the heights below which 80 % (top) and 20 % (bottom) of the
+    points of an azimuth sector lie (p. 1357); this is not done here. The
+    differences of this function are:
 
-    Griffin et al. (2020) define the top and bottom of the melting layer in
-    S-band QVPs by searching upward and downward from the ρhv minimum for the
-    first ρhv ``>= 0.97``; the reflectivity-curvature method of Fabry and
-    Zawadzki (1995) gave tops about 200 m higher and bottoms within about
-    50 m. Where the background is close to 1, as at S band, a fixed 0.97 is
-    reached well inside the dip; the default relative test finds where ρhv
-    first departs from its background, wherever that background lies (it is
-    lower at C and X band and in noisy data). On the KGWX QVPs of 30–31
-    March 2022 the default top is about 190 m above the 0.97 top, the
-    difference Griffin et al. (2020) report against the curvature method.
-    Ryzhkov and Krause (2022) place the top of the ρhv dip at the 0 °C
-    wet-bulb level and its bottom near +3 °C and estimate both from QVPs to
-    about 0.1 km, so the ``"onset"`` top is expected near the wet-bulb 0 °C
-    height of the environment; the returned offsets quantify the difference.
+    - the search is anchored on the largest ZDR value (not on the ρhv gates)
+      and looks for the ρhv minimum and the Z maximum within ``window`` metres
+      on both sides of it;
+    - ``rhohv_range`` is (0.80, 0.97), not (0.90, 0.97) (see that parameter);
+    - ``zdr_min=0.5`` dB and ``dbz_min=20`` dBZ replace 0.8 dB and 30 dBZ,
+      and there is no upper limit of 2.5 dB and 47 dBZ. The lower defaults
+      are radarx's choice, made because azimuthal averaging in a QVP smooths
+      and weakens the extremes (Z is averaged over the whole circle,
+      including weaker echo); they were not derived from the paper. Tune
+      them for other radars and elevations.
+
+    *Griffin et al. (2020) [3]* define the top and bottom of the melting
+    layer in S-band QVPs by searching upward and downward from the ρhv
+    minimum for the first ρhv ``>= 0.97``; they report that the
+    reflectivity-curvature method of Fabry and Zawadzki (1995) [5] gave tops
+    about 200 m higher and bottoms within about 50 m (not checked against the
+    paper). Where the
+    background is close to 1, as at S band, a fixed 0.97 is reached well
+    inside the dip; the default relative test finds where ρhv first departs
+    from its background, wherever that background lies (it is lower at C and
+    X band and in noisy data). On the KGWX QVPs of 30–31 March 2022 the
+    default top is about 190 m above the 0.97 top; this is a radarx result and
+    is not the same comparison as that of Griffin et al.
+
+    *Ryzhkov and Krause (2022) [4]* state (p. 533, citing an earlier study for
+    the second part) that the top of the ρhv (CC) dip of the melting layer
+    corresponds to the freezing level or the height of the wet-bulb 0 °C
+    level, and that its bottom, the end of snow melting, occurs on average at
+    about +3 °C; they add that the dip can be detected at temperatures as
+    high as 7 °C and that other authors report different bottoms. The
+    ``"onset"`` top is therefore expected near the freezing level or the
+    wet-bulb 0 °C height of the environment; the returned offsets quantify
+    the difference. Their statement that the top and bottom of the dip can
+    be estimated from QVPs with an accuracy of about 0.1 km (p. 540) is
+    attributed by them to earlier QVP studies (among them Griffin et al.
+    2020 [3]); it is not a result of their paper, and it is not a validation
+    of this function. Their own algorithm (radial profiles of ρhv at
+    elevations below about 5–6 degrees matched to model profiles, Sect. 3;
+    average bias against their RD-QVP products of −128 m for the top and
+    −107 m for the bottom in four events, p. 541) is not QVP-based and is not implemented here.
 
     References
     ----------
-    .. [1] Giangrande, S. E., J. M. Krause, and A. V. Ryzhkov, 2008: Automatic
-       designation of the melting layer with a polarimetric prototype of the
-       WSR-88D radar. *J. Appl. Meteor. Climatol.*, **47**, 1354–1364,
-       https://doi.org/10.1175/2007JAMC1634.1
+    .. [1] Giangrande, S. E., J. M. Krause, and A. V. Ryzhkov, 2008:
+       Automatic designation of the melting layer with a polarimetric
+       prototype of the WSR-88D radar. *J. Appl. Meteor. Climatol.*, **47**
+       (5), 1354–1364, https://doi.org/10.1175/2007JAMC1634.1
     .. [2] Ryzhkov, A., P. Zhang, H. Reeves, M. Kumjian, T. Tschallener,
        S. Trömel, and C. Simmer, 2016: Quasi-vertical profiles—A new way to
-       look at polarimetric radar data. *J. Atmos. Oceanic Technol.*, **33**,
-       551–562, https://doi.org/10.1175/JTECH-D-15-0020.1
+       look at polarimetric radar data. *J. Atmos. Oceanic Technol.*, **33**
+       (3), 551–562, https://doi.org/10.1175/JTECH-D-15-0020.1
     .. [3] Griffin, E. M., T. J. Schuur, and A. V. Ryzhkov, 2020: A
        polarimetric radar analysis of ice microphysical processes in melting
        layers of winter storms using S-band quasi-vertical profiles. *J.
-       Appl. Meteor. Climatol.*, **59**, 751–767,
+       Appl. Meteor. Climatol.*, **59** (4), 751–767,
        https://doi.org/10.1175/JAMC-D-19-0128.1
     .. [4] Ryzhkov, A., and J. Krause, 2022: New polarimetric radar algorithm
        for melting-layer detection and determination of its height. *J.
-       Atmos. Oceanic Technol.*, **39**, 529–543,
+       Atmos. Oceanic Technol.*, **39** (5), 529–543,
        https://doi.org/10.1175/JTECH-D-21-0130.1
     .. [5] Fabry, F., and I. Zawadzki, 1995: Long-term radar observations of
        the melting layer of precipitation and their interpretation. *J.
-       Atmos. Sci.*, **52**, 838–851,
+       Atmos. Sci.*, **52** (7), 838–851,
        https://doi.org/10.1175/1520-0469(1995)052<0838:LTROOT>2.0.CO;2
 
     Examples

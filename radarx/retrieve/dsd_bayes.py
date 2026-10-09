@@ -22,6 +22,42 @@ DSD; here the shape is uncertain, the measurements are noisy and biased, and
 the result is a posterior distribution (Rodgers 2000) summarised by its mean,
 standard deviation, maximum (MAP) and quantiles (credible intervals).
 
+Relation to Cao et al. (2010)
+-----------------------------
+The direct precedent of a Bayesian DSD retrieval from :math:`Z_H` and
+:math:`Z_{DR}` is Cao et al. (2010). They take the posterior mean and
+standard deviation (their Eqs. 3-5) of the state :math:`(\\log_{10} N_0,
+\\Lambda^{1/4})` of a constrained gamma DSD, with :math:`\\mu` from their
+Eq. 2 (the relation of Cao et al. 2008), a prior that is the empirical
+histogram of 2DVD fits (30 000 min, Oklahoma, Fig. 4), a forward model from
+T-matrix scattering at S band, 10 °C and zero canting with the Brandes et al.
+(2002) shape, and a bivariate normal error of :math:`Z_H` and :math:`Z_{DR}`
+with correlation 0.5, :math:`\\sigma_{Z_H}` = 2 dB and :math:`\\sigma_{Z_{DR}}`
+= 0.3 dB inside the region of rain data (their Eqs. 10-11, larger outside).
+radarx takes the Bayesian formulation but differs in all of these points:
+
+- the shape :math:`\\mu` is part of the state (normalized gamma DSD, state
+  :math:`(\\log_{10} N_w, D_m, \\mu)`), not tied to :math:`\\Lambda`;
+  the constrained-gamma relation of Cao et al. (2008) only centres the
+  generic prior;
+- the observations may include :math:`K_{DP}` and :math:`A_H` (Cao et al.
+  2010 use :math:`Z_H` and :math:`Z_{DR}` only, arguing that :math:`K_{DP}`
+  is noisy);
+- the errors are independent Gaussians with the standard deviations of
+  :data:`ERRORS` (radarx choices, equivalent to 1.4 dB for :math:`Z_H` and
+  0.22 dB for :math:`Z_{DR}`, no correlation and no dependence on the
+  position in the :math:`Z_H`-:math:`Z_{DR}` plane);
+- the scattering tables are those of :mod:`radarx.retrieve.dsd` (any
+  band, 0-30 °C, 7° canting) and the DSD of any prior comes from PIPS or
+  user disdrometer data (a kernel density estimate instead of a histogram);
+- the posterior is evaluated by the Laplace method per grid node and
+  returned with its MAP, quantiles and evidence, not only its mean and
+  standard deviation.
+
+Cao et al. (2013) give a variational formulation of the DSD retrieval in
+the presence of attenuation. radarx does not implement it and uses no
+equation of it; it is listed as related work for the use of :math:`A_H`.
+
 State and forward model
 -----------------------
 The state is :math:`x = (t, D_m, \\mu)` with :math:`t = \\log_{10} N_w`.
@@ -35,7 +71,8 @@ single-drop scattering tables of :mod:`radarx.retrieve.dsd` (drops up to
     K_{DP} = 10^t k(D_m, \\mu),\\quad A_H = 10^t a(D_m, \\mu).
 
 :math:`(D_m, \\mu)` are discretized on a fixed grid (:math:`D_m` from 0.4 to
-4.4 mm in steps of 0.05 mm, :math:`\\mu` from -0.5 to 12 in steps of 0.5);
+4.4 mm in steps of 0.05 mm, :math:`\\mu` from -0.5 to 12 in steps of 0.5: radarx
+choices);
 :math:`t` is continuous. The rain rate (fall speed of Atlas et al. 1973) and
 the liquid water content are :math:`10^t` times a function of
 :math:`(D_m, \\mu)` (closed-form moments of the untruncated DSD, as in
@@ -47,9 +84,14 @@ Independent Gaussian errors on :math:`Z_H` and :math:`Z_{DR}` (dB) whose
 variance is the sum of random noise and of an unknown calibration bias (for
 one gate a bias of unknown sign is indistinguishable from noise, so its
 variance adds), and on :math:`K_{DP}` and :math:`A_H` with an absolute and a
-relative part (``errors``; the defaults are listed in :data:`ERRORS`). The
-same variances also absorb forward-model errors (drop shapes, canting,
-temperature).
+relative part (``errors``; the defaults are listed in :data:`ERRORS`: radarx
+choices, not from a paper; cf. Cao et al. 2010, who use 2 dB and 0.3 dB for
+:math:`Z_H` and :math:`Z_{DR}`). The same variances also absorb forward-model
+errors (drop shapes, canting, temperature) and the neglected dependence of
+:math:`Z_{DR}` on the elevation angle (the tables are for horizontal
+incidence, see :mod:`radarx.retrieve.dsd`: at 20° elevation :math:`Z_{DR}` is
+about 12 % lower, a bias of 0.12 dB at 1 dB that the default
+:math:`Z_{DR}` error of 0.22 dB covers only for :math:`Z_{DR}` below about 2 dB).
 
 Priors
 ------
@@ -59,24 +101,32 @@ s(D_m, \\mu)^2)`, a distribution on the grid times a Gaussian in
 (:func:`dsd_prior`):
 
 ``"generic"``
-    A weakly informative prior from published disdrometer climatologies:
-    :math:`D_m \\sim \\mathcal{N}(1.7, 0.6^2)` mm and
-    :math:`\\log_{10} N_w \\sim \\mathcal{N}(3.75, 0.85^2)`, whose central
-    95 % covers the :math:`D_m` of 1-2.75 mm and :math:`\\log_{10} N_w` of
-    2-5.5 of stratiform, maritime-like and continental-like convective rain
-    in Bringi et al. (2003); the shape is centred on the
-    :math:`\\mu`-:math:`\\Lambda` relation of Cao et al. (2008) with a
-    standard deviation of 2 (the constrained-gamma method is the limit of a
-    vanishing spread).
+    A weakly informative prior: :math:`D_m \\sim \\mathcal{N}(1.7, 0.6^2)` mm
+    and :math:`\\log_{10} N_w \\sim \\mathcal{N}(3.75, 0.85^2)`; the shape is
+    centred on the :math:`\\mu`-:math:`\\Lambda` relation of Cao et al. (2008,
+    Eq. 7) with a standard deviation of 2 (the constrained-gamma method is
+    the limit of a vanishing spread). The numbers 1.7, 0.6, 3.75, 0.85 and 2
+    are radarx choices, set to be broad around the composite statistics of
+    Bringi et al. (2003, Sect. 5, Figs. 10-11), whose cluster means are
+    :math:`\\langle D_m \\rangle` of 1.5-1.75 mm with :math:`\\log_{10} N_w`
+    of 4-4.5 (maritime-like convective), :math:`\\langle D_m \\rangle` of
+    2-2.75 mm with :math:`\\log_{10} N_w` of 3-3.5 (continental-like) and,
+    for stratiform rain, :math:`\\langle D_m \\rangle` of about 1-2 mm with
+    :math:`\\log_{10} N_w` of about 3-4. They are not numbers taken from one
+    table of that paper.
 ``"perils2022"``
     Learned from 1-min OTT Parsivel2 DSDs of the Portable In situ
     Precipitation Stations (PIPS) in the PERiLS 2022 field campaign (northern
     Mississippi and Alabama, quasi-linear convective systems), fitted by the
     2-4-6 method of moments (Cao and Zhang 2009) after matching every size
     bin to the radar beam along its fall trajectory (size sorting and wind
-    drift). A kernel density estimate on the grid with the conditional
-    mean and spread of :math:`\\log_{10} N_w`, mixed with 1 % of the generic
-    prior so that no DSD is impossible.
+    drift). A kernel density estimate on the grid (Gaussian kernels with
+    Scott's rule bandwidth, Scott 1992, at least one grid step; a radarx
+    choice) with the conditional mean and spread of :math:`\\log_{10} N_w`
+    (shrunk to the global values with the weight of one sample), mixed with
+    1 % of the generic prior (``defensive``, a radarx choice) so that no DSD
+    is impossible. The data table is documented in the header of
+    ``radarx/retrieve/data/dsd_prior_perils2022.csv``.
 an :class:`xarray.Dataset`
     From :func:`dsd_prior`, e.g. learned from any disdrometer data set.
 
@@ -89,7 +139,9 @@ posterior in :math:`t` is integrated by the Laplace method around its mode
 weight of the node and a Gaussian in :math:`t`; the posterior is the mixture
 over the nodes. Nodes whose closed-form evidence from :math:`Z_H`,
 :math:`Z_{DR}` and the prior is more than ``prune`` nats below the best are
-skipped. Marginals of :math:`D_m` and :math:`\\mu` are piecewise constant
+skipped (default 15, a radarx choice). The Laplace method and the
+Gauss-Newton iterations are standard numerical techniques and are not
+taken from a specific paper. Marginals of :math:`D_m` and :math:`\\mu` are piecewise constant
 over the grid cells; those of :math:`\\log_{10} N_w`, :math:`\\log_{10} R`
 and :math:`\\log_{10} W` are Gaussian mixtures, whose quantiles are found by
 safeguarded Newton iterations on the mixture CDF. The log evidence
@@ -130,10 +182,23 @@ parameters employing disdrometer and simulated raindrop spectra. *J. Appl.
 Meteor. Climatol.*, **48** (2), 406-425,
 https://doi.org/10.1175/2008JAMC2026.1
 
+Cao, Q., G. Zhang, E. Brandes, and T. Schuur, 2010: Polarimetric radar rain
+estimation through retrieval of drop size distribution using a Bayesian
+approach. *J. Appl. Meteor. Climatol.*, **49** (5), 973-990,
+https://doi.org/10.1175/2009JAMC2227.1
+
 Cao, Q., G. Zhang, and M. Xue, 2013: A variational approach for retrieving
 raindrop size distribution from polarimetric radar measurements in the
 presence of attenuation. *J. Appl. Meteor. Climatol.*, **52** (1), 169-185,
 https://doi.org/10.1175/JAMC-D-12-0101.1
+
+Brandes, E. A., G. Zhang, and J. Vivekanandan, 2002: Experiments in rainfall
+estimation with a polarimetric radar in a subtropical environment. *J. Appl.
+Meteor.*, **41** (6), 674-685,
+https://doi.org/10.1175/1520-0450(2002)041<0674:EIREWA>2.0.CO;2
+
+Scott, D. W., 1992: *Multivariate Density Estimation: Theory, Practice, and
+Visualization*. Wiley, 317 pp., https://doi.org/10.1002/9780470316849
 
 Rodgers, C. D., 2000: *Inverse Methods for Atmospheric Sounding: Theory and
 Practice*. Series on Atmospheric, Oceanic and Planetary Physics, Vol. 2,
@@ -186,13 +251,18 @@ except ImportError:  # pragma: no cover - depends on the build
     _dsd_bayes = None
     HAS_COMPILED_KERNEL = False
 
-# grid of (Dm, mu)
+# grid of (Dm, mu): radarx choices (a Dm range of 0.4-4.4 mm and mu of -0.5-12
+# in steps of 0.05 mm and 0.5; not from a paper)
 DM_AXIS = (0.4, 0.05, 81)  # first, step, size: 0.4-4.4 mm
 MU_AXIS = (-0.5, 0.5, 26)  # -0.5-12
 
 #: Default measurement error model: standard deviations of the random noise
 #: and of the calibration bias of Z_H (dB) and Z_DR (dB), and the absolute
-#: (degrees/km, dB/km) and relative parts of the K_DP and A_H errors.
+#: (degrees/km, dB/km) and relative parts of the K_DP and A_H errors. All
+#: values are radarx choices, not taken from a paper (Cao et al. 2010 use a
+#: total sigma of 2 dB for Z_H and 0.3 dB for Z_DR inside the region of rain
+#: data; here the totals are sqrt(1 + 1) = 1.41 dB and sqrt(0.2^2 + 0.1^2) =
+#: 0.22 dB).
 ERRORS = {
     "zh": 1.0,
     "zh_bias": 1.0,
@@ -214,7 +284,8 @@ _WEIGHT_MIN = 1e-9
 _LN10 = np.log(10.0)
 _LOG2PI = np.log(2.0 * np.pi)
 
-# generic prior (see the module docstring)
+# generic prior (see the module docstring): radarx choices, set to be broad
+# around the composite statistics of Bringi et al. (2003), Figs. 10-11
 _GENERIC = {"dm": (1.7, 0.6), "log10_nw": (3.75, 0.85), "mu_sd": 2.0}
 
 
@@ -287,6 +358,30 @@ def forward_grid(band="S", temperature=20.0):
         ``RAIN_RATE`` (mm/h) and ``LWC`` (g/m3). :math:`Z_H` adds
         :math:`10 \\log_{10} N_w`; the others scale with :math:`N_w`, except
         :math:`Z_{DR}`.
+
+    Notes
+    -----
+    Computed from the T-matrix tables of :func:`radarx.retrieve.scattering_table`
+    (horizontal incidence, Brandes et al. 2002 axis ratio, 7 degrees canting;
+    see :mod:`radarx.retrieve.dsd`) for the normalized gamma DSD of Testud et
+    al. (2001); the rain rate uses the fall speed of Atlas et al. (1973).
+
+    References
+    ----------
+    Testud, J., S. Oury, R. A. Black, P. Amayenc, and X. Dou, 2001: The
+    concept of "normalized" distribution to describe raindrop spectra: A tool
+    for cloud physics and cloud remote sensing. *J. Appl. Meteor.*, **40**
+    (6), 1118-1140,
+    https://doi.org/10.1175/1520-0450(2001)040<1118:TCONDT>2.0.CO;2
+
+    Brandes, E. A., G. Zhang, and J. Vivekanandan, 2002: Experiments in
+    rainfall estimation with a polarimetric radar in a subtropical
+    environment. *J. Appl. Meteor.*, **41** (6), 674-685,
+    https://doi.org/10.1175/1520-0450(2002)041<0674:EIREWA>2.0.CO;2
+
+    Atlas, D., R. C. Srivastava, and R. S. Sekhon, 1973: Doppler radar
+    characteristics of precipitation at vertical incidence. *Rev. Geophys.*,
+    **11** (1), 1-35, https://doi.org/10.1029/RG011i001p00001
     """
     band = _check_band(band)
     f = _forward(band, float(temperature))
@@ -319,7 +414,12 @@ def forward_grid(band="S", temperature=20.0):
 
 
 def _mu_cao(dm):
-    """Shape mu of the Cao et al. (2008) mu-Lambda relation at given Dm."""
+    """
+    Shape mu of the Cao et al. (2008, Eq. 7) mu-Lambda relation at given Dm.
+
+    The relation is solved with Lambda = (4 + mu) / Dm (the normalized-gamma
+    link between the slope and Dm) by a damped fixed-point iteration.
+    """
     c2, c1, c0 = MU_LAMBDA["cao2008"]
     # mu = c2 L^2 + c1 L + c0 with L = (4 + mu) / Dm: fixed-point in mu
     mu = np.full_like(dm, 2.0)
@@ -388,7 +488,16 @@ def _generic():
 
 
 def _kde(dm_s, mu_s, t_s, weights=None, defensive=0.01, bandwidth=None):
-    """Kernel density prior on the grid from samples of (Dm, mu, log10 Nw)."""
+    """
+    Kernel density prior on the grid from samples of (Dm, mu, log10 Nw).
+
+    Gaussian kernels in (Dm, mu) with the bandwidth of Scott's rule
+    (Scott 1992; n_eff^(-1/6) times the weighted standard deviation, in two
+    dimensions), at least one grid step. The conditional mean and variance of
+    log10 Nw are kernel-weighted and shrunk to the global ones with the weight
+    of one sample, plus the bandwidth variance: radarx's construction, not
+    taken from a paper.
+    """
     dm_s, mu_s, t_s = (np.asarray(a, float).ravel() for a in (dm_s, mu_s, t_s))
     w = np.ones_like(dm_s) if weights is None else np.asarray(weights, float).ravel()
     dm, mu = _axes()
@@ -498,15 +607,47 @@ def dsd_prior(source="generic", *, weights=None, defensive=0.01, bandwidth=None)
         Gaussian prior of :math:`\\log_{10} N_w` at each node. It can be
         passed as ``prior`` to :func:`dsd_bayesian`.
 
+    Notes
+    -----
+    ``"generic"`` is a radarx choice centred on the :math:`\\mu`-:math:`\\Lambda`
+    relation of Cao et al. (2008, Eq. 7) and broad around the statistics of
+    Bringi et al. (2003); a learned prior is a kernel density estimate with
+    Scott's rule (Scott 1992). See :mod:`radarx.retrieve.dsd_bayes`; the prior
+    of Cao et al. (2010) is instead the histogram of 2DVD fits.
+
     References
     ----------
-    The ``"perils2022"`` prior was learned from PIPS spectra of the PERiLS
-    2022 data set, with no quality control beyond the processing of the
+    Cao, Q., G. Zhang, E. Brandes, T. Schuur, A. Ryzhkov, and K. Ikeda,
+    2008: Analysis of video disdrometer and polarimetric radar data to
+    characterize rain microphysics in Oklahoma. *J. Appl. Meteor.
+    Climatol.*, **47** (8), 2238-2255,
+    https://doi.org/10.1175/2008JAMC1732.1
+
+    Bringi, V. N., V. Chandrasekar, J. Hubbert, E. Gorgucci, W. L. Randeu, and
+    M. Schoenhuber, 2003: Raindrop size distribution in different climatic
+    regimes from disdrometer and dual-polarized radar analysis. *J. Atmos.
+    Sci.*, **60** (2), 354-365,
+    https://doi.org/10.1175/1520-0469(2003)060<0354:RSDIDC>2.0.CO;2
+
+    Cao, Q., G. Zhang, E. Brandes, and T. Schuur, 2010: Polarimetric radar
+    rain estimation through retrieval of drop size distribution using a
+    Bayesian approach. *J. Appl. Meteor. Climatol.*, **49** (5), 973-990,
+    https://doi.org/10.1175/2009JAMC2227.1
+
+    Scott, D. W., 1992: *Multivariate Density Estimation: Theory, Practice,
+    and Visualization*. Wiley, 317 pp., https://doi.org/10.1002/9780470316849
+
+    Dawson, D., M. Biggerstaff, and S. Waugh, 2025: PERiLS_2022: Portable In
+    Situ Precipitation Stations (PIPS) Data. Version 1.0. NSF NCAR Earth
+    Observing Laboratory, https://doi.org/10.26023/HFBG-7W5M-WA00
+
+    Kosiba, K. A., and Coauthors, 2024: The Propagation, Evolution, and
+    Rotation in Linear Storms (PERiLS) Project. *Bull. Amer. Meteor. Soc.*,
+    **105**, E1768-E1799, https://doi.org/10.1175/BAMS-D-22-0064.1
+
+    The ``"perils2022"`` prior was learned from the PIPS spectra of the first
+    of these data sets, with no quality control beyond the processing of the
     drop size distributions in that data set.
-
-    Dawson, D., M. Biggerstaff, and S. Waugh, 2025: PERiLS_2022: Portable In Situ Precipitation Stations (PIPS) Data. Version 1.0. NSF NCAR Earth Observing Laboratory, https://doi.org/10.26023/HFBG-7W5M-WA00.
-
-    Kosiba, K. A., and Coauthors, 2024: The Propagation, Evolution, and Rotation in Linear Storms (PERiLS) Project. Bull. Amer. Meteor. Soc., 105, E1768-E1799, https://doi.org/10.1175/BAMS-D-22-0064.1.
 
     Examples
     --------
@@ -1148,6 +1289,19 @@ def dsd_bayesian(
     ImportError
         If ``engine="compiled"`` and the compiled kernel is not available.
 
+    Notes
+    -----
+    The method follows the Bayesian formulation of Cao et al. (2010, Eqs.
+    3-5) but with a different state, error model, prior and observations
+    (see :mod:`radarx.retrieve.dsd_bayes`; Cao et al. 2013 is related work on
+    attenuation, no equation of it is used). The forward model is for
+    horizontal incidence: for data at elevations above about 5 degrees (QVPs
+    at 10-20 degrees) :math:`Z_{DR}` is biased low (about 12 % at 20
+    degrees), so :math:`D_m` is biased low by 6-8 % and :math:`N_w` high; see
+    :mod:`radarx.retrieve.dsd`. ``errors`` and ``prune`` defaults are radarx
+    choices. The state uses the normalized gamma DSD of Testud et al. (2001)
+    and the posterior formalism of Rodgers (2000).
+
     References
     ----------
     Testud, J., S. Oury, R. A. Black, P. Amayenc, and X. Dou, 2001: The
@@ -1155,6 +1309,11 @@ def dsd_bayesian(
     for cloud physics and cloud remote sensing. *J. Appl. Meteor.*, **40**
     (6), 1118-1140,
     https://doi.org/10.1175/1520-0450(2001)040<1118:TCONDT>2.0.CO;2
+
+    Cao, Q., G. Zhang, E. Brandes, and T. Schuur, 2010: Polarimetric radar
+    rain estimation through retrieval of drop size distribution using a
+    Bayesian approach. *J. Appl. Meteor. Climatol.*, **49** (5), 973-990,
+    https://doi.org/10.1175/2009JAMC2227.1
 
     Cao, Q., G. Zhang, and M. Xue, 2013: A variational approach for
     retrieving raindrop size distribution from polarimetric radar
