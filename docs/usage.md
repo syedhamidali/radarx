@@ -82,6 +82,8 @@ notebooks/Tornado_Detection
 :caption: Machine learning
 
 notebooks/Machine_Learning
+notebooks/ML_KDP
+notebooks/ML_Single_Doppler
 ```
 
 ```{toctree}
