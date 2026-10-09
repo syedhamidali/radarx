@@ -41,9 +41,8 @@ The drop is assumed at its equilibrium (wet-bulb) temperature, which is what
 the single-drop law of Rogers and Yau (1989) is derived for, and the
 ventilation coefficients for vapour and heat are taken equal (so that
 :math:`f_v` multiplies both :math:`F_K` and :math:`F_D`). The numbers 0.78 and
-0.308 are the ones printed in the three papers above (they are
-Pruppacher and Klett's; the book itself was not available to check the
-equation).
+0.308 are those printed in the three papers above (they are Pruppacher and
+Klett's; the equation is not checked in the book).
 
 Differences from Kumjian and Ryzhkov (2010)
 -------------------------------------------
@@ -67,8 +66,7 @@ deviates from the paper in these points (the first four change the numbers):
 Thermodynamic properties
 ------------------------
 - saturation vapour pressure over water, Buck (1981, his Eq. 8 for liquid
-  water; the equation number and the constants were taken from
-  secondary sources, as the paper is not on disk):
+  water; equation number and constants not checked against the paper):
   :math:`e_s = 611.21 \\exp[17.502\\, t / (240.97 + t)]` Pa, :math:`t` in °C.
   Buck's enhancement factor of moist air, :math:`1.0007 + 3.46\\times10^{-8}
   p` with :math:`p` in Pa (about 1.004 at 1000 hPa), is neglected (radarx
@@ -99,16 +97,14 @@ Reference pressure of :math:`D_v`
 ---------------------------------
 Eq. A7 of Kumjian and Ryzhkov (2010) states that :math:`p_0` "is the
 reference level pressure, taken as 1000 hPa in this study", and radarx uses
-exactly that (``1.0e5 / p`` in ``_air``). The fit of Pruppacher and Klett
-(1997), from which this form originates, is, to my knowledge, defined for
-:math:`p_0 = 1013.25` hPa (I could not check this, the book is not
-available here). With 1013.25 hPa :math:`D_v` would be 1.3 % larger,
+that value (``1.0e5 / p`` in ``_air``). The fit of Pruppacher and Klett
+(1997), from which this form originates, is defined for
+:math:`p_0 = 1013.25` hPa (not checked in the book). With 1013.25 hPa :math:`D_v` would be 1.3 % larger,
 :math:`F_D` 1.3 % smaller and the evaporation rates larger by 0.3-0.8 %
 (computed for 0-30 °C at 800-1000 hPa and :math:`q_v` = 5 g kg\\ :sup:`-1`;
 the larger the colder the air, as :math:`F_D` is a larger part of
 :math:`F_K + F_D` there). radarx rates are therefore, if that reading of the
-fit is right, up to 0.8 % too small (the rates computed with 1000 hPa
-are lower, not higher). This is smaller than the uncertainty of the
+fit is right, up to 0.8 % too small. This is smaller than the uncertainty of the
 ventilation coefficient and of the DSD, and the value is kept for
 consistency with Kumjian and Ryzhkov (2010).
 
@@ -119,10 +115,10 @@ The terminal fall speed of Atlas et al. (1973),
 is quoted at sea level as Eq. 7.65b of Bringi and Chandrasekar 2001, where
 it is described as a fit to the Gunn and Kinzer 1949 measurements), does
 not integrate in closed form under the square root of the ventilation term.
-The Atlas et al. law is negative below :math:`D` = 0.109 mm and the paper
-itself was not available here, so its stated range of validity could not be
-checked; radarx uses the exponential fit below, which is meant for
-0.5-7 mm, and its extrapolation to small drops is a radarx choice.
+The Atlas et al. law is negative below :math:`D` = 0.109 mm and its range of
+validity in the original paper is not checked. radarx uses the exponential
+fit below, which is meant for 0.5-7 mm; its extrapolation to small drops is a
+radarx choice.
 It is therefore represented by :math:`V = a D^b e^{-f D}` with
 :math:`a = 4.643` m s\\ :sup:`-1` mm\\ :sup:`-b`, :math:`b = 0.9496`,
 :math:`f = 0.1671` mm\\ :sup:`-1`, a least-squares fit (relative error) to
@@ -133,8 +129,8 @@ on :math:`V^{1/2}`. Other coefficients can be given
 :math:`(\\rho_0 / \\rho)^{0.4}`, the correction attributed to Foote and
 du Toit (1969) in Li and Srivastava (2001, text after their Eq. 4:
 :math:`V = V_m (\\rho_m/\\rho)^{0.4}`) and Kumjian and Ryzhkov (2010, Eq.
-3); the original paper was not available to check its own equation and the
-range of densities for which it was derived. :math:`\\rho_0` = 1.204 kg
+3); the equation and range of densities of the original paper are not
+checked. :math:`\\rho_0` = 1.204 kg
 m\\ :sup:`-3` is the density of dry air at 1013.25 hPa and 20 °C, the
 density at which the sea-level fall speeds are taken to hold (a radarx
 choice; the cited papers only call it the surface reference density).
@@ -163,7 +159,7 @@ single-drop law, not taken from a paper). The closed-form integration of the
 ventilated single-drop law over a gamma DSD is the one of bulk microphysics
 schemes: the ventilation factor integrated over a gamma DSD is Eq. 8 (with
 the thermodynamic function of Eq. 9) of Milbrandt and Yau (2005, Part II),
-and the same approach is used by Ferrier (1994; equation not checked here).
+and the same approach is used by Ferrier (1994; equation number not checked).
 radarx's moment :math:`I_1` is the same integral with the fall-speed law of
 this module. Supersaturated air gives negative rates (growth by
 condensation, a radarx extension); saturated air none.

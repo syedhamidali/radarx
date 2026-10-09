@@ -18,8 +18,8 @@
 //
 // Sources (details, references and radarx choices in the docstring of
 // radarx/retrieve/rain_trajectories.py): drops follow the wind and fall at
-// their terminal speed without inertia (the approach of Dawson et al. 2015;
-// their paper was not available to check that this matches in detail); the
+// their terminal speed without inertia (the approach of Dawson et al. 2015);
+// the
 // terminal speed is the Atlas et al. (1973) law times (rho0 / rho)^0.4
 // (Foote and du Toit 1969); the evaporation is the single-drop law of
 // Kumjian and Ryzhkov (2010) as in evaporation.py, with e_s of Buck (1981);

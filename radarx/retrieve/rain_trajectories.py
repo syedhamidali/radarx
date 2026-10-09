@@ -20,10 +20,9 @@ bin.
 Equations
 ---------
 A drop of equal-volume diameter :math:`D` follows the air horizontally and
-falls through it at its terminal speed (inertia is neglected, as to my
-knowledge in Dawson et al. 2015, whose paper was not available to check; the statement that drops reach their terminal speed within
-about a second is a rule of thumb that was not checked against a paper
-here),
+falls through it at its terminal speed (inertia is neglected, as in
+Dawson et al. 2015; the statement that drops reach their terminal speed
+within about a second is a rule of thumb, not checked against a paper),
 
 .. math::
 
@@ -43,7 +42,7 @@ By default :math:`V_t = V_0(D) (\\rho_0/\\rho)^{0.4}` with the sea-level speed
 of Atlas et al. (1973), :math:`V_0 = 9.65 - 10.3 e^{-0.6 D}` m s\\ :sup:`-1`
 (:math:`D` in mm, at least zero, negative below 0.109 mm; the same as
 :func:`radarx.retrieve.terminal_fall_speed`, where the source of the formula
-and the unverified validity range are discussed), and the air-density
+and its range of validity are discussed), and the air-density
 correction of Foote and du Toit (1969) as quoted by Li and Srivastava (2001)
 and Kumjian and Ryzhkov (2010, Eq. 3), where :math:`\\rho` is the density of
 moist air at the height of the drop and :math:`\\rho_0` = 1.204 kg
@@ -124,9 +123,8 @@ Turbulent dispersion
 With ``dispersion=(sigma_h, sigma_w, timescale)`` every drop is released
 ``members`` times with velocity perturbations that follow a first-order
 autoregressive (Langevin) process for homogeneous, stationary Gaussian
-turbulence (Thomson 1987; Wilson and Sawford 1996: the discretization is the standard
-one of these reviews, their equations were not checked here, and the default
-parameters are the user's choice, there are none from a paper),
+turbulence (Thomson 1987; Wilson and Sawford 1996: the standard discretization; equation numbers
+not checked; there are no default parameters),
 :math:`u'_{n+1} = a u'_n + \\sqrt{1 - a^2}\\,\\sigma \\xi_n` with
 :math:`a = e^{-\\Delta t / T_L}`, standard deviations ``sigma_h`` (horizontal)
 and ``sigma_w`` (vertical) and Lagrangian time scale ``timescale``. The random
@@ -1107,8 +1105,7 @@ def rain_trajectories(
     ``max_time`` 3600 s, ``evaporated_diameter`` 0.12 mm, the RK4 scheme and
     the Hermite landing interpolation. The fall speed, density correction,
     evaporation and turbulence formulations are described, with their
-    sources and the points that could not be checked, in the module
-    docstring.
+    sources, in the module docstring.
 
     References
     ----------

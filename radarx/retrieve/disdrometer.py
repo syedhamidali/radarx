@@ -37,14 +37,12 @@ records pressure and temperature (:func:`terminal_fall_speed`).
 - The Atlas et al. (1973) law is quoted as Eq. 7.65b of Bringi and
   Chandrasekar (2001), where it is the sea-level fit to the Gunn and Kinzer
   (1949) measurements. It is negative below 0.109 mm (clipped to zero
-  here), and its range of validity in the original paper could not be
-  checked (not on disk); radarx uses it for all classes up to the maximum
-  diameter of the quality control.
+  here). Its range of validity in the original paper is not checked; radarx
+  uses it for all classes up to the maximum diameter of the quality control.
 - The factor :math:`(\\rho_0/\\rho)^{0.4}` is the correction attributed to
   Foote and du Toit (1969), as quoted by Li and Srivastava (2001, after
-  their Eq. 4) and Kumjian and Ryzhkov (2010, Eq. 3); the original paper was
-  not on disk, so its equation number and its range of validity are not
-  given. :math:`\\rho_0` = 1.204 kg m\\ :sup:`-3` is the density of dry air at
+  their Eq. 4) and Kumjian and Ryzhkov (2010, Eq. 3). The equation number and
+  the range of validity in the original paper are not checked. :math:`\\rho_0` = 1.204 kg m\\ :sup:`-3` is the density of dry air at
   1013.25 hPa and 20 °C, taken as the density of the sea-level law (radarx
   choice).
 - Raupach and Berne (2015, Sect. 5.1) used the terminal velocities of Beard
@@ -67,7 +65,7 @@ at an angle. Friedrich et al. (2013) also removed drops larger than 8 mm
 (``max_diameter``). With ``method="raupach2015"`` the absolute filter of
 Raupach and Berne (2015, their Eqs. 9-11) is used instead: particles are
 removed if :math:`D > 7.5` mm, :math:`V > v_t(D) + 4` or
-:math:`V < v_t(D) - 3` m s\\ :sup:`-1` (their Eqs. 9-11, quoted exactly;
+:math:`V < v_t(D) - 3` m s\\ :sup:`-1` (their Eqs. 9-11, as printed;
 :math:`v_t` is the Atlas et al. law here, see above). The default relative
 tolerance of 60 % of the ``"relative"`` filter is a radarx choice, not taken
 from a paper. The two smallest size classes, which the Parsivel does not
@@ -84,8 +82,7 @@ filter above and multiplies N(D) by the per-class correction factors that
 Raupach and Berne (2015) calibrated against a 2D video disdrometer for
 classes of the Parsivel rain intensity (their Table 3 for the first
 generation Parsivel, from the SOP2013 campaign, and Table 10 for Parsivel2,
-from HyMeX 2013; the numbers in this module were checked against both
-tables). The velocity shift is their Sect. 5.1 (classes subsampled to 0.1 m
+from HyMeX 2013; the numbers in this module agree with both tables). The velocity shift is their Sect. 5.1 (classes subsampled to 0.1 m
 s\\ :sup:`-1`, shifted so that the mean velocity equals the terminal velocity,
 regrouped) and the concentration factors :math:`P(i)` their Sect. 5.2.
 Classes without a factor are not corrected. The factors were trained in the
@@ -127,8 +124,8 @@ with drops), following the idea of the truncated moments of Ulbrich and
 Atlas (1998) and the truncated moment fit used by Cao et al. (2008) and
 Vivekanandan et al. (2004) (the way of solving the two log moment ratios
 for :math:`\\mu` and :math:`\\ln\\Lambda` by a damped Newton iteration is
-radarx's own; the papers were not on disk, so what exactly they truncate
-and solve was not compared), and
+radarx's own; the truncation and solution in those papers are not compared),
+and
 with ``lower_truncation=True`` also at the smallest, :math:`D_{min}` (lower
 edge of the smallest class with drops; else :math:`D_{min} = 0`):
 
@@ -415,12 +412,10 @@ def terminal_fall_speed(diameter, air_density=None):
     Notes
     -----
     The law is negative below 0.109 mm (clipped to zero here, a radarx
-    choice) and its range of validity in the original paper could not be
-    checked (not on disk). The exponent 0.4 of the density correction is the
+    choice). Its range of validity in the original paper is not checked. The exponent 0.4 of the density correction is the
     one attributed to Foote and du Toit (1969) in Li and Srivastava (2001,
     text after their Eq. 4) and Kumjian and Ryzhkov (2010, Eq. 3); the
-    original paper was not on disk, so its own equation and range of
-    validity are not given. Beard (1976), used as the reference by Raupach
+    equation and range of validity of the original paper are not checked. Beard (1976), used as the reference by Raupach
     and Berne (2015), is not implemented.
 
     References
@@ -1285,8 +1280,7 @@ def fit_gamma(
     the 2-4-6 estimator evaluated by Cao and Zhang (2009); the truncated fit
     follows the idea of the truncated moments of Ulbrich and Atlas (1998) and
     the truncated moment fit of Cao et al. (2008) and Vivekanandan et al.
-    (2004). The papers were not on disk, so the equations were not compared;
-    the closed forms are those of the gamma moments and incomplete gamma
+    (2004); the equations are not compared with those papers. The closed forms are those of the gamma moments and incomplete gamma
     functions, solved by radarx's own damped Newton iteration. The ``mu_range``,
     ``max_iter`` and ``tol`` defaults are radarx choices. The rain rate of the
     fitted DSD uses the Atlas et al. (1973) fall speed (Bringi and

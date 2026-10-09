@@ -25,12 +25,10 @@ Methods
     :math:`\\mu = c_2 \\Lambda^2 + c_1 \\Lambda + c_0`, either that of Cao et
     al. (2008, Eq. 7: :math:`\\mu = -0.0201 \\Lambda^2 + 0.902 \\Lambda -
     1.718`, fitted to Oklahoma 2D video disdrometer data and stated there to
-    apply for :math:`\\Lambda` between 0 and 20 mm\\ :sup:`-1`, the default; the
-    coefficients and range were checked against the paper) or that of
-    Zhang et al. (2001, Florida, :math:`-0.016, 1.213, -1.957`; these digits
-    are quoted from the literature and were *not* checked against the paper,
-    which was not available here, so its equation number is not given), or
-    one given by the user. Because
+    apply for :math:`\\Lambda` between 0 and 20 mm\\ :sup:`-1`, the default) or
+    that of Zhang et al. (2001, Florida, :math:`-0.016, 1.213, -1.957`;
+    coefficients and equation number not checked against the paper), or one
+    given by the user. Because
     :math:`Z_{DR}` does not depend on :math:`N_0`, it fixes :math:`\\Lambda`
     (and :math:`\\mu`); :math:`N_0` then follows from :math:`Z_H`
     (Zhang et al. 2001; Vivekanandan et al. 2004). The lookup table is radarx's
@@ -97,8 +95,7 @@ untruncated gamma DSD:
   applied. The law is negative below :math:`D` = 0.109 mm; radarx integrates
   it over :math:`0 < D < \\infty` in the closed form, so the (small) negative
   contribution of tiny drops is included (a radarx simplification), and the
-  validity range stated in the original paper could not be checked (not on
-  disk).
+  validity range of the original law is not checked.
 
 Scattering tables
 -----------------
@@ -113,15 +110,14 @@ through the ``pytmatrix`` interface of Leinonen 2014) by
 
 - oblate spheroids with the axis ratio of Brandes et al. (2002),
   :math:`b/a = 0.9951 + 0.0251 D - 0.03644 D^2 + 0.005303 D^3 - 0.0002492 D^4`
-  (:math:`D` in mm). Brandes et al. (2002) was not on disk, so its equation
-  number is not given; the polynomial is the one reproduced as Eq. 15 of
-  Kumjian and Ryzhkov (2010), which prints the second coefficient as
-  0.025 10, i.e. 0.0251 (the other four coefficients agree). radarx caps the
-  ratio at 1 (a radarx choice for the table and ``axis_ratio`` output);
+  (:math:`D` in mm). The polynomial is reproduced as Eq. 15 of Kumjian and
+  Ryzhkov (2010), who print the second coefficient as 0.025 10, i.e. 0.0251;
+  the equation number in Brandes et al. (2002) is not checked. radarx caps
+  the ratio at 1 (radarx choice, for the table and the ``axis_ratio``
+  output);
 - Gaussian canting angles with zero mean and 7° standard deviation. The
-  value is attributed to the width of the canting distribution measured by
-  Huang et al. (2008); that paper was not on disk, so the number and the
-  page could not be checked and the choice should be regarded as radarx's;
+  value is attributed to the width of the canting distribution of Huang et
+  al. (2008); the number is not checked against that paper;
 - horizontal incidence (0° elevation), see the warning below;
 - the refractive index of water of Ray (1972), at 0, 10, 20 and 30 °C, and
   :math:`|K_w|^2 = 0.93` for all bands and temperatures (a convention, not
@@ -146,8 +142,8 @@ through the ``pytmatrix`` interface of Leinonen 2014) by
     so :math:`Z_H` is unchanged but :math:`Z_{DR}(\\theta) < Z_{DR}(0)`, and
     :math:`K_{DP}` falls by about :math:`\\cos^2\\theta`. An estimate
     (S band Rayleigh scattering by spheroids with the Brandes et al. axis
-    ratio and :math:`\\epsilon = 80 + 10i`; an estimate made for this note,
-    not a T-matrix computation, and not checked against a paper) gives
+    ratio and :math:`\\epsilon = 80 + 10i`; a radarx estimate, not a T-matrix
+    computation) gives
     :math:`Z_{DR}(\\theta)/Z_{DR}(0)` of 0.97 at 10° and 0.88 at 20°, nearly
     independent of drop size for 1-3 mm (e.g. 0.64, 0.62, 0.56 dB at
     0°, 10°, 20° for D = 2 mm). Applying the tables to a 20° QVP or a PPI at
@@ -317,10 +313,10 @@ KW2 = 0.93
 BANDS = ("S", "C", "X")
 MU_LAMBDA = {
     # mu = c2 Lambda^2 + c1 Lambda + c0 (Lambda in mm-1)
-    # Cao et al. (2008), Eq. 7, valid for Lambda in 0-20 mm-1 (checked)
+    # Cao et al. (2008), Eq. 7, valid for Lambda in 0-20 mm-1
     "cao2008": (-0.0201, 0.902, -1.718),
-    # Zhang et al. (2001), Florida relation: quoted from the literature, NOT
-    # checked against the paper (not on disk), equation number unknown
+    # Zhang et al. (2001), Florida relation; coefficients and equation number
+    # not checked against the paper
     "zhang2001": (-0.016, 1.213, -1.957),
 }
 # mm-1, upper end of the constrained-gamma table: the validity limit of Eq. 7 of
@@ -456,7 +452,7 @@ def scattering_table(band="S", temperature=20.0):
     -----
     The values come from the T-matrix method (Mishchenko and Travis 1998)
     through the ``pytmatrix`` interface (Leinonen 2014), with Gaussian canting
-    of 7 degrees standard deviation attributed to Huang et al. (2008; not
+    of 7 degrees standard deviation attributed to Huang et al. (2008; value not
     checked against the paper) and the refractive index of Ray (1972).
     The T-matrix runs are for horizontal incidence (0 degrees elevation), so
     ZDR (and KDP) computed from these tables are those seen at low elevation;
@@ -1163,9 +1159,8 @@ def parsivel_bins():
     -----
     The class centres and widths are the manufacturer's table of the OTT
     Parsivel (0.125 mm wide classes up to 1.25 mm, then 0.25, 0.5, 1, 2 and 3
-    mm). The table was not available here; the centres of classes 3-22 agree
-    with the :math:`D_i` listed in Tables 3 and 10 of Raupach and Berne
-    (2015) (0.31, 0.44, ..., 6.50 mm), which is the check that was made.
+    mm). The centres of classes 3-22 agree with the :math:`D_i` listed in
+    Tables 3 and 10 of Raupach and Berne (2015) (0.31, 0.44, ..., 6.50 mm).
     Tokay et al. (2014) describe the instrument, not this table.
 
     References
@@ -1288,8 +1283,8 @@ def fit_gamma_moments(nd, dim="diameter"):
     :math:`N_0 = M_2 \\Lambda^{\\mu + 3} / \\Gamma(\\mu + 3)` (the
     2-4-6 moment estimator evaluated by Cao and Zhang 2009; the closed form
     here follows from :math:`M_n = N_0 \\Gamma(\\mu + n + 1) /
-    \\Lambda^{\\mu + n + 1}` and is derived for radarx, the equation of the
-    paper was not available to compare with). The moments are not truncated
+    \\Lambda^{\\mu + n + 1}`; it is not compared with the equation of the
+    paper). The moments are not truncated
     (see :func:`radarx.retrieve.fit_gamma` for truncated moments, Ulbrich and
     Atlas 1998).
 

@@ -2,7 +2,7 @@
 
 This note documents `dsd_scattering.csv` and `dsd_prior_perils2022.csv`
 (provenance, calculation, citations). The CSV files themselves are unchanged
-(their loaders skip a fixed number of header lines, so comments are kept here).
+(their loaders skip a fixed number of header lines, so the description is kept here).
 `ziegler2013_profiles_cm1_squall_line.csv` is documented in its own header
 and in `radarx.retrieve.diabatic_lagrangian`.
 
@@ -22,15 +22,15 @@ Single-drop scattering of raindrops, read by `radarx.retrieve.dsd`
   53.53, 31.89 mm) and 0, 10, 20 and 30 degrees Celsius.
 * Axis ratio: Brandes et al. (2002), doi:10.1175/1520-0450(2002)041<0674:EIREWA>2.0.CO;2,
   b/a = 0.9951 + 0.0251 D - 0.03644 D^2 + 0.005303 D^3 - 0.0002492 D^4 (D in
-  mm), capped at 1. That paper was not on disk when this note was written; the
-  polynomial agrees with Eq. 15 of Kumjian and Ryzhkov (2010,
-  doi:10.1175/2010JAMC2243.1), which prints the second coefficient as 0.025 10.
+  mm), capped at 1. The polynomial agrees with Eq. 15 of Kumjian and Ryzhkov
+  (2010, doi:10.1175/2010JAMC2243.1), which prints the second coefficient as
+  0.025 10. The equation number in Brandes et al. is not checked.
 * Canting: Gaussian, zero mean, 7 degrees standard deviation, attributed to
-  Huang et al. (2008), doi:10.1175/2008JTECHA1075.1 (paper not on disk, so
-  the number and its use as a width were not checked).
+  Huang et al. (2008), doi:10.1175/2008JTECHA1075.1 (value not checked
+  against the paper).
 * Refractive index of water: the Debye-type fit of Ray (1972),
-  doi:10.1364/AO.11.001836 (constants transcribed in the script, not
-  re-checked against the paper here); the Z_H normalization in
+  doi:10.1364/AO.11.001836 (constants not checked against the
+  paper); the Z_H normalization in
   `radarx.retrieve.dsd` uses |K_w|^2 = 0.93 for every band and temperature.
 * Geometry: **horizontal incidence** (0 degrees elevation). ZDR of oblate
   drops decreases with elevation (about 12 % lower at 20 degrees in a Rayleigh

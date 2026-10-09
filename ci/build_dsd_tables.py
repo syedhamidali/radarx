@@ -25,15 +25,13 @@ Provenance and caveats are also summarised in
   do not represent;
 - complex refractive index of liquid water from the Debye model of
   Ray (1972), at 0, 10, 20 and 30 degrees Celsius (the constants in
-  ``water_refractive_index`` were transcribed from that model and not
-  re-checked against the paper, which is not on disk);
+  ``water_refractive_index`` are not checked against the paper);
 - radar frequencies 2.8, 5.6 and 9.4 GHz for S, C and X band, and the
   quadrature order ``ndgs = 4`` of ``pytmatrix``: radarx choices, not from the
   cited papers. The axis-ratio polynomial agrees with Eq. 15 of Kumjian and
   Ryzhkov (2010) (who print the second coefficient as 0.025 10); the equation
-  number of Brandes et al. (2002) was not checked (paper not on disk), and the
-  value of 7 degrees for the width of the canting distribution (Huang et al.
-  2008) was not checked either.
+  number of Brandes et al. (2002) and the value of 7 degrees for the width of
+  the canting distribution (Huang et al. 2008) are not checked.
 
 Usage::
 
@@ -110,8 +108,7 @@ def water_refractive_index(wavelength_mm, temperature_c):
 
     Debye-type model: static and high-frequency permittivities, relaxation
     wavelength, distribution parameter alpha and ionic conductivity term, as
-    functions of temperature. The constants were transcribed here and not
-    re-checked against the paper.
+    functions of temperature. The constants are not checked against the paper.
     """
     t = temperature_c
     lam = wavelength_mm / 10.0  # cm

@@ -55,9 +55,8 @@ radarx takes the Bayesian formulation but differs in all of these points:
   standard deviation.
 
 Cao et al. (2013) give a variational formulation of the DSD retrieval in
-the presence of attenuation; radarx does not implement it and the paper was
-not on disk, so no equation of it is used here (it is listed as related work,
-for the use of :math:`A_H`).
+the presence of attenuation. radarx does not implement it and uses no
+equation of it; it is listed as related work for the use of :math:`A_H`.
 
 State and forward model
 -----------------------
