@@ -150,7 +150,10 @@ def _wind(m, t, x, y, z):
 
 
 def _esat(t):
-    """Buck (1981) saturation vapour pressure over water [Pa], ``t`` in K."""
+    """Buck (1981), Eq. 8, saturation vapour pressure over water [Pa], ``t`` in K
+
+    The enhancement factor of moist air is neglected (radarx choice).
+    """
     tc = t - T0
     return 611.21 * np.exp(17.502 * tc / (240.97 + tc))
 
