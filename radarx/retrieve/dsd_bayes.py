@@ -637,6 +637,18 @@ def dsd_prior(source="generic", *, weights=None, defensive=0.01, bandwidth=None)
     Scott, D. W., 1992: *Multivariate Density Estimation: Theory, Practice,
     and Visualization*. Wiley, 317 pp., https://doi.org/10.1002/9780470316849
 
+    Dawson, D., M. Biggerstaff, and S. Waugh, 2025: PERiLS_2022: Portable In
+    Situ Precipitation Stations (PIPS) Data. Version 1.0. NSF NCAR Earth
+    Observing Laboratory, https://doi.org/10.26023/HFBG-7W5M-WA00
+
+    Kosiba, K. A., and Coauthors, 2024: The Propagation, Evolution, and
+    Rotation in Linear Storms (PERiLS) Project. *Bull. Amer. Meteor. Soc.*,
+    **105**, E1768-E1799, https://doi.org/10.1175/BAMS-D-22-0064.1
+
+    The ``"perils2022"`` prior was learned from the PIPS spectra of the first
+    of these data sets, with no quality control beyond the processing of the
+    drop size distributions in that data set.
+
     Examples
     --------
     >>> fits = radarx.retrieve.fit_gamma_moments(nd)  # doctest: +SKIP

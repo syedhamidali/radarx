@@ -51,8 +51,21 @@ learned prior of `radarx.retrieve.dsd_bayesian`.
   matched to the lowest WSR-88D beam over each probe along the drop fall
   trajectories (see `radarx.retrieve.rain_trajectories`), built by
   `ml/models/bayesian_dsd/prior_samples.py` (not part of the package). The
-  file holds derived gamma parameters, not the raw spectra. A DOI of the
-  PIPS data set is not recorded in the repository.
+  file holds derived gamma parameters, not the raw spectra. The prior was
+  learned from the PIPS spectra of the data set below, and no quality
+  control beyond the processing of the drop size distributions in that data
+  set was applied.
+* Data: Dawson, D., M. Biggerstaff, and S. Waugh, 2025: PERiLS_2022:
+  Portable In Situ Precipitation Stations (PIPS) Data. Version 1.0. NSF NCAR
+  Earth Observing Laboratory, https://doi.org/10.26023/HFBG-7W5M-WA00. The
+  data are distributed under the UCAR terms of use
+  (https://www.ucar.edu/terms-of-use).
+* Campaign: Kosiba, K. A., and Coauthors, 2024: The Propagation, Evolution,
+  and Rotation in Linear Storms (PERiLS) Project. Bull. Amer. Meteor. Soc.,
+  105, E1768-E1799, https://doi.org/10.1175/BAMS-D-22-0064.1.
+* Acknowledgement: we thank the PERiLS investigators and the NSF NCAR Earth
+  Observing Laboratory for these data. The default prior of radarx is
+  `"generic"`, which does not depend on them.
 * Fit: the 2-4-6 method of moments (Cao and Zhang 2009,
   doi:10.1175/2008JAMC2026.1) for mu; Dm and Nw from the moments (Testud et
   al. 2001, doi:10.1175/1520-0450(2001)040<1118:TCONDT>2.0.CO;2); minutes with

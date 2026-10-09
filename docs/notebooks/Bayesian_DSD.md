@@ -26,7 +26,7 @@ $(\log_{10} N_w, D_m, \mu)$ instead, given
 - a prior learned from disdrometers: `"generic"` (ranges of Bringi et al.
   2003, $\mu$–$\Lambda$ relation of Cao et al. 2008) or `"perils2022"`
   (PERiLS 2022 Parsivel2 DSDs matched to the radar beam along their fall
-  trajectories), or one learned from any disdrometer data set with
+  trajectories; Dawson et al. 2025), or one learned from any disdrometer data set with
   `dsd_prior`.
 
 Per gate it returns the posterior mean, standard deviation, quantiles
@@ -51,7 +51,7 @@ from radarx.retrieve import dsd, dsd_bayesian, dsd_prior, forward_grid
 
 The prior is a distribution over the $(D_m, \mu)$ grid times a Gaussian in
 $\log_{10} N_w$ at each node. The generic prior is broad; the prior learned
-from the PERiLS disdrometers is concentrated on the DSDs of quasi-linear
+from the PERiLS disdrometers (Dawson et al. 2025) is concentrated on the DSDs of quasi-linear
 convective systems in the south-eastern United States.
 
 ```{code-cell} ipython3
@@ -133,7 +133,7 @@ for name, lim in (("DBZH", -32.0), ("ZDR", -12.9), ("RHOHV", 0.21)):
 sweep["KDP"] = sweep.radarx.kdp()["KDP"]
 hail = (sweep.DBZH >= 50) & (sweep.ZDR < 0.5)
 rain = (sweep.RHOHV >= 0.97) & (sweep.DBZH >= 5) & ~hail & (sweep.range <= 120e3)
-post = sweep.radarx.dsd_bayesian(kdp="KDP", mask=rain, band="S", prior="perils2022")
+post = sweep.radarx.dsd_bayesian(kdp="KDP", mask=rain, band="S", prior="generic")
 post[["DM", "DM_SD", "RAIN_RATE", "MISFIT"]]
 ```
 
@@ -196,6 +196,8 @@ print(f"gates with misfit > 16: {np.mean(post.MISFIT.values[ok] > 16):.1%}")
 
 ## References
 
+- Dawson, D., M. Biggerstaff, and S. Waugh, 2025: PERiLS_2022: Portable In Situ Precipitation Stations (PIPS) Data. Version 1.0. NSF NCAR Earth Observing Laboratory, https://doi.org/10.26023/HFBG-7W5M-WA00.
+- Kosiba, K. A., and Coauthors, 2024: The Propagation, Evolution, and Rotation in Linear Storms (PERiLS) Project. Bull. Amer. Meteor. Soc., 105, E1768-E1799, https://doi.org/10.1175/BAMS-D-22-0064.1.
 - Testud, J., S. Oury, R. A. Black, P. Amayenc, and X. Dou, 2001: The concept
   of "normalized" distribution to describe raindrop spectra: A tool for cloud
   physics and cloud remote sensing. *J. Appl. Meteor.*, **40**, 1118–1140,
