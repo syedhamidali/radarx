@@ -1350,6 +1350,20 @@ fig.suptitle("VIL, echo top, VIL density and rain water content, KGWX, 00:00 UTC
 plt.show()
 ```
 
+The columns of the volume sit at the ground range of the lowest sweep, and a
+sweep contributes its value at the height of its beam above that ground range.
+The two geometry functions that give them are `radarx.fundamentals.geometry.ground_range`
+(slant range to ground range) and `beam_height_at_ground_range`; for a gate of
+the 0.5° sweep at 100 km slant range:
+
+```{code-cell} ipython3
+from radarx.fundamentals import geometry
+
+ground = geometry.ground_range(100e3, 0.5)
+print(f"ground range {ground / 1e3:.2f} km, beam height {geometry.beam_height_at_ground_range(ground, 0.5, 30.0):.0f} m "
+      f"(slant-range formula: {geometry.beam_center_height(100e3, 0.5, 30.0):.0f} m)")
+```
+
 The VIL of the line is 10 to 25 kg m$^{-2}$ with echo tops of 8 to 10 km;
 the water content is for the rain gates of the lowest sweep only. Within about
 10 km of the radar the highest beam is only a few km high, so the VIL and
@@ -1485,9 +1499,9 @@ notebooks or from this index.
 | `nyquist_velocity` | `radarx.fundamentals.doppler` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `unambiguous_range` | `radarx.fundamentals.doppler` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `beam_center_height` | `radarx.fundamentals.geometry` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
-| `beam_height_at_ground_range` | `radarx.fundamentals.geometry` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
+| `beam_height_at_ground_range` | `radarx.fundamentals.geometry` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `effective_radius` | `radarx.fundamentals.geometry` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
-| `ground_range` | `radarx.fundamentals.geometry` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
+| `ground_range` | `radarx.fundamentals.geometry` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `half_power_radius` | `radarx.fundamentals.geometry` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `sample_volume_gaussian` | `radarx.fundamentals.geometry` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `compute_average_power` | `radarx.fundamentals.power` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
