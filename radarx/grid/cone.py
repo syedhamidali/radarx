@@ -30,6 +30,17 @@ altitude. Optionally, the lowest sweep fills the levels below it
 The work is done by a compiled C++ kernel; if it is not available, an
 equivalent NumPy implementation is used.
 
+Provenance. The method is radarx's own combination of two standard steps and
+is not a reproduction of one publication. Its closest published relative is
+the vertical interpolation (VI) scheme of Zhang et al. (2005): linear
+interpolation between the two tilts around the grid
+cell (their Eqs. 5-7, p. 36), nearest neighbour in azimuth and range. Cone
+gridding instead interpolates bilinearly in azimuth and range within each
+sweep and then linearly in beam height (not in elevation angle) between
+sweeps. The beam height uses the 4/3 effective Earth radius model (Doviak and
+Zrnić 1993, Eqs. 2.28b-d, pp. 21-22; Zhang et al. 2005, Eqs. 3-4, p. 32). Full
+references are listed in :func:`grid_cones`.
+
 .. autosummary::
    :nosignatures:
    :toctree: generated/
@@ -54,6 +65,10 @@ except ImportError:  # pragma: no cover - depends on the build
     _cone = None
     HAS_COMPILED_KERNEL = False
 
+# Earth radius [m] of the beam geometry (multiplied by 4/3 in the kernels):
+# the commonly used mean radius, a radarx choice that matches xradar.georeference.
+# Doviak and Zrnic (1993), Eqs. 2.28, only require the radius "a" of the Earth
+# and the factor k_e = 4/3 (Eq. 2.28d).
 EARTH_RADIUS = 6371000.0
 
 
@@ -77,7 +92,8 @@ def _select_sweeps(sweeps, variable, tolerance=0.1):
     Pick one sweep per elevation that contains ``variable``.
 
     Volumes with split cuts (e.g. NEXRAD) scan some elevations twice; the cut
-    that reaches farthest is used.
+    that reaches farthest is used. This rule and the default tolerance are
+    radarx choices, not taken from a publication.
 
     Parameters
     ----------
@@ -127,7 +143,14 @@ def _sweep_arrays(ds, variable):
 def _cone_numpy(
     data, azimuth, elevation, rng, s, az, site_altitude, max_gap, min_weight
 ):
-    """Value and beam height of one sweep at ground distance ``s``, azimuth ``az``."""
+    """
+    Value and beam height of one sweep at ground distance ``s``, azimuth ``az``.
+
+    NumPy reference of the compiled kernel: bilinear interpolation of the four
+    surrounding gates (weights from azimuth and ground distance), the beam
+    height from the 4/3 Earth model of xradar (Doviak and Zrnic 1993,
+    Eq. 2.28b); ``max_gap`` and ``min_weight`` are radarx choices.
+    """
     from xradar.georeference import antenna_to_cartesian
 
     el_med = float(np.median(elevation))
@@ -190,7 +213,10 @@ def _columns_numpy(s, az, z, arrays, site_altitude, max_gap, min_weight, fill_be
     Cone gridding of columns at ground distance ``s`` and azimuth ``az``.
 
     ``s`` and ``az`` (degrees) have the shape of the output columns; the
-    result is float32 on ``(z,) + s.shape``.
+    result is float32 on ``(z,) + s.shape``. Between the two cones that
+    bracket a level the value is interpolated linearly in beam height (compare
+    the vertical interpolation of Zhang et al. 2005, Eqs. 5-7, which
+    interpolates in elevation angle).
     """
     values, heights = zip(
         *(
@@ -298,6 +324,45 @@ def grid_cones(
         If no sweep contains a requested variable, or the grid is missing.
     ImportError
         If ``engine="compiled"`` and the compiled kernel is not available.
+
+    Notes
+    -----
+    Beam height. The height of a gate above sea level is computed with the
+    4/3 effective Earth radius model, h = [r^2 + (k_e a)^2 + 2 r k_e a
+    sin(theta_e)]^(1/2) - k_e a with k_e = 4/3 (Doviak and Zrnić 1993 [2]_,
+    Eq. 2.28b, p. 21; the same model is Eqs. 3-4, p. 32, of Zhang et al. 2005
+    [3]_).
+    The Earth radius ``a`` (6371 km) is a radarx choice.
+
+    What is taken from the literature, and what is not. Bilinear
+    interpolation within a sweep and linear interpolation in height between
+    the two sweeps around a cell are standard operations, here combined as
+    described in the module docstring; the vertical step is analogous to the
+    VI scheme of Zhang et al. (2005) [3]_ (Eqs. 5-7) but interpolates in beam
+    height instead of elevation angle. ``max_gap`` (2 median ray spacings),
+    ``min_weight`` (0.5), the 0.1 degree tolerance with which sweeps of equal
+    elevation are identified, and the rule that cells outside the bracketing
+    cones stay empty are radarx choices, not values from a paper.
+
+    Velocity gridding. Interpolating radial velocity from the polar grid
+    (here and in the multi-Doppler input) can leave periodic gridding
+    artifacts that map into spurious vertical velocities in variational
+    retrievals (Collis et al. 2010 [1]_); their mixed-order linear
+    interpolation is not implemented.
+
+    References
+    ----------
+    .. [1] Collis, S., A. Protat, and K.-S. Chung, 2010: The effect of radial
+       velocity gridding artifacts on variationally retrieved vertical
+       velocities. *J. Atmos. Oceanic Technol.*, **27**, 1239-1246,
+       https://doi.org/10.1175/2010JTECHA1402.1
+    .. [2] Doviak, R. J., and D. S. Zrnić, 1993: *Doppler Radar and Weather
+       Observations*, 2nd ed. Academic Press, ISBN 0-12-221422-6 (book, no
+       DOI).
+    .. [3] Zhang, J., K. Howard, and J. J. Gourley, 2005: Constructing
+       three-dimensional multiple-radar reflectivity mosaics: Examples of
+       convective storms and stratiform rain echoes. *J. Atmos. Oceanic
+       Technol.*, **22**, 30-42, https://doi.org/10.1175/JTECH-1689.1
 
     Examples
     --------

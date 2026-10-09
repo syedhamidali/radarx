@@ -10,6 +10,20 @@ Azimuthal shear and radial divergence of the Doppler velocity with the
 linear least-squares derivative (LLSD) technique (Smith and Elmore 2004;
 Miller et al. 2013; Mahalik et al. 2019).
 
+Provenance. The local linear model ``v = a + b s + c dr`` fitted by weighted
+least squares in a window that keeps a nearly constant width in metres, its
+reading as half the vertical vorticity and half the horizontal divergence for
+a symmetric wind field, and the default window (3 range gates of 250 m deep,
+about 2500 m wide) are those of the extended abstract of Smith and Elmore
+(2004). Not taken from it: the exact solution of the
+2 x 2 normal equations for windows that are not symmetric (Smith and Elmore
+assume symmetric windows and weights, which makes the normal equations
+diagonal), the Gaussian weights, the ``min_valid_fraction`` and the minimum of
+three valid gates, which are radarx choices; Smith and Elmore also apply a
+3 x 3 median filter first, which radarx does not. Miller et al. (2013) and
+Mahalik et al. (2019) use the LLSD derivatives; nothing else in this module
+is attributed to them.
+
 At every gate, the radial velocity of the gates in a window of fixed
 physical size is fitted by weighted least squares with the plane
 
@@ -59,19 +73,19 @@ except ImportError:  # pragma: no cover - depends on the build
 _REFERENCES = """
     References
     ----------
-    Smith, T. M., and K. L. Elmore, 2004: The use of radial velocity
-    derivative to diagnose rotation and divergence. *Preprints, 11th Conf.
-    on Aviation, Range, and Aerospace Meteorology*, Hyannis, MA, Amer.
-    Meteor. Soc., P5.6 (conference preprint, no DOI).
-
-    Miller, M. L., V. Lakshmanan, and T. M. Smith, 2013: An automated method
-    for depicting mesocyclone paths and intensities. *Wea. Forecasting*,
-    **28**, 570-585, https://doi.org/10.1175/WAF-D-12-00065.1
-
-    Mahalik, M. C., B. R. Smith, K. L. Elmore, D. M. Kingfield, K. L. Ortega,
-    and T. M. Smith, 2019: Estimates of gradients in radar moments using a
-    linear least squares derivative technique. *Wea. Forecasting*, **34**,
-    415-434, https://doi.org/10.1175/WAF-D-18-0095.1
+    .. [1] Smith, T. M., and K. L. Elmore, 2004: The use of radial velocity
+       derivative to diagnose rotation and divergence. *Preprints, 11th Conf.
+       on Aviation, Range, and Aerospace Meteorology*, Hyannis, MA, Amer.
+       Meteor. Soc., P5.6 (conference extended abstract, no DOI),
+       https://ams.confex.com/ams/11aram22sls/techprogram/paper_81827.htm
+    .. [2] Miller, M. L., V. Lakshmanan, and T. M. Smith, 2013: An automated
+       method for depicting mesocyclone paths and intensities. *Wea.
+       Forecasting*, **28**, 570-585,
+       https://doi.org/10.1175/WAF-D-12-00065.1
+    .. [3] Mahalik, M. C., B. R. Smith, K. L. Elmore, D. M. Kingfield, K. L.
+       Ortega, and T. M. Smith, 2019: Estimates of gradients in radar moments
+       using a linear least squares derivative technique. *Wea. Forecasting*,
+       **34**, 415-434, https://doi.org/10.1175/WAF-D-18-0095.1
 """
 
 _ATTRS = {
@@ -109,7 +123,14 @@ def _llsd_numpy(data, azimuth, rng, window_range, window_azimuth, gaussian, min_
     NumPy implementation of the compiled kernel (same results).
 
     Sums every (ray, gate) pair of the window directly instead of using
-    cumulative sums, so it doubles as an independent test oracle.
+    cumulative sums, so it doubles as an independent test oracle. Gaussian
+    weights are ``exp(-2 d^2 / h^2)`` with ``h`` the half window, i.e. a
+    standard deviation of ``h / 2`` (a quarter of the window), a radarx choice.
+    The 2 x 2 normal equations are solved after removing the weighted means;
+    Smith and Elmore (2004) obtain the diagonal system only for symmetric
+    windows and weights. The thresholds in ``good`` (at least 3 valid gates,
+    ``min_frac`` of the window, determinant above 1e-10 of the product of the
+    variances) are radarx choices.
     """
     nray, ngate = data.shape
     if np.any(np.diff(rng) <= 0):
@@ -325,7 +346,24 @@ def llsd(
 
     For solid-body rotation the azimuthal shear is half the vertical
     vorticity; for axisymmetric convergence the radial divergence is half the
-    horizontal divergence.
+    horizontal divergence. Smith and Elmore (2004) [1]_ state this as an
+    approximation that holds for a symmetric wind field (mesocyclone, symmetric
+    downburst) and breaks down for asymmetric features such as gust fronts. For
+    solid-body rotation :math:`v_\\theta = \\Omega r` one gets :math:`\\partial v /
+    \\partial s = \\Omega = \\zeta / 2`, which follows from elementary geometry.
+
+    What is taken from the literature. The fitted plane, the arc coordinate
+    :math:`s = r\\,\\Delta\\theta`, the weighted least-squares fit and the
+    fixed-width window whose number of rays shrinks with range are those of
+    Smith and Elmore (2004) [1]_. Their kernel is 3 range gates deep and about
+    2500 m wide (also 5000 and 8000 m), with at least 3 radials; the radarx
+    defaults ``window = (750, 2500)`` are 3 gates of 250 m and 2500 m, the
+    smallest kernel of that paper. The window was set in metres, so for other
+    gate spacings the depth is not 3 gates. Miller et al. (2013) [2]_ and
+    Mahalik et al. (2019) [3]_ apply and evaluate the LLSD derivatives; their
+    window sizes and weights are not used here. The Gaussian weights (a
+    standard deviation of a quarter of the window), ``min_valid_fraction``
+    (0.5) and the requirement of at least 3 valid gates are radarx choices.
     {references}
     Examples
     --------
@@ -381,6 +419,12 @@ def azimuthal_shear(obj, field="VRADH", window=(750.0, 2500.0), **kwargs):
     See Also
     --------
     llsd
+
+    Notes
+    -----
+    Method: the LLSD of Smith and Elmore (2004) [1]_, as used by Miller et al.
+    (2013) [2]_ and Mahalik et al. (2019) [3]_; see :func:`llsd` for what is
+    taken from them.
     {references}"""
     return _select(llsd(obj, field, window, **kwargs), "azimuthal_shear")
 
@@ -400,6 +444,12 @@ def radial_divergence(obj, field="VRADH", window=(750.0, 2500.0), **kwargs):
     See Also
     --------
     llsd
+
+    Notes
+    -----
+    Method: the LLSD of Smith and Elmore (2004) [1]_, as used by Miller et al.
+    (2013) [2]_ and Mahalik et al. (2019) [3]_; see :func:`llsd` for what is
+    taken from them.
     {references}"""
     return _select(llsd(obj, field, window, **kwargs), "radial_divergence")
 

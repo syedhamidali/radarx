@@ -83,8 +83,12 @@ def _column_geometry(x, y, origin, sites, use_compiled=False, n_threads=None):
     Column geometry of the shared grid as seen from every radar.
 
     The compiled kernel solves the geodesics on the WGS84 ellipsoid with
-    Vincenty's (1975) formulae; the NumPy fallback uses PROJ's azimuthal
-    equidistant projections (:func:`_column_geometry_numpy`).
+    Vincenty's (1975) direct and inverse formulae (https://doi.org/10.1179/
+    sre.1975.23.176.88; equation numbers not checked against the paper). The
+    NumPy fallback uses PROJ's azimuthal equidistant projections
+    (:func:`_column_geometry_numpy`). The WGS84 ellipsoid constants
+    (a = 6378137 m, 1/f = 298.257223563) are its defining parameters (NIMA
+    TR8350.2).
 
     Returns
     -------
@@ -166,7 +170,19 @@ def _column_geometry_numpy(x, y, origin, sites, step=100.0):
 
 
 def _cell_angles(ground, z, site_altitude, earth_radius=EARTH_RADIUS):
-    """Slant range, local and antenna elevation (deg) of cells (4/3 Earth)."""
+    """
+    Slant range, local and antenna elevation (deg) of cells (4/3 Earth).
+
+    The radar is at distance ``a = R + site_altitude`` and the cell at
+    ``b = R + z`` from the centre of an Earth of effective radius
+    ``R = 4/3 * earth_radius``, separated by the central angle ``ground / R``.
+    The slant range is the law of cosines in that triangle; the elevation
+    angles follow from the same triangle. This is the geometry behind the
+    effective Earth radius model, Doviak and Zrnic (1993), Eqs. 2.28b-d,
+    pp. 21-22 (k_e = 4/3, Eq. 2.28d), solved for range and elevation instead
+    of height; the algebra is radarx's own. The Earth radius of 6371 km is a
+    radarx choice.
+    """
     R = earth_radius * 4.0 / 3.0
     a = R + site_altitude
     b = R + np.asarray(z, dtype=np.float64).reshape((-1,) + (1,) * np.ndim(ground))
@@ -194,7 +210,15 @@ def _beam_weight_numpy(e, elevations, beamwidth):
 
     ``a`` is the angular distance of the cell from the nearest beam axis as a
     fraction of the larger of the beamwidth and the spacing to the next beam
-    on that side.
+    on that side. This is Eq. (6) of Lakshmanan et al. (2006), p. 808:
+    ``delta_e = exp[alpha^3 ln(0.005)]`` with ``alpha = (e - theta_i) /
+    (|theta_(i+-1) - theta_i| V b_i)``, where ``V`` is the maximum operator,
+    ``b_i`` the beamwidth and ``theta_i`` the elevation of the beam centre.
+    The paper states the weight is 1 at the beam centre, 0.5 at half a
+    beamwidth and below 0.01 at a beamwidth (the exact values of the formula
+    are 0.516 at ``alpha = 0.5`` and 0.005 at ``alpha = 1``). Which neighbour
+    beam is used (the one on the side of the cell) follows the paper's
+    ``theta_(i+-1)``; the choice of the nearest axis is radarx's.
     """
     el = np.sort(np.asarray(elevations, dtype=np.float64))
     n = el.size
@@ -228,7 +252,15 @@ def _merge_numpy(
     time_scale,
     earth_radius=EARTH_RADIUS,
 ):
-    """NumPy implementation of ``_multi.merge``."""
+    """
+    NumPy implementation of ``_multi.merge``.
+
+    Weight of radar ``r``: ``exp(-(range/range_scale)^2)`` (the Gaussian
+    distance weight of Zhang et al. 2005, Fig. 15, p. 41, with R = 50 km) times
+    the elevation weight of Lakshmanan et al. (2006), Eq. (6), times
+    ``exp(-(dt/time_scale)^2)`` (radarx's own time weight, not Eq. 7 of
+    Lakshmanan et al. 2006; see :func:`merge_radars`).
+    """
     num = np.zeros(values.shape[1:])
     den = np.zeros(values.shape[1:])
     for r in range(values.shape[0]):
@@ -379,7 +411,8 @@ def grid_radars(
 
     The result keeps every radar separately along a ``radar`` dimension,
     together with the beam geometry from each radar to each cell (4/3 Earth
-    radius model, as in :mod:`xradar.georeference`):
+    radius model, as in :mod:`xradar.georeference`; Doviak and Zrnić 1993 [4]_,
+    Eqs. 2.28b-d, pp. 21-22):
 
     * ``azimuth``: direction of the beam at the cell, in degrees clockwise
       from the grid's ``+y`` axis (grid north). This is the direction of the
@@ -451,8 +484,9 @@ def grid_radars(
         Half-power beamwidth (degrees) of each radar, for the merge weights.
         Default 1.
     range_scale, time_scale : float, optional
-        Merge weight scales, see :func:`merge_radars`. Defaults 50 km and
-        300 s.
+        Merge weight scales, see :func:`merge_radars`. Defaults 50 km (the
+        value of Fig. 15 of Zhang et al. 2005 [3]_) and 300 s (a radarx
+        choice).
     fill_below, max_gap, min_weight : optional
         Cone gridding options, see :func:`radarx.grid.grid_cones`.
     n_threads : int, optional
@@ -490,12 +524,35 @@ def grid_radars(
     --------
     merge_radars, network_bias, radarx.grid.grid_cones, radarx.retrieve.advect
 
+    Notes
+    -----
+    Source of each ingredient. The geodesic geometry of the columns is
+    Vincenty (1975) [2]_ (equation numbers not checked against the paper).
+    Moving the fields to a common time along the storm motion is the
+    frame-of-reference correction of Gal-Chen (1982) [1]_ (equations not
+    checked against the paper). It assumes steady translation. The beam
+    geometry is the 4/3 Earth model [4]_. Gridding, the merge weights and the
+    calibration are described in :func:`grid_cones`, :func:`merge_radars` and
+    :func:`network_bias`. The Earth radius (6371 km), ``beamwidth`` (1 degree)
+    and ``time_scale`` defaults are radarx choices, not values from the
+    references.
+
     References
     ----------
     .. [1] Gal-Chen, T., 1982: Errors in fixed and moving frame of references:
        Applications for conventional and Doppler radar analysis. *J. Atmos.
        Sci.*, **39**, 2279-2300,
        https://doi.org/10.1175/1520-0469(1982)039<2279:EIFAMF>2.0.CO;2
+    .. [2] Vincenty, T., 1975: Direct and inverse solutions of geodesics on
+       the ellipsoid with application of nested equations. *Survey Review*,
+       **23**, 88-93, https://doi.org/10.1179/sre.1975.23.176.88
+    .. [3] Zhang, J., K. Howard, and J. J. Gourley, 2005: Constructing
+       three-dimensional multiple-radar reflectivity mosaics: Examples of
+       convective storms and stratiform rain echoes. *J. Atmos. Oceanic
+       Technol.*, **22**, 30-42, https://doi.org/10.1175/JTECH-1689.1
+    .. [4] Doviak, R. J., and D. S. Zrnić, 1993: *Doppler Radar and Weather
+       Observations*, 2nd ed. Academic Press, ISBN 0-12-221422-6 (book, no
+       DOI).
 
     Examples
     --------
@@ -839,17 +896,45 @@ def merge_radars(
         w = \\exp(-r^2 / L^2) \\; \\delta_e \\; \\exp(-\\Delta t^2 / \\tau^2)
 
     * ``r`` is the slant range from the radar and ``L = range_scale``: the
-      nearer radar, with the smaller, lower beam, dominates, as in the
-      exponential distance weighting of Zhang et al. (2005) [1]_;
+      nearer radar, with the smaller, lower beam, dominates. This is the
+      Gaussian distance weight ``w = exp(-d^2 / R^2)`` with ``R = 50 km`` of
+      Zhang et al. (2005) [1]_, shown in their Fig. 15 (p. 41), where ``d`` is
+      the distance between the grid cell and the radar. The paper gives the
+      function only as the legend of that figure; its text (p. 39-40) says
+      the weight decreases monotonically with range and that the steep
+      function (this one) is preferred over a flat alternative. radarx
+      uses the slant range for ``d`` and keeps 50 km as the default;
     * ``delta_e`` is the elevation weight of Lakshmanan et al. (2006) [2]_,
-      ``exp(|a|^3 ln 0.005)``, where ``a`` is the angular distance of the
-      cell from the nearest beam axis as a fraction of the larger of the
-      beamwidth and the spacing to the next sweep: 1 on a beam axis, 0.5 half
-      way between sweeps and below 0.01 one spacing away. Cone gridding fills
-      the gaps between sweeps; this weight lets a radar whose beam passes
-      through the cell override one that interpolates across a gap;
+      Eq. (6), p. 808, ``exp(|a|^3 ln 0.005)``, where ``a`` is the angular
+      distance of the cell from the nearest beam axis as a fraction of the
+      larger of the beamwidth and the spacing to the next sweep: 1 on a beam
+      axis, 0.52 half way between sweeps and 0.005 one spacing away (the paper
+      quotes 0.5 and below 0.01). Cone gridding fills the gaps between
+      sweeps; this weight lets a radar whose beam passes through the cell
+      override one that interpolates across a gap. This factor reproduces the
+      paper's formula;
     * ``dt`` is the time between the radar's volume and the analysis time and
-      ``tau = time_scale``, so the most recent radar dominates.
+      ``tau = time_scale``, so the most recent radar dominates. This time
+      factor is a radarx choice (a Gaussian with ``tau`` = 300 s) and is not
+      taken from either paper.
+
+    Difference from Lakshmanan et al. (2006). That paper weights an
+    observation (an "agent", including repeated scans of the same radar) by
+    ``delta = delta_e exp[-(t^2 r^2 / beta)]`` (their Eq. 7, p. 809), with
+    ``t`` the time between the observation and the grid time in seconds,
+    ``r`` the range of the gate in km and ``beta = 17.36 s^2 km^2``, "chosen
+    through experimentation". There the range matters only through the
+    product ``t r``: at ``t = 0`` every range has weight 1 and the time weight
+    is tighter at long range. radarx instead multiplies a range Gaussian and
+    a time Gaussian that act independently, so the range weight also
+    separates two radars observed at the same time. radarx therefore does
+    not reproduce the merger of Lakshmanan et al. (2006); only the elevation
+    weight is theirs and only the range weight is Zhang et al.'s. (With the
+    paper's units a 60 s old scan at 50 km would have weight
+    ``exp(-5.2e5)``, so ``beta`` is meaningful only for time offsets of a few
+    seconds; the paper does not resolve this.) The paper's text before Eq. 7
+    also describes the agent weight simply as an exponentially declining
+    function of the distance from the radar.
 
     A scale of ``None`` or 0 switches its factor off. Values are averaged in
     the units of the field (dBZ for reflectivity).
@@ -1050,10 +1135,12 @@ def network_bias(
 
     For every pair of radars ``(i, j)`` the differences ``X_i - X_j`` of a
     field are collected over all cells of the multi-radar grid observed by
-    both radars at the same height and (after advection) the same time, the
-    space-time matching used to compare two radars by Seo et al. (2014) [1]_.
-    The pair bias ``d_ij`` is the median difference, robust against residual
-    clutter, partial beam blockage and attenuation; its spread ``s_ij`` is
+    both radars at the same height and (after advection) the same time. Seo
+    et al. (2014) [1]_ compare two ground-based radars by matching their
+    observations in space and time; radarx takes only that idea. Their
+    matching and statistics are not reproduced. The pair bias ``d_ij`` is the
+    median difference, resistant to residual clutter, partial beam blockage
+    and attenuation; its spread ``s_ij`` is
     the interquartile range divided by 1.349. The pair biases are then
     reconciled across the network by weighted least squares,
 
@@ -1065,6 +1152,15 @@ def network_bias(
     so that every radar connected to the reference through a chain of
     overlaps gets a bias, closed loops of overlaps are made consistent and
     well-sampled pairs count most. The corrected field is ``X - bias``.
+
+    The median pair bias, the interquartile-range spread (1.349 is the ratio
+    of the interquartile range of a normal distribution to its standard
+    deviation, so IQR / 1.349 estimates sigma), the weights ``n / s^2`` and
+    the least-squares network solution are radarx's construction, not taken
+    from Seo et al. (2014). The defaults (valid reflectivity 15 to 50 dBZ,
+    companion reflectivity 20 to 40 dBZ, ``min_count`` 200, ``bin_width``
+    0.01, ``max_difference`` 20) are radarx choices without a published
+    source.
 
     Parameters
     ----------

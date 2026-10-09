@@ -3,6 +3,16 @@
 //
 // Linear least-squares derivative (LLSD) kernel.
 //
+// After Smith and Elmore (2004), "The use of radial velocity derivative to
+// diagnose rotation and divergence", 11th Conf. on Aviation, Range, and
+// Aerospace Meteorology, P5.6 (extended abstract): local plane fit
+// v = u0 + ur dr + us s with s = r dtheta in a window of nearly constant width in
+// metres (they use 3 gates deep and about 2500 m wide). They solve a diagonal
+// system for symmetric windows; this kernel solves the full 2 x 2 system after
+// removing the weighted means, so asymmetric windows (missing data, sector
+// edges) are handled. Gaussian weights, min_valid_fraction and the minimum of
+// 3 valid gates are radarx choices.
+//
 // For every gate, the radial velocity v of the gates in a window of fixed
 // physical size is fitted by weighted least squares with the plane
 //

@@ -25,6 +25,16 @@ components must come from prior knowledge. Two kinds of prior are offered:
   which makes the result fit the observed radial velocities and the
   continuity equation.
 
+Provenance. The variational cost is the multi-Doppler cost of
+:func:`radarx.retrieve.multi_doppler` with one radar; Gao et al. (1999) treat
+two radars, so its use with a single radar is radarx's own application and is
+not a result of that paper. The network, its input features and their scaling
+constants (``VR_SCALE``, ``DBZ_SCALE``, ``WIND_SCALE``, ``HEIGHT_SCALE``,
+``RANGE_SCALE``), the tiling (``_TILE``, ``_OVERLAP``), the blending of tiles
+with cosine ramps and the refinement weights (``REFINE_WEIGHTS``) are radarx's
+own design and are not taken from a publication. Full references are in
+:func:`single_doppler_winds`.
+
 The heavy work runs in compiled code: the network in ONNX Runtime, the
 variational cost and its adjoint in the multithreaded kernel of
 :func:`radarx.retrieve.multi_doppler`.
@@ -65,6 +75,9 @@ FEATURES = (
     "height",
     "range",
 )
+# Scales that normalise the network inputs and outputs, grid spacing, tile and
+# overlap sizes and the refinement weights below are radarx choices (shared with
+# the training code); none of them comes from a publication.
 FEATURE_VERSION = "1"
 VR_SCALE = 30.0  # m s-1
 DBZ_SCALE = 60.0  # dBZ
@@ -402,9 +415,10 @@ def single_doppler_winds(
     Retrieve the three-dimensional wind from one Doppler radar.
 
     Without ``model`` this is the variational single-Doppler retrieval: the
-    cost function of :func:`radarx.retrieve.multi_doppler` (Gao et al. 1999
-    [1]_) with the observation term of the one radar, the anelastic mass
-    continuity equation, smoothness and the background. Along the beams the
+    cost function of :func:`radarx.retrieve.multi_doppler` (the structure of
+    Gao et al. 1999 [1]_, which treats two radars) with the observation term
+    of the one radar, the anelastic mass continuity equation, smoothness and
+    the background. Along the beams the
     wind follows the observations; across them it comes from the background
     and from mass continuity.
 
@@ -481,6 +495,22 @@ def single_doppler_winds(
         ``v_network`` and ``w_network`` hold its raw prediction and the
         attributes ``ml_model``, ``ml_model_version`` and
         ``ml_model_licence`` name it.
+
+    Notes
+    -----
+    What is taken from the literature. Only the variational cost structure of
+    Gao et al. (1999) [1]_ (and, through :func:`radarx.retrieve.multi_doppler`,
+    its scaling and weights, which are radarx's own). Gao et al. (1999) analyse
+    two radars; the single-radar use here, the physics-informed network, its
+    training, the ``refine`` weights ``{"background": 0.05, "background_w":
+    0.05}`` and the one-radar lower boundary ``w_boundary="bottom"`` are
+    radarx's own and are not taken from that or any other paper. As in
+    :func:`radarx.retrieve.multi_doppler`, ``w_boundary="bottom"`` imposes
+    ``w = 0`` at the lowest grid level whatever its height; for a grid whose
+    lowest level is above the ground this gives a column-wide bias in ``w``
+    (see the Notes there). A single Doppler radar determines only the wind
+    component along its beams; the cross-beam wind comes from the background
+    and the prior, so the retrieved cross-beam wind is not an observation.
 
     References
     ----------

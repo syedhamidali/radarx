@@ -5,10 +5,32 @@ Radarx Conversion
 This module provides conversions between metric, imperial, and radar-relevant units.
 It is designed for consistent, clear, and SI-compliant conversions.
 
+Sources and exactness of the constants (radarx has no other source for them):
+
+- ``1000`` (km), ``1e6``/``1e9`` (MHz/GHz), ``1e-6`` (microseconds), ``60``
+  (minutes), ``3.6`` (km/h per m/s, exactly 3600/1000), ``273.15`` (Celsius
+  to Kelvin, the offset of the kelvin scale [1]_) and ``9/5``, ``32``
+  (Fahrenheit) are exact by definition.
+- ``1609.344`` m per mile is exact (international mile = 5280 ft with
+  1 ft = 0.3048 m exactly).
+- ``1.943844`` kn per m/s is the rounded 3600/1852 = 1.9438445 (1 kn = 1852
+  m/h), relative rounding error about 3e-7.
+- ``3.28084`` ft per m is the rounded 1/0.3048 = 3.2808399 (relative error
+  about 3e-8).
+- ``c = 3e8`` m/s, the default of the wavelength/frequency conversions, is a
+  radarx choice: a round number 0.07 percent above the exact vacuum value
+  299 792 458 m/s [1]_ (see :data:`radarx.fundamentals.constants.C`). Pass
+  ``c=299_792_458.0`` for the exact value. Conversions in air would also
+  need the refractive index.
+
+The metre, second and kelvin definitions follow the SI brochure [1]_; the conversions do not depend on any
+radar-meteorology source.
+
 References
 ----------
-- BIPM SI Brochure: https://www.bipm.org/en/publications/si-brochure/
-- Doviak and Zrnić (1993), Doppler Radar and Weather Observations
+.. [1] BIPM, 2019: *The International System of Units (SI)*, 9th ed.
+       Bureau International des Poids et Mesures, Sevres,
+       https://www.bipm.org/en/publications/si-brochure (document, no DOI).
 
 .. autosummary::
    :nosignatures:
@@ -82,12 +104,12 @@ def kilometers_to_meters(value: Number) -> Number:
 
 
 def meters_to_miles(value: Number) -> Number:
-    """Convert meters to miles."""
+    """Convert meters to miles (international mile, exactly 1609.344 m)."""
     return np.asarray(value) / 1_609.344
 
 
 def miles_to_meters(value: Number) -> Number:
-    """Convert miles to meters."""
+    """Convert miles to meters (international mile, exactly 1609.344 m)."""
     return np.asarray(value) * 1_609.344
 
 
@@ -114,12 +136,30 @@ def ghz_to_hz(value: Number) -> Number:
 
 # Wavelength Conversions
 def wavelength_to_frequency(wavelength_m: Number, c: float = 3e8) -> Number:
-    """Convert wavelength in meters to frequency in Hz."""
+    """Convert wavelength in meters to frequency in Hz (``f = c / lambda``).
+
+    The default ``c = 3e8`` m/s is a radarx choice (round number, 0.07 percent
+    above the exact vacuum speed of light 299 792 458 m/s [1]_).
+
+    References
+    ----------
+    .. [1] BIPM, 2019: *The International System of Units (SI)*, 9th ed.
+           https://www.bipm.org/en/publications/si-brochure (document, no DOI).
+    """
     return np.asarray(c) / np.asarray(wavelength_m)
 
 
 def frequency_to_wavelength(frequency_hz: Number, c: float = 3e8) -> Number:
-    """Convert frequency in Hz to wavelength in meters."""
+    """Convert frequency in Hz to wavelength in meters (``lambda = c / f``).
+
+    The default ``c = 3e8`` m/s is a radarx choice (round number, 0.07 percent
+    above the exact vacuum speed of light 299 792 458 m/s [1]_).
+
+    References
+    ----------
+    .. [1] BIPM, 2019: *The International System of Units (SI)*, 9th ed.
+           https://www.bipm.org/en/publications/si-brochure (document, no DOI).
+    """
     return np.asarray(c) / np.asarray(frequency_hz)
 
 
@@ -146,12 +186,12 @@ def kph_to_mps(value: Number) -> Number:
 
 
 def mps_to_knots(value: Number) -> Number:
-    """Convert meters per second to knots."""
+    """Convert meters per second to knots (factor 1.943844, rounded 3600/1852)."""
     return np.asarray(value) * 1.943844
 
 
 def knots_to_mps(value: Number) -> Number:
-    """Convert knots to meters per second."""
+    """Convert knots to meters per second (divides by 1.943844, rounded 3600/1852)."""
     return np.asarray(value) / 1.943844
 
 
@@ -168,7 +208,7 @@ def radians_to_degrees(value: Number) -> Number:
 
 # Temperature Conversions
 def celsius_to_kelvin(value: Number) -> Number:
-    """Convert Celsius to Kelvin."""
+    """Convert Celsius to Kelvin (offset 273.15, SI definition)."""
     return np.asarray(value) + 273.15
 
 
@@ -179,12 +219,12 @@ def kelvin_to_celsius(value: Number) -> Number:
 
 # Additional Length Conversions
 def meters_to_feet(value: Number) -> Number:
-    """Convert meters to feet."""
+    """Convert meters to feet (factor 3.28084, rounded 1/0.3048)."""
     return np.asarray(value) * 3.28084
 
 
 def feet_to_meters(value: Number) -> Number:
-    """Convert feet to meters."""
+    """Convert feet to meters (divides by 3.28084, rounded 1/0.3048)."""
     return np.asarray(value) / 3.28084
 
 

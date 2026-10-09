@@ -23,6 +23,18 @@ moved to the same time (Gal-Chen 1982). This module
    forward and the later one backward to the target time and blending the
    two (:func:`interpolate_time`).
 
+Provenance. The idea of moving data to a common time along the storm motion is
+the frame-of-reference correction of Gal-Chen (1982); tracking the motion by
+cross-correlating successive echo patterns goes back to Rinehart and Garvey
+(1978); the departure-point scheme is the semi-Lagrangian method reviewed by
+Staniforth and Côté (1991); cubic convolution is that of Keys (1981).
+The FFT implementation of the correlation, the Hann taper, the Gaussian
+high-pass, the parabolic sub-cell refinement and its iterations, the tiling,
+the validity-mask handling and the blend of :func:`interpolate_time` are
+radarx's own constructions, and so are all defaults. Equation numbers of the
+cited papers are not checked unless a docstring gives one. Full references
+are in the docstrings of the functions.
+
 All functions work on the gridded :class:`xarray.Dataset` returned by
 :func:`radarx.grid.grid_radar` or ``dtree.radarx.to_grid()`` (``x`` and ``y``
 coordinates in metres, a scalar ``time``), or on a DataArray from it. The
@@ -172,7 +184,11 @@ def _prepare(a, mask, floor):
 
 
 def _parabolic(lo, mid, hi):
-    """Sub-cell offset of the vertex of the parabola through three samples."""
+    """
+    Sub-cell offset of the vertex of the parabola through three samples.
+
+    Standard three-point parabolic peak interpolation (elementary algebra).
+    """
     d = lo - 2.0 * mid + hi
     return 0.5 * (lo - hi) / d if d < 0 else 0.0
 
@@ -182,7 +198,9 @@ def _correlate(a, b, mask, floor, sigma, max_shift):
     Displacement (rows, columns) that carries ``a`` onto ``b``, and its quality.
 
     Plain (not phase-normalised) FFT cross-correlation of the windowed echo
-    fields after a Gaussian high-pass ``1 - exp(-2 pi^2 sigma^2 k^2)``; the
+    fields after a Gaussian high-pass ``1 - exp(-2 pi^2 sigma^2 k^2)`` (the
+    Fourier transform of one minus a Gaussian of standard deviation
+    ``sigma``; a radarx construction, as is the Hann taper); the
     peak is searched within ``max_shift`` cells and refined with a parabola.
     The quality is the normalised cross-correlation at the peak (between -1
     and 1). Returns NaN shifts when there is no echo or the peak lies on the
@@ -392,9 +410,11 @@ def estimate_motion(
     Storm motion between two gridded radar volumes.
 
     The motion is what is needed to move radar data observed at different
-    times to a common analysis time (Gal-Chen 1982 [1]_). The displacement of the echo pattern between the two times is found with
-    an FFT cross-correlation, the method used for radar echo tracking since
-    Rinehart and Garvey (1978) [2]_. Before correlating, each field is
+    times to a common analysis time (Gal-Chen 1982 [1]_). The displacement of
+    the echo pattern between the two times is found by cross-correlation of
+    the two echo patterns, the principle of radar echo tracking by correlation
+    introduced by Rinehart and Garvey (1978) [2]_. The FFT
+    implementation and everything below are radarx's own. Before correlating, each field is
 
     * restricted to the area observed at both times (``observed``), so that
       the fixed edge of the radar coverage does not pin the result to zero;
@@ -412,13 +432,21 @@ def estimate_motion(
     final peak must reach ``min_quality``; otherwise the motion is NaN.
 
     With ``tile`` set, the estimate is repeated on overlapping tiles, giving a
-    spatially varying motion (Shapiro et al. 2010 [3]_, [4]_ show why a single
-    vector is often not enough for evolving storms). Each tile starts from the
-    domain-wide motion and searches within half of it (plus two cells) around
-    it, a coarse-to-fine scheme that keeps small tiles from locking onto
-    spurious peaks. Tiles with little echo or a weak correlation take the
-    domain-wide motion; the tile vectors are then smoothed and interpolated
-    bilinearly to every grid cell.
+    spatially varying motion. This is a motivation shared with Shapiro et al.
+    (2010) [3]_, [4]_, who treat spatially variable advection by a different,
+    variational method; radarx does not implement their method. Each tile
+    starts from the domain-wide motion and searches within half of it (plus
+    two cells) around it, a coarse-to-fine scheme that keeps small tiles from
+    locking onto spurious peaks. Tiles with little echo (less than 5 % of the
+    tile at either time) or a weak correlation take the domain-wide motion;
+    the tile vectors are then smoothed and interpolated bilinearly to every
+    grid cell.
+
+    The defaults (``floor`` 5 dBZ, ``highpass`` 10 km, ``max_speed`` 60 m/s,
+    ``min_quality`` 0.3, ``iterations`` 3, ``overlap`` 0.5, ``smooth`` 1 tile)
+    and the 5 % echo threshold are radarx choices, not taken from the cited
+    papers. The sub-cell refinement is the standard three-point parabola
+    through the correlation peak.
 
     Parameters
     ----------
@@ -582,7 +610,14 @@ def estimate_motion(
 
 
 def _keys(t):
-    """Keys (1981) cubic convolution weights (a = -1/2) for offsets ``t``."""
+    """
+    Keys (1981) cubic convolution weights (a = -1/2) for offsets ``t``.
+
+    Keys, R., 1981, IEEE Trans. Acoust. Speech Signal Process. 29, 1153-1160,
+    https://doi.org/10.1109/TASSP.1981.1163711. The piecewise cubic kernel with
+    the free parameter a = -1/2 is used. Equation numbers not checked against
+    the paper.
+    """
     a = -0.5
     t1, t3, t4 = 1.0 + t, 1.0 - t, 2.0 - t
     return (
@@ -707,7 +742,9 @@ def _departure(u, v, dts, dx, dy, ny, nx, use_compiled, n_threads):
     trajectories are straight lines. For a spatially varying motion the
     displacement is found with the implicit midpoint iteration
     ``alpha = dt * V(x - alpha / 2)`` of two-time-level semi-Lagrangian
-    schemes (Staniforth and Cote 1991), for all time steps at once.
+    schemes (Staniforth and Côté 1991, Mon. Wea. Rev. 119, 2206-2223; equation
+    number not checked), for all time steps at once. Three
+    iterations are a radarx choice.
     """
     dts = np.asarray(dts, dtype=np.float64)[:, None, None]
     rows = np.arange(ny, dtype=np.float64)[None, :, None]
@@ -805,11 +842,16 @@ def advect(
     Move gridded fields along the storm motion by a time step.
 
     Semi-Lagrangian advection: every output cell takes the value found at its
-    departure point ``x - u dt`` (Staniforth and Cote 1991 [2]_). Fields
+    departure point ``x - u dt`` (Staniforth and Côté 1991 [2]_). Fields
     observed at one time are thereby moved to another, the frame-of-reference
     correction of Gal-Chen (1982) [1]_. The value at the departure point is
     interpolated bilinearly, or with cubic convolution (Keys 1981 [3]_)
     clipped to the four nearest values so that no new extremes appear.
+
+    The cubic option uses the kernel of Keys (1981) with a = -1/2 (a radarx
+    choice of the free parameter; equation numbers not checked against the
+    paper). The clipping to the four nearest values, the validity mask and the
+    default ``min_weight`` of 0.5 are radarx choices.
 
     Missing data are handled with an advected validity mask: a cell is
     defined only if valid neighbours carry at least ``min_weight`` of the
@@ -819,8 +861,11 @@ def advect(
     used only where all of its 16 neighbours are valid.
 
     For a spatially varying motion the departure points are found with the
-    implicit midpoint iteration of two-time-level semi-Lagrangian schemes.
-    Every level of a 3-D field moves with the same horizontal motion.
+    implicit midpoint iteration of two-time-level semi-Lagrangian schemes
+    (Staniforth and Côté 1991 [2]_, who review such schemes; the iteration
+    count of 3 used here is a radarx choice). Every level of a 3-D field moves
+    with the same horizontal motion, the motion is assumed steady between the
+    two times (Gal-Chen 1982 [1]_) and vertical motion is not represented.
 
     Parameters
     ----------
@@ -953,9 +998,11 @@ def interpolate_time(
     two are blended with weights ``1 - f`` and ``f``, where
     ``f = (t - t0) / (t1 - t0)``. Echoes therefore move smoothly between the
     two observations instead of fading out in one place and in at another, as
-    with plain linear interpolation (the approach used for nowcasting
-    interpolation in pysteps, Pulkkinen et al. 2019 [2]_). Where only one of
-    the two advected fields is defined, it is used alone.
+    with plain linear interpolation. Where only one of the two advected
+    fields is defined, it is used alone. The forward-backward blend is
+    radarx's own construction. The pysteps library (Pulkkinen et al. 2019
+    [2]_) provides advection-based extrapolation for precipitation nowcasting.
+    The blend of two volumes is not taken from that paper.
 
     Parameters
     ----------

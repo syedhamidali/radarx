@@ -71,7 +71,10 @@ inline void geometry(double s, double a, double b, double R, double& range,
 
 // Weight of a cell at antenna elevation e (deg) between the sweeps of sorted
 // elevations el[0..n): 1 on a beam axis, 0.5 half way to the next beam (or
-// half a beamwidth), below 0.01 one spacing away (Lakshmanan et al. 2006).
+// half a beamwidth), below 0.01 one spacing away (Lakshmanan et al. 2006,
+// Wea. Forecasting 21, 802-823, Eq. 6 on p. 808: delta_e = exp[alpha^3 ln 0.005],
+// alpha = (e - theta_i) / (|theta_(i+-1) - theta_i| V b_i), V = maximum;
+// the exact values are 0.516 at alpha = 0.5 and 0.005 at alpha = 1).
 inline double beam_weight(double e, const std::vector<double>& el, double beamwidth) {
     const int64_t n = static_cast<int64_t>(el.size());
     if (n == 0) return 1.0;
@@ -90,6 +93,13 @@ inline double beam_weight(double e, const std::vector<double>& el, double beamwi
 }
 
 // --- geodesics on the WGS84 ellipsoid (Vincenty 1975) ----------------------
+// Vincenty, T., 1975: Direct and inverse solutions of geodesics on the
+// ellipsoid with application of nested equations. Survey Review 23(176),
+// 88-93, https://doi.org/10.1179/sre.1975.23.176.88. The series for A and B,
+// the constant C and the iteration for lambda below are that paper's;
+// equation numbers not checked against the paper. The convergence tolerance
+// (1e-13 rad) and the 200-iteration cap are radarx choices. a and f are the
+// defining WGS84 parameters (NIMA TR8350.2).
 
 constexpr double kA = 6378137.0;
 constexpr double kF = 1.0 / 298.257223563;
@@ -309,7 +319,11 @@ std::tuple<py::array_t<float>, py::array_t<float>> beam_geometry(
 
 // Weighted mean over radars of values (nradar, nz, ncol...) with weight
 //   exp(-(range / range_scale)^2) * beam_weight * exp(-(dt / time_scale)^2),
-// a scale <= 0 switching that factor off. Returns the merged field and the
+// a scale <= 0 switching that factor off. The range factor is the Gaussian
+// distance weight exp(-d^2 / R^2), R = 50 km, of Zhang et al. (2005, J. Atmos.
+// Oceanic Technol. 22, 30-42, Fig. 15 on p. 41); beam_weight is Eq. 6 of
+// Lakshmanan et al. (2006); the time factor is a radarx choice. It is NOT
+// the exp[-(t^2 r^2) / beta] of Lakshmanan et al. (2006, Eq. 7). Returns the merged field and the
 // weight sum, float32 (nz, ncol...).
 std::tuple<py::array_t<float>, py::array_t<float>> merge(
     const FArray& values, const std::vector<DArray>& ground, const DArray& z,

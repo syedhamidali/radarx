@@ -18,6 +18,14 @@ footprint, which grows with range. This follows the discussion in
 
 uxarray is an optional dependency (``pip install uxarray``).
 
+Provenance. The gate-footprint construction (corner nodes halfway between
+neighbouring ray and gate centres, quadrilateral faces) is a radarx convention
+following the two software discussions linked above; it is not taken from a
+journal publication. The corner positions use the 4/3 effective Earth radius
+beam model of :func:`xradar.georeference.antenna_to_cartesian` (Doviak and
+Zrnić 1993, *Doppler Radar and Weather Observations*, 2nd ed., Eqs. 2.28b-d,
+book, no DOI) and the WGS84 azimuthal equidistant inverse projection of PROJ.
+
 .. autosummary::
    :nosignatures:
    :toctree: generated/
@@ -111,6 +119,15 @@ def gate_corners(obj):
         Ray indices that sort the sweep by azimuth; faces follow this order.
     full_circle : bool
         Whether the sweep closes on itself.
+
+    Notes
+    -----
+    Nodes lie halfway between gate centres in range, azimuth and elevation
+    (a radarx convention, see the module docstring); the first and last edge
+    of a sector extend by half a spacing. A sweep counts as a full circle if
+    no gap between sorted azimuths exceeds twice the median spacing (a radarx
+    threshold). The ground distance of each corner uses the 4/3 Earth model of Doviak and
+    Zrnić (1993), Eqs. 2.28b-d (book, no DOI), through xradar.
     """
     import pyproj
     from xradar.georeference import antenna_to_cartesian

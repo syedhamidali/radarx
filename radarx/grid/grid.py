@@ -8,6 +8,13 @@ Radarx Grid
 
 This sub-module contains functions necessary to grid the radar data.
 
+``grid_radar(method="cone")`` is the radarx cone gridding of
+:mod:`radarx.grid.cone`; ``grid_radar(method="barnes")`` is the Barnes (1964)
+objective analysis, evaluated with the fast approximation of Zürcher (2023)
+(see the References of :func:`grid_radar`). :func:`stack_data` and
+:func:`make_3d_grid` are bookkeeping (stacking gates, building the target
+grid); they implement no published algorithm.
+
 .. autosummary::
    :nosignatures:
    :toctree: generated/
@@ -73,6 +80,12 @@ def stack_data(dtree, data_vars=None, geo=False):
     -------
     xarray.Dataset
         A stacked dataset with the specified or all multidimensional variables.
+
+    Notes
+    -----
+    Bookkeeping only (no published method): the gates are georeferenced with
+    xradar (4/3 effective Earth radius model) and stacked into one point
+    dimension.
     """
     dtree = dtree.xradar.georeference()
     if geo:
@@ -175,11 +188,15 @@ def make_3d_grid(
     Notes
     -----
     - The function uses the Azimuthal Equidistant projection (AEQD)
-    defined in the radar dataset.
+      defined in the radar dataset.
     - The transformation ensures compatibility between Cartesian and
-    geographic coordinates.
+      geographic coordinates.
     - This function assumes the dataset is compatible with `xradar`
-    and has a valid CRS.
+      and has a valid CRS.
+    - The defaults (+-200 km, 1 km, 0 to 10 km at 250 m) are radarx choices,
+      not taken from a publication.
+    - The azimuthal equidistant projection and its WGS84 inverse are provided
+      by PROJ (through pyproj); no published method is implemented here.
 
     """
 
@@ -224,8 +241,9 @@ def grid_radar(
     Two methods are available. ``"cone"`` (default) interpolates within each
     sweep and then between sweeps (see :func:`radarx.grid.grid_cones`): it
     needs no smoothing parameters, keeps the native resolution and is much
-    faster. ``"barnes"`` uses Barnes objective analysis via the optional
-    fast-barnes-py package (Python < 3.13 only).
+    faster. ``"barnes"`` uses Barnes (1964) [1]_ objective analysis via the
+    optional fast-barnes-py package (Python < 3.13 only), which implements the
+    fast approximate Barnes interpolation of Zürcher (2023) [2]_.
 
     Parameters
     ----------
@@ -245,20 +263,28 @@ def grid_radar(
         (-100e3, 100e3).
     z_lim : tuple of float, optional
         Range of z-coordinates (meters) for the Cartesian grid. Defaults to
-        (0, 16e3).
+        (0, 10e3).
     x_step : int, optional
-        Grid resolution in the x-direction (meters). Defaults to 500.
+        Grid resolution in the x-direction (meters). Defaults to 1000.
     y_step : int, optional
-        Grid resolution in the y-direction (meters). Defaults to 500.
+        Grid resolution in the y-direction (meters). Defaults to 1000.
     z_step : int, optional
         Grid resolution in the z-direction (meters). Defaults to 250.
     x_smth : float, optional
-        Smoothing factor for the x-dimension. Defaults to 0.2.
+        Smoothing factor for the x-dimension: the Gaussian width of the Barnes
+        kernel as a fraction of the longitude step of the grid. Defaults to
+        0.2.
     y_smth : float, optional
-        Smoothing factor for the y-dimension. Defaults to 0.2.
+        Smoothing factor for the y-dimension (fraction of the latitude step).
+        Defaults to 0.2.
     z_smth : float, optional
-        Smoothing factor for the z-dimension. Defaults to 1.
+        Smoothing factor for the z-dimension (fraction of ``z_step``).
+        Defaults to 1.
         ``x_smth``, ``y_smth`` and ``z_smth`` apply to ``method="barnes"`` only.
+        The grid defaults and the three smoothing factors are radarx choices,
+        not taken from Barnes (1964) or Zürcher (2023). The settings passed to
+        fast-barnes-py (``max_dist=4`` and ``num_iter=4``) are radarx choices
+        too; they are not taken from Zürcher (2023).
     method : {"cone", "barnes"}, optional
         Interpolation method. Default ``"cone"``.
     n_threads : int, optional
@@ -274,12 +300,36 @@ def grid_radar(
 
     Notes
     -----
-    - The pseudo-CAPPI is created by extrapolating data from higher altitudes
-      to fill missing values at lower altitudes.
+    - With ``method="barnes"`` the pseudo-CAPPI is created by copying the value
+      of the level above into every missing (NaN) cell of a level, working
+      downward from the third-highest level to the lowest one (the two
+      highest levels are not filled). This fills any NaN cell at any of these
+      levels, including gaps inside a column, from the level above, not only
+      the cells below the lowest echo; it is a radarx convention, not a
+      published algorithm.
     - With ``method="cone"``, ``pseudo_cappi`` fills levels below the lowest
       sweep with that sweep's value; other cells not bracketed by two sweeps
-      stay empty.
+      stay empty. The cone method is radarx's own: its closest published
+      relative is the vertical interpolation (VI) scheme of Zhang et al. (2005)
+      [3]_ (their Eqs. 5-7, a linear interpolation in elevation angle between
+      the two tilts around the grid cell, nearest neighbour in azimuth and
+      range). It differs in interpolating bilinearly within each sweep and
+      linearly in beam height (not in elevation angle) between sweeps.
     - With ``method="barnes"``, interpolation uses Barnes objective analysis.
+
+    References
+    ----------
+    .. [1] Barnes, S. L., 1964: A technique for maximizing details in numerical
+       weather map analysis. *J. Appl. Meteor.*, **3**, 396-409,
+       https://doi.org/10.1175/1520-0450(1964)003<0396:ATFMDI>2.0.CO;2
+    .. [2] Zürcher, B. K., 2023: Fast approximate Barnes interpolation:
+       illustrated by Python-Numba implementation fast-barnes-py v1.0.
+       *Geosci. Model Dev.*, **16**, 1697-1711,
+       https://doi.org/10.5194/gmd-16-1697-2023
+    .. [3] Zhang, J., K. Howard, and J. J. Gourley, 2005: Constructing
+       three-dimensional multiple-radar reflectivity mosaics: Examples of
+       convective storms and stratiform rain echoes. *J. Atmos. Oceanic
+       Technol.*, **22**, 30-42, https://doi.org/10.1175/JTECH-1689.1
 
     """
     if method == "cone":
