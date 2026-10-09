@@ -14,6 +14,19 @@
 // (sub-steps of at most max_step seconds), updating temperature and specific
 // humidity; cells are independent and shared out the same way.
 //
+// Sources (details, references and radarx choices in the docstring of
+// radarx/retrieve/evaporation.py): the single-drop law of Rogers and Yau
+// (1989) as written by Kumjian and Ryzhkov (2010), Eq. 2 and Appendix
+// Eqs. A1-A10, with the ventilation coefficient 0.78 + 0.308 N_Sc^(1/3)
+// N_Re^(1/2) (Pruppacher and Klett 1997; Li and Srivastava 2001, Eq. 2) taken
+// equal for heat and vapour; D_v with the reference pressure of 1000 hPa as in
+// Eq. A7 (the fit of Pruppacher and Klett uses 1013.25 hPa, a 0.3-0.8 %
+// effect on the rates); e_s of Buck (1981), Eq. 8, without the enhancement
+// factor; the fall speed is a radarx fit to Atlas et al. (1973) times the
+// (rho0 / rho)^0.4 correction attributed to Foote and du Toit (1969); the
+// gamma-DSD integral follows the approach of Milbrandt and Yau (2005, Part II,
+// Eq. 8). The saturation limit of the time step is a radarx choice.
+//
 // Every step follows the NumPy reference in radarx/retrieve/evaporation.py,
 // in the same order of operations.
 

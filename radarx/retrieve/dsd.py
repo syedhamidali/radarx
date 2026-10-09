@@ -12,7 +12,8 @@ Retrieve the parameters of a gamma raindrop size distribution (DSD)
 
     N(D) = N_0 D^{\\mu} \\exp(-\\Lambda D)
 
-(Ulbrich 1983; :math:`N` in m\\ :sup:`-3` mm\\ :sup:`-1`, :math:`D` in mm)
+(Ulbrich 1983, as written in Bringi and Chandrasekar 2001, Eq. 7.12;
+:math:`N` in m\\ :sup:`-3` mm\\ :sup:`-1`, :math:`D` in mm)
 from polarimetric radar variables, and derived quantities, for sweeps,
 volumes, grids or QVPs.
 
@@ -22,11 +23,23 @@ Methods
     Constrained-gamma DSD of Zhang et al. (2001): the shape :math:`\\mu` is
     tied to the slope :math:`\\Lambda` by an empirical relation
     :math:`\\mu = c_2 \\Lambda^2 + c_1 \\Lambda + c_0`, either that of Cao et
-    al. (2008, Oklahoma 2D video disdrometer data, the default) or that of
-    Zhang et al. (2001, Florida), or one given by the user. Because
+    al. (2008, Eq. 7: :math:`\\mu = -0.0201 \\Lambda^2 + 0.902 \\Lambda -
+    1.718`, fitted to Oklahoma 2D video disdrometer data and stated there to
+    apply for :math:`\\Lambda` between 0 and 20 mm\\ :sup:`-1`, the default; the
+    coefficients and range were checked against the paper) or that of
+    Zhang et al. (2001, Florida, :math:`-0.016, 1.213, -1.957`; these digits
+    are quoted from the literature and were *not* checked against the paper,
+    which was not available here, so its equation number is not given), or
+    one given by the user. Because
     :math:`Z_{DR}` does not depend on :math:`N_0`, it fixes :math:`\\Lambda`
     (and :math:`\\mu`); :math:`N_0` then follows from :math:`Z_H`
-    (Zhang et al. 2001; Vivekanandan et al. 2004).
+    (Zhang et al. 2001; Vivekanandan et al. 2004). The lookup table is radarx's
+own construction (a table of :math:`Z_{DR}` against :math:`\\Lambda` on a
+geometric grid of 0.3-20 mm\\ :sup:`-1`, 2000 points, discarding the part
+where :math:`\\mu \\le -0.99`) rather than an iterative or polynomial
+solution as in the cited papers; Cao et al. (2008, Eqs. 9-11) give
+polynomial fits of :math:`R`, :math:`W` and :math:`D_0` against
+:math:`Z_{DR}` for the same relation, which radarx does not use.
 ``"normalized"``
     Normalized gamma DSD (Testud et al. 2001; Bringi et al. 2002)
 
@@ -38,7 +51,10 @@ Methods
 
     where :math:`D_m` is the mass-weighted mean diameter and :math:`N_w` the
     intercept of the exponential DSD with the same water content and
-    :math:`D_m`. For a given shape :math:`\\mu` (``mu``, default 3),
+    :math:`D_m` (the :math:`D_m` form of Testud et al. 2001; Bringi and
+    Chandrasekar 2001, Eqs. 7.60-7.62, normalize with the median volume
+    diameter :math:`D_0` and 3.67 instead of :math:`D_m` and 4, which gives
+    slightly different :math:`N_w` and :math:`f(\\mu)`). For a given shape :math:`\\mu` (``mu``, default 3),
     :math:`Z_{DR}` depends on :math:`D_m` only, which it fixes, and
     :math:`N_w` follows from :math:`Z_H`.
 
@@ -68,13 +84,21 @@ untruncated gamma DSD:
 
 - :math:`D_m = M_4 / M_3 = (4 + \\mu)/\\Lambda`;
 - the median volume diameter :math:`D_0 \\approx (3.67 + \\mu)/\\Lambda`
-  (Ulbrich 1983);
+  (Ulbrich 1983; Bringi and Chandrasekar 2001, text after Eq. 7.12, where
+  3.67 is exact for :math:`\\mu = 0` and approximate otherwise);
 - the liquid water content :math:`W = \\frac{\\pi}{6} \\rho_w M_3`;
 - :math:`N_w = \\frac{4^4}{\\pi \\rho_w} \\frac{W}{D_m^4}` (Testud et al. 2001);
 - the rain rate :math:`R = 6\\pi \\times 10^{-4} \\int v(D) D^3 N(D)\\,dD`
-  (mm h\\ :sup:`-1`) with the fall speed
-  :math:`v(D) = 9.65 - 10.3 \\exp(-0.6 D)` m s\\ :sup:`-1` of Atlas et al.
-  (1973) at sea level, which also integrates in closed form.
+  (mm h\\ :sup:`-1`, Bringi and Chandrasekar 2001, Eq. 7.66a, whose
+  prefactor is :math:`0.6\\pi\\times10^{-3}`, the same) with the sea-level
+  fall speed :math:`v(D) = 9.65 - 10.3 \\exp(-0.6 D)` m s\\ :sup:`-1` of
+  Atlas et al. (1973), quoted as Eq. 7.65b of Bringi and Chandrasekar
+  (2001), which also integrates in closed form. No density correction is
+  applied. The law is negative below :math:`D` = 0.109 mm; radarx integrates
+  it over :math:`0 < D < \\infty` in the closed form, so the (small) negative
+  contribution of tiny drops is included (a radarx simplification), and the
+  validity range stated in the original paper could not be checked (not on
+  disk).
 
 Scattering tables
 -----------------
@@ -88,12 +112,54 @@ through the ``pytmatrix`` interface of Leinonen 2014) by
 ``ci/build_dsd_tables.py``, assuming
 
 - oblate spheroids with the axis ratio of Brandes et al. (2002),
-  :math:`b/a = 0.9951 + 0.0251 D - 0.03644 D^2 + 0.005303 D^3 - 0.0002492 D^4`;
-- Gaussian canting angles with zero mean and 7° standard deviation (Huang
-  et al. 2008);
-- horizontal incidence (low elevation angles);
-- the refractive index of water of Ray (1972), and
-  :math:`|K_w|^2 = 0.93`.
+  :math:`b/a = 0.9951 + 0.0251 D - 0.03644 D^2 + 0.005303 D^3 - 0.0002492 D^4`
+  (:math:`D` in mm). Brandes et al. (2002) was not on disk, so its equation
+  number is not given; the polynomial is the one reproduced as Eq. 15 of
+  Kumjian and Ryzhkov (2010), which prints the second coefficient as
+  0.025 10, i.e. 0.0251 (the other four coefficients agree). radarx caps the
+  ratio at 1 (a radarx choice for the table and ``axis_ratio`` output);
+- Gaussian canting angles with zero mean and 7° standard deviation. The
+  value is attributed to the width of the canting distribution measured by
+  Huang et al. (2008); that paper was not on disk, so the number and the
+  page could not be checked and the choice should be regarded as radarx's;
+- horizontal incidence (0° elevation), see the warning below;
+- the refractive index of water of Ray (1972), at 0, 10, 20 and 30 °C, and
+  :math:`|K_w|^2 = 0.93` for all bands and temperatures (a convention, not
+  computed from the refractive index: Bringi and Chandrasekar 2001, text
+  after Eq. 7.82, give 0.93 at 3 GHz and 0 °C);
+- the radar frequencies 2.8, 5.6 and 9.4 GHz for S, C and X band (radarx
+  choice, representative values; the wavelengths are 107.07, 53.53 and
+  31.89 mm in the table);
+- the reflectivity from the backscatter cross sections as
+  :math:`Z = \\lambda^4 / (\\pi^5 |K_w|^2) \\sum \\sigma N \\Delta D`, the
+  usual definition (see Bringi and Chandrasekar 2001, Chap. 7), with a
+  trapezoid rule over the 0.05 mm grid; :math:`K_{DP}` and the specific
+  attenuations are per-drop values from the same T-matrix runs summed over
+  the DSD in the same way.
+
+.. warning::
+
+    The tables assume **horizontal incidence** (0° elevation). The
+    measured :math:`Z_{DR}` of oblate drops decreases with elevation angle
+    :math:`\\theta`: in the Rayleigh limit :math:`S_{hh} \\propto \\alpha_h` and
+    :math:`S_{vv} \\propto \\alpha_v \\cos^2\\theta + \\alpha_h \\sin^2\\theta`,
+    so :math:`Z_H` is unchanged but :math:`Z_{DR}(\\theta) < Z_{DR}(0)`, and
+    :math:`K_{DP}` falls by about :math:`\\cos^2\\theta`. An estimate
+    (S band Rayleigh scattering by spheroids with the Brandes et al. axis
+    ratio and :math:`\\epsilon = 80 + 10i`; an estimate made for this note,
+    not a T-matrix computation, and not checked against a paper) gives
+    :math:`Z_{DR}(\\theta)/Z_{DR}(0)` of 0.97 at 10° and 0.88 at 20°, nearly
+    independent of drop size for 1-3 mm (e.g. 0.64, 0.62, 0.56 dB at
+    0°, 10°, 20° for D = 2 mm). Applying the tables to a 20° QVP or a PPI at
+    a 20° tilt therefore reads :math:`Z_{DR}` about 12 % too low; for a
+    normalized gamma DSD with :math:`\\mu` = 3 this lowers the retrieved
+    :math:`D_m` by about 6-8 % (1.5-2 % at 10°) and, at fixed :math:`Z_H`
+    (:math:`Z \\propto N_w D_m^7` in the Rayleigh limit), raises :math:`N_w`
+    by roughly a factor of 1.6 (+0.2 in :math:`\\log_{10}`). The tables are
+    adequate for sweeps at elevations below about 5° (< 1 % in
+    :math:`Z_{DR}`); there is no ``elevation`` argument, correction or
+    warning in the code. At C and X band the elevation dependence is not
+    the Rayleigh one (resonance) and was not estimated.
 
 Rain only
 ---------
@@ -102,22 +168,30 @@ gates, e.g. from a hydrometeor classification or a quality-control step) to
 leave other gates empty; snow, hail, the melting layer and non-meteorological
 echo otherwise give meaningless DSDs. As a safeguard, gates whose :math:`N_w`
 falls outside ``nw_range`` (by default :math:`10`-:math:`10^6`
-m\\ :sup:`-3` mm\\ :sup:`-1`, about one decade beyond the
-:math:`\\log_{10} N_w` of 2-5.5 found in rain of different climates by
-Bringi et al. 2003) are left empty too: their :math:`Z_H` and :math:`Z_{DR}`
-are not consistent with rain.
+m\\ :sup:`-3` mm\\ :sup:`-1`) are left empty too: their :math:`Z_H` and
+:math:`Z_{DR}` are not consistent with rain. The bounds
+(:math:`\\log_{10} N_w` of 1 and 6) are a radarx choice, deliberately wide.
+For comparison, the composite statistics of Bringi et al. (2003, Sect. 5,
+Figs. 10-11) have cluster means of :math:`\\log_{10} N_w` of 3-3.5
+(continental-like) and 4-4.5 (maritime-like convective rain) with
+:math:`\\pm 1\\sigma` bars of about 2.5-5, and their retrieval table spans
+:math:`3 \\le \\log_{10} N_w \\le 5` (Appendix, Eq. A2).
 
 Disdrometers
 ------------
 :func:`dsd_spectrum` rebuilds :math:`N(D)` from the retrieved parameters on
 disdrometer size bins (the 32 classes of the OTT Parsivel by default, see
-:func:`parsivel_bins`), :func:`fit_gamma_moments` fits a gamma DSD to measured
+:func:`parsivel_bins`; Tokay et al. 2014 describe the Parsivel2), :func:`fit_gamma_moments` fits a gamma DSD to measured
 spectra by the method of moments (second, fourth and sixth moments, as
 evaluated by Cao and Zhang 2009) and :func:`radar_from_dsd` computes radar
 variables from measured or rebuilt spectra, for radar-disdrometer comparisons.
 
 References
 ----------
+Bringi, V. N., and V. Chandrasekar, 2001: *Polarimetric Doppler Weather
+Radar: Principles and Applications*. Cambridge University Press, 636 pp.,
+https://doi.org/10.1017/CBO9780511541094
+
 Ulbrich, C. W., 1983: Natural variations in the analytical form of the
 raindrop size distribution. *J. Climate Appl. Meteor.*, **22** (10),
 1764-1775, https://doi.org/10.1175/1520-0450(1983)022<1764:NVITAF>2.0.CO;2
@@ -160,11 +234,6 @@ Analysis of video disdrometer and polarimetric radar data to characterize
 rain microphysics in Oklahoma. *J. Appl. Meteor. Climatol.*, **47** (8),
 2238-2255, https://doi.org/10.1175/2008JAMC1732.1
 
-Bringi, V. N., C. R. Williams, M. Thurai, and P. T. May, 2009: Using
-dual-polarized radar and dual-frequency profiler for DSD characterization: A
-case study from Darwin, Australia. *J. Atmos. Oceanic Technol.*, **26** (10),
-2107-2122, https://doi.org/10.1175/2009JTECHA1258.1
-
 Cao, Q., and G. Zhang, 2009: Errors in estimating raindrop size distribution
 parameters employing disdrometer and simulated raindrop spectra. *J. Appl.
 Meteor. Climatol.*, **48** (2), 406-425,
@@ -190,6 +259,11 @@ https://doi.org/10.1175/2008JTECHA1075.1
 
 Ray, P. S., 1972: Broadband complex refractive indices of ice and water.
 *Appl. Opt.*, **11** (8), 1836-1844, https://doi.org/10.1364/AO.11.001836
+
+Kumjian, M. R., and A. V. Ryzhkov, 2010: The impact of evaporation on
+polarimetric characteristics of rain: Theoretical model and practical
+implications. *J. Appl. Meteor. Climatol.*, **49** (6), 1247-1267,
+https://doi.org/10.1175/2010JAMC2243.1
 
 Tokay, A., D. B. Wolff, and W. A. Petersen, 2014: Evaluation of the new
 version of the laser-optical disdrometer, OTT Parsivel2. *J. Atmos. Oceanic
@@ -236,14 +310,22 @@ except ImportError:  # pragma: no cover - depends on the build
     _dsd = None
     HAS_COMPILED_KERNEL = False
 
-KW2 = 0.93  # dielectric factor |K_w|^2 of the reflectivity
+# dielectric factor |K_w|^2 of the reflectivity: the conventional 0.93 (Bringi
+# and Chandrasekar 2001, text after Eq. 7.82: 0.93 at 3 GHz, 0 degC), used for
+# all bands and temperatures
+KW2 = 0.93
 BANDS = ("S", "C", "X")
 MU_LAMBDA = {
-    # mu = c2 Lambda^2 + c1 Lambda + c0
+    # mu = c2 Lambda^2 + c1 Lambda + c0 (Lambda in mm-1)
+    # Cao et al. (2008), Eq. 7, valid for Lambda in 0-20 mm-1 (checked)
     "cao2008": (-0.0201, 0.902, -1.718),
+    # Zhang et al. (2001), Florida relation: quoted from the literature, NOT
+    # checked against the paper (not on disk), equation number unknown
     "zhang2001": (-0.016, 1.213, -1.957),
 }
-_LAMBDA_MAX = 20.0  # mm-1, upper end of the constrained-gamma table
+# mm-1, upper end of the constrained-gamma table: the validity limit of Eq. 7 of
+# Cao et al. (2008), "0 to 20"; the other table sizes below are radarx choices
+_LAMBDA_MAX = 20.0
 _N_LAMBDA = 2000
 _DM_RANGE = (0.3, 4.0)  # mm, normalized-gamma table
 _N_DM = 741
@@ -279,7 +361,8 @@ _OUT_ATTRS = {
     },
 }
 
-# OTT Parsivel size classes [mm]: centres and widths
+# OTT Parsivel size classes [mm]: centres and widths (manufacturer's table;
+# classes 3-22 agree with D_i of Raupach and Berne 2015, Tables 3 and 10)
 _PARSIVEL_CENTERS = np.array(
     [0.062, 0.187, 0.312, 0.437, 0.562, 0.687, 0.812, 0.937, 1.062, 1.187]
     + [1.375, 1.625, 1.875, 2.125, 2.375, 2.75, 3.25, 3.75, 4.25, 4.75]
@@ -368,6 +451,51 @@ def scattering_table(band="S", temperature=20.0):
         (for one drop per m3) to ``kdp`` (degrees/km) and to the specific
         attenuation ``ah`` and ``av`` (dB/km), with the drop ``axis_ratio``.
         The assumptions are listed in :mod:`radarx.retrieve.dsd`.
+
+    Notes
+    -----
+    The values come from the T-matrix method (Mishchenko and Travis 1998)
+    through the ``pytmatrix`` interface (Leinonen 2014), with Gaussian canting
+    of 7 degrees standard deviation attributed to Huang et al. (2008; not
+    checked against the paper) and the refractive index of Ray (1972).
+    The T-matrix runs are for horizontal incidence (0 degrees elevation), so
+    ZDR (and KDP) computed from these tables are those seen at low elevation;
+    at 20 degrees elevation ZDR would be about 12 % lower (Rayleigh, S band
+    estimate in :mod:`radarx.retrieve.dsd`; not a T-matrix result). The axis
+    ratio is that of Brandes et al. (2002) as printed in Kumjian and Ryzhkov
+    (2010, Eq. 15), capped at 1. The table is built by
+    ``ci/build_dsd_tables.py`` and its provenance is stated in the header of
+    ``radarx/retrieve/data/dsd_scattering.csv``.
+
+    References
+    ----------
+    Mishchenko, M. I., and L. D. Travis, 1998: Capabilities and limitations of
+    a current FORTRAN implementation of the T-matrix method for randomly
+    oriented, rotationally symmetric scatterers. *J. Quant. Spectrosc.
+    Radiat. Transfer*, **60** (3), 309-324,
+    https://doi.org/10.1016/S0022-4073(98)00008-9
+
+    Leinonen, J., 2014: High-level interface to T-matrix scattering
+    calculations: architecture, capabilities and limitations. *Opt. Express*,
+    **22** (2), 1655-1660, https://doi.org/10.1364/OE.22.001655
+
+    Brandes, E. A., G. Zhang, and J. Vivekanandan, 2002: Experiments in
+    rainfall estimation with a polarimetric radar in a subtropical
+    environment. *J. Appl. Meteor.*, **41** (6), 674-685,
+    https://doi.org/10.1175/1520-0450(2002)041<0674:EIREWA>2.0.CO;2
+
+    Kumjian, M. R., and A. V. Ryzhkov, 2010: The impact of evaporation on
+    polarimetric characteristics of rain: Theoretical model and practical
+    implications. *J. Appl. Meteor. Climatol.*, **49** (6), 1247-1267,
+    https://doi.org/10.1175/2010JAMC2243.1
+
+    Huang, G.-J., V. N. Bringi, and M. Thurai, 2008: Orientation angle
+    distributions of drops after an 80-m fall using a 2D video disdrometer.
+    *J. Atmos. Oceanic Technol.*, **25** (9), 1717-1723,
+    https://doi.org/10.1175/2008JTECHA1075.1
+
+    Ray, P. S., 1972: Broadband complex refractive indices of ice and water.
+    *Appl. Opt.*, **11** (8), 1836-1844, https://doi.org/10.1364/AO.11.001836
 
     Examples
     --------
@@ -461,6 +589,7 @@ def _increasing_prefix(x):
 
 
 def _f_mu(mu):
+    """f(mu) of the normalized gamma DSD, Testud et al. (2001); Bringi et al. (2002)."""
     return 6.0 / 4.0**4 * (4.0 + mu) ** (mu + 4.0) / _gamma_fn(mu + 4.0)
 
 
@@ -531,8 +660,14 @@ def _moments_numpy(logn0, mu, lam):
         n0 = 10.0**logn0
         m3 = n0 * _gamma_fn(mu + 4.0) * lam ** (-(mu + 4.0))
         dm = (mu + 4.0) / lam
+        # Nw = 4^4 / (pi rho_w) W / Dm^4: Testud et al. 2001 (Dm form)
         nw = 256.0 / 6.0 * m3 / (dm * dm * dm * dm)
+        # D0 ~ (3.67 + mu) / Lambda: Ulbrich 1983; Bringi and Chandrasekar 2001,
+        # text after Eq. 7.12 (approximate for mu != 0)
         d0 = (mu + 3.67) / lam
+        # rate: 6e-4 pi int v D^3 N dD with v = 9.65 - 10.3 exp(-0.6 D)
+        # (Atlas et al. 1973; Bringi and Chandrasekar 2001, Eqs. 7.65b, 7.66a),
+        # integrated in closed form over 0 < D < infinity
         rate = 6.0e-4 * np.pi * m3 * (9.65 - 10.3 * (lam / (lam + 0.6)) ** (mu + 4.0))
         lwc = np.pi / 6.0 * 1.0e-3 * m3
     return np.stack([n0, nw, d0, dm, mu, lam, rate, lwc])
@@ -812,9 +947,9 @@ def dsd(
         are left empty (NaN): their :math:`Z_H` and :math:`Z_{DR}` are not
         consistent with rain (e.g. hail, with high :math:`Z_H` and
         :math:`Z_{DR}` near 0 dB, reads as an enormous number of tiny drops).
-        Default ``(1e1, 1e6)``, about one decade beyond the
-        :math:`\\log_{10} N_w` of 2-5.5 found in rain by Bringi et al.
-        (2003); ``None`` keeps all gates.
+        Default ``(1e1, 1e6)``, a deliberately wide radarx choice (the
+        composite :math:`\\log_{10} N_w` of rain in Bringi et al. 2003,
+        Figs. 10-11, is mostly 3-4.5); ``None`` keeps all gates.
     n_threads : int, optional
         Threads for the compiled kernel. Default: all cores.
     engine : {"auto", "compiled", "numpy"}, optional
@@ -840,6 +975,17 @@ def dsd(
     ImportError
         If ``engine="compiled"`` and the compiled kernel is not available.
 
+    Notes
+    -----
+    The tables behind the retrieval assume horizontal incidence: ZDR read
+    from a sweep or QVP at elevation above about 5 degrees is biased low
+    (about 12 % at 20 degrees, so :math:`D_m` low by 6-8 % and :math:`N_w`
+    high); see the Scattering tables section of
+    :mod:`radarx.retrieve.dsd` for the estimate and its limits. The rain
+    rate uses the sea-level fall speed of Atlas et al. (1973) (Bringi and
+    Chandrasekar 2001, Eq. 7.65b) without density correction; the moments
+    follow Ulbrich (1983) and Testud et al. (2001).
+
     References
     ----------
     Zhang, G., J. Vivekanandan, and E. Brandes, 2001: A method for
@@ -860,10 +1006,28 @@ def dsd(
     Technol.*, **19** (5), 633-645,
     https://doi.org/10.1175/1520-0426(2002)019<0633:AMFETP>2.0.CO;2
 
+    Bringi, V. N., V. Chandrasekar, J. Hubbert, E. Gorgucci, W. L. Randeu, and
+    M. Schoenhuber, 2003: Raindrop size distribution in different climatic
+    regimes from disdrometer and dual-polarized radar analysis. *J. Atmos.
+    Sci.*, **60** (2), 354-365,
+    https://doi.org/10.1175/1520-0469(2003)060<0354:RSDIDC>2.0.CO;2
+
     Cao, Q., G. Zhang, E. Brandes, T. Schuur, A. Ryzhkov, and K. Ikeda,
     2008: Analysis of video disdrometer and polarimetric radar data to
     characterize rain microphysics in Oklahoma. *J. Appl. Meteor.
     Climatol.*, **47** (8), 2238-2255, https://doi.org/10.1175/2008JAMC1732.1
+
+    Bringi, V. N., and V. Chandrasekar, 2001: *Polarimetric Doppler Weather
+    Radar: Principles and Applications*. Cambridge University Press, 636 pp.,
+    https://doi.org/10.1017/CBO9780511541094
+
+    Atlas, D., R. C. Srivastava, and R. S. Sekhon, 1973: Doppler radar
+    characteristics of precipitation at vertical incidence. *Rev. Geophys.*,
+    **11** (1), 1-35, https://doi.org/10.1029/RG011i001p00001
+
+    Ulbrich, C. W., 1983: Natural variations in the analytical form of the
+    raindrop size distribution. *J. Climate Appl. Meteor.*, **22** (10),
+    1764-1775, https://doi.org/10.1175/1520-0450(1983)022<1764:NVITAF>2.0.CO;2
 
     Examples
     --------
@@ -995,8 +1159,22 @@ def parsivel_bins():
         ``diameter_lower`` and ``diameter_upper`` (mm). The two smallest
         classes are not measured by the instrument.
 
+    Notes
+    -----
+    The class centres and widths are the manufacturer's table of the OTT
+    Parsivel (0.125 mm wide classes up to 1.25 mm, then 0.25, 0.5, 1, 2 and 3
+    mm). The table was not available here; the centres of classes 3-22 agree
+    with the :math:`D_i` listed in Tables 3 and 10 of Raupach and Berne
+    (2015) (0.31, 0.44, ..., 6.50 mm), which is the check that was made.
+    Tokay et al. (2014) describe the instrument, not this table.
+
     References
     ----------
+    Raupach, T. H., and A. Berne, 2015: Correction of raindrop size
+    distributions measured by Parsivel disdrometers, using a two-dimensional
+    video disdrometer as a reference. *Atmos. Meas. Tech.*, **8** (1),
+    343-365, https://doi.org/10.5194/amt-8-343-2015
+
     Tokay, A., D. B. Wolff, and W. A. Petersen, 2014: Evaluation of the new
     version of the laser-optical disdrometer, OTT Parsivel2. *J. Atmos.
     Oceanic Technol.*, **31** (6), 1276-1288,
@@ -1063,7 +1241,18 @@ def dsd_spectrum(params, diameter=None):
     -------
     xarray.DataArray
         ``ND`` (m-3 mm-1) on the dimensions of the parameters and
-        ``diameter``, with the ``bin_width`` coordinate.
+        ``diameter``, with the ``bin_width`` coordinate. The gamma form is
+        that of Ulbrich (1983) (Bringi and Chandrasekar 2001, Eq. 7.12).
+
+    References
+    ----------
+    Ulbrich, C. W., 1983: Natural variations in the analytical form of the
+    raindrop size distribution. *J. Climate Appl. Meteor.*, **22** (10),
+    1764-1775, https://doi.org/10.1175/1520-0450(1983)022<1764:NVITAF>2.0.CO;2
+
+    Bringi, V. N., and V. Chandrasekar, 2001: *Polarimetric Doppler Weather
+    Radar: Principles and Applications*. Cambridge University Press, 636 pp.,
+    https://doi.org/10.1017/CBO9780511541094
 
     Examples
     --------
@@ -1097,7 +1286,12 @@ def fit_gamma_moments(nd, dim="diameter"):
     gamma DSD equals :math:`(\\mu + 3)(\\mu + 4) / ((\\mu + 5)(\\mu + 6))`,
     then :math:`\\Lambda = \\sqrt{(\\mu + 3)(\\mu + 4) M_2 / M_4}` and
     :math:`N_0 = M_2 \\Lambda^{\\mu + 3} / \\Gamma(\\mu + 3)` (the
-    2-4-6 moment estimator evaluated by Cao and Zhang 2009).
+    2-4-6 moment estimator evaluated by Cao and Zhang 2009; the closed form
+    here follows from :math:`M_n = N_0 \\Gamma(\\mu + n + 1) /
+    \\Lambda^{\\mu + n + 1}` and is derived for radarx, the equation of the
+    paper was not available to compare with). The moments are not truncated
+    (see :func:`radarx.retrieve.fit_gamma` for truncated moments, Ulbrich and
+    Atlas 1998).
 
     Parameters
     ----------
@@ -1122,6 +1316,11 @@ def fit_gamma_moments(nd, dim="diameter"):
     distribution parameters employing disdrometer and simulated raindrop
     spectra. *J. Appl. Meteor. Climatol.*, **48** (2), 406-425,
     https://doi.org/10.1175/2008JAMC2026.1
+
+    Ulbrich, C. W., and D. Atlas, 1998: Rainfall microphysics and radar
+    properties: Analysis methods for drop size spectra. *J. Appl. Meteor.*,
+    **37** (9), 912-923,
+    https://doi.org/10.1175/1520-0450(1998)037<0912:RMARPA>2.0.CO;2
     """
     width = _bin_widths(nd, dim)
     d = nd[dim]
@@ -1177,6 +1376,35 @@ def radar_from_dsd(nd, band="S", temperature=20.0, dim="diameter"):
         ``NW`` (m-3 mm-1), ``LWC`` (g/m3) and ``RAIN_RATE`` (mm/h, fall speed
         of Atlas et al. 1973) on the remaining dimensions, from the
         scattering tables of :func:`scattering_table`.
+
+    Notes
+    -----
+    Horizontal incidence (0 degrees elevation) is assumed, as in the tables;
+    see :mod:`radarx.retrieve.dsd`. The Rayleigh scaling (:math:`D^6`) of the
+    backscatter terms below the smallest tabulated diameter (0.05 mm) is a
+    radarx choice (it is exact in the Rayleigh limit). The rain rate and
+    the other moments follow Bringi and Chandrasekar (2001), Eqs. 7.13, 7.61
+    and 7.66a, with the sea-level fall speed of Atlas et al. (1973) (no
+    density correction); :math:`N_w` is the :math:`D_m` form of Testud et al.
+    (2001). The correlation coefficient is
+    :math:`|\\sum \\sigma_{hv}| / \\sqrt{Z_H Z_V}` of the tabulated
+    copolar terms.
+
+    References
+    ----------
+    Bringi, V. N., and V. Chandrasekar, 2001: *Polarimetric Doppler Weather
+    Radar: Principles and Applications*. Cambridge University Press, 636 pp.,
+    https://doi.org/10.1017/CBO9780511541094
+
+    Testud, J., S. Oury, R. A. Black, P. Amayenc, and X. Dou, 2001: The
+    concept of "normalized" distribution to describe raindrop spectra: A tool
+    for cloud physics and cloud remote sensing. *J. Appl. Meteor.*, **40**
+    (6), 1118-1140,
+    https://doi.org/10.1175/1520-0450(2001)040<1118:TCONDT>2.0.CO;2
+
+    Atlas, D., R. C. Srivastava, and R. S. Sekhon, 1973: Doppler radar
+    characteristics of precipitation at vertical incidence. *Rev. Geophys.*,
+    **11** (1), 1-35, https://doi.org/10.1029/RG011i001p00001
     """
     tab = scattering_table(band, temperature)
     width = _bin_widths(nd, dim)

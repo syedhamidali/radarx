@@ -32,8 +32,27 @@ The terminal fall speed of raindrops is that of Atlas et al. (1973),
 zero below 0.08 mm) at the sea-level air density
 :math:`\\rho_0 = 1.204` kg m\\ :sup:`-3`, scaled by
 :math:`(\\rho_0/\\rho)^{0.4}` (Foote and du Toit 1969) where the station
-records pressure and temperature (:func:`terminal_fall_speed`). Raupach and
-Berne (2015) used the fall speeds of Beard (1976) instead.
+records pressure and temperature (:func:`terminal_fall_speed`).
+
+- The Atlas et al. (1973) law is quoted as Eq. 7.65b of Bringi and
+  Chandrasekar (2001), where it is the sea-level fit to the Gunn and Kinzer
+  (1949) measurements. It is negative below 0.109 mm (clipped to zero
+  here), and its range of validity in the original paper could not be
+  checked (not on disk); radarx uses it for all classes up to the maximum
+  diameter of the quality control.
+- The factor :math:`(\\rho_0/\\rho)^{0.4}` is the correction attributed to
+  Foote and du Toit (1969), as quoted by Li and Srivastava (2001, after
+  their Eq. 4) and Kumjian and Ryzhkov (2010, Eq. 3); the original paper was
+  not on disk, so its equation number and its range of validity are not
+  given. :math:`\\rho_0` = 1.204 kg m\\ :sup:`-3` is the density of dry air at
+  1013.25 hPa and 20 °C, taken as the density of the sea-level law (radarx
+  choice).
+- Raupach and Berne (2015, Sect. 5.1) used the terminal velocities of Beard
+  (1976) as the reference of their velocity correction and of their filter
+  (Eqs. 9-11), and the factors of their Tables 3 and 10 were trained with
+  that reference. radarx substitutes the Atlas et al. law (a deviation from
+  the paper), which differs from Beard (1976) by a few per cent for 1-5 mm
+  (not quantified here).
 
 Quality control
 ---------------
@@ -48,9 +67,13 @@ at an angle. Friedrich et al. (2013) also removed drops larger than 8 mm
 (``max_diameter``). With ``method="raupach2015"`` the absolute filter of
 Raupach and Berne (2015, their Eqs. 9-11) is used instead: particles are
 removed if :math:`D > 7.5` mm, :math:`V > v_t(D) + 4` or
-:math:`V < v_t(D) - 3` m s\\ :sup:`-1`. The two smallest size classes,
-which the Parsivel does not measure, are removed, and records with winds
-above ``max_wind`` can be discarded.
+:math:`V < v_t(D) - 3` m s\\ :sup:`-1` (their Eqs. 9-11, quoted exactly;
+:math:`v_t` is the Atlas et al. law here, see above). The default relative
+tolerance of 60 % of the ``"relative"`` filter is a radarx choice, not taken
+from a paper. The two smallest size classes, which the Parsivel does not
+measure, are removed (Raupach and Berne 2015 also ignore them: their tables
+start at class 3), and records with winds above ``max_wind`` can be
+discarded.
 
 Raupach and Berne (2015) correction
 -----------------------------------
@@ -60,10 +83,14 @@ into 0.1 m s\\ :sup:`-1` sub-classes, shifted and regrouped), applies the
 filter above and multiplies N(D) by the per-class correction factors that
 Raupach and Berne (2015) calibrated against a 2D video disdrometer for
 classes of the Parsivel rain intensity (their Table 3 for the first
-generation Parsivel, Table 10 for Parsivel2). Classes without a factor are
-not corrected. The factors were trained in the Cévennes (France); their
-transferability to other climates is limited (Raupach and Berne 2015,
-Sect. 8).
+generation Parsivel, from the SOP2013 campaign, and Table 10 for Parsivel2,
+from HyMeX 2013; the numbers in this module were checked against both
+tables). The velocity shift is their Sect. 5.1 (classes subsampled to 0.1 m
+s\\ :sup:`-1`, shifted so that the mean velocity equals the terminal velocity,
+regrouped) and the concentration factors :math:`P(i)` their Sect. 5.2.
+Classes without a factor are not corrected. The factors were trained in the
+Cévennes (France); their transferability to other climates is limited
+(Raupach and Berne 2015, Sect. 8).
 
 Drop size distribution
 ----------------------
@@ -75,10 +102,13 @@ With :math:`C_{v,i}` particles in velocity class :math:`v` and size class
     N(D_i) = \\frac{1}{S_i \\Delta D_i \\Delta t} \\sum_v \\frac{C_{v,i}}{V_v},
     \\qquad S_i = 10^{-6} L (B - D_i / 2),
 
-with the beam length :math:`L = 180` mm and width :math:`B = 30` mm: drops
-only partly inside the beam are discarded by the instrument, which shrinks
-the sampling area of large drops (Löffler-Mang and Joss 2000). ``velocity="terminal"`` uses :math:`v_t(D_i)` instead of the
-measured :math:`V_v`.
+with the beam length :math:`L = 180` mm and width :math:`B = 30` mm (the
+values of Raupach and Berne 2015, Sect. 4, who give :math:`S_i` as their
+Eq. 5 and :math:`N` as their Eq. 6 and attribute the sampling area to
+Löffler-Mang and Joss 2000 and Battaglia et al. 2010): drops only partly
+inside the beam are discarded by the instrument, which shrinks the sampling
+area of large drops. ``velocity="terminal"`` uses :math:`v_t(D_i)` instead
+of the measured :math:`V_v` (a radarx option, not in the paper).
 
 Gamma fits
 ----------
@@ -88,10 +118,17 @@ moments :math:`M_n = \\sum_i N(D_i) D_i^n \\Delta D_i` of orders
 :math:`M_n = N_0 \\Gamma(\\mu + n + 1) / \\Lambda^{\\mu + n + 1}`, the ratio
 :math:`M_j^{k-i} / (M_i^{k-j} M_k^{j-i})` depends on :math:`\\mu` only and
 is solved for it, then :math:`\\Lambda` and :math:`N_0` follow (method of
-moments; Ulbrich and Atlas 1998, Cao and Zhang 2009). With
+moments; Ulbrich and Atlas 1998, Cao and Zhang 2009; the closed-form ratio is
+derived from the moments of the gamma DSD, not copied from a paper, and
+the bounds and tolerances below are radarx numerical choices). With
 ``truncated=True`` the moments are those of the gamma DSD truncated at the
 largest observed diameter :math:`D_{max}` (upper edge of the largest class
-with drops), as in the truncated moments of Ulbrich and Atlas (1998), and
+with drops), following the idea of the truncated moments of Ulbrich and
+Atlas (1998) and the truncated moment fit used by Cao et al. (2008) and
+Vivekanandan et al. (2004) (the way of solving the two log moment ratios
+for :math:`\\mu` and :math:`\\ln\\Lambda` by a damped Newton iteration is
+radarx's own; the papers were not on disk, so what exactly they truncate
+and solve was not compared), and
 with ``lower_truncation=True`` also at the smallest, :math:`D_{min}` (lower
 edge of the smallest class with drops; else :math:`D_{min} = 0`):
 
@@ -120,6 +157,38 @@ characteristics of precipitation at vertical incidence. *Rev. Geophys.*,
 Foote, G. B., and P. S. du Toit, 1969: Terminal velocity of raindrops aloft.
 *J. Appl. Meteor.*, **8** (2), 249-253,
 https://doi.org/10.1175/1520-0450(1969)008<0249:TVORA>2.0.CO;2
+
+Bringi, V. N., and V. Chandrasekar, 2001: *Polarimetric Doppler Weather
+Radar: Principles and Applications*. Cambridge University Press, 636 pp.,
+https://doi.org/10.1017/CBO9780511541094
+
+Gunn, R., and G. D. Kinzer, 1949: The terminal velocity of fall for water
+droplets in stagnant air. *J. Meteor.*, **6** (4), 243-248,
+https://doi.org/10.1175/1520-0469(1949)006<0243:TTVOFF>2.0.CO;2
+
+Li, X., and R. C. Srivastava, 2001: An analytical solution for raindrop
+evaporation and its application to radar rainfall measurements. *J. Appl.
+Meteor.*, **40** (9), 1607-1616,
+https://doi.org/10.1175/1520-0450(2001)040<1607:AASFRE>2.0.CO;2
+
+Kumjian, M. R., and A. V. Ryzhkov, 2010: The impact of evaporation on
+polarimetric characteristics of rain: Theoretical model and practical
+implications. *J. Appl. Meteor. Climatol.*, **49** (6), 1247-1267,
+https://doi.org/10.1175/2010JAMC2243.1
+
+Vivekanandan, J., G. Zhang, and E. Brandes, 2004: Polarimetric radar
+estimators based on a constrained gamma drop size distribution model. *J.
+Appl. Meteor.*, **43** (2), 217-230,
+https://doi.org/10.1175/1520-0450(2004)043<0217:PREBOA>2.0.CO;2
+
+Cao, Q., G. Zhang, E. Brandes, T. Schuur, A. Ryzhkov, and K. Ikeda, 2008:
+Analysis of video disdrometer and polarimetric radar data to characterize
+rain microphysics in Oklahoma. *J. Appl. Meteor. Climatol.*, **47** (8),
+2238-2255, https://doi.org/10.1175/2008JAMC1732.1
+
+Battaglia, A., E. Rustemeier, A. Tokay, U. Blahak, and C. Simmer, 2010:
+PARSIVEL snow observations: A critical assessment. *J. Atmos. Oceanic
+Technol.*, **27** (2), 333-344, https://doi.org/10.1175/2009JTECHA1332.1
 
 Beard, K. V., 1976: Terminal velocity and shape of cloud and precipitation
 drops aloft. *J. Atmos. Sci.*, **33** (5), 851-864,
@@ -196,17 +265,22 @@ except ImportError:  # pragma: no cover - depends on the build
     _disdrometer = None
     HAS_COMPILED_KERNEL = False
 
-RHO0 = 1.204  # kg m-3, air density of the sea-level fall speeds
+# kg m-3, air density of the sea-level fall speeds: dry air at 1013.25 hPa and
+# 20 degC (radarx choice, as in evaporation.py)
+RHO0 = 1.204
 _ACCEPT = 1e-7  # residual accepted when the truncated Newton fit stalls
 _BISECT = 64  # bisection steps of the untruncated fit
 _LOG_LAM_MAX = np.log(1e3)  # truncated fits: Lambda within 1e-3 .. 1e3 mm-1
-BEAM_LENGTH = 180.0  # mm, Parsivel laser beam
+# Parsivel laser beam, L = 180 mm and B = 30 mm: Raupach and Berne (2015), Sect. 4
+BEAM_LENGTH = 180.0  # mm
 BEAM_WIDTH = 30.0  # mm
 EARTH_RADIUS = 6371000.0  # m
 
 # Raupach and Berne (2015) concentration correction factors P(i) by class of
 # Parsivel rain intensity (mm h-1), for the size classes i = 3, 4, ... (1-based);
-# None: no correction.
+# None: no correction (blank entries of the tables). Transcribed from their
+# Table 3 (first-generation Parsivel, SOP2013, classes 3-21) and Table 10
+# (Parsivel2, HyMeX 2013, classes 3-22) and checked against both tables.
 _RB_INTENSITY = {
     "parsivel": [0.0, 0.5, 1.0, 2.0, 200.0],  # Table 3
     "parsivel2": [0.0, 0.1, 0.25, 0.5, 1.0, 2.0, 200.0],  # Table 10
@@ -335,8 +409,19 @@ def terminal_fall_speed(diameter, air_density=None):
     -------
     xarray.DataArray
         Fall speed :math:`9.65 - 10.3 e^{-0.6 D}` m s-1 (Atlas et al.
-        1973), at least zero, broadcast over ``diameter`` and
-        ``air_density``.
+        1973; Bringi and Chandrasekar 2001, Eq. 7.65b), at least zero,
+        broadcast over ``diameter`` and ``air_density``.
+
+    Notes
+    -----
+    The law is negative below 0.109 mm (clipped to zero here, a radarx
+    choice) and its range of validity in the original paper could not be
+    checked (not on disk). The exponent 0.4 of the density correction is the
+    one attributed to Foote and du Toit (1969) in Li and Srivastava (2001,
+    text after their Eq. 4) and Kumjian and Ryzhkov (2010, Eq. 3); the
+    original paper was not on disk, so its own equation and range of
+    validity are not given. Beard (1976), used as the reference by Raupach
+    and Berne (2015), is not implemented.
 
     References
     ----------
@@ -344,9 +429,32 @@ def terminal_fall_speed(diameter, air_density=None):
     characteristics of precipitation at vertical incidence. *Rev.
     Geophys.*, **11** (1), 1-35, https://doi.org/10.1029/RG011i001p00001
 
+    Bringi, V. N., and V. Chandrasekar, 2001: *Polarimetric Doppler Weather
+    Radar: Principles and Applications*. Cambridge University Press, 636 pp.,
+    https://doi.org/10.1017/CBO9780511541094
+
+    Li, X., and R. C. Srivastava, 2001: An analytical solution for raindrop
+    evaporation and its application to radar rainfall measurements. *J.
+    Appl. Meteor.*, **40** (9), 1607-1616,
+    https://doi.org/10.1175/1520-0450(2001)040<1607:AASFRE>2.0.CO;2
+
+    Kumjian, M. R., and A. V. Ryzhkov, 2010: The impact of evaporation on
+    polarimetric characteristics of rain: Theoretical model and practical
+    implications. *J. Appl. Meteor. Climatol.*, **49** (6), 1247-1267,
+    https://doi.org/10.1175/2010JAMC2243.1
+
     Foote, G. B., and P. S. du Toit, 1969: Terminal velocity of raindrops
     aloft. *J. Appl. Meteor.*, **8** (2), 249-253,
     https://doi.org/10.1175/1520-0450(1969)008<0249:TVORA>2.0.CO;2
+
+    Beard, K. V., 1976: Terminal velocity and shape of cloud and precipitation
+    drops aloft. *J. Atmos. Sci.*, **33** (5), 851-864,
+    https://doi.org/10.1175/1520-0469(1976)033<0851:TVASOC>2.0.CO;2
+
+    Raupach, T. H., and A. Berne, 2015: Correction of raindrop size
+    distributions measured by Parsivel disdrometers, using a two-dimensional
+    video disdrometer as a reference. *Atmos. Meas. Tech.*, **8** (1),
+    343-365, https://doi.org/10.5194/amt-8-343-2015
     """
     d = diameter if isinstance(diameter, xr.DataArray) else xr.DataArray(diameter)
     v = np.maximum(9.65 - 10.3 * np.exp(-0.6 * d), 0.0)
@@ -491,6 +599,10 @@ def disdrometer_qc(
     distributions measured by Parsivel disdrometers, using a
     two-dimensional video disdrometer as a reference. *Atmos. Meas.
     Tech.*, **8** (1), 343-365, https://doi.org/10.5194/amt-8-343-2015
+
+    The default ``tolerance`` of 0.6 and the ``drop_unmeasured`` threshold of
+    0.25 mm are radarx choices, not from these papers; the fall speed is that
+    of :func:`terminal_fall_speed`.
     """
     counts = _check_counts(ds)
     if method not in ("relative", "raupach2015"):
@@ -695,12 +807,29 @@ def number_concentration(
         coordinate, multiplied by ``concentration_factor`` when present.
         NaN for records discarded by the quality control.
 
+    Notes
+    -----
+    :math:`N(D_i)` is Eq. 6 of Raupach and Berne (2015) with the sampling
+    area :math:`S_i = 10^{-6} L (B - D_i/2)` of their Eq. 5 (:math:`L` =
+    180 mm, :math:`B` = 30 mm, Sect. 4; attributed there to Löffler-Mang and
+    Joss 2000 and Battaglia et al. 2010). Raw counts are multiplied by
+    ``concentration_factor`` only when it is present (their Sect. 5.2).
+
     References
     ----------
     Raupach, T. H., and A. Berne, 2015: Correction of raindrop size
     distributions measured by Parsivel disdrometers, using a
     two-dimensional video disdrometer as a reference. *Atmos. Meas.
     Tech.*, **8** (1), 343-365, https://doi.org/10.5194/amt-8-343-2015
+
+    Löffler-Mang, M., and J. Joss, 2000: An optical disdrometer for
+    measuring size and velocity of hydrometeors. *J. Atmos. Oceanic
+    Technol.*, **17** (2), 130-139,
+    https://doi.org/10.1175/1520-0426(2000)017<0130:AODFMS>2.0.CO;2
+
+    Battaglia, A., E. Rustemeier, A. Tokay, U. Blahak, and C. Simmer, 2010:
+    PARSIVEL snow observations: A critical assessment. *J. Atmos. Oceanic
+    Technol.*, **27** (2), 333-344, https://doi.org/10.1175/2009JTECHA1332.1
     """
     if counts is None:
         counts = "counts_qc" if "counts_qc" in ds else "counts"
@@ -806,12 +935,37 @@ def dsd_moments(nd, dim="diameter"):
         intercept ``NW`` (:math:`4^4 M_3 / (6 D_m^4)`, m-3 mm-1, Testud et
         al. 2001; see :mod:`radarx.retrieve.dsd`). NaN where N(D) is NaN.
 
+    Notes
+    -----
+    The moments are :math:`M_n = \\sum N(D_i) D_i^n \\Delta D_i`. The rain rate
+    is :math:`0.6\\pi\\times10^{-3} \\sum v D^3 N \\Delta D` (Bringi and
+    Chandrasekar 2001, Eq. 7.66a) with the Atlas et al. (1973) fall speed,
+    :math:`D_m = M_4/M_3` (their Eq. 7.13), :math:`N_w` the :math:`D_m` form of
+    Testud et al. (2001). The standard deviation of the mass distribution and
+    the within-class interpolation of :math:`D_0` are the usual definitions,
+    implemented here without a specific paper's equation. The moment
+    definitions follow Ulbrich and Atlas (1998).
+
     References
     ----------
     Ulbrich, C. W., and D. Atlas, 1998: Rainfall microphysics and radar
     properties: Analysis methods for drop size spectra. *J. Appl. Meteor.*,
     **37** (9), 912-923,
     https://doi.org/10.1175/1520-0450(1998)037<0912:RMARPA>2.0.CO;2
+
+    Bringi, V. N., and V. Chandrasekar, 2001: *Polarimetric Doppler Weather
+    Radar: Principles and Applications*. Cambridge University Press, 636 pp.,
+    https://doi.org/10.1017/CBO9780511541094
+
+    Testud, J., S. Oury, R. A. Black, P. Amayenc, and X. Dou, 2001: The
+    concept of "normalized" distribution to describe raindrop spectra: A tool
+    for cloud physics and cloud remote sensing. *J. Appl. Meteor.*, **40**
+    (6), 1118-1140,
+    https://doi.org/10.1175/1520-0450(2001)040<1118:TCONDT>2.0.CO;2
+
+    Atlas, D., R. C. Srivastava, and R. S. Sekhon, 1973: Doppler radar
+    characteristics of precipitation at vertical incidence. *Rev. Geophys.*,
+    **11** (1), 1-35, https://doi.org/10.1029/RG011i001p00001
     """
     d, w = _diameter_dim(nd, dim)
     nd = nd.transpose(..., dim)
@@ -1060,7 +1214,8 @@ def _truncated_quantities(logn0, mu, lam, dmin, dmax):
         m3, m4 = moment(3), moment(4)
         dm = m4 / m3
         a4 = mu + 4.0
-        # fall speed 9.65 - 10.3 exp(-0.6 D) (Atlas et al. 1973)
+        # fall speed 9.65 - 10.3 exp(-0.6 D) (Atlas et al. 1973; Bringi and
+        # Chandrasekar 2001, Eq. 7.65b), integrated over the truncation window
         m3v = n0 * np.exp(gammaln(a4) - a4 * np.log(lam + 0.6)) * window(a4, lam + 0.6)
         rain = 6.0e-4 * np.pi * (9.65 * m3 - 10.3 * m3v)
         lo = gammainc(a4, lam * dmin)
@@ -1124,6 +1279,19 @@ def fit_gamma(
         truncated like the fit, with ``FIT_ITERATIONS`` (0 for the
         untruncated fit); NaN where the spectrum has no fit.
 
+    Notes
+    -----
+    The method of moments (untruncated) follows Ulbrich and Atlas (1998) and
+    the 2-4-6 estimator evaluated by Cao and Zhang (2009); the truncated fit
+    follows the idea of the truncated moments of Ulbrich and Atlas (1998) and
+    the truncated moment fit of Cao et al. (2008) and Vivekanandan et al.
+    (2004). The papers were not on disk, so the equations were not compared;
+    the closed forms are those of the gamma moments and incomplete gamma
+    functions, solved by radarx's own damped Newton iteration. The ``mu_range``,
+    ``max_iter`` and ``tol`` defaults are radarx choices. The rain rate of the
+    fitted DSD uses the Atlas et al. (1973) fall speed (Bringi and
+    Chandrasekar 2001, Eq. 7.65b).
+
     References
     ----------
     Ulbrich, C. W., and D. Atlas, 1998: Rainfall microphysics and radar
@@ -1131,11 +1299,29 @@ def fit_gamma(
     Meteor.*, **37** (9), 912-923,
     https://doi.org/10.1175/1520-0450(1998)037<0912:RMARPA>2.0.CO;2
 
-
     Cao, Q., and G. Zhang, 2009: Errors in estimating raindrop size
     distribution parameters employing disdrometer and simulated raindrop
     spectra. *J. Appl. Meteor. Climatol.*, **48** (2), 406-425,
     https://doi.org/10.1175/2008JAMC2026.1
+
+    Cao, Q., G. Zhang, E. Brandes, T. Schuur, A. Ryzhkov, and K. Ikeda,
+    2008: Analysis of video disdrometer and polarimetric radar data to
+    characterize rain microphysics in Oklahoma. *J. Appl. Meteor.
+    Climatol.*, **47** (8), 2238-2255,
+    https://doi.org/10.1175/2008JAMC1732.1
+
+    Vivekanandan, J., G. Zhang, and E. Brandes, 2004: Polarimetric radar
+    estimators based on a constrained gamma drop size distribution model.
+    *J. Appl. Meteor.*, **43** (2), 217-230,
+    https://doi.org/10.1175/1520-0450(2004)043<0217:PREBOA>2.0.CO;2
+
+    Bringi, V. N., and V. Chandrasekar, 2001: *Polarimetric Doppler Weather
+    Radar: Principles and Applications*. Cambridge University Press, 636 pp.,
+    https://doi.org/10.1017/CBO9780511541094
+
+    Atlas, D., R. C. Srivastava, and R. S. Sekhon, 1973: Doppler radar
+    characteristics of precipitation at vertical incidence. *Rev. Geophys.*,
+    **11** (1), 1-35, https://doi.org/10.1029/RG011i001p00001
 
     Examples
     --------
@@ -1282,6 +1468,31 @@ def process_disdrometer(
         :func:`radarx.retrieve.radar_from_dsd`, and per fit ``N0_<fit>``,
         ``MU_<fit>``, ``LAMBDA_<fit>``, ``DM_<fit>``, ``D0_<fit>`` and
         ``NW_<fit>``; with the station coordinates of ``ds``.
+
+    Notes
+    -----
+    Chains :func:`disdrometer_qc` or :func:`raupach_berne_correction`
+    (Raupach and Berne 2015), :func:`number_concentration`,
+    :func:`dsd_moments` and :func:`fit_gamma` (Ulbrich and Atlas 1998; Cao and
+    Zhang 2009) and :func:`radarx.retrieve.radar_from_dsd`; the equations,
+    tables and radarx choices are described in the documentation of each.
+
+    References
+    ----------
+    Raupach, T. H., and A. Berne, 2015: Correction of raindrop size
+    distributions measured by Parsivel disdrometers, using a two-dimensional
+    video disdrometer as a reference. *Atmos. Meas. Tech.*, **8** (1),
+    343-365, https://doi.org/10.5194/amt-8-343-2015
+
+    Ulbrich, C. W., and D. Atlas, 1998: Rainfall microphysics and radar
+    properties: Analysis methods for drop size spectra. *J. Appl. Meteor.*,
+    **37** (9), 912-923,
+    https://doi.org/10.1175/1520-0450(1998)037<0912:RMARPA>2.0.CO;2
+
+    Cao, Q., and G. Zhang, 2009: Errors in estimating raindrop size
+    distribution parameters employing disdrometer and simulated raindrop
+    spectra. *J. Appl. Meteor. Climatol.*, **48** (2), 406-425,
+    https://doi.org/10.1175/2008JAMC2026.1
 
     Examples
     --------
@@ -1444,6 +1655,13 @@ def radar_at_location(
         distance from the gate to the location, m), ``range``, ``azimuth``
         and ``elevation`` of the gate. The beam is a straight line on an
         Earth of 4/3 its radius.
+
+    Notes
+    -----
+    No published method is implemented here: the gate sampling is radarx's
+    own, and the beam height is that of
+    :func:`radarx.fundamentals.geometry.beam_center_height` (4/3 effective
+    Earth radius; see that function).
     """
     rows = []
     for ds in _sweeps(radar, sweep):
@@ -1588,8 +1806,9 @@ def match_radar(
         Time drops take from the radar gate to the instrument: none
         (default), a fixed lag, or ``"fall"`` for the height of the gate
         above the instrument divided by the terminal fall speed at the
-        mass-weighted mean diameter of the (undelayed) window. Advection by
-        the wind is not modelled.
+        mass-weighted mean diameter of the (undelayed) window (the Atlas et
+        al. 1973 law, at least 0.1 m s-1, without density correction: a
+        radarx choice). Advection by the wind is not modelled.
     band, temperature, qc, engine, n_threads : optional
         Options of :func:`process_disdrometer` for the radar variables of
         the averaged spectra.
@@ -1603,6 +1822,18 @@ def match_radar(
         ``KDP``, ...) and moment quantities (``RAIN_RATE``, ``DM``, ``D0``,
         ``NW``, ``LWC``, ``NT``) of the averaged spectra, with
         ``n_records`` and ``delay`` (s).
+
+    Notes
+    -----
+    The windows, delay and averaging are radarx's own construction (no
+    published method); ``delay="fall"`` uses the fall speed of Atlas et al.
+    (1973) at the mass-weighted mean diameter.
+
+    References
+    ----------
+    Atlas, D., R. C. Srivastava, and R. S. Sekhon, 1973: Doppler radar
+    characteristics of precipitation at vertical incidence. *Rev. Geophys.*,
+    **11** (1), 1-35, https://doi.org/10.1029/RG011i001p00001
 
     Examples
     --------
@@ -1649,6 +1880,8 @@ def match_radar(
         w = _dsdmod._bin_widths(nd, "diameter").values
         with np.errstate(invalid="ignore", divide="ignore"):
             dm = (avg * w * d**4).sum(-1) / (avg * w * d**3).sum(-1)
+        # fall speed of the mass-weighted mean drop, Atlas et al. (1973), at
+        # least 0.1 m s-1, without density correction (radarx choice)
         vt = np.maximum(9.65 - 10.3 * np.exp(-0.6 * dm), 0.1)
         sec = pts["height_above_ground"].values / vt
         lag = np.where(np.isfinite(sec), sec * 1e9, 0).astype("timedelta64[ns]")

@@ -24,6 +24,15 @@
 //    safeguarded Newton iterations on the mixture CDF, with the normal CDF
 //    and density interpolated linearly in a table.
 //
+// Sources (details in the docstring of radarx/retrieve/dsd_bayes.py): the
+// Bayesian formulation follows Rodgers (2000) and the idea of Cao et al.
+// (2010), Eqs. 3-5, but the state, forward model, error model and the Laplace
+// integration over log10 Nw are radarx's own (not from a paper): Cao et al.
+// use (log10 N0, Lambda^(1/4)) of a constrained gamma DSD, a bivariate normal
+// error with fixed sigma and an empirical 2DVD prior, and integrate on a
+// grid. The Gauss-Newton and safeguarded Newton iterations are standard
+// numerical methods.
+//
 // Every gate is independent: the gates of all inputs form one pool of work
 // that threads take in blocks from an atomic counter. Every step follows the
 // NumPy reference in radarx/retrieve/dsd_bayes.py in the same order.

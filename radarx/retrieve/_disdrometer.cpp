@@ -22,6 +22,16 @@
 //   moments, damped Newton iteration on mu and log Lambda for the two log
 //   moment ratios, from the untruncated fit).
 //
+// Sources (details, references and radarx choices in the docstring of
+// radarx/retrieve/disdrometer.py): the velocity shift is Sect. 5.1 of Raupach
+// and Berne (2015) with 0.1 m s-1 sub-classes (the terminal speed there is
+// Beard 1976; radarx passes the Atlas et al. 1973 law); the moment fits are
+// the method of moments (Ulbrich and Atlas 1998; Cao and Zhang 2009) and a
+// truncated-moment variant solved by radarx's own damped Newton iteration.
+// log Gamma and the incomplete gamma functions are the standard Lanczos
+// (g = 7, 9 terms), power-series and continued-fraction evaluations, not a
+// method specific to a paper.
+//
 // Every step follows the NumPy reference in radarx/retrieve/disdrometer.py,
 // in the same order of operations.
 
