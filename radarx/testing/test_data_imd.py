@@ -41,6 +41,7 @@ def fetch_imd_test_data():
         path=pooch.os_cache("radarx_data"),  # Local cache directory
         base_url=base_url,  # Base URL for the remote files
         registry=registry,  # Registry of files and their MD5 checksums
+        retry_if_failed=5,  # GitHub answers 504 under load
     )
 
     # Fetch files and store paths in a dictionary
