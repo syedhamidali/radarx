@@ -13,6 +13,7 @@ Radarx IO
 .. automodule:: radarx.io.sounding
 .. automodule:: radarx.io.surface
 .. automodule:: radarx.io.profiler
+.. automodule:: radarx.io.lma
 .. automodule:: radarx.io.disdrometer
 """
 
@@ -21,6 +22,7 @@ from .aws_data import *  # noqa
 from .sounding import *  # noqa
 from .surface import *  # noqa
 from .profiler import *  # noqa
+from .lma import *  # noqa
 from .disdrometer import *  # noqa
 
 __all__ = [s for s in dir() if not s.startswith("_")]

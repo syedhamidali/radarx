@@ -55,6 +55,83 @@ isobaric saturation adjustment (Soong and Ogura 1973), in sub-steps of 4 s
 (Ziegler 2013a, sect. 2g). This conserves the equivalent potential
 temperature of saturated parcels.
 
+Ice processes (optional, ``ice=True``)
+--------------------------------------
+Ziegler (2013a) keeps cloud updrafts saturated with respect to water at all
+temperatures. With ``ice=True`` cloud ice :math:`q_i` is carried as a fourth
+Lagrangian variable and the adjustment is the ice-water saturation adjustment
+of Tao et al. (1989), the scheme referred to by Lin et al. (1983) and used in
+the Goddard and LFO-type bulk schemes:
+
+- the saturation mixing ratio is the mass-weighted mix (eq. 1)
+  :math:`q_{vs} = (q_c q_{ws} + q_i q_{is}) / (q_c + q_i)` of Teten's values
+  over water and ice (eqs. 3a, 3b, :math:`b = 3.8/P` with :math:`P` in mb);
+- the excess vapour (or deficit) :math:`\\delta q = r_1 / (1 + r_2 A_3)`
+  (eqs. 5-7) is split into cloud water and cloud ice in proportions
+  :math:`CND = (T - T_{00}) / (T_0 - T_{00})` and :math:`DEP = 1 - CND`
+  (eqs. 2b, 2c; only liquid above 0 degC, only ice below :math:`T_{00}`,
+  ``parameters["t00"]``, default -40 degC), with
+  :math:`d\\theta = (L_v\\, dq_c + L_s\\, dq_i)/(c_p \\Pi)` (eq. 4a), one
+  non-iterative step per sub-step;
+- evaporation and sublimation are limited by the available :math:`q_c` and
+  :math:`q_i` (sect. 2);
+- cloud ice melts instantaneously above 0 degC and cloud water freezes
+  instantaneously at or below -40 degC (:math:`P_{IMLT}`, :math:`P_{IHOM}`,
+  Lin et al. 1983, sect. 3f; Hsie et al. 1980, sect. 3b5), with the heating of
+  eq. (4a) for :math:`dq_i = -dq_c` (:math:`\\pm L_f q / c_p \\Pi`, budget
+  term ``dtheta_freezing``), the vapour then adjusting to ice saturation.
+
+Not printed in Tao et al. (1989) and chosen here: the weights of eq. (1)
+before any condensate exists are :math:`CND` and :math:`DEP` (those of the
+condensate the step produces); :math:`L_v`, :math:`L_s` are the constants of
+LFO83. The adjustment conserves total water and, for each isobaric step,
+:math:`\\theta - (L_v q_c + L_s q_i)/(c_p \\Pi)`; along an ascent it conserves
+the ice-liquid water potential temperature in the form of eq. (4a).
+The depositional (Bergeron) growth of cloud ice at the expense of cloud
+water, :math:`P_{IDW}` (Lin et al. 1983) or :math:`P_{CNWD}` (Hsie et al.
+1980), is **not** included: its rate :math:`(N_n/1000\\rho)\\, a_1 m_n^{a_2}`
+needs the temperature-dependent coefficients :math:`a_1(T)`, :math:`a_2(T)` of
+Koenig (1971), which neither paper tabulates. Cloud ice enters the in-cloud
+test of the graupel sublimation (:math:`\\delta_1` of LFO83 eq. 20), the
+surface-flux threshold and the damping like cloud water; collection of cloud
+ice by rain or graupel is not represented. ``ice=False`` (default) leaves the
+analysis of Ziegler (2013a) unchanged.
+
+In situ initialization (``observations=``)
+------------------------------------------
+Ziegler (2013a, sects. 1, 4) lets a parcel's saturation point be initialised
+from a closely neighbouring in situ observation following Ziegler et al.
+(2007, Z07). radarx checks each backward trajectory against every observation
+(surface station, mobile mesonet, sounding or aircraft datum) taken within the
+data window before the analysis time (Z07: 12 min): the trajectory position at
+the observation time (linear between stored points) is a candidate if it is
+within ``radius`` horizontally and ``z_tolerance`` vertically, and its weight
+is the first-pass Barnes weight of Z07 (eq. 1)
+
+.. math::
+
+    w = \\exp\\left(-\\frac{r^2}{\\kappa_s} - \\frac{t_i^2}{\\tau_i}
+        - \\frac{t_L^2}{\\tau_L}\\right),
+
+with :math:`r` the distance, :math:`t_i = t_o` the time of the observation
+relative to the analysis time and :math:`t_L = |t_o|` the integration time
+along the trajectory from the observation to the grid point. The initial
+:math:`\\theta`, :math:`q_v` are the weighted means of the candidates (each
+assumed conserved following the parcel, as in Z07), :math:`q_c = q_i = 0`
+followed by the saturation adjustment, at the stored trajectory point nearest
+the time of the candidate with the largest weight; the ODEs are integrated
+forward from there. Trajectories initialised this way get flag 256 and are
+analysed even if they did not reach the environment; ``insitu_weight`` and
+``insitu_time`` report the weight sum and the start time. Defaults
+(:data:`INSITU_DEFAULTS`) are the Z07 22 May parameters (:math:`\\kappa_s` =
+0.076 km\\ :sup:`2`, :math:`\\tau_i` = 364363 s\\ :sup:`2`, :math:`\\tau_L` =
+640856 s\\ :sup:`2`), tuned to mobile mesonet legs; scale them to the station
+spacing of other networks. The cut-off radius (default
+:math:`2\\sqrt{\\kappa_s}`) and the vertical tolerance (100 m) are not given
+in Z07. Only the first pass of Z07 applies (a single trajectory has no
+first-guess field for the correcting pass), and observations after the
+analysis time are not on the backward trajectories and are not used.
+
 Microphysics :math:`M_\\phi`
 -----------------------------
 Ziegler (2013a) uses the "modified LFO" rates of Gilmore et al. (2004a),
@@ -219,10 +296,12 @@ and multi-Doppler winds of limited coverage need some care:
   of the gust front. The motion must be in the frame of the analysis
   coordinates: for a model domain that translates with the storm it is the
   domain motion, not the echo motion within the domain.
-- *Ice processes.* The DLA follows Ziegler (2013a) and has no deposition or
-  freezing of cloud water in updrafts. Cloudy updraft air above the melting
-  level stays saturated with respect to water and misses the latent heat of
-  freezing and of deposition onto ice, so it comes out too cold aloft.
+- *Ice processes.* By default the DLA follows Ziegler (2013a) and has no
+  deposition or freezing of cloud water in updrafts: cloudy updraft air above
+  the melting level stays saturated with respect to water and misses the
+  latent heat of freezing and of deposition onto ice. ``ice=True`` adds the
+  ice-water saturation adjustment of Tao et al. (1989) (see "Ice processes"
+  above); the Bergeron conversion of supercooled cloud water is still missing.
 
 Recommended squall-line configuration (Ziegler's defaults are unchanged)::
 
@@ -265,11 +344,29 @@ edge, inside the cold pool; ``boundary=["east", "north", "south"]`` flags them
 (128) and the environmental points are then exactly those of a manual
 exclusion of rear exits, with the same scores (-4.47 K, RMSE 2.27 K); the
 hole-filled fields change by less than 0.05 K. ``"no_echo"`` flags only the
-2.8 % of exits in echo. The missing ice processes show up as a spurious cold
-anomaly above the line: line-averaged :math:`\\Delta\\theta_v` at 5-7 km,
-0-30 km behind the gust front, is -2.2 K in the DLA (minimum -4.7 K) against
--0.1 K (minimum -0.7 K) in the truth, independent of the termination,
-boundary and time-morphing options.
+2.8 % of exits in echo. Above the line there is a spurious cold anomaly:
+line-averaged :math:`\\Delta\\theta_v` at 5-7 km, 0-30 km behind the gust
+front, is -2.2 K in the DLA (minimum -4.7 K) against -0.1 K (minimum
+-0.7 K) in the truth, independent of the termination, boundary and
+time-morphing options. ``ice=True`` reduces it to -1.9 K (minimum -4.2 K;
+deposition and fusion add 0.36 K of latent heating there) and the
+storm-volume :math:`\\theta_v` RMSE from 2.27 to 2.16 K (bias -0.79 to
+-0.70 K), leaving the surface unchanged (within 0.01 K); the rest of the
+anomaly, which starts at the melting level, does not come from cloud ice.
+
+With in situ observations: 200 "stations" at random surface grid points of
+the cold pool report the truth :math:`\\theta`, :math:`q_v` every 2 min for
+the 12 min before the analysis time (``observation_options={"radius": 1500,
+"kappa_s": 5e5}``), and 100 other cold-pool points at least 3 km from every
+station are held out for scoring. 1.7 % of all trajectories start from a
+station, and the analysed (environmental or station-initialised) part of the
+surface cold pool grows from 61 % to 87 %; at the hold-out
+points the surface :math:`\\Delta\\theta_v` RMSE drops from 1.89 to 1.36 K
+and the bias from +0.98 to +0.19 K (truth mean -5.18 K), and the hole-filled
+surface cold pool mean is -5.18 K against -5.38 K in the truth (-4.28 K
+without stations). With 400 stations the hold-out RMSE is 1.17 K (bias
++0.10 K); with the Z07 mobile-mesonet defaults (:math:`\\kappa_s` = 0.076
+km\\ :sup:`2`, radius 0.55 km) 200 stations give 1.52 K (bias +0.56 K).
 
 Computation
 -----------
@@ -304,6 +401,14 @@ uncertainty due to variations in precipitation particle parameters within a
 simple microphysics scheme. *Mon. Wea. Rev.*, **132** (11), 2610-2627,
 https://doi.org/10.1175/MWR2810.1
 
+Hsie, E.-Y., R. D. Farley, and H. D. Orville, 1980: Numerical simulation of
+ice-phase convective cloud seeding. *J. Appl. Meteor.*, **19** (8), 950-977,
+https://doi.org/10.1175/1520-0450(1980)019<0950:NSOIPC>2.0.CO;2
+
+Koenig, L. R., 1971: Numerical modeling of ice deposition. *J. Atmos.
+Sci.*, **28** (2), 226-237,
+https://doi.org/10.1175/1520-0469(1971)028<0226:NMOID>2.0.CO;2
+
 Kumjian, M. R., and A. V. Ryzhkov, 2010: The impact of evaporation on
 polarimetric characteristics of rain: Theoretical model and practical
 implications. *J. Appl. Meteor. Climatol.*, **49** (6), 1247-1267,
@@ -319,6 +424,15 @@ Geophys.*, **8** (2), 359-387, https://doi.org/10.1029/RG008i002p00359
 Soong, S.-T., and Y. Ogura, 1973: A comparison between axisymmetric and
 slab-symmetric cumulus cloud models. *J. Atmos. Sci.*, **30** (5), 879-893,
 https://doi.org/10.1175/1520-0469(1973)030<0879:ACBAAS>2.0.CO;2
+
+Tao, W.-K., J. Simpson, and M. McCumber, 1989: An ice-water saturation
+adjustment. *Mon. Wea. Rev.*, **117** (1), 231-235,
+https://doi.org/10.1175/1520-0493(1989)117<0231:AIWSA>2.0.CO;2
+
+Ziegler, C. L., M. S. Buban, and E. N. Rasmussen, 2007: A Lagrangian objective
+analysis technique for assimilating in situ observations with
+multiple-radar-derived airflow. *Mon. Wea. Rev.*, **135** (7), 2417-2442,
+https://doi.org/10.1175/MWR3396.1
 
 Ziegler, C. L., 2013a: A diabatic Lagrangian technique for the analysis of
 convective storms. Part I: Description and validation via an observing system
@@ -382,6 +496,22 @@ DLA_DEFAULTS = {
     "b_f": 3.0,  # height-scale coefficient (km-1), eq. (27)
     "rho_g_sfc": 690.0,  # graupel density at the surface, kg m-3 (Table 2)
     "rho_g_5km": 630.0,  # graupel density at 5 km AGL, kg m-3 (Table 2)
+    "t00": 233.15,  # T00 of the ice-water adjustment (ice=True), K (Tao et al. 1989)
+}
+
+#: Options of the in situ initialization (``observations=``): data window
+#: (s, observations at most this long before the analysis time; Ziegler et al.
+#: 2007, sect. 4: 12 min), cut-off radius (m; None: 2 sqrt(kappa_s)), vertical
+#: tolerance (m) and the Barnes parameters of Ziegler et al. (2007, eq. 1 and
+#: Table 1, 22 May case): kappa_s (m2), tau_i, tau_L (s2). The radius and the
+#: tolerance are not given by Ziegler et al. (2007).
+INSITU_DEFAULTS = {
+    "window": 720.0,
+    "radius": None,
+    "z_tolerance": 100.0,
+    "kappa_s": 7.6e4,
+    "tau_i": 364363.0,
+    "tau_l": 640856.0,
 }
 
 #: Physical processes of the DLA (all on by default).
@@ -435,11 +565,14 @@ ZIEGLER_CONSTANTS = {
 }
 
 _BUDGET = (
-    ("condensation", "condensation and evaporation of cloud"),
+    ("condensation", "condensation, deposition, evaporation and sublimation of cloud"),
     ("rain_evaporation", "rain evaporation"),
     ("graupel_melting", "graupel melting"),
     ("graupel_sublimation", "graupel sublimation"),
-    ("freezing", "rain freezing and riming of cloud by graupel"),
+    (
+        "freezing",
+        "rain freezing, riming of cloud by graupel and freezing or melting of cloud ice",
+    ),
     ("damping", "Lagrangian damping"),
     ("surface_flux", "surface flux"),
 )
@@ -1327,6 +1460,105 @@ def _mesoscale(meso, prep, base):
     return packed, grad, mt
 
 
+_OBS_KEYS = ("window", "radius", "z_tolerance", "kappa_s", "tau_i", "tau_l")
+
+
+def _observation_options(options):
+    """Options of the in situ initialization with defaults and checks."""
+    opts = dict(INSITU_DEFAULTS)
+    unknown = set(options or {}) - set(opts)
+    if unknown:
+        raise ValueError(
+            f"unknown observation options: {sorted(unknown)}; known: {sorted(opts)}"
+        )
+    opts.update(options or {})
+    if opts["radius"] is None:
+        opts["radius"] = 2.0 * math.sqrt(opts["kappa_s"])
+    for k in _OBS_KEYS:
+        if not float(opts[k]) > 0:
+            raise ValueError(f"observation option {k!r} must be positive")
+    return opts
+
+
+def _observation_xy(flat, ds0):
+    """Grid coordinates of the observations (x/y or latitude/longitude)."""
+    if "x" in flat and "y" in flat:
+        return flat["x"].astype(float), flat["y"].astype(float)
+    lat = flat.get("lat", flat.get("latitude"))
+    lon = flat.get("lon", flat.get("longitude"))
+    if lat is None or lon is None:
+        raise ValueError("the observations need 'x' and 'y' or latitude/longitude")
+    if "origin_latitude" not in ds0.attrs or "origin_longitude" not in ds0.attrs:
+        raise ValueError(
+            "observations given by latitude/longitude need the grid's "
+            "'origin_latitude' and 'origin_longitude' attributes"
+        )
+    from ..grid.multi import _aeqd
+
+    proj = _aeqd(ds0.attrs["origin_latitude"], ds0.attrs["origin_longitude"])
+    x, y = proj(lon.astype(float), lat.astype(float))
+    return np.asarray(x, float), np.asarray(y, float)
+
+
+def _observation_theta(flat, p):
+    if "theta" in flat:
+        return flat["theta"].astype(float)
+    if "temperature" in flat:
+        return flat["temperature"].astype(float) * (_nk.P0 / p) ** _nk.KAPPA
+    raise ValueError("the observations need 'theta' or 'temperature'")
+
+
+def _observation_qv(flat, p):
+    if "qv" in flat:
+        return flat["qv"].astype(float)
+    if "mixing_ratio" in flat:
+        return flat["mixing_ratio"].astype(float)
+    if "specific_humidity" in flat:
+        q = flat["specific_humidity"].astype(float)
+        return q / (1.0 - q)
+    if "dewpoint" in flat:
+        e = _es_bolton(flat["dewpoint"].astype(float))
+        return _nk.EPS * e / (p - e)
+    raise ValueError(
+        "the observations need 'qv', 'mixing_ratio', 'specific_humidity' or 'dewpoint'"
+    )
+
+
+def _observations(obs, prep, base, options, ds0):
+    """In situ observations as (n, 6) x, y, z, t (s from the analysis time),
+    theta, q_v and the matching options (window, radius, z tolerance,
+    kappa_s, tau_i, tau_L)."""
+    if not isinstance(obs, xr.Dataset):
+        raise TypeError("observations must be an xarray.Dataset")
+    opts = _observation_options(options)
+    o = obs.reset_coords()
+    if "time" not in o:
+        raise ValueError("the observations need 'time'")
+    names = [n for n in (*o.data_vars, *o.coords) if o[n].dtype.kind in "fiumM"]
+    b = xr.broadcast(*[o[n].reset_coords(drop=True) for n in names])
+    flat = {n: np.asarray(a.values).ravel() for n, a in zip(names, b)}
+    tt = flat["time"]
+    if np.issubdtype(tt.dtype, np.datetime64):
+        tt = (tt.astype("datetime64[ns]") - prep["time"]) / np.timedelta64(1, "s")
+    t = np.asarray(tt, float)
+    x, y = _observation_xy(flat, ds0)
+    zname = next((n for n in ("z", "height", "altitude") if n in flat), None)
+    if zname is None:
+        z = np.full(t.shape, float(prep["z"][0]))
+    else:
+        z = flat[zname].astype(float)
+    if "pressure" in flat:
+        p = flat["pressure"].astype(float)
+    else:
+        p = np.interp(z, base["z"].values, base["pressure"].values)
+    arr = np.column_stack(
+        [x, y, z, t, _observation_theta(flat, p), _observation_qv(flat, p)]
+    )
+    arr = np.ascontiguousarray(arr[np.isfinite(arr).all(axis=1)])
+    par = np.array([float(opts[k]) for k in _OBS_KEYS])
+    return arr, par, opts
+
+
 def _precipitation(precipitation, prep, base, kwargs):
     ds = prep["ds"]
     if precipitation is None or (
@@ -1361,6 +1593,105 @@ def _precipitation(precipitation, prep, base, kwargs):
     return pr, packed
 
 
+def _ice_insitu_output(data, attrs, dims, qi, init, flags, ice, obs, obs_opts, params):
+    """Output variables and attributes of the ice and in situ options."""
+    if ice:
+        data["qi"] = (
+            dims,
+            qi,
+            {"long_name": "cloud ice mixing ratio", "units": "kg kg-1"},
+        )
+    if obs is not None:
+        data["insitu_weight"] = (
+            dims,
+            init[..., 0],
+            {
+                "long_name": "sum of the Barnes weights of the in situ observations "
+                "that initialised the trajectory (Ziegler et al. 2007, eq. 1)",
+                "units": "1",
+            },
+        )
+        data["insitu_time"] = (
+            dims,
+            init[..., 1],
+            {
+                "long_name": "start time of the trajectory at the in situ observation "
+                "relative to the analysis time",
+                "units": "s",
+            },
+        )
+    if ice:
+        attrs["ice_adjustment"] = (
+            f"Tao et al. (1989), T00 = {params['t00']} K; homogeneous freezing at "
+            "233.15 K and melting of cloud ice above 273.15 K"
+        )
+    if obs is not None:
+        attrs["insitu_observations"] = int(obs.shape[0])
+        attrs["insitu_options"] = ", ".join(f"{k}={obs_opts[k]}" for k in obs_opts)
+        attrs["insitu_fraction"] = float(np.mean((flags & _nk.INSITU) != 0))
+
+
+def _run_kernel(
+    use_compiled,
+    prep,
+    par,
+    starts,
+    surface,
+    table,
+    precip,
+    meso,
+    meso_t,
+    grad,
+    thermo,
+    obs,
+    obs_par,
+    n_threads,
+):
+    """The DLA of all start points with the compiled kernel or the NumPy
+    reference."""
+    table, bz0, bdz = table
+    xyz = (prep["x"], prep["y"], prep["z"])
+    moving = (prep["cx"], prep["cy"], prep["eb"], prep["ea"])
+    if use_compiled:  # pragma: no cover - depends on the build
+        dummy4 = np.zeros((1, 2, 2, 2, 4), np.float32)
+        dummy2 = np.zeros((1, 2, 2, 2, 2), np.float32)
+        return _traj._lagrangian.dla(
+            prep["packed"],
+            *xyz,
+            prep["t"],
+            starts,
+            surface,
+            par,
+            *moving,
+            table,
+            bz0,
+            bdz,
+            dummy4 if precip is None else precip,
+            precip is not None,
+            dummy2 if meso is None else meso,
+            meso_t,
+            meso is not None,
+            dummy4 if grad is None else grad,
+            grad is not None,
+            thermo,
+            np.zeros((0, 6)) if obs is None else obs,
+            np.zeros(6) if obs_par is None else obs_par,
+            obs is not None,
+            n_threads=int(n_threads or 0),
+        )
+    g = _nk.Grid(*xyz, prep["t"], prep["packed"], *moving)
+    gp = None if precip is None else _nk.Grid(*xyz, prep["t"], precip, *moving)
+    gm = None if meso is None else _nk.Grid(*xyz, meso_t, meso, 0, 0, 1e30, 1e30)
+    gg = (
+        None
+        if grad is None
+        else _nk.Grid(*xyz[:2], [0.0, 1.0], meso_t, grad, 0, 0, 1e30, 1e30)
+    )
+    return _nk.dla(
+        g, par, starts, surface, table, bz0, bdz, gp, gm, gg, thermo, obs, obs_par
+    )
+
+
 def diabatic_lagrangian(
     winds,
     sounding,
@@ -1371,6 +1702,9 @@ def diabatic_lagrangian(
     precipitation_kwargs=None,
     processes=None,
     parameters=None,
+    ice=False,
+    observations=None,
+    observation_options=None,
     surface_flux=(0.0, 0.0),
     storm_motion=None,
     extend=0.0,
@@ -1439,6 +1773,28 @@ def diabatic_lagrangian(
         test of :data:`SENSITIVITY_TESTS` (``"NOLD"``, ...).
     parameters : dict, optional
         Overrides of :data:`DLA_DEFAULTS`.
+    ice : bool, optional
+        Carry cloud ice :math:`q_i` and use the ice-water saturation
+        adjustment of Tao et al. (1989) with melting of cloud ice above
+        0 degC and homogeneous freezing of cloud water at or below -40 degC
+        (see "Ice processes" in the module documentation). Default False
+        (Ziegler 2013a: water saturation only). :math:`T_{00}` is
+        ``parameters["t00"]`` (default 233.15 K).
+    observations : xarray.Dataset, optional
+        In situ observations (e.g. surface stations or mobile mesonet) that
+        initialise the trajectories passing near them (Ziegler et al. 2007;
+        Ziegler 2013a, sect. 1), on any dimensions (e.g. ``station``,
+        ``time``): ``time`` (datetime64, or seconds relative to the analysis
+        time), ``x``, ``y`` (m, grid coordinates) or ``lat``/``latitude`` and
+        ``lon``/``longitude`` (with the grid attributes ``origin_latitude``,
+        ``origin_longitude``), ``z`` (or ``height``, ``altitude``; default:
+        the ground), ``theta`` or ``temperature``, ``qv``,
+        ``mixing_ratio``, ``specific_humidity`` or ``dewpoint``, and
+        ``pressure`` (Pa; default: base-state pressure). Missing values are
+        dropped. See "In situ initialization" in the module documentation.
+    observation_options : dict, optional
+        Overrides of :data:`INSITU_DEFAULTS`: ``window`` (s), ``radius`` (m),
+        ``z_tolerance`` (m), ``kappa_s`` (m2), ``tau_i``, ``tau_l`` (s2).
     surface_flux : (float, float), optional
         Constant surface fluxes of :math:`\\theta` (K s-1) and :math:`q_v`
         (kg kg-1 s-1) added to the mesoscale advective flux of eq. (27).
@@ -1486,10 +1842,12 @@ def diabatic_lagrangian(
     xarray.Dataset
         On ``(z, y, x)`` at the analysis time: ``theta``, ``temperature``,
         ``theta_v``, ``delta_theta_v`` (relative to the base state),
-        ``qv``, ``qc``, the diagnosed ``qr``, ``nr``, ``qg``, ``ng`` and
+        ``qv``, ``qc`` (and ``qi`` with ``ice=True``), the diagnosed ``qr``, ``nr``, ``qg``, ``ng`` and
         ``rain_rate``; per grid point ``flags``, ``n_steps``, ``environment``,
         the trajectory origin ``origin_x``, ``origin_y``, ``origin_z``,
-        ``origin_time``, ``valid_fraction`` and the accumulated :math:`\\theta` change of each
+        ``origin_time``, ``valid_fraction`` (with ``observations`` also
+        ``insitu_weight`` and ``insitu_time``, NaN where no observation
+        matched) and the accumulated :math:`\\theta` change of each
         process ``dtheta_<process>`` (unfiltered, NaN without a valid
         trajectory); the base-state profiles ``theta_base``,
         ``theta_v_base``, ``pressure_base`` on ``z``.
@@ -1501,9 +1859,19 @@ def diabatic_lagrangian(
 
     Ziegler, C. L., 2013b, *J. Atmos. Oceanic Technol.*, **30**, 2266-2280,
     https://doi.org/10.1175/JTECH-D-13-00036.1
+
+    Ziegler, C. L., M. S. Buban, and E. N. Rasmussen, 2007, *Mon. Wea. Rev.*,
+    **135**, 2417-2442, https://doi.org/10.1175/MWR3396.1
+
+    Tao, W.-K., J. Simpson, and M. McCumber, 1989, *Mon. Wea. Rev.*, **117**,
+    231-235, https://doi.org/10.1175/1520-0493(1989)117<0231:AIWSA>2.0.CO;2
     """
     params = _traj._parameters(parameters, DLA_DEFAULTS)
     on, bits = _switches(processes)
+    if ice:
+        bits |= _nk.ICE
+        if not 0.0 < params["t00"] < _nk.T0:
+            raise ValueError("parameters['t00'] must be between 0 K and 273.15 K")
     use_compiled = _traj._use_compiled(engine)
     prep = _traj._prepare(
         winds,
@@ -1544,83 +1912,32 @@ def diabatic_lagrangian(
         switches=float(bits),
     )
     thermo = np.array([float(q[k]) for k in _nk.THERMO_KEYS])
+    obs = obs_par = obs_opts = None
+    if observations is not None:
+        obs, obs_par, obs_opts = _observations(
+            observations, prep, base, observation_options, prep["ds"]
+        )
     starts, index, ks = _traj._grid_starts(prep, levels, params["offset_height"])
     surface = (index[0] == 0).astype(np.int8)
-    if use_compiled:
-        dummy4 = np.zeros((1, 2, 2, 2, 4), np.float32)
-        dummy2 = np.zeros((1, 2, 2, 2, 2), np.float32)
-        out, bud, org, npts, flags = _traj._lagrangian.dla(
-            prep["packed"],
-            prep["x"],
-            prep["y"],
-            prep["z"],
-            prep["t"],
-            starts,
-            surface,
-            par,
-            prep["cx"],
-            prep["cy"],
-            prep["eb"],
-            prep["ea"],
-            table,
-            bz0,
-            bdz,
-            dummy4 if precip is None else precip,
-            precip is not None,
-            dummy2 if meso is None else meso,
-            meso_t,
-            meso is not None,
-            dummy4 if grad is None else grad,
-            grad is not None,
-            thermo,
-            n_threads=int(n_threads or 0),
-        )
-    else:
-        g = _nk.Grid(
-            prep["x"],
-            prep["y"],
-            prep["z"],
-            prep["t"],
-            prep["packed"],
-            prep["cx"],
-            prep["cy"],
-            prep["eb"],
-            prep["ea"],
-        )
-        gp = (
-            None
-            if precip is None
-            else _nk.Grid(
-                prep["x"],
-                prep["y"],
-                prep["z"],
-                prep["t"],
-                precip,
-                prep["cx"],
-                prep["cy"],
-                prep["eb"],
-                prep["ea"],
-            )
-        )
-        gm = (
-            None
-            if meso is None
-            else _nk.Grid(
-                prep["x"], prep["y"], prep["z"], meso_t, meso, 0, 0, 1e30, 1e30
-            )
-        )
-        gg = (
-            None
-            if grad is None
-            else _nk.Grid(
-                prep["x"], prep["y"], [0.0, 1.0], meso_t, grad, 0, 0, 1e30, 1e30
-            )
-        )
-        out, bud, org, npts, flags = _nk.dla(
-            g, par, starts, surface, table, bz0, bdz, gp, gm, gg, thermo
-        )
+    out, bud, org, npts, flags, init = _run_kernel(
+        use_compiled,
+        prep,
+        par,
+        starts,
+        surface,
+        (table, bz0, bdz),
+        precip,
+        meso,
+        meso_t,
+        grad,
+        thermo,
+        obs,
+        obs_par,
+        n_threads,
+    )
     shape = (ks.size, prep["y"].size, prep["x"].size)
-    out = np.asarray(out).reshape(shape + (3,))
+    out = np.asarray(out).reshape(shape + (4,))
+    init = np.asarray(init).reshape(shape + (2,))
     bud = np.asarray(bud).reshape(shape + (_nk.N_BUDGET,))
     org = np.asarray(org).reshape(shape + (5,))
     npts = np.asarray(npts).reshape(shape)
@@ -1630,11 +1947,11 @@ def diabatic_lagrangian(
         flags = np.where(low, flags | 64, flags)
         out = np.where(low[..., None], np.nan, out)
         bud = np.where(low[..., None], np.nan, bud)
-    theta, qv, qc = out[..., 0], out[..., 1], out[..., 2]
+    theta, qv, qc, qi = (out[..., i] for i in range(4))
     if hole_fill:
-        theta, qv, qc = _hole_fill(theta), _hole_fill(qv), _hole_fill(qc)
+        theta, qv, qc, qi = (_hole_fill(a) for a in (theta, qv, qc, qi))
     if filter_passes:
-        theta, qv, qc = (_nine_point(a, filter_passes) for a in (theta, qv, qc))
+        theta, qv, qc, qi = (_nine_point(a, filter_passes) for a in (theta, qv, qc, qi))
     zsel = prep["z"][ks]
     bsel = base.isel(z=ks)
     pz = bsel["pressure"].values[:, None, None]
@@ -1682,8 +1999,9 @@ def diabatic_lagrangian(
             flags.astype(np.int32),
             {
                 "long_name": "trajectory termination flags",
-                "flag_masks": _traj.FLAG_MASKS,
-                "flag_meanings": _traj.FLAG_MEANINGS,
+                "flag_masks": np.append(_traj.FLAG_MASKS, np.int32(_nk.INSITU)),
+                "flag_meanings": _traj.FLAG_MEANINGS
+                + " initialized_from_in_situ_observation",
             },
         ),
         "environment": (
@@ -1788,7 +2106,9 @@ def diabatic_lagrangian(
         "ground_height": ground,
         "environment_fraction": float(np.mean((flags & _nk.ENVIRONMENT) != 0)),
         "termination": str(termination),
+        "ice": int(bool(ice)),
     }
+    _ice_insitu_output(data, attrs, dims, qi, init, flags, ice, obs, obs_opts, params)
     return xr.Dataset(data, coords=coords, attrs=attrs)
 
 
