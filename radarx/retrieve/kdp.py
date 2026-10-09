@@ -13,9 +13,12 @@ differential phase :math:`K_{DP} = \\frac{1}{2}\\, d\\Phi_{DP}/dr`.
 Every ray is processed independently along range:
 
 1. **Masking.** Gates count as meteorological where :math:`\\Psi_{DP}` is
-   finite, :math:`\\rho_{hv}` reaches ``rhohv_min`` and the texture of
+   finite, :math:`\\rho_{hv}` reaches ``rhohv_min`` (default 0.85, the level
+   below which Park et al. 2009 [3] consider the data contaminated by
+   non-meteorological scatterers, p. 736) and the texture of
    :math:`\\Psi_{DP}` (its circular standard deviation over
-   ``texture_window``) is at most ``texture_max``. More than half of the
+   ``texture_window``, default 2 km, radarx choice) is at most
+   ``texture_max`` (default 20 degrees, radarx choice). More than half of the
    texture window must be valid, so isolated gates are dropped. The circular
    statistic is computed from running sums of :math:`\\cos\\Psi_{DP}` and
    :math:`\\sin\\Psi_{DP}`, so it is not affected by phase folding.
@@ -23,7 +26,9 @@ Every ray is processed independently along range:
    range in rain. The direction is detected from the phase differences of
    adjacent rain gates of all rays (wrapped, so folding does not matter) and
    the phase is multiplied by -1 if it decreases significantly
-   (``phidp_sign``).
+   (``phidp_sign``). This step, the thresholds of the detection and the
+   offset and unfolding steps below are radarx's own and not taken from a
+   paper.
 3. **System offset.** The system differential phase is the circular mean of
    the first ``n_offset`` valid gates, either of each ray or pooled over the
    whole sweep (``offset="sweep"``, the default, which is robust to rays
@@ -37,35 +42,53 @@ Every ray is processed independently along range:
    :math:`\\Phi_{DP}` over a window whose length adapts to the reflectivity:
    ``kdp_window[0]`` where :math:`Z_H` is at least ``z_threshold`` (heavy
    rain, where :math:`K_{DP}` changes quickly) and ``kdp_window[1]``
-   elsewhere, the trade-off between resolution and noise discussed by
-   Wang and Chandrasekar (2009). It is given at valid gates whose window
+   elsewhere. The two window lengths and the 40 dBZ switch are those of the
+   WSR-88D algorithm described by Park et al. (2009) [3] (Sect. 2a, p. 732: a
+   lightly filtered :math:`K_{DP}` from 9 gates, 2 km at 0.25 km spacing, if
+   :math:`Z > 40` dBZ, a heavily filtered one from 25 gates, 6 km, otherwise;
+   they cite Ryzhkov and Zrnic 1996, not checked); radarx applies the short
+   window at :math:`Z \\geq 40` dBZ. The trade-off between resolution and noise
+   is discussed by Wang and Chandrasekar (2009) [2] (not checked against the
+   paper, which is not on disk). It is given at valid gates whose window
    holds at least ``min_valid_fraction`` valid gates.
 
 Methods
 -------
 ``"hubbert"`` (default)
-    Iterative finite-impulse-response filtering after Hubbert and Bringi
-    (1995). The profile is low-pass filtered; gates whose measurement departs
-    from the filtered profile by more than ``delta_threshold`` (backscatter
-    phase :math:`\\delta`, noise spikes) and masked gates are replaced by the
+    Iterative filtering after Hubbert and Bringi (1995) [1]. The profile is
+    low-pass filtered; gates whose measurement departs from the filtered
+    profile by more than ``delta_threshold`` (backscatter phase
+    :math:`\\delta`, noise spikes) and masked gates are replaced by the
     filtered values, and the procedure is repeated ``n_iter`` times. The
-    low-pass filter is three passes of a moving average of length
-    ``filter_window`` (a cubic B-spline kernel, close to a Gaussian), each
-    computed with running sums in O(N).
+    iteration on a monotonically increasing :math:`\\Phi_{DP}` with a
+    backscatter phase :math:`\\delta` superposed is the one described by
+    Bringi and Chandrasekar (2001) [5] (Sect. 6.6.1, pp. 369-372), who show a
+    20th-order finite-impulse-response low-pass filter (their Fig. 6.32b)
+    and 1 to 13 iterations (Fig. 6.34d). **Differences:** the low-pass filter
+    here is three passes of a moving average of length ``filter_window`` (a
+    cubic B-spline kernel, close to a Gaussian), each computed with running
+    sums in O(N); it is radarx's substitute for the published filter and not
+    the published coefficients. The defaults ``n_iter=10``,
+    ``delta_threshold=4`` degrees and ``filter_window=2`` km are radarx's
+    own; the original paper [1] was not available to check them.
 ``"vulpiani"``
-    Iterative :math:`K_{DP}` estimation after Vulpiani et al. (2012):
-    :math:`K_{DP}` is estimated from :math:`\\Phi_{DP}`, values outside
-    ``kdp_bounds`` are set to zero, :math:`\\Phi_{DP}` is rebuilt by
+    Iterative :math:`K_{DP}` estimation in the manner of Vulpiani et al.
+    (2012) [4]: :math:`K_{DP}` is estimated from :math:`\\Phi_{DP}`, values
+    outside ``kdp_bounds`` are set to zero, :math:`\\Phi_{DP}` is rebuilt by
     integrating :math:`2 K_{DP}` in range, and the two steps are repeated
     ``n_iter`` times. The integration constant is the least-squares fit of
-    the rebuilt profile to the measured gates.
+    the rebuilt profile to the measured gates. The paper was not available
+    to check this description; the defaults ``n_iter=4`` and
+    ``kdp_bounds=(-2, 20)`` degrees/km are radarx's own.
 ``"monotone"``
-    Monotone :math:`\\Phi_{DP}` as assumed by Maesaka et al. (2012) for rain
-    below the melting layer: the least-squares non-decreasing fit to the
+    Monotone :math:`\\Phi_{DP}` as assumed by Maesaka et al. (2012) [6] for
+    rain below the melting layer: the least-squares non-decreasing fit to the
     valid gates (pool-adjacent-violators algorithm, O(N)), smoothed with the
     same low-pass filter. :math:`K_{DP}` is then never negative. Maesaka et
     al. solve a variational problem under this constraint; the monotone fit
-    used here enforces the same assumption in a single O(N) pass. Use it only
+    used here is radarx's own simplification that enforces the same
+    assumption in a single O(N) pass (the conference paper was not available
+    to check; its details are not reproduced). Use it only
     for rain; hail or ice above the melting layer can have negative
     :math:`K_{DP}`.
 ``"ml"``
@@ -76,7 +99,8 @@ Methods
     :math:`\\rho_{hv}` and :math:`Z_H`, and returns :math:`K_{DP}`, the
     backscatter phase :math:`\\delta` and the standard deviation of
     :math:`K_{DP}`. It was trained on rays simulated from the T-matrix
-    scattering tables of :mod:`radarx.retrieve.dsd` with a loss that,
+    scattering tables of :mod:`radarx.retrieve.dsd` (no published method;
+    radarx's own model) with a loss that,
     besides the error against the simulated truth, requires
     :math:`\\Psi_{DP} = 2\\int K_{DP}\\,dr + \\delta + \\Phi_{DP}^0`
     at valid gates, penalises negative :math:`K_{DP}` in rain and rough
@@ -92,24 +116,30 @@ not available, an equivalent NumPy implementation is used.
 
 References
 ----------
-Hubbert, J., and V. N. Bringi, 1995: An iterative filtering technique for the
-analysis of copolar differential phase and dual-frequency radar measurements.
-*J. Atmos. Oceanic Technol.*, **12** (3), 643-648,
-https://doi.org/10.1175/1520-0426(1995)012<0643:AIFTFT>2.0.CO;2
-
-Wang, Y., and V. Chandrasekar, 2009: Algorithm for estimation of the specific
-differential phase. *J. Atmos. Oceanic Technol.*, **26** (12), 2565-2578,
-https://doi.org/10.1175/2009JTECHA1358.1
-
-Vulpiani, G., M. Montopoli, L. D. Passeri, A. G. Gioia, P. Giordano, and
-F. S. Marzano, 2012: On the use of dual-polarized C-band radar for
-operational rainfall retrieval in mountainous areas. *J. Appl. Meteor.
-Climatol.*, **51** (2), 405-425, https://doi.org/10.1175/JAMC-D-10-05024.1
-
-Maesaka, T., K. Iwanami, and M. Maki, 2012: Non-negative KDP estimation by
-monotone increasing PhiDP assumption below melting layer. *Proc. Seventh
-European Conf. on Radar in Meteorology and Hydrology (ERAD 2012)*, Toulouse,
-France (conference paper, no DOI).
+.. [1] Hubbert, J., and V. N. Bringi, 1995: An iterative filtering technique
+   for the analysis of copolar differential phase and dual-frequency radar
+   measurements. *J. Atmos. Oceanic Technol.*, **12** (3), 643-648,
+   https://doi.org/10.1175/1520-0426(1995)012<0643:AIFTFT>2.0.CO;2
+.. [2] Wang, Y., and V. Chandrasekar, 2009: Algorithm for estimation of the
+   specific differential phase. *J. Atmos. Oceanic Technol.*, **26** (12),
+   2565-2578, https://doi.org/10.1175/2009JTECHA1358.1
+.. [3] Park, H. S., A. V. Ryzhkov, D. S. Zrnić, and K.-E. Kim, 2009: The
+   hydrometeor classification algorithm for the polarimetric WSR-88D:
+   Description and application to an MCS. *Wea. Forecasting*, **24** (3),
+   730-748, https://doi.org/10.1175/2008WAF2222205.1
+.. [4] Vulpiani, G., M. Montopoli, L. Delli Passeri, A. G. Gioia, P.
+   Giordano, and F. S. Marzano, 2012: On the use of dual-polarized C-band
+   radar for operational rainfall retrieval in mountainous areas. *J. Appl.
+   Meteor. Climatol.*, **51** (2), 405-425,
+   https://doi.org/10.1175/JAMC-D-10-05024.1
+.. [5] Bringi, V. N., and V. Chandrasekar, 2001: *Polarimetric Doppler
+   Weather Radar: Principles and Applications*. Cambridge University Press,
+   https://doi.org/10.1017/CBO9780511541094
+.. [6] Maesaka, T., K. Iwanami, and M. Maki, 2012: Non-negative KDP
+   estimation by monotone increasing PhiDP assumption below melting layer.
+   *Proc. Seventh European Conf. on Radar in Meteorology and Hydrology
+   (ERAD 2012)*, Toulouse, France (conference paper, no DOI; citation not
+   verifiable with Crossref).
 
 .. autosummary::
    :nosignatures:
@@ -137,6 +167,7 @@ except ImportError:  # pragma: no cover - depends on the build
 
 METHODS = {"hubbert": 0, "vulpiani": 1, "monotone": 2}
 _DEFAULT_N_ITER = {"hubbert": 10, "vulpiani": 4, "monotone": 0}
+# The two constants below are radarx's own choices, not from a paper.
 _UNFOLD_MEMORY = 5  # unfolding reference: mean of this many previous gates
 _MIN_VALID = 3  # rays with fewer valid gates are left empty
 
@@ -816,39 +847,50 @@ def estimate_kdp(
         Default ``"hubbert"``. ``"ml"`` runs a neural network and needs
         ``pip install radarx[ml]`` and a registered model (see ``model``).
     rhohv_min : float, optional
-        Minimum :math:`\\rho_{hv}` of meteorological gates. Default 0.85.
+        Minimum :math:`\\rho_{hv}` of meteorological gates. Default 0.85, the
+        level below which Park et al. (2009) [3] consider the data
+        contaminated by non-meteorological scatterers (p. 736).
     texture_window : float, optional
-        Length (km) of the window for the phase texture. Default 2.
+        Length (km) of the window for the phase texture. Default 2 (radarx
+        choice).
     texture_max : float, optional
         Maximum circular standard deviation (degrees) of the phase within the
-        texture window. Default 20.
+        texture window. Default 20 (radarx choice).
     n_offset : int, optional
-        Number of first valid gates used for the system offset. Default 10.
+        Number of first valid gates used for the system offset. Default 10
+        (radarx choice).
     offset : {"sweep", "ray"} or float, optional
         ``"sweep"`` (default) pools the first gates of all rays, ``"ray"``
         estimates one offset per ray, a number is used as the offset in
         degrees.
     filter_window : float, optional
         Length (km) of each of the three moving-average passes of the
-        low-pass filter (``"hubbert"`` and ``"monotone"``). Default 2; the
-        combined kernel has a standard deviation of about half this length.
+        low-pass filter (``"hubbert"`` and ``"monotone"``). Default 2 (radarx
+        choice; the filter is a substitute for the FIR filter of Hubbert and
+        Bringi 1995 [1]); the combined kernel has a standard deviation of
+        about half this length.
     n_iter : int, optional
-        Iterations: default 10 for ``"hubbert"`` and 4 for ``"vulpiani"``.
+        Iterations: default 10 for ``"hubbert"`` and 4 for ``"vulpiani"``
+        (radarx choices, not checked against the papers [1], [4]).
     delta_threshold : float, optional
         ``"hubbert"``: gates departing from the filtered profile by more
-        than this (degrees) are replaced by the filtered value. Default 4.
+        than this (degrees) are replaced by the filtered value. Default 4
+        (radarx choice, not checked against Hubbert and Bringi 1995 [1]).
     kdp_window : (float, float), optional
         Length (km) of the least-squares KDP window where the reflectivity
-        is at least / below ``z_threshold``. Default ``(2, 6)``.
+        is at least / below ``z_threshold``. Default ``(2, 6)``: the 9 and 25
+        gates (at 0.25 km spacing) of Park et al. (2009) [3], p. 732.
     z_threshold : float, optional
-        Reflectivity (dBZ) above which the short window is used. Default 40.
+        Reflectivity (dBZ) above which the short window is used. Default 40,
+        as in Park et al. (2009) [3], p. 732 (they use ``Z > 40``, radarx
+        ``Z >= 40``).
     kdp_bounds : (float, float), optional
         ``"vulpiani"``: KDP values (degrees/km) outside these bounds are set
-        to zero in each iteration. Default ``(-2, 20)``.
+        to zero in each iteration. Default ``(-2, 20)`` (radarx choice).
     min_valid_fraction : float, optional
         KDP is only given at gates where at least this share of the gates in
         the KDP window is valid, which removes unreliable values at echo
-        edges and next to masked gates. Default 0.5.
+        edges and next to masked gates. Default 0.5 (radarx choice).
     phidp_sign : {"auto", 1, -1}, optional
         Sign convention of the input phase. Some systems record a phase that
         decreases with range in rain. ``"auto"`` (default) multiplies the
@@ -896,26 +938,43 @@ def estimate_kdp(
         If ``engine="compiled"`` and the compiled kernel is not available,
         or for ``method="ml"`` without :mod:`radarx.ml` and ONNX Runtime.
 
+    Notes
+    -----
+    Which parts follow the references: the iterative filtering idea [1], [5],
+    the iterative KDP idea [4] and the monotone assumption [6] are the
+    published concepts; their implementation details and all default values
+    marked "radarx choice" above are not taken from the papers. The windows
+    and the 40 dBZ switch are those of Park et al. (2009) [3]. Wang and
+    Chandrasekar (2009) [2] is cited for the resolution/noise trade-off of
+    the KDP window; its algorithm is not implemented.
+
     References
     ----------
-    Hubbert, J., and V. N. Bringi, 1995: An iterative filtering technique
-    for the analysis of copolar differential phase and dual-frequency radar
-    measurements. *J. Atmos. Oceanic Technol.*, **12** (3), 643-648,
-    https://doi.org/10.1175/1520-0426(1995)012<0643:AIFTFT>2.0.CO;2
-
-    Wang, Y., and V. Chandrasekar, 2009: Algorithm for estimation of the
-    specific differential phase. *J. Atmos. Oceanic Technol.*, **26** (12),
-    2565-2578, https://doi.org/10.1175/2009JTECHA1358.1
-
-    Vulpiani, G., M. Montopoli, L. D. Passeri, A. G. Gioia, P. Giordano, and
-    F. S. Marzano, 2012: On the use of dual-polarized C-band radar for
-    operational rainfall retrieval in mountainous areas. *J. Appl. Meteor.
-    Climatol.*, **51** (2), 405-425, https://doi.org/10.1175/JAMC-D-10-05024.1
-
-    Maesaka, T., K. Iwanami, and M. Maki, 2012: Non-negative KDP estimation
-    by monotone increasing PhiDP assumption below melting layer. *Proc.
-    Seventh European Conf. on Radar in Meteorology and Hydrology (ERAD
-    2012)*, Toulouse, France (conference paper, no DOI).
+    .. [1] Hubbert, J., and V. N. Bringi, 1995: An iterative filtering
+       technique for the analysis of copolar differential phase and
+       dual-frequency radar measurements. *J. Atmos. Oceanic Technol.*,
+       **12** (3), 643-648,
+       https://doi.org/10.1175/1520-0426(1995)012<0643:AIFTFT>2.0.CO;2
+    .. [2] Wang, Y., and V. Chandrasekar, 2009: Algorithm for estimation of
+       the specific differential phase. *J. Atmos. Oceanic Technol.*, **26**
+       (12), 2565-2578, https://doi.org/10.1175/2009JTECHA1358.1
+    .. [3] Park, H. S., A. V. Ryzhkov, D. S. Zrnić, and K.-E. Kim, 2009: The
+       hydrometeor classification algorithm for the polarimetric WSR-88D:
+       Description and application to an MCS. *Wea. Forecasting*, **24** (3),
+       730-748, https://doi.org/10.1175/2008WAF2222205.1
+    .. [4] Vulpiani, G., M. Montopoli, L. Delli Passeri, A. G. Gioia, P.
+       Giordano, and F. S. Marzano, 2012: On the use of dual-polarized
+       C-band radar for operational rainfall retrieval in mountainous areas.
+       *J. Appl. Meteor. Climatol.*, **51** (2), 405-425,
+       https://doi.org/10.1175/JAMC-D-10-05024.1
+    .. [5] Bringi, V. N., and V. Chandrasekar, 2001: *Polarimetric Doppler
+       Weather Radar: Principles and Applications*. Cambridge University
+       Press, https://doi.org/10.1017/CBO9780511541094
+    .. [6] Maesaka, T., K. Iwanami, and M. Maki, 2012: Non-negative KDP
+       estimation by monotone increasing PhiDP assumption below melting
+       layer. *Proc. Seventh European Conf. on Radar in Meteorology and
+       Hydrology (ERAD 2012)*, Toulouse, France (conference paper, no DOI;
+       citation not verifiable with Crossref).
 
     Examples
     --------

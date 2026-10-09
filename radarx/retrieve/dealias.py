@@ -14,36 +14,48 @@ interval :math:`[-V_n, V_n]`; a true velocity :math:`v` is reported as
 :math:`k` for every gate.
 
 radarx uses a region-based method that works directly on the polar sweep
-grid, where each gate's neighbours are known by index:
+grid, where each gate's neighbours are known by index. The method is
+radarx's own combination of published ideas, not an implementation of one
+paper: the criterion (a least-squares sum of squared velocity jumps between
+neighbours, Jing and Wiener 1993 [1]), the reference wind (Eilts and Smith
+1990 [2]), the volume continuity (James and Houze 2001 [3]) and the VAD fit
+(Browning and Wexler 1968 [4]) are the published concepts; the region graph,
+spanning tree, coordinate descent and the gate check are radarx's
+implementation, and all thresholds below are radarx choices. None of the
+papers was available to check the details of the concepts quoted here.
 
 1. **Regions.** Neighbouring gates (along the ray and between adjacent rays)
    whose velocities differ by less than ``threshold * Vn`` are joined with a
    union-find. Inside such a region the field is continuous, so all its gates
    share one fold. Velocity jumps of about :math:`2 V_n` (fold lines) separate
-   regions (Jing and Wiener 1993).
+   regions. The default ``threshold=0.3`` is radarx's own choice.
 2. **Region graph.** For every pair of touching regions, the number of
    boundary gate pairs and the summed velocity jump across the boundary are
    accumulated. Regions separated by short gaps of empty gates (along or
    across rays) are compared across the gap.
 3. **Folds.** Integer folds per region minimise the summed squared velocity
    jump over all region boundaries, weighted by boundary length (the
-   least-squares criterion of Jing and Wiener 1993). A maximum spanning tree
+   least-squares criterion of Jing and Wiener 1993 [1]). A maximum spanning tree
    (unambiguous boundaries first, then by length) gives the start; integer
    coordinate descent then moves single regions and whole blocks of
    consistently joined regions until no move lowers the cost, so groups of
    regions that are offset together are corrected too.
 4. **Absolute fold.** The largest group of connected regions is matched to a
    reference velocity where one is available: a wind profile (sounding, VAD
-   or model) as in Eilts and Smith (1990), or the already dealiased sweep
-   below, the volume continuity of James and Houze (2001). Otherwise its mean
-   velocity is brought closest to zero. A VAD fit of that group (Browning and
-   Wexler 1968) then gives the reference for all other, disconnected groups.
+   or model) as in Eilts and Smith (1990) [2], or the already dealiased
+   sweep below, the volume continuity of James and Houze (2001) [3].
+   Otherwise its mean velocity is brought closest to zero (radarx choice). A
+   VAD fit of that group (Browning and Wexler 1968 [4]; the in-sweep fit uses
+   20 gates on each side and needs at least 50 gates and an azimuth coverage
+   above a minimum, radarx choices) then gives the reference for all other,
+   disconnected groups.
    Finally, a gate that differs by more than :math:`V_n` from all of its
    neighbours is moved to the fold closest to their mean.
 
 All decisions use integer arithmetic, so the compiled C++ kernel
 (multithreaded, all sweeps in one call) and the NumPy fallback give
-identical folds. A modular alternative is described by Louf et al. (2020).
+identical folds. A modular alternative that is not used here is described by
+Louf et al. (2020) [5].
 
 .. autosummary::
    :nosignatures:
@@ -54,21 +66,21 @@ identical folds. A modular alternative is described by Louf et al. (2020).
 References
 ----------
 .. [1] Jing, Z., and G. Wiener, 1993: Two-dimensional dealiasing of Doppler
-   velocities. *J. Atmos. Oceanic Technol.*, **10**, 798-808,
+   velocities. *J. Atmos. Oceanic Technol.*, **10** (6), 798-808,
    https://doi.org/10.1175/1520-0426(1993)010<0798:TDDODV>2.0.CO;2
 .. [2] Eilts, M. D., and S. D. Smith, 1990: Efficient dealiasing of Doppler
    velocities using local environment constraints. *J. Atmos. Oceanic
-   Technol.*, **7**, 118-128,
+   Technol.*, **7** (1), 118-128,
    https://doi.org/10.1175/1520-0426(1990)007<0118:EDODVU>2.0.CO;2
 .. [3] James, C. N., and R. A. Houze, 2001: A real-time four-dimensional
-   Doppler dealiasing scheme. *J. Atmos. Oceanic Technol.*, **18**,
+   Doppler dealiasing scheme. *J. Atmos. Oceanic Technol.*, **18** (10),
    1674-1683, https://doi.org/10.1175/1520-0426(2001)018<1674:ARTFDD>2.0.CO;2
 .. [4] Browning, K. A., and R. Wexler, 1968: The determination of kinematic
-   properties of a wind field using Doppler radar. *J. Appl. Meteor.*, **7**,
+   properties of a wind field using Doppler radar. *J. Appl. Meteor.*, **7** (1),
    105-113, https://doi.org/10.1175/1520-0450(1968)007<0105:TDOKPO>2.0.CO;2
 .. [5] Louf, V., A. Protat, R. C. Jackson, S. M. Collis, and J. Helmus, 2020:
    UNRAVEL: A robust modular velocity dealiasing technique for Doppler radar.
-   *J. Atmos. Oceanic Technol.*, **37**, 741-758,
+   *J. Atmos. Oceanic Technol.*, **37** (5), 741-758,
    https://doi.org/10.1175/JTECH-D-19-0020.1
 """
 
@@ -96,6 +108,7 @@ except ImportError:  # pragma: no cover - depends on the build
 
 EARTH_RADIUS = 6371000.0
 _SCALE = 1 << 20  # fixed point for velocity jumps in units of 2 Vn
+# The constants below are radarx's own choices, not values from a paper.
 _NYQUIST_TOLERANCE = 1.01  # values beyond this times Vn are flags, not data
 _MAX_VOTE = 127  # folds beyond this are not physical
 _VEL_Q = 256.0  # velocities in fixed point of 1/256 m/s
@@ -199,7 +212,12 @@ def dealias_velocity(
 
     Notes
     -----
-    See the module documentation for the method. Without any reference, the
+    See the module documentation for the method, which combines the concepts
+    of Jing and Wiener (1993) [1], Eilts and Smith (1990) [2], James and
+    Houze (2001) [3] and Browning and Wexler (1968) [4] and is not an
+    implementation of any one of these papers; the thresholds (``threshold``,
+    ``max_gap``, the 10 ray gap, ``max_iterations``) are radarx choices.
+    Without any reference, the
     absolute fold of the lowest sweep assumes that its mean radial velocity
     is close to zero, as for a horizontally uniform wind seen all around the
     radar; for echoes that cover only part of the circle, pass a
@@ -208,19 +226,19 @@ def dealias_velocity(
     References
     ----------
     .. [1] Jing, Z., and G. Wiener, 1993: Two-dimensional dealiasing of
-       Doppler velocities. *J. Atmos. Oceanic Technol.*, **10**, 798-808,
+       Doppler velocities. *J. Atmos. Oceanic Technol.*, **10** (6), 798-808,
        https://doi.org/10.1175/1520-0426(1993)010<0798:TDDODV>2.0.CO;2
     .. [2] Eilts, M. D., and S. D. Smith, 1990: Efficient dealiasing of
        Doppler velocities using local environment constraints. *J. Atmos.
-       Oceanic Technol.*, **7**, 118-128,
+       Oceanic Technol.*, **7** (1), 118-128,
        https://doi.org/10.1175/1520-0426(1990)007<0118:EDODVU>2.0.CO;2
     .. [3] James, C. N., and R. A. Houze, 2001: A real-time four-dimensional
-       Doppler dealiasing scheme. *J. Atmos. Oceanic Technol.*, **18**,
+       Doppler dealiasing scheme. *J. Atmos. Oceanic Technol.*, **18** (10),
        1674-1683,
        https://doi.org/10.1175/1520-0426(2001)018<1674:ARTFDD>2.0.CO;2
     .. [4] Browning, K. A., and R. Wexler, 1968: The determination of
        kinematic properties of a wind field using Doppler radar. *J. Appl.
-       Meteor.*, **7**, 105-113,
+       Meteor.*, **7** (1), 105-113,
        https://doi.org/10.1175/1520-0450(1968)007<0105:TDOKPO>2.0.CO;2
 
     Examples

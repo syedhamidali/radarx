@@ -22,46 +22,77 @@ classes as ``HID_scores``.
 Methods
 -------
 ``"park"`` (S band, default for ``band="S"``)
-    The WSR-88D algorithm of Park et al. (2009): trapezoidal membership
-    functions (their Table 1, the :math:`Z_{DR}` and LKdp
+    The WSR-88D algorithm of Park et al. (2009) [1]: trapezoidal membership
+    functions (their Table 1, p. 733, with the :math:`Z_{DR}` and LKdp
     :math:`= 10 \\log_{10} K_{DP}` corners of the rain classes depending on
-    :math:`Z_H`), the class-dependent weights of their Table 2 and additive
-    aggregation :math:`A_i = \\sum_j W_{ij} Q_j P^{(i)}(V_j) / \\sum_j W_{ij}
-    Q_j` (their Eq. 3). The confidence vector :math:`Q` (their Eqs. 14-17 and
-    23) accounts for attenuation (:math:`\\Phi_{DP}`), low :math:`\\rho_{hv}`
-    and partial beam blockage. Classes that fail the hard thresholds of their
-    Table 3 are skipped in favour of the next highest score. When the
-    melting layer is known (``melting_layer=`` or from ``temperature``), the
-    classes allowed in five intervals of beam height relative to the melting
-    layer bottom and top, accounting for the beam width (their Fig. 2 and
-    Eq. 24), are enforced. Classes: dry snow, wet snow, ice crystals,
-    graupel, big drops, light and moderate rain, heavy rain and rain-hail
-    mixture.
+    :math:`Z_H` through their Eqs. 4 and 5, p. 733; LKdp as in their Eq. 1,
+    p. 732), the class-dependent weights of their Table 2 (p. 734, the
+    columns of :math:`Z_H`, :math:`Z_{DR}`, :math:`\\rho_{hv}` and LKdp) and
+    additive aggregation :math:`A_i = \\sum_j W_{ij} Q_j P^{(i)}(V_j) /
+    \\sum_j W_{ij} Q_j` (their Eq. 3, p. 732). The confidence vector
+    :math:`Q` (their Eqs. 14-17, 23 and 25, pp. 734-737) accounts for
+    attenuation (:math:`\\Phi_{DP}`, threshold 250 degrees), low
+    :math:`\\rho_{hv}` (:math:`\\Delta\\rho_{hv}^{(1)} = 0.2`, switched off
+    below 0.8) and partial beam blockage (:math:`a/50`, their Eq. 13). Classes
+    that fail the hard thresholds of their Table 3 (p. 737) are skipped in
+    favour of the next highest score. When the melting layer is known
+    (``melting_layer=`` or from ``temperature``), the classes allowed in five
+    intervals of beam height relative to the melting layer bottom and top,
+    accounting for the beam width (their Fig. 2 and Eq. 24, p. 736), are
+    enforced. Classes: dry snow, wet snow, ice crystals, graupel, big drops,
+    light and moderate rain, heavy rain and rain-hail mixture. The numbers of
+    Tables 1 to 3 and Eqs. 4, 5, 24 were checked against the paper; what
+    radarx leaves out of the paper's algorithm is listed in the Notes.
 ``"dolan"`` (default for ``band="C"`` and ``"X"``)
     Theory-based beta membership functions
-    :math:`\\beta = 1 / (1 + [((x - m)/a)^2]^b)` (Dolan and Rutledge 2009,
-    their Eq. 14) and the hybrid aggregation of Dolan et al. (2013, their
-    Eq. 8): :math:`\\mu_i = \\beta_{T,i}\\, \\beta_{Z,i}\\, (0.8\\,\\beta_{Z_{DR},i}
-    + 1.0\\,\\beta_{K_{DP},i} + 0.1\\,\\beta_{\\rho_{hv},i}) / 1.9`. At C band
-    the ten classes and membership functions of Dolan et al. (2013, Table
-    A2): drizzle, rain, ice crystals, aggregates, wet snow, vertically aligned
+    :math:`\\beta = 1 / (1 + [((x - m)/a)^2]^b)` (Dolan and Rutledge 2009
+    [2], their Eq. 14, p. 2080) and the hybrid aggregation of Dolan et al.
+    (2013) [3] (their Eq. 8, p. 2167): :math:`\\mu_i = \\beta_{T,i}\\,
+    \\beta_{Z,i}\\, (0.8\\,\\beta_{Z_{DR},i} + 1.0\\,\\beta_{K_{DP},i} +
+    0.1\\,\\beta_{\\rho_{hv},i}) / 1.9`, with the weights 0.8, 1.0 and 0.1,
+    which those authors determined subjectively. At C band the ten classes
+    and membership functions of Dolan et al. (2013, Table A2, p. 2183):
+    drizzle, rain, ice crystals, aggregates, wet snow, vertically aligned
     ice, low- and high-density graupel, hail and big drops. At X and S band
     the seven classes of Dolan and Rutledge (2009) with the variable ranges
     of their X-band (XMBF) and S-band (SMBF) membership functions (Tables
-    3-9). That paper gives the ranges (:math:`m \\pm a`) but not the slopes
-    :math:`b` or temperature membership functions; these are taken from the
-    same classes of Dolan et al. (2013), so all bands use the same algorithm.
+    3-9, pp. 2078-2079; :math:`m` and :math:`a` are the middle and half the
+    width of the printed minimum and maximum). **This is not the algorithm of
+    the 2009 paper.** There the beta score :math:`\\beta` of every variable
+    "is calculated ... and then multiplied by a weight, and the result for
+    each variable is then added together to define a score" (Sect. 3a,
+    p. 2080), i.e. a purely additive aggregation; for the X-band case study
+    with the CASA IP1 radars the weights were reflectivity 1.5, :math:`K_{DP}`
+    1.0, temperature 0.5, :math:`Z_{DR}` 0.4 and :math:`\\rho_{hv}` 0.2, the
+    last two low because of the data quality of that campaign (Sect. 3b,
+    p. 2081). radarx instead applies the hybrid rule of the 2013 C-band paper
+    (:math:`T` and :math:`Z_H` multiply the polarimetric score) with the
+    weights 0.8, 1.0 and 0.1 to **all** bands, so at X and S band the scores
+    and class boundaries differ from those of the 2009 algorithm although the
+    :math:`m` and :math:`a` values match its Tables 3-9. The 2009 paper gives
+    the ranges but not the slopes :math:`b` or temperature membership
+    functions; these are taken from the same classes of Dolan et al. (2013),
+    Table A2. The ``references`` attribute of the output names both papers
+    for ``band="X"`` and ``"S"``.
 ``"thompson"`` (winter precipitation)
-    The winter classification of Thompson et al. (2014), Table 5, with their
-    band-dependent :math:`K_{DP}` functions and class-dependent weights. A
-    melting-layer detection step separates wet snow from other echo; the
-    median height of the wet snow gates between 5 and 35 km range defines
-    the melting layer. If at least ``ml_gates[1]`` gates are wet snow
-    (complete melting), rain and freezing/frozen rain are classified below
-    it and plates, dendrites, ice crystals and aggregates above it; with at
-    least ``ml_gates[0]`` (partial melting) the above-melting-layer classes
-    are used everywhere and the wet snow is kept; otherwise the
-    above-melting-layer classes are used everywhere.
+    The winter classification of Thompson et al. (2014) [4], their Table 5
+    (p. 1470), with their band-dependent :math:`K_{DP}` functions and
+    class-dependent weights, in additive aggregation. A melting-layer
+    detection step separates wet snow from other echo; the median height of
+    the wet snow gates between 5 and 35 km range defines the melting layer
+    (p. 1466: top, median and base are the heights below which 80, 50 and 20
+    % of the wet snow gates lie, after Giangrande et al. 2008, in each
+    10 degree azimuth sector, using gates with SNR above 10 dB; radarx uses
+    only the median, for the whole volume and without the SNR condition). If
+    at least ``ml_gates[1]`` gates are wet snow (complete melting), rain and
+    freezing/frozen rain are classified below it and plates, dendrites, ice
+    crystals and aggregates above it; with at least ``ml_gates[0]`` (partial
+    melting) the above-melting-layer classes are used everywhere and the wet
+    snow is kept; otherwise the above-melting-layer classes are used
+    everywhere. The defaults 100 and 10 000 gates are the values of Thompson
+    et al. (p. 1466), which they tested for the very high spatial resolution
+    of the OU-PRIME and CSU-CHILL RHIs and describe as dependent on the data
+    quality and resolution of the radar.
 
 Temperature
 -----------
@@ -71,8 +102,10 @@ Temperature
 ``None``. The Dolan and Thompson methods use it as a membership variable
 (without temperature it is left out of the aggregation). The Park method uses
 it only to place the melting layer: its top is the wet-bulb 0 °C height of
-the profile (the 0 °C height without humidity) and its bottom
-``ml_thickness`` lower; ``melting_layer=`` overrides this, e.g. with the
+the profile (the 0 °C height without humidity; Park et al. 2009 [1], p. 736,
+call the top of the melting layer typically coincident with the 0 °C wet-bulb
+height) and its bottom ``ml_thickness`` lower (500 m, radarx's own choice,
+not a value of the paper); ``melting_layer=`` overrides this, e.g. with the
 output of :func:`radarx.retrieve.melting_layer`.
 
 Non-meteorological echo is not removed here: pass ``mask=`` (True where
@@ -89,44 +122,52 @@ the test oracle.
 
 Notes
 -----
-- Table A2 of Dolan et al. (2013) gives a half-width of 21 °C for the big
+- Table A2 of Dolan et al. (2013) [3] gives a half-width of 21 °C for the big
   drops temperature function (centre 48 °C), which would rule out big drops
-  below 27 °C and contradicts the range :math:`T > -3` °C of their Table A1.
-  The half-width of 51 °C used for rain, which matches Table A1, is used
-  instead.
-- Table 5 of Thompson et al. (2014) repeats the reflectivity parameters in
-  the wet snow :math:`Z_{DR}` row; the wet snow :math:`Z_{DR}` function
+  below 27 °C and contradicts the range :math:`T > -3` °C of their Table A1
+  (p. 2182). The half-width of 51 °C used for rain, which matches Table A1,
+  is used instead (a deliberate deviation from the printed Table A2).
+- Table 5 of Thompson et al. (2014) [4] repeats the reflectivity parameters
+  in the wet snow :math:`Z_{DR}` row; the wet snow :math:`Z_{DR}` function
   (:math:`3 \\pm 5` dB, :math:`b = 10`) is read from their Fig. 6. The
   half-widths of the rain and freezing rain reflectivity functions are
   those of the ranges given in the table. Melting-layer heights are
   estimated for the whole volume rather than per 10° azimuth sector.
 - The texture fields (SD(Z), SD(:math:`\\Phi_{DP}`)) and the
   non-meteorological classes (ground clutter, biological scatterers) of
-  Park et al. (2009) are not used: non-meteorological echo should be
+  Park et al. (2009) [1] are not used: non-meteorological echo should be
   removed with ``mask=``. Their confidence vector is computed without the
-  non-uniform beam filling and signal-to-noise terms, and their
-  convective/stratiform separation is not applied.
+  non-uniform beam filling and signal-to-noise terms (their Eqs. 9, 12, 14-17
+  contain them) and for the four variables :math:`Z_H`, :math:`Z_{DR}`,
+  :math:`\\rho_{hv}` and :math:`K_{DP}` only, their convective/stratiform
+  separation is not applied, and the smoothing of :math:`Z`, :math:`Z_{DR}`
+  and :math:`\\rho_{hv}` along the radial and the attenuation correction
+  of their Sect. 2a are left to the caller. In Table 3 the two rules for
+  ground clutter and biological scatterers are not used.
+- Values that are radarx's own choices and not from the cited papers:
+  ``ml_thickness=500`` m, ``beamwidth=1`` degree (the paper draws the
+  :math:`\\pm 0.5` degree beam extent of the 3 dB beamwidth in its Fig. 2),
+  and the 5 m histogram bins used for the median melting-layer height.
 
 References
 ----------
-Park, H. S., A. V. Ryzhkov, D. S. Zrnić, and K.-E. Kim, 2009: The
-hydrometeor classification algorithm for the polarimetric WSR-88D:
-Description and application to an MCS. *Wea. Forecasting*, **24** (3),
-730-748, https://doi.org/10.1175/2008WAF2222205.1
-
-Dolan, B., and S. A. Rutledge, 2009: A theory-based hydrometeor
-identification algorithm for X-band polarimetric radars. *J. Atmos. Oceanic
-Technol.*, **26** (10), 2071-2088, https://doi.org/10.1175/2009JTECHA1208.1
-
-Dolan, B., S. A. Rutledge, S. Lim, V. Chandrasekar, and M. Thurai, 2013: A
-robust C-band hydrometeor identification algorithm and application to a
-long-term polarimetric radar dataset. *J. Appl. Meteor. Climatol.*, **52**
-(9), 2162-2186, https://doi.org/10.1175/JAMC-D-12-0275.1
-
-Thompson, E. J., S. A. Rutledge, B. Dolan, V. Chandrasekar, and B. L.
-Cheong, 2014: A dual-polarization radar hydrometeor classification algorithm
-for winter precipitation. *J. Atmos. Oceanic Technol.*, **31** (7),
-1457-1481, https://doi.org/10.1175/JTECH-D-13-00119.1
+.. [1] Park, H. S., A. V. Ryzhkov, D. S. Zrnić, and K.-E. Kim, 2009: The
+   hydrometeor classification algorithm for the polarimetric WSR-88D:
+   Description and application to an MCS. *Wea. Forecasting*, **24** (3),
+   730-748, https://doi.org/10.1175/2008WAF2222205.1
+.. [2] Dolan, B., and S. A. Rutledge, 2009: A theory-based hydrometeor
+   identification algorithm for X-band polarimetric radars. *J. Atmos.
+   Oceanic Technol.*, **26** (10), 2071-2088,
+   https://doi.org/10.1175/2009JTECHA1208.1
+.. [3] Dolan, B., S. A. Rutledge, S. Lim, V. Chandrasekar, and M. Thurai,
+   2013: A robust C-band hydrometeor identification algorithm and
+   application to a long-term polarimetric radar dataset. *J. Appl. Meteor.
+   Climatol.*, **52** (9), 2162-2186,
+   https://doi.org/10.1175/JAMC-D-12-0275.1
+.. [4] Thompson, E. J., S. A. Rutledge, B. Dolan, V. Chandrasekar, and B. L.
+   Cheong, 2014: A dual-polarization radar hydrometeor classification
+   algorithm for winter precipitation. *J. Atmos. Oceanic Technol.*,
+   **31** (7), 1457-1481, https://doi.org/10.1175/JTECH-D-13-00119.1
 
 .. autosummary::
    :nosignatures:
@@ -188,8 +229,11 @@ def _zfunc(sel, z):
 # Published membership functions
 # --------------------------------------------------------------------------
 
-# Park et al. (2009), Table 1 (trapezoid corners x1-x4, a corner is a number
-# or (offset, "f1".."g2")) and Table 2 (weights of Z, ZDR, rhohv, LKdp).
+# Park et al. (2009), Table 1 (p. 733; trapezoid corners x1-x4, a corner is a
+# number or (offset, "f1".."g2")) and Table 2 (p. 734; weights of Z, ZDR, rhohv,
+# LKdp). Only the rows of the eight meteorological classes and the four
+# variables are used; the GC/AP and BS classes and the SD(Z), SD(PhiDP)
+# columns are not. All numbers checked against the paper.
 _P = "f1", "f2", "f3", "g1", "g2"
 _PARK = [
     # abbr, name, Z, ZDR, RHOHV, LKdp, weights (Z, ZDR, RHOHV, LKdp)
@@ -218,7 +262,10 @@ _PARK = [
      (0.85, 0.90, 1.00, 1.01), (-10, -4, (0, "g1"), (1, "g1")),
      (1.0, 0.8, 0.6, 1.0)),
 ]  # fmt: skip
-# Table 3: hard thresholds (class, variable, ">" or "<", threshold)
+# Park et al. (2009), Table 3 (p. 737): hard thresholds (class, variable, ">"
+# or "<", threshold). The GC/AP (V > 1 m/s) and BS (rhohv > 0.97) rules are not
+# used; the paper prints the GR rule as "<10 Z or >60 dBZ" and it is read as
+# 10 dBZ.
 _PARK_RULES = [
     ("DS", "ZDR", ">", 2.0),
     ("WS", "Z", "<", 20.0),
@@ -231,7 +278,8 @@ _PARK_RULES = [
     ("HR", "Z", "<", 30.0),
     ("RH", "Z", "<", 40.0),
 ]
-# Eq. (24): classes allowed by position of the beam relative to the
+# Park et al. (2009), Eq. (24), p. 736 (GC/AP and BS left out): classes
+# allowed by position of the beam relative to the
 # melting layer (beam below / centre below bottom / centre in the layer /
 # centre above top, lower edge below / beam above).
 _PARK_ZONES = [
@@ -242,8 +290,9 @@ _PARK_ZONES = [
     ("DS", "CR", "GR", "RH"),
 ]
 
-# Dolan et al. (2013), Table A2: (m, a, b) of Z, ZDR, KDP, rhohv, T [degC].
-# Big drops T: half-width 51 instead of the 21 printed (see module notes).
+# Dolan et al. (2013), Table A2 (p. 2183): (m, a, b) of Z, ZDR, KDP, rhohv,
+# T [degC] (every entry checked against the rendered table). Big drops T: half-width 51
+# instead of the 21 printed (deviation, see module notes).
 _DOLAN_C = [
     ("DZ", "drizzle", (1.75, 29, 10.0), (0.46, 0.46, 5.0), (0.03, 0.03, 2.0),
      (1.0, 0.018, 3.0), (40.0, 41.0, 50.0)),
@@ -266,11 +315,15 @@ _DOLAN_C = [
     ("VI", "vertically_aligned_ice", (-1.0, 25.0, 20.0), (-0.90, 0.9, 10.0),
      (-0.75, 0.75, 30.0), (0.975, 0.022, 3.0), (-50.0, 50.0, 25.0)),
 ]  # fmt: skip
-# Dolan et al. (2013), Eq. (8): weights of ZDR, KDP and rhohv.
+# Dolan et al. (2013), Eq. (8), p. 2167: weights of ZDR, KDP and rhohv
+# ("subjectively determined"). Used for ALL bands, including X and S band where
+# Dolan and Rutledge (2009) used an additive sum with other weights (Zh 1.5,
+# Kdp 1.0, T 0.5, Zdr 0.4, rhohv 0.2, Sect. 3b, p. 2081).
 _DOLAN_WEIGHTS = {"ZDR": 0.8, "KDP": 1.0, "RHOHV": 0.1}
 
-# Dolan and Rutledge (2009), Tables 3-9: (min, max) of the X-band (XMBF) and
-# S-band (SMBF) membership functions of Z, ZDR, KDP and rhohv.
+# Dolan and Rutledge (2009), Tables 3-9 (pp. 2078-2079): (min, max) of the
+# X-band (XMBF) and S-band (SMBF) membership functions of Z, ZDR, KDP and
+# rhohv (the "XMBF" and "SMBF" rows).
 _DOLAN_RANGES = {
     "X": {
         "DZ": ((-27, 31), (0.0, 0.9), (0.0, 0.06), (0.985, 1.0)),
@@ -293,7 +346,9 @@ _DOLAN_RANGES = {
 }
 _DOLAN_2009_CLASSES = ("DZ", "RN", "AG", "CR", "LDG", "HDG", "VI")
 
-# Thompson et al. (2014), Table 5: per class the weight, b, m, a of each
+# Thompson et al. (2014), Table 5 (p. 1470; every entry checked against the
+# rendered table, except the printed wet snow ZDR row, see the module notes):
+# per class the weight, b, m, a of each
 # variable (KDP m, a per band); group 0: melting-layer detection, 1: below,
 # 2: above the melting layer.
 _THOMPSON = [
@@ -324,7 +379,9 @@ _THOMPSON = [
         "Z": (0.16, 5, 16, 17), "ZDR": (0.28, 15, 0.5, 1.5),
         "RHOHV": (0.56, 10, 0.96, 0.06)}),
 ]  # fmt: skip
-_THOMPSON_STATS_RANGE = (5000.0, 35000.0)  # wet snow gates for ML statistics
+# wet snow gates for the melting-layer statistics: 5-35 km, Thompson et al.
+# (2014), p. 1466
+_THOMPSON_STATS_RANGE = (5000.0, 35000.0)
 
 
 def _empty_table(nc):
@@ -473,6 +530,32 @@ def hid_classes(method="auto", band="S"):
         Class code (as in the ``HID`` output; 0 is unclassified),
         abbreviation and name.
 
+    References
+    ----------
+    The classes are those of Park et al. (2009) [1] for ``"park"`` (Table 1,
+    p. 733), of Dolan et al. (2013) [3] for ``"dolan"`` at C band (Table A2,
+    p. 2183) and of Dolan and Rutledge (2009) [2] for ``"dolan"`` at X and S
+    band (Tables 3-9, pp. 2078-2079), and of Thompson et al. (2014) [4] for
+    ``"thompson"`` (Table 5, p. 1470).
+
+    .. [1] Park, H. S., A. V. Ryzhkov, D. S. Zrnić, and K.-E. Kim, 2009: The
+       hydrometeor classification algorithm for the polarimetric WSR-88D:
+       Description and application to an MCS. *Wea. Forecasting*, **24** (3),
+       730-748, https://doi.org/10.1175/2008WAF2222205.1
+    .. [2] Dolan, B., and S. A. Rutledge, 2009: A theory-based hydrometeor
+       identification algorithm for X-band polarimetric radars. *J. Atmos.
+       Oceanic Technol.*, **26** (10), 2071-2088,
+       https://doi.org/10.1175/2009JTECHA1208.1
+    .. [3] Dolan, B., S. A. Rutledge, S. Lim, V. Chandrasekar, and M. Thurai,
+       2013: A robust C-band hydrometeor identification algorithm and
+       application to a long-term polarimetric radar dataset. *J. Appl.
+       Meteor. Climatol.*, **52** (9), 2162-2186,
+       https://doi.org/10.1175/JAMC-D-12-0275.1
+    .. [4] Thompson, E. J., S. A. Rutledge, B. Dolan, V. Chandrasekar, and B.
+       L. Cheong, 2014: A dual-polarization radar hydrometeor classification
+       algorithm for winter precipitation. *J. Atmos. Oceanic Technol.*,
+       **31** (7), 1457-1481, https://doi.org/10.1175/JTECH-D-13-00119.1
+
     Examples
     --------
     >>> from radarx.retrieve import hid_classes
@@ -539,6 +622,14 @@ def _score_numpy(t, c, x, q):
 
 
 def _confidence_numpy(phidp, rho, block):
+    """Park et al. (2009) confidence vector Q for (Z, ZDR, rhohv, KDP, T).
+
+    Q_Z = exp(-0.69 [(PhiDP / 250)^2 + (a / 50)^2]) (Eq. 14), Q_ZDR adds
+    ((1 - rhohv) / 0.2)^2 (Eq. 15), Q_rhohv and Q_KDP keep that term
+    (Eqs. 16 and 17), with the thresholds of Eq. 25 and the rhohv term
+    switched off below 0.8 (Eq. 23). The non-uniform beam filling and SNR
+    terms of the paper are not included; Q of the temperature is 1.
+    """
     fphi = np.where(np.isnan(phidp), 0.0, (phidp / 250.0) ** 2)
     fblk = np.where(np.isnan(block), 0.0, (block / 50.0) ** 2)
     with np.errstate(invalid="ignore"):
@@ -1121,10 +1212,13 @@ def hid(
     band : {"S", "C", "X"}, optional
         Radar band. Default ``"S"``.
     method : {"auto", "park", "dolan", "thompson"}, optional
-        ``"auto"`` (default) uses ``"park"`` (Park et al. 2009) at S band
-        and ``"dolan"`` (Dolan and Rutledge 2009; Dolan et al. 2013) at C and
-        X band. ``"thompson"`` is the winter classification of Thompson et al.
-        (2014). See :mod:`radarx.retrieve.hid`.
+        ``"auto"`` (default) uses ``"park"`` (Park et al. 2009 [1]) at S band
+        and ``"dolan"`` at C and X band: the membership functions of Dolan et
+        al. (2013) [3] at C band, and the variable ranges of Dolan and
+        Rutledge (2009) [2] at X and S band, **both with the aggregation of
+        Dolan et al. (2013)** and not the additive weighted sum of the 2009
+        paper (see :mod:`radarx.retrieve.hid`). ``"thompson"`` is the winter
+        classification of Thompson et al. (2014) [4].
     dbzh, zdr, kdp, rhohv, phidp : str, optional
         Field names of the reflectivity (dBZ), differential reflectivity
         (dB), specific differential phase (°/km), copolar correlation
@@ -1154,15 +1248,19 @@ def hid(
         used by the Park method. Default: from ``temperature``.
     ml_thickness : float, optional
         Park method: depth (m) of the melting layer below its top when it is
-        derived from ``temperature``. Default 500.
+        derived from ``temperature``. Default 500 (radarx choice, not a value
+        of Park et al. 2009 [1]).
     beamwidth : float, optional
         Half-power beam width (degrees) for the beam extent relative to the
-        melting layer (Park method). Default 1.
+        melting layer (Park method, Fig. 2 and Eq. 24 of [1]). Default 1
+        (radarx choice, about the WSR-88D beam width).
     ml_gates : (int, int), optional
         Thompson method: number of wet snow gates for partial and complete
-        melting. Default ``(100, 10000)``; depends on the radar resolution.
+        melting. Default ``(100, 10000)``, the values of Thompson et al.
+        (2014) [4] (p. 1466); they depend on the radar resolution.
     quality : bool, optional
-        Park method: apply the confidence vector. Default True.
+        Park method: apply the confidence vector (Eqs. 14-17 of [1], without
+        the beam filling and SNR terms). Default True.
     scores : bool, optional
         Also return the scores of all classes (``HID_scores``; one float32
         value per class and gate). Default True.
@@ -1193,28 +1291,33 @@ def hid(
     ImportError
         If ``engine="compiled"`` and the compiled kernel is not available.
 
+    Notes
+    -----
+    The ``"dolan"`` method at X and S band uses the variable ranges of Dolan
+    and Rutledge (2009) [2] with the hybrid aggregation of Dolan et al. (2013)
+    [3], not the 2009 additive aggregation; see :mod:`radarx.retrieve.hid`
+    for the differences from every paper, the checked table and equation
+    numbers, and the values that are radarx choices.
+
     References
     ----------
-    Park, H. S., A. V. Ryzhkov, D. S. Zrnić, and K.-E. Kim, 2009: The
-    hydrometeor classification algorithm for the polarimetric WSR-88D:
-    Description and application to an MCS. *Wea. Forecasting*, **24** (3),
-    730-748, https://doi.org/10.1175/2008WAF2222205.1
-
-    Dolan, B., and S. A. Rutledge, 2009: A theory-based hydrometeor
-    identification algorithm for X-band polarimetric radars. *J. Atmos.
-    Oceanic Technol.*, **26** (10), 2071-2088,
-    https://doi.org/10.1175/2009JTECHA1208.1
-
-    Dolan, B., S. A. Rutledge, S. Lim, V. Chandrasekar, and M. Thurai,
-    2013: A robust C-band hydrometeor identification algorithm and
-    application to a long-term polarimetric radar dataset. *J. Appl.
-    Meteor. Climatol.*, **52** (9), 2162-2186,
-    https://doi.org/10.1175/JAMC-D-12-0275.1
-
-    Thompson, E. J., S. A. Rutledge, B. Dolan, V. Chandrasekar, and B. L.
-    Cheong, 2014: A dual-polarization radar hydrometeor classification
-    algorithm for winter precipitation. *J. Atmos. Oceanic Technol.*,
-    **31** (7), 1457-1481, https://doi.org/10.1175/JTECH-D-13-00119.1
+    .. [1] Park, H. S., A. V. Ryzhkov, D. S. Zrnić, and K.-E. Kim, 2009: The
+       hydrometeor classification algorithm for the polarimetric WSR-88D:
+       Description and application to an MCS. *Wea. Forecasting*, **24** (3),
+       730-748, https://doi.org/10.1175/2008WAF2222205.1
+    .. [2] Dolan, B., and S. A. Rutledge, 2009: A theory-based hydrometeor
+       identification algorithm for X-band polarimetric radars. *J. Atmos.
+       Oceanic Technol.*, **26** (10), 2071-2088,
+       https://doi.org/10.1175/2009JTECHA1208.1
+    .. [3] Dolan, B., S. A. Rutledge, S. Lim, V. Chandrasekar, and M. Thurai,
+       2013: A robust C-band hydrometeor identification algorithm and
+       application to a long-term polarimetric radar dataset. *J. Appl.
+       Meteor. Climatol.*, **52** (9), 2162-2186,
+       https://doi.org/10.1175/JAMC-D-12-0275.1
+    .. [4] Thompson, E. J., S. A. Rutledge, B. Dolan, V. Chandrasekar, and B.
+       L. Cheong, 2014: A dual-polarization radar hydrometeor classification
+       algorithm for winter precipitation. *J. Atmos. Oceanic Technol.*,
+       **31** (7), 1457-1481, https://doi.org/10.1175/JTECH-D-13-00119.1
 
     Examples
     --------

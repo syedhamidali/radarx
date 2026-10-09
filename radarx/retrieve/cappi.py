@@ -6,11 +6,46 @@
 CAPPI Retrieval
 ===============
 
+A constant-altitude plan position indicator (CAPPI) is a horizontal slice of
+a radar volume at a fixed height above sea level. :func:`create_cappi` offers
+three ways to build one from the sweeps of a georeferenced volume:
+
+- ``"cartesian_idw"``: three-dimensional inverse-distance weighting of the
+  gates around every point of a regular ``x``/``y`` grid (Shepard 1968 [1]).
+  The weights are ``1 / d**power`` with ``power=2``; the distance ``d`` is
+  measured after multiplying the vertical coordinate by ``vertical_scale=3``;
+  the ``k=16`` nearest gates within 5 km (in the scaled space) are used, at
+  least ``min_neighbors=3`` are needed, and only gates within
+  ``vertical_tolerance`` (default 3000 m) of the requested height are
+  considered.
+- ``"polar_vertical_interpolation"``: linear interpolation in height, gate
+  by gate on the ``azimuth``/``range`` grid of the first sweep, between the
+  sweeps of the volume.
+- ``"height_window_composite"``: for every gate of the reference grid the
+  value of the sweep whose gate height is closest to the requested height
+  within ``vertical_tolerance`` (default 500 m); with ``apply_filter`` a
+  simple gate filter is applied first.
+
+None of these is an implementation of a published CAPPI algorithm: apart
+from the inverse-distance weighting concept of Shepard (1968), which is
+cited for the weighting only, the methods and **every default above and
+below** (``k``, search radius, ``power``, ``vertical_scale``,
+``min_neighbors``, the two default vertical tolerances, the 50-gate window,
+the threshold rule and the -10 to 75 dBZ limits of the gate filter) are
+radarx's own choices, not values from a paper, and have not been tuned
+against a reference.
+
 .. autosummary::
    :nosignatures:
    :toctree: generated/
 
    {}
+
+References
+----------
+.. [1] Shepard, D., 1968: A two-dimensional interpolation function for
+   irregularly-spaced data. *Proc. 23rd ACM National Conference*, ACM
+   Press, 517-524, https://doi.org/10.1145/800186.810616
 """
 
 from __future__ import annotations
@@ -256,6 +291,10 @@ def _idw_interpolate_to_cappi(
 ):
     """
     Interpolate one field to a constant-z plane using 3D anisotropic IDW.
+
+    Inverse-distance weighting after Shepard (1968), https://doi.org/10.1145/800186.810616;
+    the defaults (k, search radius, power, vertical scale, min_neighbors) are
+    radarx's own choices, not values from the paper.
     """
     x_grid, y_grid = np.meshgrid(x_tgt, y_tgt)
     z_grid = np.full_like(x_grid, float(z_tgt), dtype=float)
@@ -335,6 +374,10 @@ def _apply_velocity_texture_gate_filter(
     """
     Apply simple gate-level quality control using Doppler-velocity texture and
     reflectivity limits.
+
+    A radarx heuristic, not a published method: the default velocity texture
+    threshold is var + std of the texture field and the reflectivity limits
+    are -10 and 75 dBZ (radarx choices).
     """
     filtered = ds.copy()
 
@@ -966,6 +1009,22 @@ def create_cappi(
     xarray.Dataset
         CAPPI dataset in either Cartesian ``(y, x)`` or native polar
         ``(azimuth, range)`` geometry, depending on the selected method.
+
+    Notes
+    -----
+    The three methods are radarx's own constructions and not implementations
+    of a published CAPPI algorithm; only the inverse-distance weighting of
+    ``"cartesian_idw"`` follows a published concept (Shepard 1968 [1]). All
+    default values (the IDW neighbour count 16, search radius 5000 m, power
+    2, vertical scale 3, at least 3 neighbours, vertical tolerances of
+    3000 m and 500 m, and the gate filter with a 50-gate velocity texture
+    window and reflectivity limits of -10 and 75 dBZ) are radarx choices.
+
+    References
+    ----------
+    .. [1] Shepard, D., 1968: A two-dimensional interpolation function for
+       irregularly-spaced data. *Proc. 23rd ACM National Conference*, ACM
+       Press, 517-524, https://doi.org/10.1145/800186.810616
     """
     method = _normalize_cappi_method(method)
     vertical_tolerance = _resolve_vertical_tolerance(method, vertical_tolerance)

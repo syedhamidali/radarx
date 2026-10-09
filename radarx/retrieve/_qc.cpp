@@ -10,8 +10,11 @@
 //    every quantity along the ray (echo, rhohv, zdr, zdr^2, cos/sin phidp,
 //    squared reflectivity differences, spin changes); then per gate the
 //    window features, their trapezoidal memberships and the weighted mean
-//    score (fuzzy logic after Gourley et al. 2007 and Krause 2016; texture
-//    and spin of the reflectivity after Steiner and Smith 2002);
+//    score (weighted-mean fuzzy aggregation in the form of Krause 2016, p.
+//    1876; the membership corners, weights and threshold are radarx's own and
+//    differ from Gourley et al. 2007 and Krause 2016, see the Notes of
+//    echo_mask in qc.py; texture and spin of the reflectivity after Steiner
+//    and Smith 2002, not checked against the paper);
 // 2. per ray, the mean score over the 3 x 3 neighbouring gates and the
 //    meteorological / non-meteorological decision;
 // 3. per sweep (in parallel), 8-connected regions of meteorological gates by

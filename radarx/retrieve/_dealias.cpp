@@ -1,13 +1,16 @@
 // Copyright (c) 2024-2026, Radarx developers.
 // Distributed under the MIT License. See LICENSE for more info.
 //
-// Region-based Doppler velocity dealiasing kernel for PPI sweeps.
+// Region-based Doppler velocity dealiasing kernel for PPI sweeps. The method
+// is radarx's own combination of published concepts (cited below; none of the
+// papers was available to check the details), not an implementation of one
+// paper. Thresholds and limits are radarx choices.
 //
 // region_folds (all sweeps of a volume in one call, in parallel):
 // 1. Segmentation: neighbouring gates (along the ray and between adjacent
 //    rays) whose velocities differ by less than a threshold are joined with a
 //    union-find. Within a region the field is continuous, so all its gates
-//    share one Nyquist fold (Jing and Wiener 1993).
+//    share one Nyquist fold.
 // 2. Region adjacency: for every pair of touching regions (also across
 //    short gaps along and across rays) the number of boundary gate pairs
 //    and the summed velocity jump across the boundary (in units of the
@@ -16,9 +19,11 @@
 //    then by length; Kruskal with an offset-carrying union-find) gives an
 //    initial integer fold per region;
 //    integer coordinate descent then minimises the summed squared velocity
-//    jump over all region boundaries (Jing and Wiener's least-squares
-//    criterion, restricted to integers), alternating single-region moves
-//    with moves of whole blocks of consistently joined regions, so that
+//    jump over all region boundaries (a least-squares criterion attributed to
+//    Jing and Wiener 1993, paper not checked, restricted to integers and
+//    solved here by radarx's own coordinate descent), alternating
+//    single-region moves with moves of whole blocks of consistently joined
+//    regions, so that
 //    groups that are offset together are corrected as well.
 //
 // absolute_folds:

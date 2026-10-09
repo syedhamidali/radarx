@@ -23,6 +23,9 @@
 //       with the confidence vector Q of Park et al. (2009) if requested;
 //   hybrid (Dolan et al. 2013, Eq. 8)
 //       A = P_T P_Z (W_zdr P_zdr + W_kdp P_kdp + W_rho P_rho) / (sum of W).
+//       Used for every band of the "dolan" method, also X and S band, where
+//       Dolan and Rutledge (2009, Sect. 3a) use a purely additive weighted
+//       sum that is not implemented (see the module docstring of hid.py).
 // The winter mode (Thompson et al. 2014) adds a melting-layer detection step
 // and a second pass, see classify().
 //
