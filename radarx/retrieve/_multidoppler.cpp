@@ -3,6 +3,15 @@
 //
 // Multi-Doppler variational wind retrieval: cost function and exact gradient.
 //
+// The structure (radial-velocity misfit, anelastic mass continuity as a weak
+// constraint, smoothness, optional vertical vorticity equation) follows the
+// variational dual-Doppler analyses of Gao et al. (1999, Mon. Wea. Rev. 127,
+// 2128-2142), Shapiro et al. (2009, J. Atmos. Oceanic Technol. 26, 2089-2106)
+// and Potvin et al. (2012, J. Atmos. Oceanic Technol. 29, 32-49). The papers'
+// equations were not checked term by term; the scalings (h, h^2/U), the
+// background term, the second-difference smoothness and every weight are
+// radarx's own formulation.
+//
 // The state is (u, v, w) on a regular (z, y, x) grid. The cost is
 //
 //   J = Jo + Jm + Js + Jb + Jv

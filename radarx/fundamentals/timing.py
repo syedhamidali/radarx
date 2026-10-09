@@ -4,9 +4,20 @@ Timing Calculations
 
 Functions for radar timing-related calculations: PRF, duty cycle, blind range, etc.
 
+Sources: duty cycle ``f = tau * PRF`` from Rinehart [2]_ (Chapter 13,
+p. 193); unambiguous range and velocity from Doviak and Zrnic [1]_,
+Eqs. (3.40a) and (3.40b), pp. 60-61. The previous pointers to "Doviak and
+Zrnic (1993), Eq. 3.3.1-3.3.4, Section 3.3, Eq. 6.3.5" do not exist in the
+2nd edition (1993) on disk and were removed.
+
 References
 ----------
-- Doviak, R. J., & Zrnić, D. S. (1993). Doppler Radar and Weather Observations. Academic Press.
+.. [1] Doviak, R. J., and D. S. Zrnic, 1993: *Doppler Radar and Weather
+       Observations*, 2nd ed. Academic Press, ISBN 0-12-221422-6 (book, no
+       DOI).
+.. [2] Rinehart, R. E., 1991: *Radar for Meteorologists*, 2nd ed. (3rd
+       printing 1994). Rinehart Publications, Grand Forks, ND, ISBN
+       0-9608700-7-5 (book, no DOI).
 
 .. autosummary::
    :nosignatures:
@@ -33,6 +44,9 @@ def compute_prf(pulse_width, duty_cycle):
     """
     Compute Pulse Repetition Frequency (PRF).
 
+    ``PRF = f / tau``: the duty cycle is ``f = tau * PRF`` (Rinehart [1]_,
+    Chapter 13, p. 193), solved for the PRF.
+
     Parameters
     ----------
     pulse_width : float
@@ -47,7 +61,9 @@ def compute_prf(pulse_width, duty_cycle):
 
     References
     ----------
-    - Doviak and Zrnić (1993), Eq. 3.3.2
+    .. [1] Rinehart, R. E., 1991: *Radar for Meteorologists*, 2nd ed. (3rd
+           printing 1994). Rinehart Publications, Grand Forks, ND, ISBN
+           0-9608700-7-5 (book, no DOI).
     """
     return duty_cycle / pulse_width
 
@@ -55,6 +71,9 @@ def compute_prf(pulse_width, duty_cycle):
 def compute_duty_cycle(prf, pulse_width):
     """
     Compute the duty cycle of the radar.
+
+    ``f = tau * PRF``, the fraction of time the transmitter is on, Rinehart
+    [1]_ (Chapter 13, p. 193).
 
     Parameters
     ----------
@@ -70,7 +89,9 @@ def compute_duty_cycle(prf, pulse_width):
 
     References
     ----------
-    - Doviak and Zrnić (1993), Eq. 3.3.3
+    .. [1] Rinehart, R. E., 1991: *Radar for Meteorologists*, 2nd ed. (3rd
+           printing 1994). Rinehart Publications, Grand Forks, ND, ISBN
+           0-9608700-7-5 (book, no DOI).
     """
     return prf * pulse_width
 
@@ -78,6 +99,11 @@ def compute_duty_cycle(prf, pulse_width):
 def compute_blind_range(pulse_width):
     """
     Compute blind range (minimum detectable range) caused by transmission pulse.
+
+    ``c * tau / 2``: the range an echo travels while the pulse of width
+    ``tau`` is being transmitted. Elementary geometry (round-trip delay
+    ``2 r / c``); no textbook equation is claimed. Receiver recovery time is
+    not included, so the real blind range is larger.
 
     Parameters
     ----------
@@ -92,10 +118,6 @@ def compute_blind_range(pulse_width):
     Notes
     -----
     Targets within this range cannot be detected because the receiver is turned off.
-
-    References
-    ----------
-    - Doviak and Zrnić (1993), Section 3.3
     """
     return C * pulse_width / 2
 
@@ -103,6 +125,8 @@ def compute_blind_range(pulse_width):
 def compute_max_unambiguous_range(prf):
     """
     Compute the maximum unambiguous range.
+
+    ``r_a = c T_s / 2 = c / (2 PRF)``, Eq. (3.40a) of [1]_ (p. 60).
 
     Parameters
     ----------
@@ -116,7 +140,9 @@ def compute_max_unambiguous_range(prf):
 
     References
     ----------
-    - Doviak and Zrnić (1993), Eq. 3.3.4
+    .. [1] Doviak, R. J., and D. S. Zrnic, 1993: *Doppler Radar and Weather
+           Observations*, 2nd ed. Academic Press, ISBN 0-12-221422-6 (book, no
+           DOI).
     """
     return C / (2 * prf)
 
@@ -124,6 +150,9 @@ def compute_max_unambiguous_range(prf):
 def compute_max_unambiguous_velocity(prf, wavelength):
     """
     Compute the maximum unambiguous velocity.
+
+    ``v_a = lambda * PRF / 4``, Eq. (3.40b) of [1]_ (p. 61); duplicate of
+    :func:`radarx.fundamentals.doppler.nyquist_velocity`.
 
     Parameters
     ----------
@@ -139,7 +168,9 @@ def compute_max_unambiguous_velocity(prf, wavelength):
 
     References
     ----------
-    - Doviak and Zrnić (1993), Eq. 6.3.5
+    .. [1] Doviak, R. J., and D. S. Zrnic, 1993: *Doppler Radar and Weather
+           Observations*, 2nd ed. Academic Press, ISBN 0-12-221422-6 (book, no
+           DOI).
     """
     return prf * wavelength / 4
 
@@ -147,6 +178,9 @@ def compute_max_unambiguous_velocity(prf, wavelength):
 def compute_pulse_repetition_interval(prf):
     """
     Compute Pulse Repetition Interval (PRI) from PRF.
+
+    ``T_s = 1 / PRF`` (definition of the pulse repetition time ``T_s`` used
+    in Eqs. 3.40a,b of [1]_).
 
     Parameters
     ----------
@@ -160,6 +194,8 @@ def compute_pulse_repetition_interval(prf):
 
     References
     ----------
-    - Doviak and Zrnić (1993), Eq. 3.3.1
+    .. [1] Doviak, R. J., and D. S. Zrnic, 1993: *Doppler Radar and Weather
+           Observations*, 2nd ed. Academic Press, ISBN 0-12-221422-6 (book, no
+           DOI).
     """
     return 1.0 / prf

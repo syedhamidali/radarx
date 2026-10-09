@@ -12,7 +12,8 @@
 // is split over (set, row) pairs handed out to threads by an atomic counter.
 //
 // order 1: bilinear interpolation from the four surrounding cells.
-// order 3: cubic convolution (Keys 1981, a = -1/2) from the 4 x 4 surrounding
+// order 3: cubic convolution (Keys 1981, IEEE Trans. Acoust. Speech Signal
+//          Process. 29, 1153-1160, a = -1/2; equations not checked) from the 4 x 4 surrounding
 //          cells, clipped to the range of the four nearest valid cells so it
 //          cannot create new extremes.
 //

@@ -27,9 +27,20 @@ pass of a compiled C++ kernel (with an identical NumPy implementation as a
 fallback and test oracle). Without the vorticity term the cost is quadratic
 and is minimised by conjugate gradients preconditioned with the inverse of
 the smoothness operator in a cosine basis; with it, by L-BFGS-B. Both run
-first on coarser grids. The vertical velocity at the lower boundary (and optionally at the top
-of the grid or above the echo top) is held at zero by leaving it out of the
-control vector.
+first on coarser grids. The vertical velocity at the lowest grid level (and
+optionally at the top of the grid or above the echo top) is held at zero by
+leaving it out of the control vector; see the Notes of :func:`multi_doppler`
+for what this assumes about the height of the lowest level.
+
+Provenance. The overall formulation, a weak-constraint variational analysis of
+the radial velocities of two or more radars with anelastic mass continuity and
+smoothness penalties, is that of Gao et al. (1999); the optional vertical
+vorticity term follows Shapiro et al. (2009) and Potvin et al. (2012). The
+cost-function terms are written out in :func:`multi_doppler`, with what is and
+is not taken from those papers. The dimensionless weights, the grid scaling of
+each term, the background term, the cosine-basis preconditioner and the
+coarse-to-fine minimisation are radarx's own and are not values or algorithms
+from the cited papers.
 
 The input is a gridded :class:`xarray.Dataset` with a ``radar`` dimension:
 per-radar radial velocity (``VRADH``) and reflectivity on ``(radar, z, y,
@@ -65,11 +76,22 @@ except ImportError:  # pragma: no cover - depends on the build
     _multidoppler = None
     HAS_COMPILED_KERNEL = False
 
+# Earth radius [m] of the beam geometry (multiplied by 4/3 below): the commonly
+# used mean radius, a radarx choice (Doviak and Zrnic 1993, Eq. 2.28, only
+# require the radius and k_e = 4/3).
 EARTH_RADIUS = 6371000.0
-OMEGA = 7.292115e-5  # Earth's angular velocity [s-1]
+# Earth's angular velocity [s-1]: the nominal value 7.292115e-5 rad s-1 (the
+# WGS84/IERS rotation rate), used in the Coriolis parameter f = 2 OMEGA sin(lat)
+# of the vorticity term; it is not given by the cited vorticity papers.
+OMEGA = 7.292115e-5
 TERMS = ("observation", "mass_continuity", "smoothness", "background", "vorticity")
-_VREF = 10.0  # velocity scale of the vorticity residual [m s-1]
-_PRECONDITIONER_LAMBDA = 0.05  # observation share of the preconditioner
+# Velocity scale U [m s-1] that makes the vorticity residual a squared velocity,
+# (h^2 / U) R: a radarx choice, not from Shapiro et al. (2009) or Potvin et al.
+# (2012).
+_VREF = 10.0
+# Share of the observation weight in the preconditioner (radarx choice that
+# only affects the speed of convergence, not the minimiser).
+_PRECONDITIONER_LAMBDA = 0.05
 
 
 def _use_compiled(engine):
@@ -266,6 +288,17 @@ def fall_speed(
     1973). The factor :math:`(\\rho_0 / \\rho)^{0.4}` corrects for the lower
     air density aloft (Foote and du Toit 1969 [2]_).
 
+    Verified pointers. The rain relation with its density factor is given in
+    Doviak and Zrnić (1993) [3]_, Eq. 9.2 (p. 289) as the empirical expression
+    of Atlas et al. (1973); the same book gives the density factor
+    :math:`(\\rho_0/\\rho)^{0.4}` in Eq. 8.5 (p. 217) and notes that Eq. 9.2
+    holds to within about 1 m s-1 for liquid water but can be wrong by several
+    m s-1 in hail. The snow coefficients (0.817, 0.063) and the table/equation
+    of Atlas et al. (1973) they come from were not checked against that paper
+    (not on disk). The cap of the reflectivity at 70 dBZ before applying the
+    relations and the default reference density of 1.2 kg m-3 are radarx
+    choices.
+
     Parameters
     ----------
     reflectivity : xarray.DataArray
@@ -295,6 +328,9 @@ def fall_speed(
     .. [2] Foote, G. B., and P. S. du Toit, 1969: Terminal velocity of
        raindrops aloft. *J. Appl. Meteor.*, **8**, 249-253,
        https://doi.org/10.1175/1520-0450(1969)008<0249:TVORA>2.0.CO;2
+    .. [3] Doviak, R. J., and D. S. Zrnić, 1993: *Doppler Radar and Weather
+       Observations*, 2nd ed. Academic Press, ISBN 0-12-221422-6 (book, no
+       DOI).
     """
     dbz = reflectivity
     z_lin = 10.0 ** (dbz.clip(max=70.0) / 10.0)
@@ -313,7 +349,15 @@ def fall_speed(
 
 
 def _beam_angles(dx, dy, z, radar_altitude, earth_radius=EARTH_RADIUS):
-    """Azimuth and local beam elevation (deg) seen from a radar (4/3 Earth)."""
+    """
+    Azimuth and local beam elevation (deg) seen from a radar (4/3 Earth).
+
+    The effective Earth radius model of Doviak and Zrnic (1993), Eqs.
+    2.28b-d (pp. 21-22), with k_e = 4/3, solved for the range ``r`` from the
+    law of cosines and for the antenna elevation from the same triangle; the
+    local elevation adds the central angle ``gamma = s / R``. The algebra is
+    radarx's own.
+    """
     R = earth_radius * 4.0 / 3.0
     s = np.hypot(dx, dy)
     azimuth = np.degrees(np.arctan2(dx, dy)) % 360.0
@@ -333,8 +377,9 @@ def radar_geometry(grid, *, earth_radius=EARTH_RADIUS):
     """
     Beam azimuth and elevation of every radar at every grid cell.
 
-    The beam is a straight line on an Earth of 4/3 its radius. The
-    elevation is the local angle of the beam above the horizon at the grid
+    The beam is a straight line on an Earth of 4/3 its radius (the effective
+    Earth radius model, Doviak and Zrnić 1993 [1]_, Eqs. 2.28b-d, pp.
+    21-22). The elevation is the local angle of the beam above the horizon at the grid
     cell (the antenna elevation plus the angle the beam has travelled around
     the Earth), so that the radial velocity is :math:`u \\cos\\phi \\sin\\alpha
     + v \\cos\\phi \\cos\\alpha + w \\sin\\phi` with ``u``, ``v`` along the grid
@@ -354,6 +399,12 @@ def radar_geometry(grid, *, earth_radius=EARTH_RADIUS):
     xarray.Dataset
         ``grid`` with ``azimuth`` and ``elevation`` on ``(radar, z, y, x)``
         (degrees; azimuth clockwise from the grid ``y`` axis).
+
+    References
+    ----------
+    .. [1] Doviak, R. J., and D. S. Zrnić, 1993: *Doppler Radar and Weather
+       Observations*, 2nd ed. Academic Press, ISBN 0-12-221422-6 (book, no
+       DOI). Eqs. 2.28b-d, pp. 21-22.
     """
     for name in ("radar_x", "radar_y", "radar_altitude"):
         if name not in grid:
@@ -471,6 +522,28 @@ def multi_doppler_input(
         ``radar_x``, ``radar_y``, ``radar_altitude``, ``radar_latitude``,
         ``radar_longitude``, ``radar_name`` and ``time`` (the time of each
         radar's data); plus ``lat``, ``lon`` and ``crs_wkt`` of the grid.
+
+    Notes
+    -----
+    Moving the radars to a common time with ``time`` and ``motion`` is the
+    frame-of-reference correction of Gal-Chen (1982) [1]_ (equations not
+    checked; it assumes a steadily translating pattern, see
+    :func:`radarx.retrieve.advect`). Interpolating the radial velocity from
+    the polar grid can create gridding artifacts that affect the retrieved
+    vertical velocity (Collis et al. 2010 [2]_; see :func:`multi_doppler`).
+    The grid's lowest level determines where ``w = 0`` is imposed (see the
+    Notes of :func:`multi_doppler`).
+
+    References
+    ----------
+    .. [1] Gal-Chen, T., 1982: Errors in fixed and moving frame of references:
+       Applications for conventional and Doppler radar analysis. *J. Atmos.
+       Sci.*, **39**, 2279-2300,
+       https://doi.org/10.1175/1520-0469(1982)039<2279:EIFAMF>2.0.CO;2
+    .. [2] Collis, S., A. Protat, and K.-S. Chung, 2010: The effect of radial
+       velocity gridding artifacts on variationally retrieved vertical
+       velocities. *J. Atmos. Oceanic Technol.*, **27**, 1239-1246,
+       https://doi.org/10.1175/2010JTECHA1402.1
     """
     import pyproj
 
@@ -617,12 +690,28 @@ def _fill_column(a):
 
 
 def _standard_density(z):
-    """Density of a standard atmosphere approximation, 1.2 exp(-z / 10 km)."""
+    """
+    Density of an exponential atmosphere, 1.2 exp(-z / 10 km) kg m-3.
+
+    A radarx approximation (surface density 1.2 kg m-3, scale height 10 km),
+    not the US Standard Atmosphere table; used only when no ``air_density`` is
+    given.
+    """
     return 1.2 * np.exp(-np.asarray(z, dtype=np.float64) / 10000.0)
 
 
 def _w_free(ds, w_boundary, valid_any):
-    """Mask of grid cells where w is a control variable."""
+    """
+    Mask of grid cells where w is a control variable.
+
+    ``"bottom"`` fixes ``w = 0`` at the first level ``z[0]``, whatever its
+    height above the ground (see the Notes of :func:`multi_doppler`);
+    ``"top"`` fixes the last level; ``"echo_top"`` fixes ``w = 0`` from one
+    level above the highest level with an echo (or valid velocity) in each
+    column. These conditions are radarx's implementation of ``w = 0``
+    boundary conditions of the cited analyses; the one-level margin of
+    ``"echo_top"`` is a radarx choice.
+    """
     nz, ny, nx = ds.sizes["z"], ds.sizes["y"], ds.sizes["x"]
     free = np.ones((nz, ny, nx), dtype=bool)
     if isinstance(w_boundary, str):
@@ -771,7 +860,13 @@ def _prepare(
 
 
 def _coarsen_problem(p, factor=2):
-    """The same problem on a grid coarsened by ``factor`` in x and y."""
+    """
+    The same problem on a grid coarsened by ``factor`` in x and y.
+
+    Block means of the observations and weights, with the weights of each term
+    rescaled per unit area (see the comment below). The coarse-to-fine
+    strategy and this rescaling are radarx's own, not from a publication.
+    """
     nz, ny, nx = p["shape"]
     cy, cx = ny // factor, nx // factor
     sy, sx = cy * factor, cx * factor
@@ -845,7 +940,13 @@ def _refine(state, coarse_shape, fine_shape, factor=2):
 def _solve(
     problem, state0, use_compiled, n_threads, max_iterations, tolerance, history
 ):
-    """L-BFGS-B on the control vector (u, v and the free w)."""
+    """
+    L-BFGS-B on the control vector (u, v and the free w).
+
+    SciPy's implementation of Byrd et al. (1995), https://doi.org/10.1137/
+    0916069, and Zhu et al. (1997), https://doi.org/10.1145/279232.279236.
+    ``maxcor=10`` is the SciPy default; ``gtol=1e-10`` is a radarx choice.
+    """
     from scipy.optimize import minimize
 
     free = problem["free"]
@@ -893,7 +994,11 @@ def _spectral_preconditioner(problem):
 
     The second differences of the smoothness term are diagonal in the basis
     of the discrete cosine transform (DCT-II), with eigenvalues
-    :math:`-4 \\sin^2(\\pi k / 2n)`. Dividing by
+    :math:`-4 \\sin^2(\\pi k / 2n)` (the standard DCT-II diagonalisation of the
+    Neumann second difference, Strang 1999, https://doi.org/10.1137/
+    S0036144598336745; equation numbers not checked). The discrete operator
+    of the code is zero in the edge cells, so this is only an approximation
+    and serves as a preconditioner. Dividing by
     :math:`\\lambda + 2 \\sum_d C_{sd}\\, 16 \\sin^4(\\pi k_d / 2 n_d)` removes
     the stiffness of the smoothness penalty, which dominates the condition
     number; :math:`\\lambda` stands for the observation and background terms.
@@ -937,6 +1042,11 @@ def _solve_cg(
     the conjugate direction (no line search). The preconditioner is
     :func:`_spectral_preconditioner`. ``w`` at the fixed boundary cells stays
     zero: the iteration runs on the free cells only.
+
+    The algorithm is the preconditioned conjugate-gradient method of Hestenes
+    and Stiefel (1952), https://doi.org/10.6028/jres.049.044 (preconditioning
+    is a later standard extension; equation numbers not checked). The
+    stopping rule relative to the right-hand side at zero wind is radarx's.
     """
     from scipy.optimize import OptimizeResult
 
@@ -992,6 +1102,10 @@ def _solve_cg(
     return x, res
 
 
+# Default dimensionless weights of the cost terms. These are radarx choices
+# (tuned on synthetic and real cases), not values from Gao et al. (1999),
+# Shapiro et al. (2009) or Potvin et al. (2012), whose terms are scaled
+# differently; see the ``weights`` parameter of multi_doppler.
 DEFAULT_WEIGHTS = {
     "observation": 1.0,
     "mass_continuity": 10.0,
@@ -1025,7 +1139,8 @@ def multi_doppler(
     Retrieve the three-dimensional wind from two or more Doppler radars.
 
     The wind ``(u, v, w)`` on the grid minimises the cost function
-    :math:`J = J_o + J_m + J_s + J_b + J_v` (Gao et al. 1999 [1]_):
+    :math:`J = J_o + J_m + J_s + J_b + J_v` (the structure of Gao et al. 1999
+    [1]_, see the Notes for what is and is not taken from it):
 
     .. math::
 
@@ -1058,7 +1173,8 @@ def multi_doppler(
 
     applied where at least two radars observe. Derivatives are centred
     differences (one-sided at the edges); the smoothness penalty is applied
-    to the second derivatives in each direction (Potvin et al. 2012).
+    to the second derivatives in each direction (a radarx choice of
+    discretisation; Potvin et al. 2012 [3]_ also use smoothness constraints).
 
     The cost and its exact gradient are computed in one fused, multithreaded
     pass of a compiled kernel. Without the vorticity term the cost is
@@ -1091,17 +1207,24 @@ def multi_doppler(
         Field names. Default ``"VRADH"`` and ``"DBZH"``.
     weights : dict, optional
         Overrides of the dimensionless weights ``observation`` (:math:`C_o`,
-        default 1), ``mass_continuity`` (:math:`C_m`, 1), ``smoothness``
-        (:math:`C_s`, 0.5), ``smoothness_vertical`` (:math:`C_{sz}`, default
-        the same as ``smoothness``), ``background`` (:math:`C_b`, 0.01),
-        ``background_w`` (weight of ``w - w_b``, 0) and ``vorticity``
-        (:math:`C_v`, 0, i.e. off).
+        default 1), ``mass_continuity`` (:math:`C_m`, default 10),
+        ``smoothness`` (:math:`C_s`, 0.5), ``smoothness_vertical``
+        (:math:`C_{sz}`, default the same as ``smoothness``), ``background``
+        (:math:`C_b`, 0.001), ``background_w`` (weight of ``w - w_b``, 0) and
+        ``vorticity`` (:math:`C_v`, 0, i.e. off). The defaults are
+        ``DEFAULT_WEIGHTS`` in :mod:`radarx.retrieve.multidoppler`. They are
+        radarx choices: the weights of Gao et al. (1999), Shapiro et al.
+        (2009) and Potvin et al. (2012) belong to differently scaled terms and
+        are not transferable, and results depend strongly on them. Without a
+        ``background``, ``background`` is set to 0.
     fall_speed_correction : bool, optional
         Correct for the precipitation fall speed. Default True.
     w_boundary : str or sequence of str, optional
         Where ``w = 0``: any of ``"bottom"`` (lowest level, default),
         ``"top"`` (highest level) and ``"echo_top"`` (from one level above
         the highest echo in each column). ``None`` for no boundary condition.
+        ``"bottom"`` sets ``w = 0`` at the lowest grid level ``z[0]``
+        whatever its height; see the Notes.
     storm_motion : tuple of float, optional
         ``(u, v)`` of the frame in which the vorticity is steady, m s-1.
     first_guess : xarray.Dataset, optional
@@ -1138,6 +1261,64 @@ def multi_doppler(
         ``(iteration, term)``. ``attrs`` record the weights, iterations,
         convergence message and run time.
 
+    Notes
+    -----
+    What is taken from the literature. Gao et al. (1999) [1]_ pose the
+    retrieval of the three-dimensional wind from the radial velocities of
+    Doppler radars as a variational (weak-constraint) problem; Shapiro et al.
+    (2009) [2]_ and Potvin et al. (2012) [3]_ describe a cost function of the
+    discrepancies between observed and analysed radial winds, errors in the
+    anelastic mass conservation equation, errors in the anelastic vertical
+    vorticity equation and spatial smoothness constraints, as used here. The
+    papers' equations were not available on disk and were not checked term by
+    term: the forms of :math:`J_o`, :math:`J_m`, :math:`J_s`, :math:`J_b` and
+    :math:`J_v` above, the scaling by :math:`h`, :math:`h^2/U` and the grid
+    spacing (so that the weights are dimensionless), the choice of second
+    differences for the smoothness term, the background term :math:`J_b`
+    and all default weights are radarx's own formulation. Unlike Shapiro et
+    al. (2009), who use Taylor's frozen-turbulence hypothesis to shift the
+    analysis winds to the observation times, radarx advects the data to a
+    common time beforehand (:func:`radarx.retrieve.advect`) and treats the
+    vorticity equation as steady in the frame moving with ``storm_motion``.
+    The fall speed correction is described in :func:`fall_speed`.
+
+    Gridding artifacts. The radial velocities enter on a Cartesian grid. Linear
+    interpolation from the polar grid can create periodic artifacts that
+    produce spurious vertical velocities (Collis et al. 2010 [4]_); radarx's
+    cone gridding (:func:`radarx.grid.grid_cones`) does not implement their
+    mixed-order interpolation, so retrieved ``w`` can contain such artifacts.
+
+    Solvers. The conjugate-gradient iteration is that of Hestenes and Stiefel
+    (1952) [5]_ with a preconditioner built on the discrete cosine transform
+    (Strang 1999 [6]_; the second-difference operator is diagonal in that
+    basis except at the edge cells, so the preconditioner is approximate and
+    only changes the speed of convergence, not the minimiser). The vorticity
+    case uses SciPy's L-BFGS-B, an implementation of Byrd et al. (1995) [7]_
+    and Zhu et al. (1997) [8]_. The coarse-to-fine sequence (``levels``, a
+    factor of two in x and y) and the stopping tolerances (3e-4 and 1e-7) are
+    radarx choices.
+
+    Lower boundary. ``w_boundary="bottom"`` imposes ``w = 0`` at the lowest
+    grid level ``z[0]``, whatever its height. The physical condition of a
+    wind analysis is impermeability, ``w = 0`` at the ground (terrain), and
+    only a grid whose lowest level is the surface satisfies it. If ``z[0]``
+    lies above the ground, for example at 500 m above sea level over flat
+    terrain near sea level as in grids built with ``z = np.arange(500, 12e3,
+    500)``, the true ``w`` there is generally not zero and the anelastic
+    integration carries the error up the whole column as a column-wide
+    offset of the order of the true ``w`` at ``z[0]``. In a test described in
+    issue #171 (two radars, analytic anelastic flow ``u = 5 + a x``, ``v = 2 +
+    a y``, ``w = -2 a H (exp(z/H) - 1)``, ``a = 2e-4 s-1``, ``H = 10 km``, no
+    noise) the root-mean-square error of ``w`` was 0.05 m s-1 for levels
+    0, 500, ..., 10000 m but 0.37 m s-1 (mean error 0.35 m s-1) for levels 500,
+    1000, ..., 10500 m, where the true ``w`` at 500 m is -0.20 m s-1. Choose
+    ``z[0]`` at the terrain height, or use ``w_boundary=None`` or
+    ``"top"``/``"echo_top"`` and judge ``w`` accordingly. The statement that
+    the condition belongs at the ground is the standard one for
+    dual-Doppler analyses; it was not checked against the text of Gao et
+    al. (1999) or Potvin et al. (2012) (not on disk). There is no terrain
+    following option and no ``w_bottom`` value yet.
+
     References
     ----------
     .. [1] Gao, J., M. Xue, A. Shapiro, and K. K. Droegemeier, 1999: A
@@ -1156,6 +1337,18 @@ def multi_doppler(
        velocity gridding artifacts on variationally retrieved vertical
        velocities. *J. Atmos. Oceanic Technol.*, **27**, 1239-1246,
        https://doi.org/10.1175/2010JTECHA1402.1
+    .. [5] Hestenes, M. R., and E. Stiefel, 1952: Methods of conjugate
+       gradients for solving linear systems. *J. Res. Natl. Bur. Stand.*,
+       **49**, 409-436, https://doi.org/10.6028/jres.049.044
+    .. [6] Strang, G., 1999: The discrete cosine transform. *SIAM Rev.*,
+       **41**, 135-147, https://doi.org/10.1137/S0036144598336745
+    .. [7] Byrd, R. H., P. Lu, J. Nocedal, and C. Zhu, 1995: A limited memory
+       algorithm for bound constrained optimization. *SIAM J. Sci. Comput.*,
+       **16**, 1190-1208, https://doi.org/10.1137/0916069
+    .. [8] Zhu, C., R. H. Byrd, P. Lu, and J. Nocedal, 1997: Algorithm 778:
+       L-BFGS-B: Fortran subroutines for large-scale bound-constrained
+       optimization. *ACM Trans. Math. Softw.*, **23**, 550-560,
+       https://doi.org/10.1145/279232.279236
 
     Examples
     --------

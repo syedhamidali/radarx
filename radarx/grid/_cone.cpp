@@ -16,7 +16,12 @@
 // columns given by their ground distance and azimuth from each radar
 // (multi-radar gridding on a shared grid).
 //
-// Beam geometry follows xradar.georeference.antenna_to_cartesian (4/3 Earth).
+// Beam geometry follows xradar.georeference.antenna_to_cartesian (4/3 Earth;
+// Doviak and Zrnic 1993, Doppler Radar and Weather Observations, 2nd ed.,
+// Eqs. 2.28b-d, pp. 21-22). The vertical step is analogous to the VI scheme of
+// Zhang et al. (2005, J. Atmos. Oceanic Technol. 22, 30-42, Eqs. 5-7, p. 36) but
+// interpolates in beam height, not elevation angle. max_gap and min_weight are
+// radarx choices, not values from a paper.
 
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
