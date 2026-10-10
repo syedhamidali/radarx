@@ -35,6 +35,72 @@ def _write_unreleased_changes():
 
 _write_unreleased_changes()
 
+
+def _write_cited_methods():
+    """List the methods behind the result attributes and their references.
+
+    The page ``how_to_cite`` includes the file, which is built from the
+    function docstrings and ``radarx/data/references.json`` through
+    ``radarx.methods`` and ``radarx.cite``.
+    """
+    import re
+    import urllib.parse
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    os.makedirs(os.path.join(here, "generated"), exist_ok=True)
+    path = os.path.join(here, "generated", "cited_methods.md")
+
+    def escape(text):
+        return re.sub(r"([\\`*_<>\[\]])", r"\\\1", text)
+
+    try:
+        import radarx
+        from radarx._provenance import DECORATED, load_registry
+    except Exception as err:  # pragma: no cover
+        warnings.warn(f"could not list the cited methods: {err}")
+        with open(path, "w") as f:
+            f.write("The list of methods is not available in this build.\n")
+        return
+    lines = ["### Methods", ""]
+    used = {}
+    for name in sorted(DECORATED):
+        func = DECORATED[name]
+        info = func.__radarx_provenance__
+        module = (
+            "radarx.grid"
+            if func.__module__.startswith("radarx.grid")
+            else ("radarx.retrieve")
+        )
+        based = "; ".join(radarx.citation._short_list(info.references))
+        lines.append(
+            f"- `{module}.{func.__name__}`: {escape(info.method)}."
+            + (f" Based on: {escape(based)}." if based else "")
+        )
+        for key in info.references:
+            used[key.lower()] = key
+    registry = load_registry()
+    entries = []
+    for key in used.values():
+        entry = registry.get(key)
+        if entry is not None:
+            entries.append((entry["authors"][0], entry.get("year", 0), key))
+    entries.sort(key=lambda e: (e[0].lower(), e[1], e[2]))
+    lines += ["", "### References", ""]
+    for _, _, key in entries:
+        text = radarx.citation._text(registry[key])
+        text = re.sub(r" https?://\S+$", "", text)
+        item = f"- {escape(text)}"
+        if "doi" in registry[key]:
+            doi = registry[key]["doi"]
+            link = "https://doi.org/" + urllib.parse.quote(doi)
+            item += f" [doi:{escape(doi)}]({link})"
+        lines.append(item)
+    with open(path, "w") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+_write_cited_methods()
+
 # The notebooks read ERA5 from Google's ARCO-ERA5 store, which keeps every
 # field as one global chunk per hour, so a cold read takes minutes. The docs
 # build seeds radarx's cache with a small pre-extracted subset (KGWX region,
