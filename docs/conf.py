@@ -81,10 +81,6 @@ extlinks = {
     "pull": ("https://github.com/syedhamidali/radarx/pull/%s", "PR %s"),
 }
 
-mathjax_path = (
-    "https://cdn.mathjax.org/mathjax/latest/MathJax.js?" "config=TeX-AMS-MML_HTMLorMML"
-)
-
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3/", None),
     "numpy": ("https://numpy.org/doc/stable/", None),
