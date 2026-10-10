@@ -298,7 +298,10 @@ class _Sweep:
         self.ray, distance = nearest_ray(az, azimuth, distance=True)
         self.in_azimuth = distance <= _MAX_GAP * max(spacing, 1e-6)
         rng = np.asarray(ds["range"].values, dtype=np.float64)
-        g = ground_range(rng, float(np.nanmedian(self.elevation)))
+        altitude = float(ds["altitude"]) if "altitude" in ds else 0.0
+        g = ground_range(
+            rng, float(np.nanmedian(self.elevation)), radar_height=altitude
+        )
         edges = 0.5 * (g[1:] + g[:-1])
         self.gate = np.clip(np.searchsorted(edges, ground), 0, rng.size - 1)
         self.covered = (ground >= g[0] - 0.5 * (g[1] - g[0])) & (
@@ -336,13 +339,14 @@ def _polar_columns(dtree, variable, tolerance, beamwidth, clear):
     elevation = np.broadcast_to(low["elevation"].values, low["azimuth"].shape).astype(
         np.float64
     )
+    altitude = float(low["altitude"]) if "altitude" in low else 0.0
     ground = ground_range(
         np.asarray(low["range"].values, dtype=np.float64),
         float(np.nanmedian(elevation)),
+        radar_height=altitude,
     )
     azimuth = np.asarray(low["azimuth"].values, dtype=np.float64)
     matched = [_Sweep(ds, variable, azimuth, ground) for ds in selected]
-    altitude = float(low["altitude"]) if "altitude" in low else 0.0
     half = 0.5 * (float(beamwidth) if beamwidth is not None else beam_width(dtree))
     nk = len(matched)
 
