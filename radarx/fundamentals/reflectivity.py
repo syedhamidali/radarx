@@ -42,6 +42,8 @@ __doc__ = __doc__.format("\n   ".join(__all__))
 
 import numpy as np
 
+from .common import _describe, _prepare
+
 
 def z_to_r_marshall_palmer(dbz):
     """
@@ -78,8 +80,9 @@ def z_to_r_marshall_palmer(dbz):
            Press, https://doi.org/10.1017/CBO9780511541094 (book; ISBN
            0-521-62384-7). Eq. (8.8b).
     """
-    z = 10.0 ** (0.1 * np.asarray(dbz))
-    return (z / 200.0) ** (1.0 / 1.6)
+    dbz = _prepare(dbz)
+    z = 10.0 ** (0.1 * dbz)
+    return _describe(dbz, (z / 200.0) ** (1.0 / 1.6), "mm h-1", "Rain rate")
 
 
 def z_to_r_custom(dbz, a=200.0, b=1.6):
@@ -114,8 +117,9 @@ def z_to_r_custom(dbz, a=200.0, b=1.6):
            Press, https://doi.org/10.1017/CBO9780511541094 (book; ISBN
            0-521-62384-7). Section 8.1, Eq. (8.8a-c).
     """
-    z = 10.0 ** (0.1 * np.asarray(dbz))
-    return (z / a) ** (1.0 / b)
+    dbz = _prepare(dbz)
+    z = 10.0 ** (0.1 * dbz)
+    return _describe(dbz, (z / a) ** (1.0 / b), "mm h-1", "Rain rate")
 
 
 def dbz_attenuation_correction(dbz, alpha=0.01, beta=0.85):
