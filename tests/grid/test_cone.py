@@ -283,3 +283,82 @@ def test_velocity_is_not_filled_below_the_lowest_beam(engine):
     # a reflectivity field is still filled
     refl = cone.grid_cones(_volume(), "DBZH", **GRID, **kw)["DBZH"]
     assert np.isfinite(float(refl.sel(**far)))
+
+
+def _moving_blob_volume(u, v, step=60.0, x0=15e3, y0=5e3, width=10e3):
+    """
+    Volume of a storm drifting with (u, v) m/s, seen by one tilt every ``step`` s.
+
+    The field is independent of height: tilt k shows the blob where it is at
+    ``t0 + k step``.
+    """
+    rng_m = np.arange(125.0, 60_000.0, 250.0)
+    azimuth = np.arange(0.5, 360.0, 1.0)
+    t0 = np.datetime64("2026-01-01T00:00:00", "ns")
+    sweeps = {}
+    for k, el in enumerate(ELEVATIONS):
+        gx, gy, _ = antenna_to_cartesian(
+            rng_m[None, :], azimuth[:, None], np.full((azimuth.size, 1), el)
+        )
+        t = k * step
+        data = 40.0 * np.exp(
+            -((gx - x0 - u * t) ** 2 + (gy - y0 - v * t) ** 2) / width**2
+        )
+        when = t0 + np.timedelta64(int(t * 1e9), "ns")
+        sweeps[f"sweep_{k}"] = xr.Dataset(
+            {"DBZH": (("azimuth", "range"), data, {"units": "dBZ"})},
+            coords={
+                "azimuth": azimuth,
+                "range": rng_m,
+                "elevation": ("azimuth", np.full(azimuth.size, el)),
+                "time": ("azimuth", np.full(azimuth.size, when)),
+            },
+        )
+    root = xr.Dataset(coords={"latitude": 45.0, "longitude": 10.0, "altitude": 0.0})
+    tree = xr.DataTree.from_dict({"/": root, **sweeps})
+    return tree, t0, (x0, y0, width)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_each_sweep_is_advected_from_its_own_time(engine):
+    """Tilts a minute apart show a storm at 20 m/s 1.2 km further each (#223)."""
+    u, v = 20.0, -5.0
+    dtree, t0, (x0, y0, width) = _moving_blob_volume(u, v)
+    grid = dict(
+        x=np.arange(-40e3, 60e3 + 1, 2e3),
+        y=np.arange(-40e3, 40e3 + 1, 2e3),
+        z=np.arange(500.0, 5000.0 + 1, 250.0),
+    )
+    X, Y = np.meshgrid(grid["x"], grid["y"])
+    # the blob at the analysis time t0, the time of the lowest tilt
+    truth = 40.0 * np.exp(-((X - x0) ** 2 + (Y - y0) ** 2) / width**2)
+    still = cone.grid_cones(dtree, "DBZH", **grid, engine=engine)["DBZH"]
+    moved = cone.grid_cones(
+        dtree, "DBZH", **grid, engine=engine, motion=(u, v), time=t0
+    )
+    near = (np.hypot(X, Y) > 8e3) & (np.hypot(X, Y) < 35e3)
+    both = np.isfinite(moved["DBZH"].values) & np.isfinite(still.values) & near
+    assert both.sum() > 1000
+    # all levels hold the blob where it is at t0, up to the 2 km cells
+    err = np.abs(moved["DBZH"].values - truth)[both]
+    assert err.max() < 0.6
+    # without advection the tilts disagree by up to 5 km and the layers blur
+    assert np.abs(still.values - truth)[both].max() > 5.0
+    assert moved["time"].values == t0
+    assert "advection" in moved.attrs
+    assert "advection" not in still.attrs
+
+
+@pytest.mark.skipif(not cone.HAS_COMPILED_KERNEL, reason="compiled kernel not built")
+def test_advected_engines_agree():
+    dtree, t0, _ = _moving_blob_volume(20.0, -5.0)
+    kw = dict(motion=(20.0, -5.0), time=t0, fill_below=True)
+    a = cone.grid_cones(dtree, "DBZH", **GRID, engine="compiled", **kw)
+    b = cone.grid_cones(dtree, "DBZH", **GRID, engine="numpy", **kw)
+    np.testing.assert_allclose(a.DBZH.values, b.DBZH.values, atol=1e-4, equal_nan=True)
+
+
+def test_motion_must_be_a_pair():
+    dtree, _, _ = _moving_blob_volume(0.0, 0.0)
+    with pytest.raises(ValueError, match="motion"):
+        cone.grid_cones(dtree, "DBZH", **GRID, motion=5.0)

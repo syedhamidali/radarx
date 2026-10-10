@@ -49,6 +49,7 @@ def _volume(
     fields=("DBZH", "ZDR", "VRADH", "RHOHV"),
     max_range=80e3,
     k_e=cone.K_E,
+    sweep_dt=0.0,
 ):
     """Synthetic volume measuring ``truth`` at each gate's grid position."""
     rng_m = np.arange(250.0, max_range, 500.0)
@@ -79,7 +80,10 @@ def _volume(
                 "azimuth": az,
                 "range": rng_m,
                 "elevation": ("azimuth", np.full(az.size, el)),
-                "time": ("azimuth", np.full(az.size, start)),
+                "time": (
+                    "azimuth",
+                    np.full(az.size, start + np.timedelta64(int(k * sweep_dt), "s")),
+                ),
             },
         )
     root = xr.Dataset(coords={"latitude": lat, "longitude": lon, "altitude": alt})
@@ -842,3 +846,53 @@ def test_network_bias_engines_agree_with_selection(network):
             b = multi.network_bias(out, field, select_on=select_on, engine="numpy")
             np.testing.assert_allclose(a.bias.values, b.bias.values, atol=1e-6)
             np.testing.assert_array_equal(a.pair_count.values, b.pair_count.values)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_advect_sweeps_moves_each_sweep_from_its_own_time(engine):
+    """With advect_sweeps the radar matches cone gridding with motion (#223)."""
+    dtree = _volume(*ORIGIN, sweep_dt=90.0)
+    kw = dict(x=GRID["x"], y=GRID["y"], z=GRID["z"], engine=engine)
+    motion = (20.0, -5.0)
+    out = multi.grid_radars(
+        [dtree],
+        origin=ORIGIN,
+        data_vars="DBZH",
+        motion=motion,
+        advect_sweeps=True,
+        **kw,
+    )
+    ref = cone.grid_cones(dtree, "DBZH", motion=motion, **kw)
+    np.testing.assert_allclose(
+        out.DBZH.isel(radar=0).values, ref.DBZH.values, atol=1e-4, equal_nan=True
+    )
+    assert "advection" in out.attrs and "analysis_time" in out.attrs
+    # moving the finished grid of the volume instead gives something else
+    volume = multi.grid_radars(
+        [dtree], origin=ORIGIN, data_vars="DBZH", motion=motion, **kw
+    )
+    still = multi.grid_radars([dtree], origin=ORIGIN, data_vars="DBZH", **kw)
+    assert np.nanmax(np.abs(out.DBZH.values - still.DBZH.values)) > 0.1
+    assert np.nanmax(np.abs(out.DBZH.values - volume.DBZH.values)) > 0.01
+    assert "coverage" in out
+    with pytest.raises(ValueError, match="advect_sweeps"):
+        multi.grid_radars([dtree], origin=ORIGIN, advect_sweeps=True, **kw)
+    with pytest.raises(ValueError, match="advect_sweeps"):
+        multi.grid_radars(
+            [dtree],
+            origin=ORIGIN,
+            motion=xr.Dataset({"u": 1.0, "v": 1.0}),
+            advect_sweeps=True,
+            **kw,
+        )
+
+
+@needs_kernel
+def test_advect_sweeps_engines_agree(network):
+    kw = dict(origin=ORIGIN, data_vars="DBZH", motion=(15.0, 5.0), advect_sweeps=True)
+    a = multi.grid_radars(network, **GRID, **kw, engine="compiled")
+    b = multi.grid_radars(network, **GRID, **kw, engine="numpy")
+    np.testing.assert_allclose(
+        a.DBZH.values, b.DBZH.values, rtol=1e-6, atol=1e-3, equal_nan=True
+    )
+    np.testing.assert_array_equal(a.coverage.values, b.coverage.values)

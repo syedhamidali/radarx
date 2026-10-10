@@ -161,6 +161,60 @@ def _select_sweeps(sweeps, variable, tolerance=0.1):
     return [ds for ds, _, _ in sorted(best.values(), key=lambda item: item[2])]
 
 
+def _mean_time(ds):
+    """Mean time of a sweep as datetime64[ns], or ``NaT``."""
+    if "time" not in ds:
+        return np.datetime64("NaT", "ns")
+    t = np.ravel(ds["time"].values).astype("datetime64[ns]")
+    t = t[~np.isnat(t)]
+    if t.size == 0:
+        return np.datetime64("NaT", "ns")
+    t0 = t.min()
+    return t0 + (t - t0).astype(np.int64).mean().astype("timedelta64[ns]")
+
+
+def _motion_pair(motion):
+    """``(u, v)`` in m/s from the ``motion`` argument."""
+    try:
+        u, v = (float(m) for m in motion)
+    except (TypeError, ValueError) as err:
+        raise ValueError(
+            "motion must be a pair (u, v) of eastward and northward speed in m/s"
+        ) from err
+    return u, v
+
+
+def _sweep_shifts(selected, motion, time, default_time):
+    """
+    Displacement (dx, dy) in metres of every sweep to the analysis time.
+
+    A cell at ``x`` at the analysis time ``time`` holds what the sweep saw
+    at ``x - (u, v) (time - t_sweep)``, so the cone is sampled there: the
+    storm is assumed to move steadily with ``(u, v)``.
+    """
+    u, v = _motion_pair(motion)
+    t0 = np.datetime64(default_time if time is None else time, "ns")
+    shifts = []
+    for ds in selected:
+        dt = (t0 - _mean_time(ds)) / np.timedelta64(1, "s")
+        dt = 0.0 if np.isnan(dt) else float(dt)
+        shifts.append((u * dt, v * dt))
+    return shifts
+
+
+def _volume_time(sweeps):
+    """Mean time of all rays of the volume as datetime64[ns], or ``NaT``."""
+    times = [np.ravel(ds["time"].values) for ds in sweeps if "time" in ds]
+    if not times:
+        return np.datetime64("NaT", "ns")
+    t = np.concatenate(times).astype("datetime64[ns]")
+    t = t[~np.isnat(t)]
+    if t.size == 0:
+        return np.datetime64("NaT", "ns")
+    t0 = t.min()
+    return t0 + (t - t0).astype(np.int64).mean().astype("timedelta64[ns]")
+
+
 def _sweep_arrays(ds, variable):
     """Contiguous float64 arrays (data, azimuth, elevation, range) of a sweep."""
     ray_dim = (
@@ -253,6 +307,7 @@ def _grid_numpy(
     fill_below,
     k_e=K_E,
     fill_depth=np.inf,
+    shifts=None,
 ):
     """NumPy implementation of the compiled kernel (same results)."""
     X, Y = np.meshgrid(x, y)
@@ -269,7 +324,18 @@ def _grid_numpy(
         fill_below,
         k_e,
         fill_depth,
+        shifts,
     )
+
+
+def _displaced(s, az, dx, dy):
+    """Ground distance and azimuth (deg) of the columns shifted by (-dx, -dy)."""
+    if dx == 0.0 and dy == 0.0:
+        return s, az
+    a = np.radians(az)
+    px = s * np.sin(a) - dx
+    py = s * np.cos(a) - dy
+    return np.hypot(px, py), np.mod(np.degrees(np.arctan2(px, py)), 360.0)
 
 
 def _columns_numpy(
@@ -283,6 +349,7 @@ def _columns_numpy(
     fill_below,
     k_e=K_E,
     fill_depth=np.inf,
+    shifts=None,
 ):
     """
     Cone gridding of columns at ground distance ``s`` and azimuth ``az``.
@@ -293,12 +360,21 @@ def _columns_numpy(
     the vertical interpolation of Zhang et al. 2005, Eqs. 5-7, which
     interpolates in elevation angle). With a finite ``fill_depth`` the lowest
     cone fills at most that many metres below itself and not below the radar
-    altitude.
+    altitude. ``shifts`` gives a displacement ``(dx, dy)`` in metres per
+    sweep: the cone is sampled at the column position minus the shift.
     """
+    shifts = shifts if shifts is not None else [(0.0, 0.0)] * len(arrays)
     values, heights = zip(
         *(
-            _cone_numpy(*sweep, s, az, site_altitude, max_gap, min_weight, k_e)
-            for sweep in arrays
+            _cone_numpy(
+                *sweep,
+                *_displaced(s, az, dx, dy),
+                site_altitude,
+                max_gap,
+                min_weight,
+                k_e,
+            )
+            for sweep, (dx, dy) in zip(arrays, shifts)
         )
     )
     V = np.stack(values)
@@ -359,6 +435,8 @@ def grid_cones(
     fill_depth=None,
     fill_velocity=False,
     k_e=K_E,
+    motion=None,
+    time=None,
     max_gap=2.0,
     min_weight=0.5,
     n_threads=None,
@@ -398,6 +476,19 @@ def grid_cones(
         (Doviak and Zrnić 1993, Eq. 2.28). Default 4/3, the standard
         atmosphere. :func:`radarx.fundamentals.geometry.k_e_from_refractivity`
         derives it from a sounding or reanalysis profile.
+    motion : tuple of float, optional
+        Storm motion ``(u, v)`` in m/s. When given, every sweep is moved from
+        its own mean time to the analysis time ``time`` before the vertical
+        interpolation (Gal-Chen 1982 [4]_, equations not checked against the
+        paper): low and high tilts of a volume are minutes apart, and a storm
+        moving at 15 m/s travels 4.5 km in five minutes, so an echo seen by
+        the lowest and the highest tilt would otherwise appear at positions
+        that differ by that distance. The motion is steady and the same
+        everywhere; the displacement is applied per sweep, not per ray.
+        Default ``None``: no advection, as before.
+    time : datetime-like, optional
+        Analysis time for ``motion``. Default: the mean time of the volume.
+        Also the ``time`` of the result when given.
     max_gap : float, optional
         Do not interpolate between rays more than this many median ray
         spacings apart (sector edges, missing rays). Default 2.
@@ -465,6 +556,10 @@ def grid_cones(
        three-dimensional multiple-radar reflectivity mosaics: Examples of
        convective storms and stratiform rain echoes. *J. Atmos. Oceanic
        Technol.*, **22**, 30-42, https://doi.org/10.1175/JTECH-1689.1
+    .. [4] Gal-Chen, T., 1982: Errors in fixed and moving frame of references:
+       Applications for conventional and Doppler radar analysis. *J. Atmos.
+       Sci.*, **39**, 2279-2300,
+       https://doi.org/10.1175/1520-0469(1982)039<2279:EIFAMF>2.0.CO;2
 
     Examples
     --------
@@ -487,6 +582,7 @@ def grid_cones(
 
     k_e = _check_k_e(k_e)
     fill_depth = _fill_depth(fill_depth)
+    volume_time = _volume_time(sweeps)
     gridded = {}
     for variable in data_vars:
         selected = _select_sweeps(sweeps, variable)
@@ -494,6 +590,11 @@ def grid_cones(
             raise ValueError(f"No sweep contains {variable!r}.")
         arrays = [_sweep_arrays(ds, variable) for ds in selected]
         attrs = dict(selected[0][variable].attrs)
+        shifts = (
+            _sweep_shifts(selected, motion, time, volume_time)
+            if motion is not None
+            else None
+        )
         options = dict(
             max_gap=max_gap,
             min_weight=min_weight,
@@ -502,6 +603,7 @@ def grid_cones(
             ),
             k_e=k_e,
             fill_depth=fill_depth,
+            shifts=shifts,
         )
         site_altitude = site.get("altitude", 0.0)
         if use_compiled:
@@ -511,6 +613,15 @@ def grid_cones(
         gridded[variable] = (("z", "y", "x"), field, attrs)
     out = _to_dataset(gridded, x, y, z, sweeps, site, dtree.attrs)
     out.attrs["k_e"] = k_e
+    if motion is not None:
+        u, v = _motion_pair(motion)
+        out = out.assign_coords(
+            time=volume_time if time is None else np.datetime64(time, "ns")
+        )
+        out.attrs["advection"] = (
+            f"each sweep moved from its own time to the analysis time with "
+            f"u = {u} m/s, v = {v} m/s"
+        )
     return out.assign_coords(site_coords)
 
 
@@ -576,6 +687,9 @@ def _load_volume(dtree):
 def _grid_compiled(x, y, z, arrays, site_altitude, n_threads, **options):
     """Run the C++ kernel on per-sweep (data, azimuth, elevation, range) arrays."""
     data, azimuth, elevation, rng = (list(a) for a in zip(*arrays))
+    shifts = options.pop("shifts", None)
+    if shifts is not None:
+        options["shift"] = [float(c) for pair in shifts for c in pair]
     return _cone.grid_cones(
         x,
         y,

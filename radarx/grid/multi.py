@@ -417,6 +417,7 @@ def grid_radars(
     fill_velocity=False,
     k_e=K_E,
     coverage=True,
+    advect_sweeps=False,
     max_gap=2.0,
     min_weight=0.5,
     n_threads=None,
@@ -518,6 +519,14 @@ def grid_radars(
         1993, Eq. 2.28). Default 4/3. It is stored in the ``k_e`` attribute
         so that :func:`merge_radars` uses the same value. See
         :func:`radarx.fundamentals.geometry.k_e_from_refractivity`.
+    advect_sweeps : bool, optional
+        With ``motion`` as a pair ``(u, v)``: move every sweep from its own
+        mean time to the analysis time before the vertical interpolation, as
+        in :func:`radarx.grid.grid_cones`, instead of moving the finished
+        grid of each radar from its volume time. The tilts of a volume are
+        minutes apart, so the latter leaves echoes at different positions
+        in the lowest and highest tilt. Default ``False``: the volume is
+        moved as a whole.
     coverage : bool, optional
         Add the ``coverage`` mask (default ``True``), which tells a cell a
         radar looks at but sees no echo in from a cell it does not look at.
@@ -632,7 +641,12 @@ def grid_radars(
     beamwidths = np.broadcast_to(np.asarray(beamwidth, dtype=float), (len(radars),))
 
     columns = _column_geometry(x, y, origin, sites, use_compiled, n_threads)
-    tasks, task_keys = [], []
+    if advect_sweeps and (motion is None or isinstance(motion, xr.Dataset)):
+        raise ValueError("advect_sweeps needs motion as a pair (u, v) in m/s")
+    analysis_time = (
+        np.datetime64(time, "ns") if time is not None else _volume_time(volumes[0][0])
+    )
+    tasks, task_keys, shifts = [], [], []
     sweep_el = []
     for r, (sweeps, _, _) in enumerate(volumes):
         elevations = []
@@ -643,6 +657,11 @@ def grid_radars(
             arrays = [_task_arrays(ds, name, rhohv, rhohv_min) for ds in selected]
             tasks.append((r, arrays))
             task_keys.append((r, name, dict(selected[0][name].attrs)))
+            shifts.append(
+                cone._sweep_shifts(selected, motion, analysis_time, analysis_time)
+                if advect_sweeps
+                else None
+            )
             if len(selected) > len(elevations):
                 elevations = _sweep_elevations(selected)
         sweep_el.append(elevations)
@@ -661,7 +680,15 @@ def grid_radars(
         for _, name, attrs in task_keys
     ]
     gridded = _grid_tasks(
-        columns, z, altitudes, tasks, fills, use_compiled, n_threads, **options
+        columns,
+        z,
+        altitudes,
+        tasks,
+        fills,
+        use_compiled,
+        n_threads,
+        shifts=shifts,
+        **options,
     )
     covered = (
         _coverage(
@@ -673,6 +700,7 @@ def grid_radars(
             bool(fill_below),
             use_compiled,
             n_threads,
+            shifts=shifts,
             **options,
         )
         if coverage
@@ -711,7 +739,12 @@ def grid_radars(
         covered,
     )
     out.attrs["k_e"] = k_e
-    if motion is not None:
+    if motion is not None and advect_sweeps:
+        out.attrs["analysis_time"] = str(analysis_time)
+        out.attrs["advection"] = (
+            "each sweep advected from its own time to analysis_time"
+        )
+    elif motion is not None:
         out = _advect_radars(out, data_vars, motion, time, engine, n_threads)
     elif time is not None:
         out.attrs["analysis_time"] = str(np.datetime64(time, "ns"))
@@ -738,7 +771,7 @@ def grid_radars(
 
 
 def _grid_tasks(
-    columns, z, altitudes, tasks, fills, use_compiled, n_threads, **options
+    columns, z, altitudes, tasks, fills, use_compiled, n_threads, shifts=None, **options
 ):
     """
     Cone-grid every (radar, field) task onto the shared columns.
@@ -756,6 +789,7 @@ def _grid_tasks(
             [tasks[i] for i in index],
             use_compiled,
             n_threads,
+            shifts=None if shifts is None else [shifts[i] for i in index],
             fill_below=flag,
             **options,
         )
@@ -764,8 +798,17 @@ def _grid_tasks(
     return out
 
 
-def _grid_task_group(columns, z, altitudes, tasks, use_compiled, n_threads, **options):
+def _grid_task_group(
+    columns, z, altitudes, tasks, use_compiled, n_threads, shifts=None, **options
+):
     """Cone-grid tasks that share their cone gridding options."""
+    if shifts is None or all(sh is None for sh in shifts):
+        shifts = None
+    else:
+        shifts = [
+            sh if sh is not None else [(0.0, 0.0)] * len(t[1])
+            for sh, t in zip(shifts, tasks)
+        ]
     if use_compiled:
         radar = [r for r, _ in tasks]
         parts = [list(zip(*arrays)) for _, arrays in tasks]
@@ -781,6 +824,13 @@ def _grid_task_group(columns, z, altitudes, tasks, use_compiled, n_threads, **op
             altitudes,
             earth_radius=EARTH_RADIUS,
             n_threads=int(n_threads or 0),
+            **(
+                {}
+                if shifts is None
+                else {
+                    "shift": [[float(c) for pair in sh for c in pair] for sh in shifts]
+                }
+            ),
             **options,
         )
     return [
@@ -795,13 +845,23 @@ def _grid_task_group(columns, z, altitudes, tasks, use_compiled, n_threads, **op
             options["fill_below"],
             options["k_e"],
             options["fill_depth"],
+            None if shifts is None else shifts[i],
         )
-        for r, arrays in tasks
+        for i, (r, arrays) in enumerate(tasks)
     ]
 
 
 def _coverage(
-    columns, z, altitudes, tasks, nradar, fill_below, use_compiled, n_threads, **options
+    columns,
+    z,
+    altitudes,
+    tasks,
+    nradar,
+    fill_below,
+    use_compiled,
+    n_threads,
+    shifts=None,
+    **options,
 ):
     """
     Mask of the cells inside the volume each radar scans, uint8 (radar, z, y, x).
@@ -810,10 +870,11 @@ def _coverage(
     all gates set to 1, so a cell is covered where the cones bracket it (or
     the lowest cone fills it), whether or not a gate there holds an echo.
     """
-    best = {}
-    for r, arrays in tasks:
+    best, best_shift = {}, {}
+    for i, (r, arrays) in enumerate(tasks):
         if r not in best or len(arrays) > len(best[r]):
             best[r] = arrays
+            best_shift[r] = None if shifts is None else shifts[i]
     shape = (nradar, z.size) + columns["ground"][0].shape
     covered = np.zeros(shape, dtype=np.uint8)
     radars = sorted(best)
@@ -834,6 +895,7 @@ def _coverage(
         ones,
         use_compiled,
         n_threads,
+        shifts=[best_shift[r] for r in radars],
         fill_below=fill_below,
         **options,
     )

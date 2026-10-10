@@ -8,6 +8,8 @@
 // column are interpolated bilinearly from the four surrounding gates, using
 // the measured ray azimuths and elevations. Each output level is then
 // interpolated linearly in height between the two cones that bracket it.
+// Optionally every cone is sampled at the position displaced by its own shift
+// (the advection of the storm from the time of the sweep to the analysis time).
 // Levels below the lowest or above the highest cone, or between cones where
 // one has no value, stay NaN (optionally the lowest cone fills below itself).
 //
@@ -60,6 +62,10 @@ struct Sweep {
     std::vector<double> az_ext;    // sorted ray azimuths, wrapped at both ends
     std::vector<int64_t> ray_ext;  // ray index for each az_ext entry
     double spacing = 0.0;          // median azimuth step [deg]
+    // The cone is sampled at (x - dx, y - dy) instead of (x, y), relative to
+    // the radar [m]: echoes seen at the time of the sweep moved to the
+    // analysis time by the storm motion times the time difference.
+    double dx = 0.0, dy = 0.0;
 };
 
 // Beam height above sea level (effective Earth radius R = k_e a), as in
@@ -163,14 +169,22 @@ void grid_column(const std::vector<Sweep>& sweeps, double sc, double ac, const d
         hts[k] = kNaN;
         const Sweep& sw = sweeps[k];
         const int64_t ng = sw.ngate;
-        if (!(sc >= sw.ground[0] && sc <= sw.ground[ng - 1])) continue;  // also NaN
-        const int64_t i = bisect(sw.ground.data(), ng, sc);
-        const double fr = (sc - sw.ground[i]) / (sw.ground[i + 1] - sw.ground[i]);
+        double sk = sc, ak = ac;
+        if (sw.dx != 0.0 || sw.dy != 0.0) {
+            const double px = sc * std::sin(ac * kDeg) - sw.dx;
+            const double py = sc * std::cos(ac * kDeg) - sw.dy;
+            sk = std::hypot(px, py);
+            ak = std::atan2(px, py) / kDeg;
+            if (ak < 0) ak += 360.0;
+        }
+        if (!(sk >= sw.ground[0] && sk <= sw.ground[ng - 1])) continue;  // also NaN
+        const int64_t i = bisect(sw.ground.data(), ng, sk);
+        const double fr = (sk - sw.ground[i]) / (sw.ground[i + 1] - sw.ground[i]);
         const int64_t na = static_cast<int64_t>(sw.az_ext.size());
-        const int64_t j = bisect(sw.az_ext.data(), na, ac);
+        const int64_t j = bisect(sw.az_ext.data(), na, ak);
         const double da = sw.az_ext[j + 1] - sw.az_ext[j];
         if (da > max_gap * sw.spacing) continue;  // do not bridge missing rays
-        const double fa = (ac - sw.az_ext[j]) / da;
+        const double fa = (ak - sw.az_ext[j]) / da;
         const int64_t r0 = sw.ray_ext[j], r1 = sw.ray_ext[j + 1];
         const int64_t o0 = r0 * ng + i, o1 = r1 * ng + i;
         const double w[4] = {(1 - fa) * (1 - fr), (1 - fa) * fr, fa * (1 - fr), fa * fr};
@@ -275,11 +289,18 @@ py::array_t<float> grid_cones(const DArray& x, const DArray& y, const DArray& z,
                                const std::vector<DArray>& elevation,
                                const std::vector<DArray>& range, double site_altitude,
                                double earth_radius, double max_gap, double min_weight,
-                               bool fill_below, int n_threads, double k_e, double fill_depth) {
+                               bool fill_below, int n_threads, double k_e, double fill_depth,
+                               const std::vector<double>& shift) {
     const double R = earth_radius * k_e;
     const double sr = R + site_altitude;
-    const std::vector<Sweep> sweeps = prepare_all(data, azimuth, elevation, range, R, sr);
+    std::vector<Sweep> sweeps = prepare_all(data, azimuth, elevation, range, R, sr);
     const size_t nk = sweeps.size();
+    if (!shift.empty() && shift.size() != 2 * nk)
+        throw std::invalid_argument("shift needs a (dx, dy) pair per sweep");
+    for (size_t k = 0; k < shift.size() / 2; ++k) {
+        sweeps[k].dx = shift[2 * k];
+        sweeps[k].dy = shift[2 * k + 1];
+    }
 
     const int64_t nx = x.size(), ny = y.size(), nz = z.size();
     const int64_t ncol = nx * ny;
@@ -332,7 +353,7 @@ std::vector<py::array_t<float>> grid_columns(
     const std::vector<std::vector<DArray>>& elevation,
     const std::vector<std::vector<DArray>>& range, const std::vector<double>& site_altitude,
     double earth_radius, double max_gap, double min_weight, bool fill_below, int n_threads,
-    double k_e, double fill_depth) {
+    double k_e, double fill_depth, const std::vector<std::vector<double>>& shift) {
     const size_t nr = ground.size();
     const size_t ntask = radar.size();
     if (nr == 0) throw std::invalid_argument("need at least one radar");
@@ -356,6 +377,14 @@ std::vector<py::array_t<float>> grid_columns(
         srs[t] = R + site_altitude[radar[t]];
         sweeps[t] = prepare_any(data[t], azimuth[t], elevation[t], range[t], R, srs[t], keep);
         nk_max = std::max(nk_max, sweeps[t].size());
+        if (!shift.empty()) {
+            if (shift.size() != ntask || shift[t].size() != 2 * sweeps[t].size())
+                throw std::invalid_argument("shift needs a (dx, dy) pair per sweep and task");
+            for (size_t k = 0; k < sweeps[t].size(); ++k) {
+                sweeps[t][k].dx = shift[t][2 * k];
+                sweeps[t][k].dy = shift[t][2 * k + 1];
+            }
+        }
     }
     const int64_t nz = z.size();
     std::vector<py::ssize_t> shape(ground[0].shape(), ground[0].shape() + ground[0].ndim());
@@ -414,12 +443,14 @@ PYBIND11_MODULE(_cone, m) {
           py::arg("site_altitude"), py::arg("earth_radius") = 6371000.0,
           py::arg("max_gap") = 2.0, py::arg("min_weight") = 0.5, py::arg("fill_below") = false,
           py::arg("n_threads") = 0, py::arg("k_e") = 4.0 / 3.0,
-          py::arg("fill_depth") = std::numeric_limits<double>::infinity());
+          py::arg("fill_depth") = std::numeric_limits<double>::infinity(),
+          py::arg("shift") = std::vector<double>());
     m.def("grid_columns", &grid_columns, py::arg("ground"), py::arg("column_azimuth"),
           py::arg("z"), py::arg("radar"), py::arg("data"), py::arg("azimuth"),
           py::arg("elevation"), py::arg("range"), py::arg("site_altitude"),
           py::arg("earth_radius") = 6371000.0, py::arg("max_gap") = 2.0,
           py::arg("min_weight") = 0.5, py::arg("fill_below") = false, py::arg("n_threads") = 0,
           py::arg("k_e") = 4.0 / 3.0,
-          py::arg("fill_depth") = std::numeric_limits<double>::infinity());
+          py::arg("fill_depth") = std::numeric_limits<double>::infinity(),
+          py::arg("shift") = std::vector<std::vector<double>>());
 }
