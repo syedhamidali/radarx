@@ -909,12 +909,7 @@ def _profile_dataset(
         rh = _thermo("esat", td, engine=engine) / _thermo("esat", t, engine=engine)
     cols.update(dewpoint=td, specific_humidity=q, relative_humidity=rh)
     cols["wind_speed"] = np.hypot(cols["u"], cols["v"])
-    cols["wind_direction"] = np.mod(
-        np.degrees(np.arctan2(-cols["u"], -cols["v"])), 360.0
-    )
-    cols["wind_direction"][~(cols["wind_speed"] > 0)] = np.where(
-        cols["wind_speed"][~(cols["wind_speed"] > 0)] == 0, 0.0, np.nan
-    )
+    cols["wind_direction"] = _wind_from_direction(cols["u"], cols["v"])
 
     data_vars = {}
     for name in PROFILE_VARS:
@@ -1935,6 +1930,22 @@ def era5_profile(
 # profile helpers
 
 
+def _wind_from_direction(u, v, calm=0.0):
+    """
+    Direction the wind blows from, degrees clockwise from north, in [0, 360).
+
+    ``calm`` is returned where both components are zero (the direction is
+    undefined there; ``arctan2`` would otherwise give an arbitrary 180).
+    Rounding such as ``-1e-18 % 360 == 360.0`` is mapped to 0.
+    """
+    d = np.degrees(np.arctan2(-u, -v)) % 360.0
+    if isinstance(d, xr.DataArray):
+        d = xr.where(d >= 360.0, 0.0, d)
+        return xr.where((u == 0) & (v == 0), calm, d)
+    d = np.where(d >= 360.0, 0.0, d)
+    return np.where((np.asarray(u) == 0) & (np.asarray(v) == 0), calm, d)
+
+
 def _profile_columns(profile, variables):
     """(ncol, nlev) heights, (nvar, ncol, nlev) values and the column dims."""
     if "height" not in profile.dims:
@@ -2065,9 +2076,9 @@ def interpolate_profile(
         out["wind_speed"] = np.hypot(out["u"], out["v"]).assign_attrs(
             ATTRS["wind_speed"]
         )
-        out["wind_direction"] = (
-            np.mod(np.degrees(np.arctan2(-out["u"], -out["v"])), 360.0)
-        ).assign_attrs(ATTRS["wind_direction"])
+        out["wind_direction"] = _wind_from_direction(out["u"], out["v"]).assign_attrs(
+            ATTRS["wind_direction"]
+        )
     out = out.transpose(*heights.dims)
     out.attrs = dict(profile.attrs)
     return out
@@ -2261,7 +2272,7 @@ def mean_wind(
             "wind_speed": (other, np.hypot(u, v), dict(ATTRS["wind_speed"])),
             "wind_direction": (
                 other,
-                np.mod(np.degrees(np.arctan2(-u, -v)), 360.0),
+                _wind_from_direction(u, v),
                 dict(ATTRS["wind_direction"]),
             ),
         },

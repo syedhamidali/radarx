@@ -116,6 +116,7 @@ import xarray as xr
 from .._fields import VELOCITY, as_sweep
 from .._provenance import provenance
 from .._registry import accessor_method
+from ..io.sounding import _wind_from_direction
 from .coldpool import _columns, _f64, _height_of, _kernel, _per_column, _threads
 
 # Deviation of the Bunkers et al. (2000) method [m s-1]; value as used by the
@@ -171,7 +172,7 @@ def _da(values, other, coords, shape, name, attrs=None):
 def _wind_vars(u, v, prefix, what):
     """u, v, speed and direction (from) of a wind vector."""
     speed = np.hypot(u, v)
-    direction = (np.degrees(np.arctan2(-u, -v)) % 360.0).where(speed > 0)
+    direction = _wind_from_direction(u, v, calm=np.nan).where(speed > 0)
     return {
         f"{prefix}u": u.rename(f"{prefix}u").assign_attrs(
             long_name=f"{what}, eastward (x) component", units="m s-1"
@@ -718,7 +719,7 @@ def vad_profile(
     out["wind_speed"] = np.hypot(uda, vda).assign_attrs(
         standard_name="wind_speed", units="m s-1"
     )
-    out["wind_direction"] = (np.degrees(np.arctan2(-uda, -vda)) % 360.0).assign_attrs(
+    out["wind_direction"] = _wind_from_direction(uda, vda, calm=np.nan).assign_attrs(
         standard_name="wind_from_direction", units="degree"
     )
     out["vad_rms"] = xr.DataArray(rm, dims="height", coords=coords).assign_attrs(

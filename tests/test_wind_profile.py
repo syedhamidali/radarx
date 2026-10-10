@@ -291,3 +291,19 @@ def test_layer_top_equal_to_last_level_to_rounding(engine):
     assert np.isfinite(float(sh.shear_u))
     sh = wp.bulk_shear(p, 0, 3000, ground=g * 1000.0 - 1.0, engine=engine)
     assert np.isnan(float(sh.shear_u))
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_mean_wind_direction_in_range(engine):
+    z = np.arange(0.0, 7001.0, 500.0)
+    north = xr.Dataset(
+        {
+            "u": ("height", np.full(z.size, 1e-17)),
+            "v": ("height", np.full(z.size, -5.0)),
+        },
+        coords={"height": z},
+    )
+    mw = wp.layer_mean_wind(north, 0, 6000, engine=engine)
+    assert float(mw.direction) == 0.0
+    calm = north.assign(u=north.u * 0, v=north.v * 0)
+    assert np.isnan(float(wp.layer_mean_wind(calm, 0, 6000, engine=engine).direction))

@@ -1162,3 +1162,43 @@ def test_top_down_profile_equals_bottom_up(engine):
     wa = sounding.wet_bulb_zero_height(prof, engine=engine)
     wb = sounding.wet_bulb_zero_height(down, engine=engine)
     assert np.isfinite(float(wb)) and float(wa) == pytest.approx(float(wb))
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_wind_direction_range_and_calm(engine):
+    z = np.array([0.0, 1000.0, 2000.0])
+
+    def prof(u, v):
+        return xr.Dataset(
+            {"u": ("height", np.full(3, u)), "v": ("height", np.full(3, v))},
+            coords={"height": z},
+        )
+
+    # north wind with a rounding-sized u: in [0, 360), not 360.0
+    north = prof(1e-17, -5.0)
+    assert (
+        float(sounding.mean_wind(north, 0, 2000, engine=engine)["wind_direction"])
+        == 0.0
+    )
+    out = sounding.interpolate_profile(north, [500.0], engine=engine)
+    assert float(out["wind_direction"][0]) == 0.0
+    # calm: 0, as in the profile readers (not an arbitrary 180)
+    calm = prof(0.0, 0.0)
+    assert (
+        float(sounding.mean_wind(calm, 0, 2000, engine=engine)["wind_direction"]) == 0.0
+    )
+    out = sounding.interpolate_profile(calm, [500.0], engine=engine)
+    assert float(out["wind_direction"][0]) == 0.0
+    ds = sounding._profile_dataset(
+        height=z,
+        temperature=np.full(3, 280.0),
+        u=np.array([0.0, 1e-17, 3.0]),
+        v=np.array([0.0, -5.0, 0.0]),
+    )
+    np.testing.assert_allclose(ds["wind_direction"], [0.0, 0.0, 270.0])
+    # the four cardinal directions and a diagonal
+    d = sounding._wind_from_direction(
+        np.array([0.0, -4.0, 0.0, 4.0, 3.0]), np.array([-4.0, 0.0, 4.0, 0.0, 3.0])
+    )
+    np.testing.assert_allclose(d, [0.0, 90.0, 180.0, 270.0, 225.0])
+    assert np.isnan(sounding._wind_from_direction(np.nan, 1.0))
