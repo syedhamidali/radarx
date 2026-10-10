@@ -25,6 +25,7 @@ from . import retrieve  # noqa
 from . import testing  # noqa
 from . import vis  # noqa
 
+from .citation import cite, methods  # noqa
 from .utils import *  # noqa
 
 __all__ = [s for s in dir() if not s.startswith("_")]
