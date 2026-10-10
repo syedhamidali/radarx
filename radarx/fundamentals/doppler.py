@@ -22,11 +22,12 @@ References
        Electron. Syst.*, **AES-21** (4), 470-483,
        https://doi.org/10.1109/TAES.1985.310635
 
-The relativistic option of :func:`doppler_frequency_shift` returns the
-one-way shift and :func:`dual_prf_velocity` is negative for ``prf1 > prf2``.
-The two-way classical results [1]_ (see also [2]_) are the default and
-``exact`` options; the relativistic form is that of [3]_ and the dual-PRF
-method that of [4]_.
+All Doppler shifts here are two-way (reflected) shifts. The classical
+results [1]_ (see also [2]_) are the default and ``exact`` options; the
+relativistic option is the exact reflection from a moving mirror, built on the
+Lorentz transformation of [3]_. :func:`dual_prf_velocity` follows the dual-PRF
+method of [4]_ and returns a positive velocity for either order of the two
+PRFs.
 
 .. autosummary::
    :nosignatures:
@@ -146,12 +147,13 @@ def unambiguous_range(prf):
 
 def _doppler_shift_relativistic(frequency, vr):
     """
-    One-way relativistic Doppler shift ``f (sqrt((1+b)/(1-b)) - 1)``,
-    ``b = vr / c`` (Einstein 1905 [1]_, one-way source/observer shift).
+    Two-way relativistic Doppler shift ``f ((1+b)/(1-b) - 1)``, ``b = vr / c``.
 
-    A radar measures the two-way (reflected) shift, which is about twice
-    this, ``f ((1+b)/(1-b) - 1) = 2 f vr / (c - vr)`` (the ``exact`` result);
-    this helper therefore returns about half the radar value.
+    A radar measures the reflected shift: the target sees the frequency
+    ``f sqrt((1+b)/(1-b))`` (one-way relativistic shift of Einstein 1905
+    [1]_) and re-radiates it, so the radar receives
+    ``f (1+b)/(1-b)``. The shift ``f ((1+b)/(1-b) - 1) = 2 f vr / (c - vr)``
+    is analytically the same as the ``exact`` result.
 
     References
     ----------
@@ -159,7 +161,8 @@ def _doppler_shift_relativistic(frequency, vr):
            Phys.*, **322** (10), 891-921,
            https://doi.org/10.1002/andp.19053221004 (section not cited)
     """
-    return frequency * (np.sqrt((1 + vr / C) / (1 - vr / C)) - 1)
+    beta = vr / C
+    return frequency * ((1 + beta) / (1 - beta) - 1)
 
 
 def _doppler_shift_exact(frequency, vr):
@@ -194,11 +197,12 @@ def doppler_frequency_shift(frequency, vr, exact=False, relativistic=False):
 
     The default is the first-order two-way shift ``2 f vr / c`` (Eq. 3.30 of
     [1]_ divided by 2 pi). ``exact=True`` gives ``2 f vr / (c - vr)``, the
-    exact reflected shift of a moving target. ``relativistic=True`` returns
-    ``f (sqrt((1+b)/(1-b)) - 1)`` with ``b = vr/c`` [2]_, which is the one-way
-    relativistic shift, about half the radar (two-way) value (e.g. 186.8 Hz
-    instead of 373.6 Hz for 5.6 GHz and 10 m/s). Positive ``vr`` (approaching)
-    gives a positive shift.
+    exact reflected shift of a moving target. ``relativistic=True`` returns the
+    two-way relativistic shift ``f ((1+b)/(1-b) - 1)`` with ``b = vr/c`` [2]_
+    (373.6 Hz for 5.6 GHz and 10 m/s), which equals the ``exact`` result
+    analytically. Before this release it returned the one-way relativistic
+    shift ``f (sqrt((1+b)/(1-b)) - 1)``, half the radar value (186.8 Hz).
+    Positive ``vr`` (approaching) gives a positive shift.
 
     Parameters
     ----------
@@ -209,7 +213,8 @@ def doppler_frequency_shift(frequency, vr, exact=False, relativistic=False):
     exact : bool, optional
         If True, uses the classical but accurate Doppler formula: (2 * f * v) / (c - v).
     relativistic : bool, optional
-        If True, uses the relativistic Doppler formula. Overrides `exact` if both are True.
+        If True, uses the two-way relativistic Doppler formula. Overrides
+        `exact` if both are True.
 
     Returns
     -------
@@ -272,14 +277,13 @@ def dual_prf_velocity(wavelength, prf1, prf2):
     """
     Compute Nyquist velocity using dual-PRF scheme.
 
-    Implements ``lambda / (4 (1/prf1 - 1/prf2))``, which is the extended
+    Implements ``lambda / (4 |1/prf1 - 1/prf2|)``, which is the extended
     unambiguous velocity ``v_m = lambda / (4 (T_s2 - T_s1))`` of the
     staggered / dual-PRT scheme, Eq. (7.6b) of [1]_ (Section 7.4.3; method
-    of [2]_), where ``T_s = 1/PRF`` and ``T_s2 > T_s1``. With
-    ``T_s1 = 1/prf1`` and ``T_s2 = 1/prf2`` the code computes
-    ``lambda / (4 (T_s1 - T_s2))``, the opposite order. It is therefore
-    positive when ``prf1 < prf2`` and negative when ``prf1 > prf2``; take
-    ``abs()`` of the result for the magnitude.
+    of [2]_), where ``T_s = 1/PRF`` and ``T_s2 > T_s1``. The result is the
+    magnitude of a velocity and does not depend on the order of the two PRFs.
+    Before this release the sign followed the order of the arguments
+    (negative for ``prf1 > prf2``, against the documented ordering).
 
     Parameters
     ----------
@@ -297,10 +301,9 @@ def dual_prf_velocity(wavelength, prf1, prf2):
 
     Notes
     -----
-    The sign of the result depends on the order of PRF values. The result is
-    positive for ``prf1 < prf2`` and negative for ``prf1 > prf2``, e.g.
-    ``dual_prf_velocity(0.1, 1000, 750) == -75`` and
-    ``dual_prf_velocity(0.1, 750, 1000) == 75``.
+    The result is positive for either order of the PRFs, e.g.
+    ``dual_prf_velocity(0.1, 1000, 750) == 75`` and
+    ``dual_prf_velocity(0.1, 750, 1000) == 75``. Equal PRFs give ``inf``.
 
     References
     ----------
@@ -312,4 +315,5 @@ def dual_prf_velocity(wavelength, prf1, prf2):
            Electron. Syst.*, **AES-21** (4), 470-483,
            https://doi.org/10.1109/TAES.1985.310635
     """
-    return wavelength / (4.0 * (1.0 / prf1 - 1.0 / prf2))
+    spacing = np.abs(1.0 / np.asarray(prf1) - 1.0 / np.asarray(prf2))
+    return wavelength / (4.0 * spacing)
