@@ -741,3 +741,147 @@ def test_projection_threads_match():
     # due east and north of the origin along the axes
     x, y = L._project([LON0, LON0 + 1.0], [LAT0 + 1.0, LAT0], LAT0, LON0)
     assert abs(x[0]) < 1e-6 and y[0] > 110e3 and abs(y[1]) < 2e3 and x[1] > 90e3
+
+
+# --------------------------------------------------------------------------
+# DBSCAN minimum number of points, maximum duration, noise (issue 278)
+# --------------------------------------------------------------------------
+
+
+def _random_walk_flashes(seed=11, n_flash=150):
+    """Flashes as random walks of sources: ragged clouds, some close in time."""
+    rng = np.random.default_rng(seed)
+    lat, lon, alt, t = [], [], [], []
+    for k in range(n_flash):
+        n = int(rng.integers(3, 60))
+        step = rng.normal(0, 1200.0, (n, 3)).cumsum(axis=0)
+        t0 = rng.uniform(0, 120)
+        t.append(t0 + np.sort(rng.uniform(0, 0.6, n)))
+        cy, cx = rng.uniform(-30e3, 30e3, 2)
+        lat.append(LAT0 + (cy + step[:, 0]) / 111.2e3)
+        lon.append(LON0 + (cx + step[:, 1]) / (111.2e3 * np.cos(np.radians(LAT0))))
+        alt.append(8e3 + step[:, 2] / 3.0)
+    t = np.concatenate(t)
+    order = np.argsort(t, kind="stable")
+    return xr.Dataset(
+        {"event_altitude": ("number_of_events", np.concatenate(alt)[order])},
+        coords={
+            "event_time": (
+                "number_of_events",
+                DAY + (t[order] * 1e9).astype("timedelta64[ns]"),
+            ),
+            "event_latitude": ("number_of_events", np.concatenate(lat)[order]),
+            "event_longitude": ("number_of_events", np.concatenate(lon)[order]),
+        },
+    )
+
+
+def _brute_force_dbscan(ds, min_points, distance=3000.0, time=0.15):
+    """Dense-matrix DBSCAN: core sources, smallest-index core owner, noise alone."""
+    lat = ds.event_latitude.values
+    lon = ds.event_longitude.values
+    ex, ey, ez = L._ecef(lon, lat, ds.event_altitude.values)
+    t = (ds.event_time.values - ds.event_time.values[0]).astype("int64") * 1e-9
+    d2 = (
+        (ex[:, None] - ex[None]) ** 2
+        + (ey[:, None] - ey[None]) ** 2
+        + (ez[:, None] - ez[None]) ** 2
+    ) / distance**2 + ((t[:, None] - t[None]) / time) ** 2
+    near = d2 <= 1.0
+    n = len(t)
+    core = near.sum(axis=1) >= min_points  # the source itself is in its row
+    label = np.arange(n)
+    # connected components of core-core links by repeated minimum propagation
+    link = near & core[:, None] & core[None]
+    changed = True
+    while changed:
+        smallest = np.where(link, label[None], n).min(axis=1)
+        new = np.where(core, np.minimum(label, smallest), label)
+        changed = bool((new != label).any())
+        label = new
+    for i in np.nonzero(~core)[0]:
+        owners = np.nonzero(near[i] & core)[0]
+        if owners.size:
+            label[i] = label[owners.min()]
+    return label
+
+
+def _same_partition(a, b):
+    """Whether two labelings group the sources identically."""
+    pairs = np.unique(np.column_stack([a, b]), axis=0)
+    return pairs.shape[0] == np.unique(a).size == np.unique(b).size
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("min_points", [1, 2, 3, 5, 10])
+def test_cluster_min_points_is_dbscan(engine, min_points):
+    ds = _random_walk_flashes()
+    out = cluster_flashes(ds, min_points=min_points, engine=engine)
+    ref = _brute_force_dbscan(out, min_points)
+    assert _same_partition(out.event_parent_flash_id.values, ref)
+    if min_points <= 2:
+        single = cluster_flashes(ds, engine=engine)
+        np.testing.assert_array_equal(
+            out.event_parent_flash_id, single.event_parent_flash_id
+        )
+
+
+@needs_kernel
+def test_cluster_min_points_engines_and_threads_agree():
+    ds = _random_walk_flashes(seed=5)
+    a = cluster_flashes(ds, min_points=10, engine="numpy")
+    b = cluster_flashes(ds, min_points=10, engine="compiled", n_threads=4)
+    c = cluster_flashes(ds, min_points=10, engine="compiled", n_threads=1)
+    np.testing.assert_array_equal(a.event_parent_flash_id, b.event_parent_flash_id)
+    np.testing.assert_array_equal(b.event_parent_flash_id, c.event_parent_flash_id)
+
+
+def test_cluster_min_points_colorado_setting_differs_from_single_linkage():
+    ds = _random_walk_flashes()
+    one = cluster_flashes(ds)
+    ten = cluster_flashes(ds, min_points=10)
+    assert one.sizes["number_of_flashes"] != ten.sizes["number_of_flashes"]
+    # noise sources dropped: they are in no flash and the rest is unchanged
+    kept = cluster_flashes(ds, min_points=10, noise="drop")
+    ids = kept.event_parent_flash_id.values
+    assert (ids < 0).any() and (ids >= 0).any()
+    assert kept.sizes["number_of_flashes"] < ten.sizes["number_of_flashes"]
+    assert kept.flash_event_count.min() >= 2  # noise is single sources
+    assert kept.flash_event_count.sum() == (ids >= 0).sum()
+    assert np.isfinite(kept.flash_center_latitude).all()
+    assert _same_partition(ids[ids >= 0], ten.event_parent_flash_id.values[ids >= 0])
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_cluster_max_duration_splits_long_flashes(engine):
+    """A 5 s flash is one flash without a limit and two with 3 s."""
+    n = 51
+    t = np.linspace(0.0, 5.0, n)  # a source every 0.1 s, 100 m apart
+    lat = LAT0 + 100.0 * np.arange(n) / 111.2e3
+    ds = xr.Dataset(
+        {"event_altitude": ("number_of_events", np.full(n, 8e3))},
+        coords={
+            "event_time": (
+                "number_of_events",
+                DAY + (t * 1e9).astype("timedelta64[ns]"),
+            ),
+            "event_latitude": ("number_of_events", lat),
+            "event_longitude": ("number_of_events", np.full(n, LON0)),
+        },
+    )
+    assert cluster_flashes(ds, engine=engine).sizes["number_of_flashes"] == 1
+    out = cluster_flashes(ds, max_duration=3.0, engine=engine)
+    assert out.sizes["number_of_flashes"] == 2
+    assert out.flash_duration.max() <= 3.0 + 1e-9
+    np.testing.assert_array_equal(out.flash_event_count, [31, 20])
+    assert cluster_flashes(ds, max_duration=10.0).sizes["number_of_flashes"] == 1
+
+
+def test_cluster_new_argument_errors():
+    ds, _ = _sources([(0, 0, 5)])
+    with pytest.raises(ValueError, match="min_points"):
+        cluster_flashes(ds, min_points=0)
+    with pytest.raises(ValueError, match="max_duration"):
+        cluster_flashes(ds, max_duration=-1.0)
+    with pytest.raises(ValueError, match="noise"):
+        cluster_flashes(ds, noise="remove")
