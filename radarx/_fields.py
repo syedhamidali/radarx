@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import xarray as xr
 
-__all__ = ["VELOCITY", "align_like", "as_sweep", "find_field"]
+__all__ = ["VELOCITY", "align_like", "as_sweep", "find_field", "node_dataset"]
 
 # Radial velocity, in the order of preference: xradar's ``VRADH`` first, then
 # ``VRAD`` (single polarisation), the vertical channel, and other spellings.
@@ -29,6 +29,36 @@ VELOCITY = (
     "velocity",
     "radial_velocity",
 )
+
+
+def node_dataset(node):
+    """
+    A DataTree node as a Dataset with the coordinates it inherits.
+
+    The radar site (``latitude``, ``longitude``, ``altitude``) is a scalar
+    coordinate of the root. Recent xarray passes it on to the sweeps; xarray
+    2024.10 inherits the indexed coordinates only, so the scalar coordinates
+    of the parents are added here.
+
+    Parameters
+    ----------
+    node : xarray.DataTree
+
+    Returns
+    -------
+    xarray.Dataset
+    """
+    try:
+        ds = node.to_dataset(inherit="all_coords")
+    except (TypeError, ValueError):  # xarray without "all_coords"
+        ds = node.to_dataset()
+    parent = node.parent
+    while parent is not None:
+        for name, coord in parent.to_dataset(inherit=False).coords.items():
+            if name not in ds.variables and set(coord.dims) <= set(ds.dims):
+                ds = ds.assign_coords({name: coord})
+        parent = parent.parent
+    return ds
 
 
 def as_sweep(obj):
@@ -54,10 +84,7 @@ def as_sweep(obj):
         return obj
     if any(name.startswith("sweep") for name in obj.children):
         return obj
-    try:
-        return obj.to_dataset(inherit="all_coords")
-    except (TypeError, ValueError):  # xarray without "all_coords"
-        return obj.to_dataset()
+    return node_dataset(obj)
 
 
 def _holds(node, name):

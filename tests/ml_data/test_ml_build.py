@@ -14,6 +14,9 @@ from .conftest import synthetic_sweep, synthetic_volume
 
 pytest.importorskip("zarr")
 
+# the store is written with zarr_format=2, which xarray passes on from 2025.1
+OLD_XARRAY = tuple(int(v) for v in xr.__version__.split(".")[:2]) < (2025, 1)
+
 T0 = np.datetime64("2022-03-30T23:00:00")
 
 
@@ -101,6 +104,7 @@ def _config():
     )
 
 
+@pytest.mark.skipif(OLD_XARRAY, reason="xarray before 2025.1 has no zarr_format")
 def test_build_end_to_end(tmp_path, offline):
     cfg = _config()
     lines = []

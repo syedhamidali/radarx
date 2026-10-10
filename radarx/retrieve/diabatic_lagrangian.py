@@ -2315,7 +2315,11 @@ def diabatic_lagrangian(
         )
     if precip_ds is not None:
         pa = precip_ds.isel(z=ks)
-        pt = pa.interp(time=prep["time"]) if pa.sizes["time"] > 1 else pa.isel(time=0)
+        pt = (
+            pa.interp(time=np.asarray(prep["time"]))
+            if pa.sizes["time"] > 1
+            else pa.isel(time=0)
+        )
         for k in ("qr", "nr", "qg", "ng"):
             data[k] = (
                 dims,

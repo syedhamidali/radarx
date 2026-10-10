@@ -932,7 +932,7 @@ def _reference_height(value, template, other):
         if "time" in template.coords and da.sizes["time"] > 1:
             t = template["time"].values
             near = da.sel(time=t, method="nearest").drop_vars("time")
-            da = da.interp(time=t).drop_vars("time").fillna(near)
+            da = da.interp(time=np.asarray(t)).drop_vars("time").fillna(near)
             if np.ndim(t):
                 da = da.assign_coords(time=t)
         elif da.sizes["time"] == 1:

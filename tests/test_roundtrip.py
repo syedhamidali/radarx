@@ -15,6 +15,7 @@ left to the tests that fetch it.
 import numpy as np
 import pytest
 import xarray as xr
+from packaging.version import Version
 
 import radarx
 
@@ -47,6 +48,11 @@ from .test_vil import storm_volume
 from .test_wind_profile import vad_sweep
 
 zarr = pytest.importorskip("zarr")
+
+# xarray before 2025.1 cannot write Zarr format 3, which zarr 3 uses
+NO_ZARR_3 = Version(xr.__version__) < Version("2025.1") and Version(
+    zarr.__version__
+) >= Version("3")
 
 R = radarx.retrieve
 
@@ -307,6 +313,8 @@ def _open(path, engine, tree):
 @pytest.mark.parametrize("name", list(PRODUCTS))
 @pytest.mark.parametrize("engine", ["netcdf4", "zarr"])
 def test_product_round_trip_is_identical(name, engine, tmp_path):
+    if engine == "zarr" and NO_ZARR_3:
+        pytest.skip("xarray before 2025.1 does not write Zarr 3")
     out = _as_tree_or_dataset(PRODUCTS[name]())
     tree = isinstance(out, xr.DataTree)
     path = tmp_path / ("product.zarr" if engine == "zarr" else "product.nc")
@@ -337,3 +345,12 @@ def test_not_covered_products_exist():
     from radarx._provenance import DECORATED
 
     assert set(NOT_COVERED) <= set(DECORATED)
+
+
+@pytest.mark.parametrize("name", ["estimate_kdp", "hid (park)", "grid_cones"])
+def test_chunked_product_round_trip_is_identical(name, tmp_path):
+    pytest.importorskip("dask")
+    out = PRODUCTS[name]()
+    out.chunk().to_netcdf(tmp_path / "chunked.nc")
+    with xr.open_dataset(tmp_path / "chunked.nc") as back:
+        xr.testing.assert_identical(back.load(), out)
