@@ -1292,3 +1292,138 @@ def test_surface_request_failure_warns_and_keeps_the_levels(tmp_path, monkeypatc
     with pytest.warns(RuntimeWarning, match="surface fields could not be read"):
         prof = sounding.era5_profile(33.9, -88.33, "2022-03-30T23:30", source="cds")
     assert prof.sizes["height"] == 4
+
+
+# failure modes reported against MetPy (Unidata/MetPy #973, #2637, #596, #788,
+# #178, #794, #165, #3640), checked against analytic profiles
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_layer_limit_matches_level_to_rounding(engine):
+    # heights (g + k dz) * 1000 versus g * 1000 + 6000 differ by 9e-13 m for
+    # g = 0.347 km: the layer is still spanned by the profile
+    g, dz = 0.347, 0.1
+    z = (g + np.arange(61) * dz) * 1000.0
+    assert z[-1] < g * 1000.0 + 6000.0
+    prof = xr.Dataset(
+        {"u": ("height", np.linspace(0, 12, 61)), "v": ("height", np.zeros(61))},
+        coords={"height": z},
+    )
+    mw = sounding.mean_wind(prof, g * 1000.0, g * 1000.0 + 6000.0, engine=engine)
+    assert float(mw["u"]) == pytest.approx(6.0)
+    out = sounding.interpolate_profile(
+        prof, [g * 1000.0 + 6000.0], ["u"], engine=engine
+    )
+    assert float(out["u"][0]) == pytest.approx(12.0)
+    # a real gap is still outside the profile
+    assert np.isnan(
+        float(
+            sounding.interpolate_profile(prof, [z[-1] + 0.01], ["u"], engine=engine)[
+                "u"
+            ][0]
+        )
+    )
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_top_down_profile_equals_bottom_up(engine):
+    prof = synthetic_profile()
+    down = prof.isel(height=slice(None, None, -1))
+    target = [500.0, 2500.0, 12000.0]
+    a = sounding.interpolate_profile(prof, target, engine=engine)
+    b = sounding.interpolate_profile(down, target, engine=engine)
+    xr.testing.assert_allclose(a, b)
+    assert float(b["temperature"][0]) == pytest.approx(300.0 - 0.0065 * 500.0)
+    ma = sounding.mean_wind(prof, 1000, 7000, engine=engine)
+    mb = sounding.mean_wind(down, 1000, 7000, engine=engine)
+    assert float(mb["u"]) == pytest.approx(2 + 1e-3 * 4000)
+    xr.testing.assert_allclose(ma, mb)
+    za = sounding.isotherm_height(prof, engine=engine)
+    zb = sounding.isotherm_height(down, engine=engine)
+    assert float(zb) == pytest.approx((300 - 273.15) / 0.0065)
+    assert float(za) == pytest.approx(float(zb))
+    wa = sounding.wet_bulb_zero_height(prof, engine=engine)
+    wb = sounding.wet_bulb_zero_height(down, engine=engine)
+    assert np.isfinite(float(wb)) and float(wa) == pytest.approx(float(wb))
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_wind_direction_range_and_calm(engine):
+    z = np.array([0.0, 1000.0, 2000.0])
+
+    def prof(u, v):
+        return xr.Dataset(
+            {"u": ("height", np.full(3, u)), "v": ("height", np.full(3, v))},
+            coords={"height": z},
+        )
+
+    # north wind with a rounding-sized u: in [0, 360), not 360.0
+    north = prof(1e-17, -5.0)
+    assert (
+        float(sounding.mean_wind(north, 0, 2000, engine=engine)["wind_direction"])
+        == 0.0
+    )
+    out = sounding.interpolate_profile(north, [500.0], engine=engine)
+    assert float(out["wind_direction"][0]) == 0.0
+    # calm: 0, as in the profile readers (not an arbitrary 180)
+    calm = prof(0.0, 0.0)
+    assert (
+        float(sounding.mean_wind(calm, 0, 2000, engine=engine)["wind_direction"]) == 0.0
+    )
+    out = sounding.interpolate_profile(calm, [500.0], engine=engine)
+    assert float(out["wind_direction"][0]) == 0.0
+    ds = sounding._profile_dataset(
+        height=z,
+        temperature=np.full(3, 280.0),
+        u=np.array([0.0, 1e-17, 3.0]),
+        v=np.array([0.0, -5.0, 0.0]),
+    )
+    np.testing.assert_allclose(ds["wind_direction"], [0.0, 0.0, 270.0])
+    # the four cardinal directions and a diagonal
+    d = sounding._wind_from_direction(
+        np.array([0.0, -4.0, 0.0, 4.0, 3.0]), np.array([-4.0, 0.0, 4.0, 0.0, 3.0])
+    )
+    np.testing.assert_allclose(d, [0.0, 90.0, 180.0, 270.0, 225.0])
+    assert np.isnan(sounding._wind_from_direction(np.nan, 1.0))
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_si_units_enforced(engine):
+    with pytest.raises(ValueError, match="temperature must be in K"):
+        sounding.saturation_vapor_pressure(20.0, engine=engine)
+    with pytest.raises(ValueError, match="pressure must be in Pa"):
+        sounding.wet_bulb_temperature(1000.0, 293.15, 283.15, engine=engine)
+    with pytest.raises(ValueError, match="temperature must be in K"):
+        sounding.wet_bulb_temperature(1e5, 20.0, 10.0, engine=engine)
+    with pytest.raises(ValueError, match="pressure must be in Pa"):
+        sounding.air_density(1013.25, 288.15, engine=engine)
+    with pytest.raises(ValueError, match="pressure must be in Pa"):
+        sounding.dewpoint_from_specific_humidity(0.01, 1000.0, engine=engine)
+    # NaN-only and SI input pass
+    assert np.isnan(float(sounding.saturation_vapor_pressure(np.nan, engine=engine)))
+    assert float(sounding.saturation_vapor_pressure(293.15, engine=engine)) > 2000
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_masked_arrays_are_missing_not_fill_values(engine):
+    # netCDF4 returns masked arrays; the data under the mask (1e20, -9999) must
+    # not enter the result (MetPy #361, #1496, #1516, #973)
+    t = np.ma.masked_array([293.15, 1e20, 280.0], mask=[0, 1, 0])
+    es = sounding.saturation_vapor_pressure(t, engine=engine).values
+    assert np.isnan(es[1]) and np.all(np.isfinite(es[[0, 2]]))
+    p = np.ma.masked_array([1e5, 1e5, 9e4], mask=[0, 0, 0])
+    td = np.ma.masked_array([283.15, -9999.0, 270.0], mask=[0, 1, 0])
+    tw = sounding.wet_bulb_temperature(
+        p, np.array([293.15, 293.15, 280.0]), td, engine=engine
+    ).values
+    assert np.isnan(tw[1]) and 280.0 > tw[2] > 270.0
+    rho = sounding.air_density(
+        np.ma.masked_array([1e5, 1e5], mask=[0, 1]), 290.0, 0.01, engine=engine
+    ).values
+    assert np.isfinite(rho[0]) and np.isnan(rho[1])
+    heights = np.ma.masked_array([500.0, 1e20], mask=[0, 1])
+    out = sounding.interpolate_profile(
+        synthetic_profile(), heights, ["temperature"], engine=engine
+    )
+    assert np.isfinite(float(out["temperature"][0]))
+    assert np.isnan(float(out["temperature"][1]))

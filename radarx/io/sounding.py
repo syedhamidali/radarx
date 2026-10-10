@@ -461,9 +461,51 @@ def _f64(a):
     return np.ascontiguousarray(a, dtype=np.float64)
 
 
+# Units expected by the thermodynamic kernels, per argument: "K", "Pa" or None
+# (no check: vapour pressures and humidities have no usable lower bound).
+_OP_UNITS = {
+    "esat": ("K",),
+    "wet_bulb": ("Pa", "K", "K"),
+    "density": ("Pa", "K", None),
+    "vapor_pressure": (None, "Pa"),
+    "specific_humidity": (None, "Pa"),
+}
+
+
+def _check_si(op, arrays):
+    """Raise for temperatures in degC or pressures in hPa (a silent wrong answer)."""
+    for kind, a in zip(_OP_UNITS.get(op, ()), arrays):
+        fin = a[np.isfinite(a)]
+        if not fin.size:
+            continue
+        if kind == "K" and fin.max() < 150.0:
+            raise ValueError(
+                f"temperature must be in K, got values up to {fin.max():g} "
+                "(degC input?)"
+            )
+        if kind == "Pa" and fin.max() < 2000.0:
+            raise ValueError(
+                f"pressure must be in Pa, got values up to {fin.max():g} (hPa input?)"
+            )
+
+
+def _unmask(a):
+    """Masked arrays (netCDF4, MaskedArray) with NaN for the masked values.
+
+    ``np.asarray`` would drop the mask and use the data under it (a fill value
+    such as 1e20 or -9999) as if it were a measurement.
+    """
+    if isinstance(a, np.ma.MaskedArray):
+        return np.ma.filled(a.astype(np.float64), np.nan)
+    return a
+
+
 def _thermo(op, *arrays, engine="auto", n_threads=None):
     """Run an elementwise kernel on broadcast NumPy arrays, keeping the shape."""
-    arrays = np.broadcast_arrays(*(np.asarray(a, dtype=np.float64) for a in arrays))
+    arrays = np.broadcast_arrays(
+        *(np.asarray(_unmask(a), dtype=np.float64) for a in arrays)
+    )
+    _check_si(op, arrays)
     shape = arrays[0].shape
     k = _kernel(engine)
     out = k.thermo(op, [_f64(a).ravel() for a in arrays], n_threads=int(n_threads or 0))
@@ -473,7 +515,8 @@ def _thermo(op, *arrays, engine="auto", n_threads=None):
 def _as_dataarray(*args):
     """xarray-aligned DataArrays of the inputs (scalars and arrays allowed)."""
     das = [
-        a if isinstance(a, xr.DataArray) else xr.DataArray(np.asarray(a)) for a in args
+        a if isinstance(a, xr.DataArray) else xr.DataArray(np.asarray(_unmask(a)))
+        for a in args
     ]
     return xr.broadcast(*das)
 
@@ -929,12 +972,7 @@ def _profile_dataset(
         rh = _thermo("esat", td, engine=engine) / _thermo("esat", t, engine=engine)
     cols.update(dewpoint=td, specific_humidity=q, relative_humidity=rh)
     cols["wind_speed"] = np.hypot(cols["u"], cols["v"])
-    cols["wind_direction"] = np.mod(
-        np.degrees(np.arctan2(-cols["u"], -cols["v"])), 360.0
-    )
-    cols["wind_direction"][~(cols["wind_speed"] > 0)] = np.where(
-        cols["wind_speed"][~(cols["wind_speed"] > 0)] == 0, 0.0, np.nan
-    )
+    cols["wind_direction"] = _wind_from_direction(cols["u"], cols["v"])
 
     data_vars = {}
     for name in PROFILE_VARS:
@@ -2194,6 +2232,22 @@ def era5_profile(
 # profile helpers
 
 
+def _wind_from_direction(u, v, calm=0.0):
+    """
+    Direction the wind blows from, degrees clockwise from north, in [0, 360).
+
+    ``calm`` is returned where both components are zero (the direction is
+    undefined there; ``arctan2`` would otherwise give an arbitrary 180).
+    Rounding such as ``-1e-18 % 360 == 360.0`` is mapped to 0.
+    """
+    d = np.degrees(np.arctan2(-u, -v)) % 360.0
+    if isinstance(d, xr.DataArray):
+        d = xr.where(d >= 360.0, 0.0, d)
+        return xr.where((u == 0) & (v == 0), calm, d)
+    d = np.where(d >= 360.0, 0.0, d)
+    return np.where((np.asarray(u) == 0) & (np.asarray(v) == 0), calm, d)
+
+
 def _profile_columns(profile, variables):
     """(ncol, nlev) heights, (nvar, ncol, nlev) values and the column dims."""
     if "height" not in profile.dims:
@@ -2223,7 +2277,8 @@ def _profile_columns(profile, variables):
             for n in variables
         ]
     )
-    return zarr, _f64(vals), other, shape
+    zarr, vals = _ascending(zarr, _f64(vals))
+    return zarr, vals, other, shape
 
 
 def interpolate_profile(
@@ -2240,7 +2295,9 @@ def interpolate_profile(
 
     Values are interpolated linearly in height between the nearest valid
     levels, pressure linearly in its logarithm; wind speed and direction are
-    recomputed from the interpolated ``u`` and ``v``.
+    recomputed from the interpolated ``u`` and ``v`` (direction the wind comes
+    from, in [0, 360), 0 for calm). Levels may be stored top-down. A target
+    within 1e-6 m of the lowest or highest valid level counts as that level.
 
     Parameters
     ----------
@@ -2276,7 +2333,7 @@ def interpolate_profile(
     if isinstance(heights, xr.Dataset):
         heights = heights["z"]
     if not isinstance(heights, xr.DataArray):
-        heights = xr.DataArray(np.asarray(heights, dtype=np.float64))
+        heights = xr.DataArray(np.asarray(_unmask(heights), dtype=np.float64))
     if variables is None:
         variables = [
             n
@@ -2323,9 +2380,9 @@ def interpolate_profile(
         out["wind_speed"] = np.hypot(out["u"], out["v"]).assign_attrs(
             ATTRS["wind_speed"]
         )
-        out["wind_direction"] = (
-            np.mod(np.degrees(np.arctan2(-out["u"], -out["v"])), 360.0)
-        ).assign_attrs(ATTRS["wind_direction"])
+        out["wind_direction"] = _wind_from_direction(out["u"], out["v"]).assign_attrs(
+            ATTRS["wind_direction"]
+        )
     out = out.transpose(*heights.dims)
     out.attrs = dict(profile.attrs)
     return out
@@ -2461,7 +2518,9 @@ def mean_wind(
 
     The height-weighted mean of ``u`` and ``v`` over ``[bottom, top]``,
     integrating the profile linearly interpolated between valid levels
-    (trapezoidal rule).
+    (trapezoidal rule). Levels may be stored top-down; a limit within 1e-6 m
+    of the lowest or highest valid level counts as that level. The direction
+    of a calm mean wind is 0.
 
     Parameters
     ----------
@@ -2519,7 +2578,7 @@ def mean_wind(
             "wind_speed": (other, np.hypot(u, v), dict(ATTRS["wind_speed"])),
             "wind_direction": (
                 other,
-                np.mod(np.degrees(np.arctan2(-u, -v)), 360.0),
+                _wind_from_direction(u, v),
                 dict(ATTRS["wind_direction"]),
             ),
         },
@@ -2570,6 +2629,29 @@ def _grid_time(grid):
     raise ValueError("pass time=..., the grid has no 'time'")
 
 
+def _ascending(z, *arrays):
+    """
+    Columns ordered by increasing height.
+
+    ``z`` is (ncol, nlev); each array in ``arrays`` ends with the same
+    ``(ncol, nlev)`` axes. Profiles stored top-down (model levels, pressure
+    levels from the top) are reversed; the compiled and NumPy kernels
+    assume ascending heights and would otherwise return NaN or wrong values.
+    Missing heights go last (the kernels skip them).
+    """
+    z = np.asarray(z)
+    if z.shape[-1] < 2 or (
+        np.isfinite(z).all() and not (np.diff(z, axis=-1) < 0).any()
+    ):
+        return (z, *arrays)
+    order = np.argsort(np.where(np.isfinite(z), z, np.inf), axis=-1, kind="stable")
+    out = [np.take_along_axis(z, order, axis=-1)]
+    for a in arrays:
+        a = np.asarray(a)
+        out.append(np.take_along_axis(a, np.broadcast_to(order, a.shape), axis=-1))
+    return tuple(out)
+
+
 def _background(zcols, cols, grid, attrs, engine, n_threads):
     """
     Common assembly of a grid background from columns.
@@ -2582,8 +2664,12 @@ def _background(zcols, cols, grid, attrs, engine, n_threads):
     z = grid["z"].values.astype(np.float64)
     ny, nx = grid.sizes["y"], grid.sizes["x"]
     ncell = ny * nx
-    ncol = zcols.shape[0]
     names = ["pressure", "temperature", "specific_humidity", "u", "v", "w"]
+    zcols, *sorted_cols = _ascending(
+        np.asarray(zcols, dtype=np.float64), *(cols[n] for n in names)
+    )
+    cols = {**cols, **dict(zip(names, sorted_cols))}
+    ncol = zcols.shape[0]
     vals = _f64(np.stack([cols[n] for n in names]))
     target = _f64(np.broadcast_to(z, (ncol, z.size)))
     log_var = np.array([n == "pressure" for n in names], dtype=bool)

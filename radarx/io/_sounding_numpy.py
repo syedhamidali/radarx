@@ -21,6 +21,10 @@ CPV = 1875.0  # specific heat of water vapour [J kg-1 K-1]; radarx value, not tr
 T0 = 273.15  # 0 degC [K]
 G0 = 9.80665  # standard gravity [m s-2]; conventional (CGPM 1901) value
 RE = 6371008.8  # mean Earth radius [m]; GRS80 (2a+b)/3 = 6371008.77 m, Moritz (2000), rounded
+# Heights that differ by less than this are the same level: a layer limit
+# computed as ground + depth can miss the matching profile level by rounding
+# (1e-6 m is far above float64 rounding at 1e5 m and far below any real gap).
+ZTOL = 1e-6  # [m]
 
 
 def _esat(t):
@@ -128,7 +132,7 @@ def interp_vertical(z, values, target, log_var, extrapolate=False, n_threads=0):
             else:
                 res = np.interp(zt, zv, vv)
             if not extrapolate:
-                res = np.where((zt < zv[0]) | (zt > zv[-1]), np.nan, res)
+                res = np.where((zt < zv[0] - ZTOL) | (zt > zv[-1] + ZTOL), np.nan, res)
             res = np.where(np.isnan(zt), np.nan, res)
             out[k, row] = res
     return out
@@ -162,7 +166,7 @@ def layer_mean(z, values, bottom, top, n_threads=0):
         for c in range(ncol):
             ok = np.isfinite(values[k, c]) & np.isfinite(z[c])
             zc, vc = z[c, ok], values[k, c, ok]
-            if zc.size < 2 or zc[0] > bottom or zc[-1] < top:
+            if zc.size < 2 or zc[0] > bottom + ZTOL or zc[-1] < top - ZTOL:
                 continue
             inner = zc[(zc > bottom) & (zc < top)]
             zz = np.concatenate([[bottom], inner, [top]])
