@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <atomic>
 #include <charconv>
+#include <cstdio>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -60,9 +61,10 @@ std::string run_blocks(int64_t total, int n_threads, F&& body) {
     return all;
 }
 
-// Number formatting with std::to_chars, which rounds exactly like printf and like Python's
-// % operator (so the three give the same digits) but is several times faster than snprintf.
-// Width means right-aligned in at least that many characters, like the printf field width.
+// Number formatting. Floating-point values go through snprintf, which gives the same digits as
+// Python's % operator; std::to_chars for double is not available at the oldest macOS
+// deployment target the wheels use. Integers use std::to_chars. Width means right-aligned in
+// at least that many characters, like the printf field width.
 inline void pad(std::string& s, const char* b, size_t len, int width) {
     if (static_cast<int>(len) < width) s.append(static_cast<size_t>(width) - len, ' ');
     s.append(b, len);
@@ -71,19 +73,17 @@ inline void pad(std::string& s, const char* b, size_t len, int width) {
 // %<width>.16E
 inline void put_e(std::string& s, double v, int width) {
     char b[64];
-    auto r = std::to_chars(b, b + sizeof b, v, std::chars_format::scientific, 16);
-    if (r.ec != std::errc()) throw std::runtime_error("formatting failed");
-    for (char* q = b; q < r.ptr; ++q)
-        if (*q == 'e') *q = 'E';
-    pad(s, b, static_cast<size_t>(r.ptr - b), width);
+    int n = std::snprintf(b, sizeof b, "%.16E", v);
+    if (n < 0 || n >= static_cast<int>(sizeof b)) throw std::runtime_error("formatting failed");
+    pad(s, b, static_cast<size_t>(n), width);
 }
 
 // %<width>.<prec>f
 inline void put_f(std::string& s, double v, int prec, int width) {
     char b[400];
-    auto r = std::to_chars(b, b + sizeof b, v, std::chars_format::fixed, prec);
-    if (r.ec != std::errc()) throw std::runtime_error("formatting failed");
-    pad(s, b, static_cast<size_t>(r.ptr - b), width);
+    int n = std::snprintf(b, sizeof b, "%.*f", prec, v);
+    if (n < 0 || n >= static_cast<int>(sizeof b)) throw std::runtime_error("formatting failed");
+    pad(s, b, static_cast<size_t>(n), width);
 }
 
 // %<width>lld
