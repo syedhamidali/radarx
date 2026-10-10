@@ -393,11 +393,51 @@ def test_method_without_published_source_has_empty_references():
 # accessors
 
 
+def local_imports(tree, func):
+    """Names that a function imports inside its body, with the imported objects."""
+    local = {}
+    package = func.__module__.rpartition(".")[0]
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            module = importlib.import_module(
+                "." * node.level + (node.module or ""), package
+            )
+            for alias in node.names:
+                local[alias.asname or alias.name] = getattr(module, alias.name)
+    return local
+
+
+def call_target(node, local, func):
+    """The object a call refers to, or None if it cannot be resolved by name."""
+    target = node.func
+    if isinstance(target, ast.Name):
+        return local.get(target.id, func.__globals__.get(target.id))
+    if not isinstance(target, ast.Attribute) or not isinstance(target.value, ast.Name):
+        return None
+    if target.value.id == "self":  # another accessor method
+        return getattr(accessors.RadarxDataTreeAccessor, target.attr, None)
+    base = local.get(target.value.id, func.__globals__.get(target.value.id))
+    return getattr(base, target.attr, None)
+
+
 def called_decorated(func, seen=None):
     """Does the accessor method call a function that records provenance?"""
     seen = set() if seen is None else seen
     if func in seen:
         return False
+    seen.add(func)
+    tree = ast.parse(textwrap.dedent(inspect.getsource(func)))
+    local = local_imports(tree, func)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        obj = call_target(node, local, func)
+        if hasattr(obj, "__radarx_provenance__"):
+            return True
+        if inspect.isfunction(obj) and obj.__module__.startswith("radarx.accessors"):
+            if called_decorated(obj, seen):
+                return True
+    return False
     seen.add(func)
     tree = ast.parse(textwrap.dedent(inspect.getsource(func)))
     local = {}
