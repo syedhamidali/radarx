@@ -33,7 +33,9 @@ References
 
 __all__ = [
     "beam_center_height",
+    "beam_height_at_ground_range",
     "effective_radius",
+    "ground_range",
     "half_power_radius",
     "sample_volume_gaussian",
 ]
@@ -123,6 +125,72 @@ def beam_center_height(
     elev_rad = np.deg2rad(elevation_deg)
     term = np.sqrt(range_m**2 + reff**2 + 2 * range_m * reff * np.sin(elev_rad))
     return term - reff + radar_height
+
+
+def ground_range(range_m, elevation_deg, reff=EFFECTIVE_RADIUS_4_3):
+    """
+    Ground distance of a gate: the arc length under the beam on the Earth.
+
+    Implements ``s = reff arcsin(r cos(theta_e) / (reff + h))`` with the beam
+    height ``h`` of :func:`beam_center_height`, the 4/3 Earth model of [1]_
+    (Eqs. 2.28b-d; the form of ``s`` was not rechecked against the book).
+
+    Parameters
+    ----------
+    range_m : float or array-like
+        Slant range from the radar [m]
+    elevation_deg : float or array-like
+        Elevation angle [degrees]
+    reff : float
+        Effective Earth radius [m]
+
+    Returns
+    -------
+    float or array-like
+        Ground distance [m]
+
+    References
+    ----------
+    .. [1] Doviak, R. J., and D. S. Zrnic, 1993: *Doppler Radar and Weather
+           Observations*, 2nd ed. Academic Press, ISBN 0-12-221422-6 (book, no
+           DOI).
+    """
+    height = beam_center_height(range_m, elevation_deg, 0.0, reff)
+    cos_e = np.cos(np.deg2rad(elevation_deg))
+    return reff * np.arcsin(range_m * cos_e / (reff + height))
+
+
+def beam_height_at_ground_range(
+    ground_m, elevation_deg, radar_height=0.0, reff=EFFECTIVE_RADIUS_4_3
+):
+    """
+    Height above sea level of a beam at a given ground distance.
+
+    The inverse of the pair :func:`beam_center_height` and
+    :func:`ground_range` for a known ground distance: with
+    ``phi = s / reff`` the law of sines in the triangle of the Earth centre,
+    the radar and the beam gives ``h = reff cos(theta_e) / cos(theta_e + phi)
+    - reff`` (plus ``radar_height``). Same 4/3 Earth model as
+    :func:`beam_center_height`.
+
+    Parameters
+    ----------
+    ground_m : float or array-like
+        Ground distance from the radar [m]
+    elevation_deg : float or array-like
+        Elevation angle [degrees]
+    radar_height : float
+        Radar site altitude [m]
+    reff : float
+        Effective Earth radius [m]
+
+    Returns
+    -------
+    float or array-like
+        Beam center height [m]
+    """
+    e = np.deg2rad(elevation_deg)
+    return radar_height + reff * (np.cos(e) / np.cos(e + ground_m / reff) - 1.0)
 
 
 def sample_volume_gaussian(range_m, beamwidth_h_deg, beamwidth_v_deg, pulse_length_m):

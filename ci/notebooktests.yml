@@ -38,6 +38,8 @@ dependencies:
   - geopandas
   - wradlib
   - boto3
+  - metpy
+  - cfgrib
   - arm_pyart
   - ffmpeg
   - zarr

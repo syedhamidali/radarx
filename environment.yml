@@ -27,6 +27,8 @@ dependencies:
   - matplotlib-base
   - scipy
   - boto3
+  - metpy
+  - cfgrib
   - arm_pyart
   - ffmpeg
   - zarr

@@ -90,6 +90,7 @@ __all__ = ["biological_echo"]
 import numpy as np
 import xarray as xr
 
+from .._polar import nearest_ray
 from .._registry import accessor_method
 from . import _onnx_models
 from ._products import product_tree
@@ -146,13 +147,6 @@ def _sweep_lookup(ds, field):
     return da.values[order], az[order], np.asarray(ds["range"].values, np.float64)
 
 
-def _nearest_index(sorted_az, target):
-    ext = np.concatenate([sorted_az[-1:] - 360.0, sorted_az, sorted_az[:1] + 360.0])
-    idx = np.clip(np.searchsorted(ext, target), 1, len(ext) - 1)
-    left = target - ext[idx - 1] < ext[idx] - target
-    return np.mod(np.where(left, idx - 1, idx) - 1, sorted_az.size)
-
-
 def _render(ds, fields, size, resolution):
     """Fields of a sweep on the MistNet grid (rows north, columns east)."""
     elev = np.radians(_fixed_angle(ds))
@@ -165,7 +159,7 @@ def _render(ds, fields, size, resolution):
         if field is None or field not in ds:
             continue
         values, az, ranges = _sweep_lookup(ds, field)
-        ray = _nearest_index(az, azimuth)
+        ray = nearest_ray(az, azimuth)
         step = ranges[1] - ranges[0]
         gate = np.rint((rng - ranges[0]) / step).astype(np.int64)
         inside = (gate >= 0) & (gate < ranges.size)
