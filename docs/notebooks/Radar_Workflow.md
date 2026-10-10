@@ -30,7 +30,7 @@ multi-radar steps.
 |---|---|---|
 | 1 | volumes, Nyquist velocity, georeferencing | xradar, `download_file` |
 | 2 | non-meteorological echo removed | `dtree.radarx.echo_mask`, `apply_mask` |
-| 3 | environment: ERA5 profile and radiosonde, 0 °C height, humidity and wind-profile parameters | `dtree.radarx.sounding`, `read_sounding`, `bulk_shear` |
+| 3 | environment: ERA5 profile and radiosonde, 0 °C height, humidity, wind-profile and parcel parameters (CAPE, CIN) | `dtree.radarx.sounding`, `read_sounding`, `bulk_shear` |
 | 4 | dealiased Doppler velocity, VAD wind profile | `dtree.radarx.dealias`, `vad_profile` |
 | 5 | processed ΦDP and KDP | `dtree.radarx.kdp` |
 | 6 | hydrometeor classes | `dtree.radarx.hid` |
@@ -94,6 +94,7 @@ from radarx.io import (
     mean_wind,
     nearest_station,
     open_sounding_file,
+    parcel_diagnostics,
     read_sounding,
     relative_humidity_from_dewpoint,
     saturation_vapor_pressure,
@@ -487,6 +488,36 @@ ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=2, frameon=False
 fig.colorbar(sc, label="height above ground (km)")
 plt.show()
 print(f"storm-relative wind at 1 km: {float(rel.sel(height=low.height[0] + 1000, method='nearest').storm_relative_speed):.1f} m/s")
+```
+
+### Parcel thermodynamics: CAPE, CIN, the lifted index and the levels
+
+`parcel_diagnostics` lifts a parcel through a sounding or an ERA5 column and
+returns the CAPE and CIN, the lifted index and the pressure and height of the
+lifting condensation level (LCL), the level of free convection (LFC) and the
+equilibrium level (EL), for a surface-based, a mixed-layer (lowest 100 hPa) or
+the most unstable parcel (lowest 300 hPa). The thermodynamics are those of
+Bolton (1980) with the virtual-temperature correction (see
+`radarx.io.parcel`). The ERA5 profile has its levels below the ground masked
+and a surface level of 2 m air and 10 m wind (`surface=True` of `era5_profile`):
+
+```{code-cell} ipython3
+rows = {}
+for name, prof in (("BMX sounding", valid), ("ERA5 at KGWX", era5)):
+    for parcel in ("surface-based", "mixed-layer", "most-unstable"):
+        d = parcel_diagnostics(prof, parcel)
+        rows[(name, parcel)] = {
+            "CAPE (J/kg)": float(d.cape),
+            "CIN (J/kg)": float(d.cin),
+            "lifted index (K)": float(d.lifted_index),
+            "LCL (m)": float(d.lcl_height),
+            "LFC (m)": float(d.lfc_height),
+            "EL (m)": float(d.el_height),
+        }
+display(pd.DataFrame(rows).T.round(1))
+via_accessor = valid.radarx.parcel_diagnostics("most-unstable")
+print("the accessor agrees:",
+      bool(np.isclose(float(via_accessor.cape), rows[("BMX sounding", "most-unstable")]["CAPE (J/kg)"])))
 ```
 
 ## 4. Dealias the Doppler velocity
@@ -1567,6 +1598,7 @@ notebooks or from this index.
 | `read_parsivel` | `radarx.io.disdrometer` | [part 2](Radar_Workflow_Advanced): 2. Disdrometers |
 | `read_pips_netcdf` | `radarx.io.disdrometer` | [part 2](Radar_Workflow_Advanced): 2. Disdrometers |
 | `read_lma` | `radarx.io.lma` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
+| `parcel_diagnostics` | `radarx.io.parcel` | [core](Radar_Workflow): Parcel thermodynamics: CAPE, CIN, the lifted index and the levels |
 | `read_mrr` | `radarx.io.profiler` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `read_wind_profiler` | `radarx.io.profiler` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `air_density` | `radarx.io.sounding` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
@@ -1734,6 +1766,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.merge_radars` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `.radarx.multi_doppler` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `.radarx.network_bias` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
+| `.radarx.parcel_diagnostics` | [core](Radar_Workflow): Parcel thermodynamics: CAPE, CIN, the lifted index and the levels |
 | `.radarx.plot` | [core](Radar_Workflow): 10. Cone gridding, Max-CAPPI, interactive view and UGRID |
 | `.radarx.plot_cappi` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `.radarx.plot_max_cappi` | [core](Radar_Workflow): 10. Cone gridding, Max-CAPPI, interactive view and UGRID |
