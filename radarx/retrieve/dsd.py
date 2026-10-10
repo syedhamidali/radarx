@@ -671,7 +671,9 @@ def _moments_numpy(logn0, mu, lam):
     return np.stack([n0, nw, d0, dm, mu, lam, rate, lwc])
 
 
-def _retrieve_numpy(z, zdr, kdp, mask, tab, kdp_min, nw_range=(0.0, np.inf)):
+def _retrieve_numpy(
+    z, zdr, kdp, mask, tab, kdp_min, nw_range=(0.0, np.inf), kdp_blend=0.0
+):
     """NumPy implementation of the compiled kernel (same results)."""
     out = np.full((len(_OUT_NAMES), z.size), np.nan)
     good = np.isfinite(z) & np.isfinite(zdr)
@@ -686,6 +688,9 @@ def _retrieve_numpy(z, zdr, kdp, mask, tab, kdp_min, nw_range=(0.0, np.inf)):
         with np.errstate(invalid="ignore", divide="ignore"):
             use = np.isfinite(k) & (k >= kdp_min) & (k > 0.0)
             from_kdp = np.log10(np.where(use, k, 1.0)) - e["logk"] + e["logn0"]
+        if kdp_blend > 0.0:
+            w = np.clip((np.where(use, k, 0.0) - kdp_min) / kdp_blend, 0.0, 1.0)
+            from_kdp = (1.0 - w) * logn0 + w * from_kdp
         logn0 = np.where(use, from_kdp, logn0)
     values = _moments_numpy(logn0, e["mu"], e["lam"])
     nw = values[1]
@@ -694,7 +699,7 @@ def _retrieve_numpy(z, zdr, kdp, mask, tab, kdp_min, nw_range=(0.0, np.inf)):
     return out
 
 
-def _retrieve_compiled(arrays, tab, kdp_min, nw_range, n_threads):
+def _retrieve_compiled(arrays, tab, kdp_min, nw_range, n_threads, kdp_blend=0.0):
     return _dsd.retrieve(
         [a[0] for a in arrays],
         [a[1] for a in arrays],
@@ -704,6 +709,7 @@ def _retrieve_compiled(arrays, tab, kdp_min, nw_range, n_threads):
         float(kdp_min),
         float(nw_range[0]),
         float(nw_range[1]),
+        float(kdp_blend),
         int(n_threads or 0),
     )
 
@@ -811,7 +817,7 @@ def _as_mask(mask, ds, ref):
     return np.ascontiguousarray(mask.transpose(*ref.dims).values.ravel())
 
 
-def _prepare(ds, fields, mask, kdp_da):
+def _prepare(ds, fields, mask, kdp_da, zdr_offset=0.0):
     """Contiguous 1-D arrays of one dataset and the reference field."""
     dbzh, zdr = fields
     zname = _find(ds, dbzh, _DBZH_NAMES, True)
@@ -825,7 +831,7 @@ def _prepare(ds, fields, mask, kdp_da):
 
     arrays = (
         flat(ref),
-        flat(ds[dname]),
+        flat(ds[dname]) - zdr_offset,
         None if kdp_da is None else flat(kdp_da),
         _as_mask(mask, ds, ref),
     )
@@ -833,7 +839,18 @@ def _prepare(ds, fields, mask, kdp_da):
     return {"ref": ref, "fields": (zname, dname, kname), "arrays": arrays}
 
 
-def _wrap(item, values, attrs):
+def _clipped(item, tab):
+    """Gates (0/1) whose ZDR lies outside the lookup table, as 1-D int8."""
+    z, zdr, _, mask = item["arrays"]
+    good = np.isfinite(z) & np.isfinite(zdr)
+    if mask is not None:
+        good &= mask.astype(bool)
+    with np.errstate(invalid="ignore"):
+        out = good & ((zdr < tab["zdr"][0]) | (zdr > tab["zdr"][-1]))
+    return out.astype(np.int8)
+
+
+def _wrap(item, values, attrs, clipped=None):
     """Output Dataset on the coordinates of the reflectivity field."""
     ref = item["ref"]
     data_vars = {}
@@ -843,21 +860,38 @@ def _wrap(item, values, attrs):
             values[i].reshape(ref.shape),
             dict(_OUT_ATTRS[name]),
         )
+    if clipped is not None:
+        data_vars["ZDR_CLIPPED"] = (
+            ref.dims,
+            clipped.reshape(ref.shape),
+            {
+                "long_name": "ZDR outside the lookup table",
+                "units": "1",
+                "flag_values": np.array([0, 1], dtype=np.int8),
+                "flag_meanings": "within_table clipped_to_table",
+                "comment": "1 where ZDR (after the offset) was clipped to the "
+                "range of the scattering table, so that Dm and Nw are not "
+                "sensitive to it (at C band ZDR saturates near 3 dB)",
+            },
+        )
     src = ", ".join(f for f in item["fields"] if f)
     out = xr.Dataset(data_vars, coords=dict(ref.coords), attrs=dict(attrs))
     out.attrs["source_fields"] = src
     return out
 
 
-def _run(items, tab, kdp_min, nw_range, attrs, n_threads, use_compiled):
+def _run(items, tab, kdp_min, nw_range, attrs, n_threads, use_compiled, kdp_blend=0.0):
     if use_compiled:
         arrays = [it["arrays"] for it in items]
-        results = _retrieve_compiled(arrays, tab, kdp_min, nw_range, n_threads)
+        results = _retrieve_compiled(
+            arrays, tab, kdp_min, nw_range, n_threads, kdp_blend
+        )
     else:
         results = [
-            _retrieve_numpy(*it["arrays"], tab, kdp_min, nw_range) for it in items
+            _retrieve_numpy(*it["arrays"], tab, kdp_min, nw_range, kdp_blend)
+            for it in items
         ]
-    return [_wrap(it, res, attrs) for it, res in zip(items, results)]
+    return [_wrap(it, res, attrs, _clipped(it, tab)) for it, res in zip(items, results)]
 
 
 def _kdp_for(ds, kdp, estimated):
@@ -889,6 +923,8 @@ def dsd(
     mu=3.0,
     kdp_min=1.0,
     nw_range=(1.0e1, 1.0e6),
+    zdr_offset=0.0,
+    kdp_blend=0.0,
     n_threads=None,
     engine="auto",
 ):
@@ -951,6 +987,16 @@ def dsd(
         Default ``(1e1, 1e6)``, a deliberately wide radarx choice (the
         composite :math:`\\log_{10} N_w` of rain in Bringi et al. 2003,
         Figs. 10-11, is mostly 3-4.5); ``None`` keeps all gates.
+    zdr_offset : float, optional
+        Calibration offset of ZDR (dB), subtracted before the retrieval.
+        Default 0. No attenuation correction is made here.
+    kdp_blend : float, optional
+        Width (degrees/km) of a linear transition from the :math:`Z_H`
+        intercept to the :math:`K_{DP}` intercept above ``kdp_min``. Default
+        0: the intercept switches abruptly at ``kdp_min``, so :math:`N_w` can
+        jump there. With a width, the weight of the :math:`K_{DP}` intercept
+        grows from 0 at ``kdp_min`` to 1 at ``kdp_min + kdp_blend`` (a radarx
+        choice).
     n_threads : int, optional
         Threads for the compiled kernel. Default: all cores.
     engine : {"auto", "compiled", "numpy"}, optional
@@ -963,7 +1009,9 @@ def dsd(
         On the coordinates of the reflectivity: ``N0`` (m-3 mm-(1+mu)),
         ``NW`` (m-3 mm-1), ``D0`` and ``DM`` (mm), ``MU``, ``LAMBDA``
         (mm-1), ``RAIN_RATE`` (mm/h) and ``LWC`` (g/m3); NaN where an input is
-        missing or the mask is ``False``. For a volume, a DataTree with one
+        missing or the mask is ``False``. ``ZDR_CLIPPED`` is 1 where ZDR lay
+        outside the lookup table and was clipped to its ends (finite values
+        are returned there, but they do not depend on ZDR any more). For a volume, a DataTree with one
         such node per sweep and the root of the input. The options used are
         stored in the attributes.
 
@@ -1061,6 +1109,9 @@ def dsd(
         float(mu) if method == "normalized" else None,
     )
     kdp_min = float(kdp_min)
+    zdr_offset, kdp_blend = float(zdr_offset), float(kdp_blend)
+    if kdp_blend < 0:
+        raise ValueError("kdp_blend must not be negative")
     if nw_range is None:
         nw_range = (0.0, np.inf)
     nw_range = (float(nw_range[0]), float(nw_range[1]))
@@ -1080,8 +1131,12 @@ def dsd(
     else:
         attrs["mu"] = float(mu)
     attrs["nw_range"] = list(nw_range) if np.isfinite(nw_range[1]) else "none"
+    if zdr_offset:
+        attrs["zdr_offset"] = zdr_offset
     if kdp is not None:
         attrs["kdp_min"] = kdp_min
+        if kdp_blend:
+            attrs["kdp_blend"] = kdp_blend
         attrs["comment"] += (
             f"; intercept from KDP where KDP >= {kdp_min:g} degrees/km, "
             "otherwise from DBZH"
@@ -1097,8 +1152,10 @@ def dsd(
         kdp_da = _kdp_for(obj, kdp, est)
         if isinstance(kdp, str) and kdp != "estimate" and kdp_da is None:
             raise KeyError(f"{kdp!r} is not in the dataset")
-        item = _prepare(obj, fields, mask, kdp_da)
-        return _run([item], tab, kdp_min, nw_range, attrs, n_threads, use_compiled)[0]
+        item = _prepare(obj, fields, mask, kdp_da, zdr_offset)
+        return _run(
+            [item], tab, kdp_min, nw_range, attrs, n_threads, use_compiled, kdp_blend
+        )[0]
 
     names = [
         name
@@ -1137,8 +1194,10 @@ def dsd(
         k = kdp
         if isinstance(kdp, xr.DataTree):
             k = kdp[name].ds["KDP"] if name in kdp.children else None
-        items.append(_prepare(ds, fields, m, _kdp_for(ds, k, est)))
-    results = _run(items, tab, kdp_min, nw_range, attrs, n_threads, use_compiled)
+        items.append(_prepare(ds, fields, m, _kdp_for(ds, k, est), zdr_offset))
+    results = _run(
+        items, tab, kdp_min, nw_range, attrs, n_threads, use_compiled, kdp_blend
+    )
     nodes = {"/": obj.root.to_dataset(inherit=False)}
     nodes.update(zip(names, results))
     return xr.DataTree.from_dict(nodes)

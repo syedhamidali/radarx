@@ -69,6 +69,7 @@ struct Table {
     const double* lam;  // Lambda [mm-1]
     int64_t n = 0;
     double kdp_min = 0.0;
+    double kdp_blend = 0.0;  // width [deg/km] of the Z to K_DP transition above kdp_min
     double nw_min = 0.0, nw_max = 0.0;  // plausible range of Nw [m-3 mm-1]
 };
 
@@ -131,8 +132,12 @@ void gate(const Table& t, const Block& b, int64_t g) {
     double logn0 = 0.1 * z - e.logz + e.logn0;
     if (b.kdp) {
         const double k = b.kdp[g];
-        if (std::isfinite(k) && k >= t.kdp_min && k > 0.0)
-            logn0 = std::log10(k) - e.logk + e.logn0;
+        if (std::isfinite(k) && k >= t.kdp_min && k > 0.0) {
+            const double from_kdp = std::log10(k) - e.logk + e.logn0;
+            const double w =
+                t.kdp_blend > 0.0 ? std::min((k - t.kdp_min) / t.kdp_blend, 1.0) : 1.0;
+            logn0 = (1.0 - w) * logn0 + w * from_kdp;
+        }
     }
     moments(t, logn0, e.mu, e.lam, b.out, g, b.n);
 }
@@ -159,7 +164,8 @@ py::list retrieve(const std::vector<DArray>& z, const std::vector<DArray>& zdr,
                   const std::vector<py::object>& kdp, const std::vector<py::object>& mask,
                   const DArray& zdr_tab, const DArray& logz_tab, const DArray& logk_tab,
                   const DArray& logn0_tab, const DArray& mu_tab, const DArray& lam_tab,
-                  double kdp_min, double nw_min, double nw_max, int n_threads) {
+                  double kdp_min, double nw_min, double nw_max, double kdp_blend,
+                  int n_threads) {
     const size_t ns = z.size();
     if (zdr.size() != ns || kdp.size() != ns || mask.size() != ns)
         throw std::invalid_argument("need one entry per input in every list");
@@ -179,6 +185,7 @@ py::list retrieve(const std::vector<DArray>& z, const std::vector<DArray>& zdr,
     t.mu = mu_tab.data();
     t.lam = lam_tab.data();
     t.kdp_min = kdp_min;
+    t.kdp_blend = kdp_blend;
     t.nw_min = nw_min;
     t.nw_max = nw_max;
 
@@ -242,5 +249,5 @@ PYBIND11_MODULE(_dsd, m) {
           py::arg("logk_table"), py::arg("logn0_table"), py::arg("mu_table"),
           py::arg("lambda_table"), py::arg("kdp_min") = 0.0, py::arg("nw_min") = 0.0,
           py::arg("nw_max") = std::numeric_limits<double>::infinity(),
-          py::arg("n_threads") = 0);
+          py::arg("kdp_blend") = 0.0, py::arg("n_threads") = 0);
 }
