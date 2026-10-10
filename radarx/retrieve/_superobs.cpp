@@ -18,8 +18,9 @@
 //
 // Rays are cut into fixed blocks that threads take from an atomic counter.
 // Each block sums into its own small table, so the result does not depend on
-// the number of threads; the tables are added in block order. Every step follows the NumPy reference in that
-// module, in the same order of operations.
+// the number of threads; the tables are added in block order. Every step
+// follows the NumPy reference in radarx/retrieve/superobs.py, in the same order
+// of operations.
 
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
