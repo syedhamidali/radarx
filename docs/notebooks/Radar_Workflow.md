@@ -42,7 +42,7 @@ multi-radar steps.
 | 12 | multi-radar grid, radar bias, ERA5 on the grid, three-dimensional wind | `grid_radars`, `network_bias`, `multi_doppler` |
 | 13 | evaporation and evaporative cooling | `evaporation`, `integrate_evaporation` |
 | 14 | VIL, liquid VIL, echo top, VIL density and liquid water content | `vil`, `echo_top`, `vil_density`, `liquid_water_content` |
-| 15 | super-observations of reflectivity and velocity with errors, WRFDA `ob.radar` file | `superobs`, `write_wrfda_radar` |
+| 15 | super-observations of reflectivity and velocity with errors, WRFDA `ob.radar` and DART `obs_seq` files | `superobs`, `write_wrfda_radar`, `write_dart_obs_seq` |
 | 16 | runtime summary and one `DataTree` with all products | |
 | | function index of the whole package | |
 
@@ -102,6 +102,7 @@ from radarx.io import (
     specific_humidity_from_dewpoint,
     station_list,
     wet_bulb_temperature,
+    write_dart_obs_seq,
     write_wrfda_radar,
 )
 from radarx.io.aws_data import download_file
@@ -1383,7 +1384,7 @@ mean radial velocity with the mean unit vector of the rays (so that an
 operator can project the model wind), the number of gates, the spread and an
 error estimate $\sqrt{\mathrm{floor}^2 + \mathrm{spread}^2/n}$, and flags the
 boxes that have gates but no echo. `write_wrfda_radar` writes the result as
-the `ob.radar` file of WRFDA. The model here is a Lambert conformal grid of
+the `ob.radar` file of WRFDA and `write_dart_obs_seq` as a DART `obs_seq` file. The model here is a Lambert conformal grid of
 1 km cells; a WRF file with `XLAT` and `XLONG` is used the same way. The
 [super-observation notebook](Superobs_Data_Assimilation) shows the gates and the
 super-observations, the errors and the file in more detail.
@@ -1399,10 +1400,11 @@ with timed("15. super-observations, WRFDA file"):
     so = superobs(kgwx, (lat2d, lon2d), cells=3, vel="VRADH_dealiased", rho_min=0.85, max_range=150e3)
     so_acc = kgwx.radarx.superobs((lat2d, lon2d), cells=3, vel="VRADH_dealiased", rho_min=0.85, max_range=150e3)
     stats = write_wrfda_radar(so, "ob.radar", time="2022-03-31_00:00:00")
+    dart_stats = write_dart_obs_seq(so, "obs_seq.out", time="2022-03-31_00:00:00")
 print("accessor agrees:", bool(so.reflectivity.equals(so_acc.reflectivity)), bool(so.velocity.equals(so_acc.velocity)))
 print(f"{int(so.gate_count.sum()):,} gates in {so.sizes['obs']:,} boxes: {int(so.reflectivity.count()):,} with "
       f"reflectivity, {int(so.velocity.count()):,} with velocity, {int(so.nonprecip.sum()):,} without echo; "
-      f"WRFDA file: {stats['columns']:,} columns")
+      f"WRFDA file: {stats['columns']:,} columns; DART file: {dart_stats['observations']:,} records")
 ```
 
 ```{code-cell} ipython3
@@ -1626,6 +1628,7 @@ notebooks or from this index.
 | `download_file` | `radarx.io.aws_data` | [core](Radar_Workflow): 1. Read the volumes |
 | `get_s3_client` | `radarx.io.aws_data` | [core](Radar_Workflow): 1. Read the volumes |
 | `list_available_files` | `radarx.io.aws_data` | [core](Radar_Workflow): 1. Read the volumes |
+| `write_dart_obs_seq` | `radarx.io.dart` | [core](Radar_Workflow): 15. Super-observations for data assimilation |
 | `parsivel_classes` | `radarx.io.disdrometer` | [part 2](Radar_Workflow_Advanced): 2. Disdrometers |
 | `read_parsivel` | `radarx.io.disdrometer` | [part 2](Radar_Workflow_Advanced): 2. Disdrometers |
 | `read_pips_netcdf` | `radarx.io.disdrometer` | [part 2](Radar_Workflow_Advanced): 2. Disdrometers |

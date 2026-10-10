@@ -30,7 +30,7 @@ of the model grid and layers of height and returns, per box:
   model rain.
 
 `radarx.io.write_wrfda_radar` writes the result as the `ob.radar` file that
-WRFDA reads. The binning and the sums run in a compiled, multithreaded C++
+WRFDA reads, and `radarx.io.write_dart_obs_seq` as an `obs_seq` file of DART. The binning and the sums run in a compiled, multithreaded C++
 kernel; a NumPy implementation gives the same numbers.
 
 ```{code-cell} ipython3
@@ -47,7 +47,7 @@ from xradar.io.backends.nexrad_level2 import NEXRADLevel2File
 
 import radarx  # noqa: F401  registers the .radarx accessors
 from radarx.fundamentals.geometry import beam_center_height, ground_range
-from radarx.io import write_wrfda_radar
+from radarx.io import write_dart_obs_seq, write_wrfda_radar
 from radarx.io.aws_data import download_file
 from radarx.retrieve import superobs, vad_profile
 
@@ -339,6 +339,59 @@ assert (rv > -888888).sum() == stats["velocities"]
 assert (rf > -888888).sum() == stats["reflectivities"]
 ```
 
+## The DART file
+
+`write_dart_obs_seq` writes an ASCII `obs_seq` file for the Data Assimilation
+Research Testbed (DART; El Gharamti et al. 2025,
+[doi:10.1175/BAMS-D-24-0214.1](https://doi.org/10.1175/BAMS-D-24-0214.1);
+Anderson et al. 2009, [doi:10.1175/2009BAMS2618.1](https://doi.org/10.1175/2009BAMS2618.1);
+software [doi:10.5065/D6WQ0202](https://doi.org/10.5065/D6WQ0202)). Every box gives up to two observations:
+`DOPPLER_RADIAL_VELOCITY`, which carries the position of the radar, the beam
+direction (the mean radial unit vector of the box, which DART projects the model wind on) and
+the Nyquist velocity, and `RADAR_REFLECTIVITY` in dBZ; boxes without echo become
+`RADAR_CLEARAIR_REFLECTIVITY`. DART takes the error as a variance, so the error
+estimates are squared. The observations are written in time order, with the linked list of
+previous and next keys that DART reads.
+
+The Dataset does not hold the Nyquist velocity, and the DART documentation does
+not give a value for clear-air reflectivity, so both are arguments:
+`nyquist_velocity` (here the velocity is already dealiased, and the default
+missing value tells DART not to unfold it) and `clearair_dbz` (default -10 dBZ).
+
+```{code-cell} ipython3
+dart_stats = write_dart_obs_seq(so, "obs_seq.out", time="2022-03-31_00:00:00")
+print(dart_stats)
+with open("obs_seq.out") as f:
+    head = [next(f).rstrip("\n") for _ in range(46)]
+print("\n".join(head))
+```
+
+The file was written from the DART source and documentation, and read back by a
+reader written from the same layout. It was **not tested with DART itself**.
+
+The records are formatted by a compiled, multithreaded formatter; a Python
+formatter gives the same bytes. Time for the boxes of this volume tiled to
+100 000 boxes (about 170 000 DART records):
+
+```{code-cell} ipython3
+big = so.isel(obs=np.arange(100_000) % so.sizes["obs"])
+big = big.assign_coords(column=("obs", big.column.values + np.arange(100_000) // so.sizes["obs"] * 10**7))
+rows = []
+for writer, name in ((write_dart_obs_seq, "obs_seq.big"), (write_wrfda_radar, "ob.radar.big")):
+    for engine, threads in (("python", None), ("compiled", 1), ("compiled", None)):
+        kwargs = {"engine": engine, "time": "2022-03-31_00:00:00"}
+        if threads:
+            kwargs["n_threads"] = threads
+        best = min(
+            (lambda t0: (writer(big, name, **kwargs), time.perf_counter() - t0)[1])(time.perf_counter())
+            for _ in range(3)
+        )
+        rows.append((writer.__name__, engine, threads or "all", round(best, 2)))
+import pandas as pd
+
+pd.DataFrame(rows, columns=["writer", "engine", "threads", "seconds"])
+```
+
 ## Notes
 
 - The velocity is averaged as given. Dealias it first (as here), or rely on the
@@ -347,7 +400,7 @@ assert (rf > -888888).sum() == stats["reflectivities"]
   elevation are all used; their gates count once per cut.
 - The layout of the `ob.radar` file is the one of the writer this function comes
   from, which WRFDA 4.7 read without errors; it was not checked here against the
-  WRFDA reader. A DART (`obs_seq`) writer is not included, because its format could
-  not be checked against the DART documentation.
+  WRFDA reader. The DART writer follows the DART documentation and source and has not been
+  tested with DART.
 - Alpert and Kumar (2007) describe super-obs as averages of raw radial winds.
   The box sizes and the error model here are radarx choices.
