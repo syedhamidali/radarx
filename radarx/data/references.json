@@ -2022,5 +2022,83 @@
   "issue": "10",
   "pages": "1340-1356",
   "doi": "10.1175/JTECH1912.1"
+ },
+ "10.1175/2009BAMS2618.1": {
+  "authors": [
+   "Anderson, J.",
+   "Hoar, T.",
+   "Raeder, K.",
+   "Liu, H.",
+   "Collins, N.",
+   "Torn, R.",
+   "Arellano, A."
+  ],
+  "year": 2009,
+  "title": "The Data Assimilation Research Testbed: A Community Facility",
+  "type": "article",
+  "journal": "Bulletin of the American Meteorological Society",
+  "volume": "90",
+  "issue": "9",
+  "pages": "1283-1296",
+  "doi": "10.1175/2009BAMS2618.1"
+ },
+ "10.1175/BAMS-D-24-0214.1": {
+  "authors": [
+   "El Gharamti, M.",
+   "Kershaw, H.",
+   "Raeder, K.",
+   "Raczka, B.",
+   "Johnson, B.",
+   "Smith, M.",
+   "Anderson, J.",
+   "Amrhein, D.",
+   "Collins, N.",
+   "Hoar, T.",
+   "Gaubert, B.",
+   "Grooms, I.",
+   "Kugler, L."
+  ],
+  "year": 2025,
+  "title": "The Data Assimilation Research Testbed: A Robust, Scalable Software Facility with Groundbreaking Capabilities for Model-Data Integration",
+  "type": "article",
+  "journal": "Bulletin of the American Meteorological Society",
+  "volume": "106",
+  "issue": "11",
+  "pages": "E2328-E2345",
+  "doi": "10.1175/BAMS-D-24-0214.1"
+ },
+ "10.1175/MWR3324.1": {
+  "authors": [
+   "Alpert, J. C.",
+   "Kumar, V. K."
+  ],
+  "year": 2007,
+  "title": "Radial Wind Super-Obs from the WSR-88D Radars in the NCEP Operational Assimilation System",
+  "type": "article",
+  "journal": "Monthly Weather Review",
+  "volume": "135",
+  "issue": "3",
+  "pages": "1090-1109",
+  "doi": "10.1175/MWR3324.1"
+ },
+ "10.5065/D6WQ0202": {
+  "authors": [
+   "Anderson, J.",
+   "Collins, N.",
+   "Gharamti, M.",
+   "Hendricks, J.",
+   "Hoar, T.",
+   "Johnson, B.",
+   "Kershaw, H.",
+   "Raczka, B.",
+   "Raeder, K.",
+   "Smith, M."
+  ],
+  "year": 2024,
+  "title": "Data Assimilation Research Testbed",
+  "type": "software",
+  "publisher": "NSF NCAR Computational and Information Systems Laboratory",
+  "doi": "10.5065/D6WQ0202",
+  "url": "https://github.com/NCAR/DART"
  }
 }

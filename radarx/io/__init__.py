@@ -15,6 +15,8 @@ Radarx IO
 .. automodule:: radarx.io.profiler
 .. automodule:: radarx.io.lma
 .. automodule:: radarx.io.disdrometer
+.. automodule:: radarx.io.wrfda
+.. automodule:: radarx.io.dart
 """
 
 from .imd import *  # noqa
@@ -24,5 +26,7 @@ from .surface import *  # noqa
 from .profiler import *  # noqa
 from .lma import *  # noqa
 from .disdrometer import *  # noqa
+from .wrfda import *  # noqa
+from .dart import *  # noqa
 
 __all__ = [s for s in dir() if not s.startswith("_")]

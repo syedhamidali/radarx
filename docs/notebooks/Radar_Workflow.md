@@ -44,7 +44,8 @@ multi-radar steps.
 | 13 | evaporation and evaporative cooling | `evaporation`, `integrate_evaporation` |
 | 14 | VIL, liquid VIL, echo top, VIL density and liquid water content | `vil`, `echo_top`, `vil_density`, `liquid_water_content` |
 | 15 | noise level, SNR, noise-corrected RHOHV and ZDR, ZDR, Z and system ΦDP offsets | `noise_level`, `snr`, `correct_rhohv_noise`, `zdr_offset`, `z_offset`, `phidp_offset` |
-| 16 | runtime summary and one `DataTree` with all products | |
+| 16 | super-observations of reflectivity and velocity with errors, WRFDA `ob.radar` and DART `obs_seq` files | `superobs`, `write_wrfda_radar`, `write_dart_obs_seq` |
+| 17 | runtime summary and one `DataTree` with all products | |
 | | function index of the whole package | |
 
 The [second part](Radar_Workflow_Advanced) of this notebook shows the rest of
@@ -103,6 +104,8 @@ from radarx.io import (
     specific_humidity_from_dewpoint,
     station_list,
     wet_bulb_temperature,
+    write_dart_obs_seq,
+    write_wrfda_radar,
 )
 from radarx.io.aws_data import download_file
 from radarx.retrieve import (
@@ -148,6 +151,7 @@ from radarx.retrieve import (
     snr,
     storm_relative_helicity,
     storm_relative_wind,
+    superobs,
     vad_profile,
     vil,
     vil_density,
@@ -1566,7 +1570,67 @@ ax.legend(frameon=False)
 plt.show()
 ```
 
-## 16. Summary
+## 16. Super-observations for data assimilation
+
+A volume has millions of gates, a model a few hundred thousand cells, and the
+errors of neighbouring gates are correlated, so assimilation systems use
+averages of the gates in a box, the super-observations of Alpert and Kumar
+(2007). `superobs` bins the gates into columns of 3 x 3 cells of a model grid and
+layers of 500 m, and returns the mean reflectivity (averaged in linear $Z$), the
+mean radial velocity with the mean unit vector of the rays (so that an
+operator can project the model wind), the number of gates, the spread and an
+error estimate $\sqrt{\mathrm{floor}^2 + \mathrm{spread}^2/n}$, and flags the
+boxes that have gates but no echo. `write_wrfda_radar` writes the result as
+the `ob.radar` file of WRFDA and `write_dart_obs_seq` as a DART `obs_seq` file. The model here is a Lambert conformal grid of
+1 km cells; a WRF file with `XLAT` and `XLONG` is used the same way. The
+[super-observation notebook](Superobs_Data_Assimilation) shows the gates and the
+super-observations, the errors and the file in more detail.
+
+```{code-cell} ipython3
+from pyproj import Transformer
+
+lcc = "+proj=lcc +lat_1=30 +lat_2=60 +lat_0=33.9 +lon_0=-88.33 +R=6370000 +units=m"
+axis = (np.arange(300) - 149.5) * 1000.0
+lon2d, lat2d = Transformer.from_crs(lcc, "EPSG:4326", always_xy=True).transform(*np.meshgrid(axis, axis))
+
+with timed("16. super-observations, WRFDA and DART files"):
+    so = superobs(kgwx, (lat2d, lon2d), cells=3, vel="VRADH_dealiased", rho_min=0.85, max_range=150e3)
+    so_acc = kgwx.radarx.superobs((lat2d, lon2d), cells=3, vel="VRADH_dealiased", rho_min=0.85, max_range=150e3)
+    stats = write_wrfda_radar(so, "ob.radar", time="2022-03-31_00:00:00")
+    dart_stats = write_dart_obs_seq(so, "obs_seq.out", time="2022-03-31_00:00:00")
+print("accessor agrees:", bool(so.reflectivity.equals(so_acc.reflectivity)), bool(so.velocity.equals(so_acc.velocity)))
+print(f"{int(so.gate_count.sum()):,} gates in {so.sizes['obs']:,} boxes: {int(so.reflectivity.count()):,} with "
+      f"reflectivity, {int(so.velocity.count()):,} with velocity, {int(so.nonprecip.sum()):,} without echo; "
+      f"WRFDA file: {stats['columns']:,} columns; DART file: {dart_stats['observations']:,} records")
+```
+
+```{code-cell} ipython3
+layer = so.where(so.level == 4, drop=True)  # 2 to 2.5 km above sea level
+to_xy = Transformer.from_crs("EPSG:4326", lcc, always_xy=True)
+ox, oy = to_xy.transform(layer.longitude.values, layer.latitude.values)
+ox0, oy0 = to_xy.transform(float(so.radar_longitude[0]), float(so.radar_latitude[0]))
+fig, axes = plt.subplots(1, 3, figsize=(17, 4.8), sharey=True, layout="constrained")
+panels = [
+    (layer.reflectivity, "reflectivity (dBZ)", dict(cmap="ChaseSpectral", vmin=-10, vmax=70)),
+    (layer.velocity, "radial velocity (m s$^{-1}$)", dict(cmap="balance", vmin=-40, vmax=40)),
+    (layer.velocity_error, "velocity error estimate (m s$^{-1}$)", dict(cmap="viridis", vmin=2, vmax=3)),
+]
+for ax, (da, label, style) in zip(axes, panels):
+    ok = da.notnull().values
+    sc = ax.scatter((ox - ox0)[ok] / 1e3, (oy - oy0)[ok] / 1e3, c=da[ok], s=9, marker="s", **style)
+    fig.colorbar(sc, ax=ax, label=label, shrink=0.85)
+    ax.set(xlim=(-150, 150), ylim=(-150, 150), aspect="equal", xlabel="east of KGWX (km)")
+axes[0].set_ylabel("north of KGWX (km)")
+fig.suptitle("Super-observations of 3 km, layer 2 to 2.5 km above sea level, KGWX, 00:00 UTC")
+plt.show()
+```
+
+The dealiased velocity of step 4 is used as it is. The super-observations keep the
+line and the low-level wind and replace millions of gates by tens of thousands of
+boxes. Boxes without echo ahead of and behind the line are flagged, and WRFDA can use
+them to remove spurious model rain.
+
+## 17. Summary
 
 The runtime of each step:
 
@@ -1578,7 +1642,7 @@ summary
 
 All products of the case in one `DataTree`: the environment profiles,
 the 00:00 UTC polar volume with every derived field, the DSD, the rain rate, the QVPs and melting
-layer, the VIL products, the grids as observed and at the common analysis time, the storm
+layer, the VIL products, the super-observations, the grids as observed and at the common analysis time, the storm
 motion, the interpolated frames, the two-radar grid and the wind.
 
 ```{code-cell} ipython3
@@ -1592,6 +1656,7 @@ nodes["/rain_rate"] = rain_blend
 nodes["/qvp"] = tqvp
 nodes["/melting_layer"] = ml
 nodes["/vil"] = vil_vol.assign(ECHO_TOP=top, VIL_DENSITY=density)
+nodes["/superobs"] = so
 for i, (observed, advected) in enumerate(zip(grids, common)):
     nodes[f"/grid/observed/volume_{i}"] = observed
     nodes[f"/grid/analysis_time/volume_{i}"] = advected
@@ -1761,6 +1826,7 @@ notebooks or from this index.
 | `download_file` | `radarx.io.aws_data` | [core](Radar_Workflow): 1. Read the volumes |
 | `get_s3_client` | `radarx.io.aws_data` | [core](Radar_Workflow): 1. Read the volumes |
 | `list_available_files` | `radarx.io.aws_data` | [core](Radar_Workflow): 1. Read the volumes |
+| `write_dart_obs_seq` | `radarx.io.dart` | [core](Radar_Workflow): 16. Super-observations for data assimilation |
 | `parsivel_classes` | `radarx.io.disdrometer` | [part 2](Radar_Workflow_Advanced): 2. Disdrometers |
 | `read_parsivel` | `radarx.io.disdrometer` | [part 2](Radar_Workflow_Advanced): 2. Disdrometers |
 | `read_pips_netcdf` | `radarx.io.disdrometer` | [part 2](Radar_Workflow_Advanced): 2. Disdrometers |
@@ -1789,6 +1855,7 @@ notebooks or from this index.
 | `read_pips` | `radarx.io.surface` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `read_sticknet` | `radarx.io.surface` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `read_sticknet_locations` | `radarx.io.surface` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
+| `write_wrfda_radar` | `radarx.io.wrfda` | [core](Radar_Workflow): 16. Super-observations for data assimilation |
 | `list_models` | `radarx.ml.model` | [part 2](Radar_Workflow_Advanced): 10. Machine-learning plumbing |
 | `load_model` | `radarx.ml.model` | [part 2](Radar_Workflow_Advanced): 10. Machine-learning plumbing |
 | `Model` | `radarx.ml.model` | [part 2](Radar_Workflow_Advanced): 10. Machine-learning plumbing |
@@ -1876,6 +1943,7 @@ notebooks or from this index.
 | `llsd` | `radarx.retrieve.shear` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `radial_divergence` | `radarx.retrieve.shear` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `single_doppler_winds` | `radarx.retrieve.single_doppler` | [part 2](Radar_Workflow_Advanced): 8. Wind from a single Doppler radar |
+| `superobs` | `radarx.retrieve.superobs` | [core](Radar_Workflow): 16. Super-observations for data assimilation |
 | `rotation_couplets` | `radarx.retrieve.tornado` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
 | `tornado_probability` | `radarx.retrieve.tornado` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
 | `tornet_inputs` | `radarx.retrieve.tornado` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
@@ -1970,6 +2038,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.snr` | [core](Radar_Workflow): 15. Noise and calibration |
 | `.radarx.sounding` | [core](Radar_Workflow): 3. Environment |
 | `.radarx.storm_relative_helicity` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
+| `.radarx.superobs` | [core](Radar_Workflow): 16. Super-observations for data assimilation |
 | `.radarx.to_cappi` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `.radarx.to_grid` | [core](Radar_Workflow): 10. Cone gridding, Max-CAPPI, interactive view and UGRID |
 | `.radarx.to_uxarray` | [core](Radar_Workflow): 10. Cone gridding, Max-CAPPI, interactive view and UGRID |

@@ -30,6 +30,7 @@ notebooks/Dealiasing
 notebooks/KDP
 notebooks/Attenuation_Correction
 notebooks/Advection_Correction
+notebooks/Superobs_Data_Assimilation
 ```
 
 ```{toctree}
