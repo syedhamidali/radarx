@@ -415,3 +415,87 @@ def test_real_csapr2_default_call(csapr2):
     a, b = results.values()
     m = np.isfinite(a) & np.isfinite(b)
     assert np.corrcoef(a[m], b[m])[0, 1] > 0.95
+
+
+# --------------------------------------------------------------------------
+# phase texture of rain with high KDP, and band-dependent defaults
+# --------------------------------------------------------------------------
+
+
+def _ramp_sweep(kdp, nray=24, ng=800, junk_from=600, noise=3.0, seed=0):
+    """Uniform rain with a constant KDP, then random phase (junk)."""
+    rnd = np.random.default_rng(seed)
+    r = (np.arange(ng) + 0.5) * DR / 1000.0
+    phi = 150.0 + 2.0 * kdp * r + rnd.normal(0.0, noise, (nray, ng))
+    phi = (phi + 180.0) % 360.0 - 180.0
+    phi[:, junk_from:] = rnd.uniform(-180, 180, (nray, ng - junk_from))
+    return xr.Dataset(
+        {
+            "PHIDP": (("azimuth", "range"), phi),
+            "RHOHV": (("azimuth", "range"), np.full((nray, ng), 0.98)),
+            "DBZH": (("azimuth", "range"), np.full((nray, ng), 35.0)),
+        },
+        coords={
+            "azimuth": np.linspace(0.5, 359.5, nray),
+            "range": (np.arange(ng) + 0.5) * DR,
+            "elevation": ("azimuth", np.full(nray, 0.5)),
+        },
+    )
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("kdp", [5.0, 15.0, 20.0, 30.0])
+def test_detrended_texture_keeps_heavy_rain(kdp, engine):
+    ds = _ramp_sweep(kdp)
+    out = estimate_kdp(ds, texture_method="detrended", phidp_sign=1, engine=engine)
+    k = out.KDP.values
+    assert np.isfinite(k[:, 20:580]).mean() > 0.99
+    assert np.nanmedian(k[:, 30:570]) == pytest.approx(kdp, rel=0.01)
+    # random phase with a high rhohv is still rejected
+    assert np.isfinite(k[:, 620:]).mean() < 0.01
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_circular_texture_masks_heavy_rain(engine):
+    """The default rule includes the rain ramp (see texture_method)."""
+    ds = _ramp_sweep(20.0)
+    out = estimate_kdp(ds, phidp_sign=1, engine=engine)
+    assert np.isfinite(out.KDP.values[:, 20:580]).mean() < 0.05
+    out = estimate_kdp(ds, phidp_sign=1, texture_max=60.0, engine=engine)
+    assert np.isfinite(out.KDP.values[:, 20:580]).mean() > 0.99
+
+
+@pytest.mark.skipif(not kdpmod.HAS_COMPILED_KERNEL, reason="compiled kernel not built")
+@pytest.mark.parametrize("method", METHODS)
+def test_texture_engines_agree(method):
+    ds, *_ = _sweep(seed=3)
+    a = estimate_kdp(ds, method=method, texture_method="detrended", engine="numpy")
+    b = estimate_kdp(ds, method=method, texture_method="detrended", engine="compiled")
+    np.testing.assert_array_equal(np.isfinite(a.KDP.values), np.isfinite(b.KDP.values))
+    np.testing.assert_allclose(a.KDP.values, b.KDP.values, atol=1e-6, equal_nan=True)
+    np.testing.assert_allclose(
+        a.PHIDP_processed.values, b.PHIDP_processed.values, atol=1e-6, equal_nan=True
+    )
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_band_scales_the_defaults(engine):
+    """Vulpiani zeroes KDP above 20 deg/km at S band, not at X band."""
+    ds = _ramp_sweep(30.0)
+    kw = dict(
+        method="vulpiani",
+        texture_method="detrended",
+        phidp_sign=1,
+        engine=engine,
+    )
+    s_band = estimate_kdp(ds, **kw)
+    x_band = estimate_kdp(ds, band="X", **kw)
+    assert np.nanmedian(s_band.KDP.values[:, 100:500]) < 10.0
+    assert np.nanmedian(x_band.KDP.values[:, 100:500]) == pytest.approx(30.0, rel=0.05)
+    # values you pass are used as given
+    given = estimate_kdp(ds, band="X", kdp_bounds=(-2.0, 20.0), **kw)
+    assert np.nanmedian(given.KDP.values[:, 100:500]) < 10.0
+    with pytest.raises(ValueError, match="band"):
+        estimate_kdp(ds, band="K")
+    with pytest.raises(ValueError, match="texture_method"):
+        estimate_kdp(ds, texture_method="x")

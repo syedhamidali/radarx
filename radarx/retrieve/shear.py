@@ -219,7 +219,16 @@ def _llsd_numpy(data, azimuth, rng, window_range, window_azimuth, gaussian, min_
     return out
 
 
-def _sweep_arrays(ds, field, mask):
+def _as_gate_mask(mask, ds, da):
+    """Boolean DataArray on the field's dimensions from a name or array."""
+    if isinstance(mask, str):
+        mask = ds[mask]
+    elif not isinstance(mask, xr.DataArray):
+        mask = xr.DataArray(np.asarray(mask), dims=da.dims)
+    return mask.astype(bool)
+
+
+def _sweep_arrays(ds, field, mask, exclude, floor):
     """Velocity on (ray, range) and contiguous float64 arrays of one sweep."""
     if field not in ds:
         raise KeyError(f"{field!r} is not in the sweep")
@@ -228,12 +237,12 @@ def _sweep_arrays(ds, field, mask):
         raise ValueError(f"{field!r} must be 2-D with a 'range' dimension")
     ray_dim = da.dims[0] if da.dims[1] == "range" else da.dims[1]
     da_t = da.transpose(ray_dim, "range")
+    if floor is not None:
+        da_t = da_t.where(~(da_t <= floor))
     if mask is not None:
-        if isinstance(mask, str):
-            mask = ds[mask]
-        elif not isinstance(mask, xr.DataArray):
-            mask = xr.DataArray(np.asarray(mask), dims=da.dims)
-        da_t = da_t.where(~mask.astype(bool))
+        da_t = da_t.where(_as_gate_mask(mask, ds, da))
+    if exclude is not None:
+        da_t = da_t.where(~_as_gate_mask(exclude, ds, da))
     data = np.ascontiguousarray(da_t.values, dtype=np.float64)
     azimuth = np.ascontiguousarray(ds["azimuth"].values, dtype=np.float64)
     rng = np.ascontiguousarray(ds["range"].values, dtype=np.float64)
@@ -242,11 +251,35 @@ def _sweep_arrays(ds, field, mask):
     return da, da_t, (data, azimuth, rng)
 
 
+def _nodata_floor(ds, field, nodata, root_attrs):
+    """No-data floor of ``field`` (NEXRAD Level II flag codes), or None."""
+    from .qc import _NEXRAD_FIELD_NODATA, _is_nexrad
+
+    if nodata is None or not (nodata == "nexrad" or _is_nexrad(ds, root_attrs)):
+        return None
+    return _NEXRAD_FIELD_NODATA.get(field)
+
+
 def _llsd_sweeps(
-    sweeps, field, window, weights, min_valid_fraction, mask, n_threads, engine
+    sweeps,
+    field,
+    window,
+    weights,
+    min_valid_fraction,
+    mask,
+    exclude,
+    nodata,
+    root_attrs,
+    n_threads,
+    engine,
 ):
     """LLSD on a list of sweep Datasets in one kernel call; one Dataset each."""
-    prepared = [_sweep_arrays(ds, field, mask) for ds in sweeps]
+    prepared = [
+        _sweep_arrays(
+            ds, field, mask, exclude, _nodata_floor(ds, field, nodata, root_attrs)
+        )
+        for ds in sweeps
+    ]
     window_range, window_azimuth = (float(w) for w in window)
     gaussian = weights == "gaussian"
     options = (window_range, window_azimuth, gaussian)
@@ -296,6 +329,8 @@ def llsd(
     weights="uniform",
     min_valid_fraction=0.5,
     mask=None,
+    exclude=None,
+    nodata="auto",
     n_threads=None,
     engine="auto",
 ):
@@ -322,8 +357,20 @@ def llsd(
         Minimum fraction of the gates in the window that must hold valid data.
         Default 0.5. The centre gate must always be valid.
     mask : str or xarray.DataArray, optional
-        Gates to leave out of the fit (``True`` = excluded), e.g. a
-        reflectivity or quality mask, or the name of such a variable.
+        Gates to use (``True`` = keep, as in :func:`radarx.retrieve.hid`,
+        :func:`radarx.retrieve.dsd` and :func:`radarx.retrieve.echo_mask`),
+        e.g. the output of ``echo_mask``, or the name of such a variable.
+        Other gates are left out of the fit. Before this version ``True``
+        meant excluded; use ``exclude`` for that.
+    exclude : str or xarray.DataArray, optional
+        Gates to leave out of the fit (``True`` = excluded). Can be combined
+        with ``mask``.
+    nodata : {"auto", "nexrad", None}, optional
+        Flag values that are not data. ``"auto"`` (default) treats the
+        NEXRAD Level II codes decoded by xradar (velocity at or below
+        -63.9 m/s, the floor ``echo_mask`` and ``apply_mask`` use) as
+        missing for NEXRAD volumes; ``"nexrad"`` does it for any input,
+        None never.
     n_threads : int, optional
         Threads for the compiled kernel. Default: all cores.
     engine : {"auto", "compiled", "numpy"}, optional
@@ -384,11 +431,15 @@ def llsd(
         "weights": weights,
         "min_valid_fraction": min_valid_fraction,
         "mask": mask,
+        "exclude": exclude,
+        "nodata": nodata,
         "n_threads": n_threads,
         "engine": engine,
     }
+    if nodata not in ("auto", "nexrad", None):
+        raise ValueError(f"nodata must be 'auto', 'nexrad' or None, not {nodata!r}")
     if isinstance(obj, xr.Dataset):
-        return _llsd_sweeps([obj], field, **options)[0]
+        return _llsd_sweeps([obj], field, root_attrs=None, **options)[0]
     if hasattr(obj, "children"):  # DataTree: all sweeps in one kernel call
         names, sweeps = [], []
         for name, node in obj.children.items():
@@ -401,7 +452,7 @@ def llsd(
                 sweeps.append(ds)
         if not sweeps:
             raise ValueError(f"No sweep contains {field!r}.")
-        results = _llsd_sweeps(sweeps, field, **options)
+        results = _llsd_sweeps(sweeps, field, root_attrs=obj.root.attrs, **options)
         return product_tree(obj, dict(zip(names, results)))
     raise TypeError("llsd needs an xarray.Dataset sweep or an xarray.DataTree")
 

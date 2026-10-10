@@ -93,10 +93,15 @@ struct Integral {
     bool has = false, has_liquid = false;
 };
 
+// A layer between a sample with echo and one without (Z = 0).
+inline bool edge_layer(const double* sz, int64_t i) { return (sz[i] > 0.0) != (sz[i + 1] > 0.0); }
+
 // Liquid part of the layer between samples i and i + 1 below the ceiling.
-void add_liquid_layer(Integral& r, const double* sh, const double* sz, int64_t i, double ceil_h) {
+void add_liquid_layer(Integral& r, const double* sh, const double* sz, int64_t i, double ceil_h,
+                      bool partial_layers) {
     if (std::isnan(ceil_h) || sh[i] >= ceil_h) return;
     r.has_liquid = true;
+    if (!partial_layers && edge_layer(sz, i)) return;
     const double dh = sh[i + 1] - sh[i];
     if (sh[i + 1] <= ceil_h) {
         r.liquid += std::pow(0.5 * (sz[i] + sz[i + 1]), kExponent) * dh;
@@ -125,12 +130,13 @@ void add_fill_below(Integral& r, const double* sh, const double* sz, double ceil
 
 // VIL and liquid VIL of a column: the layers between consecutive samples.
 Integral integrate_column(const double* sh, const double* sz, int64_t n, double ceil_h,
-                          bool fill_below, double base_height) {
+                          bool fill_below, double base_height, bool partial_layers) {
     Integral r;
     for (int64_t i = 0; i + 1 < n; ++i) {
-        r.total += std::pow(0.5 * (sz[i] + sz[i + 1]), kExponent) * (sh[i + 1] - sh[i]);
+        if (partial_layers || !edge_layer(sz, i))
+            r.total += std::pow(0.5 * (sz[i] + sz[i + 1]), kExponent) * (sh[i + 1] - sh[i]);
         r.has = true;
-        add_liquid_layer(r, sh, sz, i, ceil_h);
+        add_liquid_layer(r, sh, sz, i, ceil_h, partial_layers);
     }
     if (fill_below && std::isfinite(base_height)) add_fill_below(r, sh, sz, ceil_h, base_height);
     return r;
@@ -181,7 +187,7 @@ py::array_t<double> columns_py(const DArray& h, const DArray& h_top, const DArra
                                const DArray& ceiling, bool shared, double dbz_cap,
                                double min_dbz, double top_threshold, double no_echo_dbz,
                                bool fill_below, double base_height, bool interpolate,
-                               int n_threads) {
+                               bool partial_layers, int n_threads) {
     check_shapes(h, h_top, v, ceiling, shared);
     const int64_t nk = v.shape(0);
     const int64_t nc = v.shape(1);
@@ -210,7 +216,8 @@ py::array_t<double> columns_py(const DArray& h, const DArray& h_top, const DArra
                     for (int64_t i = 0; i < n; ++i)
                         sz[i] = (sv[i] < floor_dbz) ? 0.0 : std::pow(10.0, std::min(sv[i], cap) / 10.0);
                     const Integral r =
-                        integrate_column(sh.data(), sz.data(), n, cp[c], fill_below, base_height);
+                        integrate_column(sh.data(), sz.data(), n, cp[c], fill_below, base_height,
+                                         partial_layers);
                     if (r.has) vil = kCoefficient * r.total;
                     if (r.has_liquid) liquid = kCoefficient * r.liquid;
                     top = echo_top_height(sh.data(), st.data(), sv.data(), n, top_threshold,
@@ -233,5 +240,6 @@ PYBIND11_MODULE(_vil, m) {
     m.def("columns", &columns_py, py::arg("h"), py::arg("h_top"), py::arg("v"),
           py::arg("ceiling"), py::arg("shared"), py::arg("dbz_cap"), py::arg("min_dbz"),
           py::arg("top_threshold"), py::arg("no_echo_dbz"), py::arg("fill_below"),
-          py::arg("base_height"), py::arg("interpolate"), py::arg("n_threads") = 0);
+          py::arg("base_height"), py::arg("interpolate"),
+          py::arg("partial_layers") = true, py::arg("n_threads") = 0);
 }

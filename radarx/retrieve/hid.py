@@ -26,7 +26,9 @@ Methods
     functions (their Table 1, p. 733, with the :math:`Z_{DR}` and LKdp
     :math:`= 10 \\log_{10} K_{DP}` corners of the rain classes depending on
     :math:`Z_H` through their Eqs. 4 and 5, p. 733; LKdp as in their Eq. 1,
-    p. 732), the class-dependent weights of their Table 2 (p. 734, the
+    p. 732: :math:`10 \\log_{10} K_{DP}` for :math:`K_{DP} > 10^{-3}`
+    deg/km and -30 otherwise, so negative :math:`K_{DP}` also maps to -30;
+    checked against the text of the paper), the class-dependent weights of their Table 2 (p. 734, the
     columns of :math:`Z_H`, :math:`Z_{DR}`, :math:`\\rho_{hv}` and LKdp) and
     additive aggregation :math:`A_i = \\sum_j W_{ij} Q_j P^{(i)}(V_j) /
     \\sum_j W_{ij} Q_j` (their Eq. 3, p. 732). The confidence vector
@@ -770,7 +772,7 @@ def _classify_numpy(blocks, t, opts):
         masked = np.where(allowed, s, -1.0)
         best = np.argmax(masked, axis=0)
         best_s = np.take_along_axis(masked, best[None], 0)[0]
-        found = ok & (best_s > -1.0)
+        found = ok & (best_s > opts["min_confidence"])
         shape = b["zh"].shape
         cls = np.where(found, best + 1, 0).astype(np.int8).reshape(shape)
         conf = np.where(found, best_s, np.nan).astype(np.float32).reshape(shape)
@@ -827,6 +829,7 @@ def _classify_compiled(blocks, t, opts, n_threads):
         opts["hist_bin"],
         opts["hist_n"],
         opts["want_scores"],
+        opts["min_confidence"],
         int(n_threads or 0),
     )
     return list(zip(cls, conf, scores)), dict(info)
@@ -965,6 +968,34 @@ def _temperature_values(ds, da, temperature, height, opts):
     return _to_celsius(tda.values, tda.attrs.get("units"))
 
 
+def _infer_obj_band(obj):
+    """Radar band of a sweep or volume (frequency metadata), as ``dsd``."""
+    from .dsd import _infer_band
+
+    objs = [obj]
+    if isinstance(obj, xr.DataTree):
+        objs = [obj.ds]
+        objs += [obj[c].ds for c in ("radar_parameters",) if c in obj.children]
+        objs.append(obj.root.ds)
+    return _infer_band(objs)
+
+
+def _nodata_floors(ds, opts):
+    """No-data floors of (dbzh, zdr, rhohv) for this sweep, or None."""
+    from .qc import NEXRAD_NODATA, _is_nexrad
+
+    mode = opts["nodata"]
+    if mode is None or not (mode == "nexrad" or _is_nexrad(ds, opts.get("root_attrs"))):
+        return None
+    return {k: NEXRAD_NODATA[k] for k in ("dbzh", "zdr", "rhohv")}
+
+
+def _drop_nodata(values, floor):
+    """The values with the flag codes at or below ``floor`` set to NaN."""
+    with np.errstate(invalid="ignore"):
+        return np.where(values <= floor, np.nan, values)
+
+
 def _prepare(ds, fields, opts):
     """Arrays of one sweep or grid for the kernel, and wrapping info."""
     dbzh, zdr, kdp, rhohv, phidp = fields
@@ -981,6 +1012,12 @@ def _prepare(ds, fields, opts):
     block = {"zh": _c2d(da.values)}
     for key, name in names.items():
         block[key] = None if name is None else _c2d(_on(ds[name], da).values)
+    floors = _nodata_floors(ds, opts)
+    if floors is not None:
+        block["zh"] = _drop_nodata(block["zh"], floors["dbzh"])
+        for key in ("zdr", "rhohv"):
+            if block[key] is not None:
+                block[key] = _drop_nodata(block[key], floors[key])
 
     temperature = opts["temperature"]
     height = None
@@ -1176,7 +1213,7 @@ def hid(
     obj,
     temperature=None,
     *,
-    band="S",
+    band=None,
     method="auto",
     dbzh=None,
     zdr=None,
@@ -1191,6 +1228,8 @@ def hid(
     ml_gates=(100, 10000),
     quality=True,
     scores=True,
+    min_confidence=0.0,
+    nodata="auto",
     n_threads=None,
     engine="auto",
 ):
@@ -1213,7 +1252,9 @@ def hid(
         grid input); or the name of a temperature field in each sweep.
         Default None: no temperature.
     band : {"S", "C", "X"}, optional
-        Radar band. Default ``"S"``.
+        Radar band. Default None: taken from the radar frequency in the data
+        (as :func:`radarx.retrieve.dsd`), S band for WSR-88D volume coverage
+        patterns, and S band with a warning if neither is found.
     method : {"auto", "park", "dolan", "thompson"}, optional
         ``"auto"`` (default) uses ``"park"`` (Park et al. 2009 [1]) at S band
         and ``"dolan"`` at C and X band: the membership functions of Dolan et
@@ -1267,6 +1308,22 @@ def hid(
     scores : bool, optional
         Also return the scores of all classes (``HID_scores``; one float32
         value per class and gate). Default True.
+    min_confidence : float, optional
+        A gate whose best class score is not above this value is left
+        unclassified (class 0, confidence NaN). Default 0: gates for which
+        every class has a score of zero (for example Z = 90 dBZ, ZDR = -5 dB,
+        rhohv = 0.3) are not assigned to the first class. Raise it to reject
+        weak matches; the Park et al. (2009) [1] scores are 0-1. Whether a
+        positive aggregate is required in [1] was not checked against the
+        paper.
+    nodata : {"auto", "nexrad", None}, optional
+        Flag values that are not data. ``"auto"`` (default) treats the Level
+        II codes decoded by xradar (reflectivity at or below -32 dBZ,
+        differential reflectivity at or below -12.9 dB, correlation
+        coefficient at or below 0.21; :data:`radarx.retrieve.qc.NEXRAD_NODATA`)
+        as missing for NEXRAD volumes: gates without reflectivity are not
+        classified and the other fields drop out of the aggregation.
+        ``"nexrad"`` does it for any input, None never.
     n_threads : int, optional
         Threads for the compiled kernel. Default: all cores.
     engine : {"auto", "compiled", "numpy"}, optional
@@ -1328,10 +1385,19 @@ def hid(
     >>> out = radarx.retrieve.hid(dtree, profile, band="S")  # doctest: +SKIP
     >>> out = sweep.radarx.hid(profile, band="C")  # doctest: +SKIP
     """
+    if band is None:
+        band = _infer_obj_band(obj)
     classes, table = _scheme(method, band)
     use_compiled = _use_compiled(engine)
     lo, hi = _check_inputs(obj, temperature, mask, blockage, ml_gates)
+    if not 0.0 <= float(min_confidence) < 1.0:
+        raise ValueError("min_confidence must be in [0, 1)")
+    if nodata not in ("auto", "nexrad", None):
+        raise ValueError(f"nodata must be 'auto', 'nexrad' or None, not {nodata!r}")
     opts = {
+        "min_confidence": float(min_confidence),
+        "nodata": nodata,
+        "root_attrs": obj.root.attrs if isinstance(obj, xr.DataTree) else {},
         "temperature": temperature,
         "mask": mask,
         "blockage": blockage,
@@ -1443,7 +1509,7 @@ def _with_kdp_tree(dtree, names, fields, use_compiled, n_threads):
 
 
 @accessor_method("dataset", name="hid")
-def _hid_dataset_accessor(self, temperature=None, *, band="S", **kwargs):
+def _hid_dataset_accessor(self, temperature=None, *, band=None, **kwargs):
     """
     Classify hydrometeors with fuzzy logic for this sweep or grid.
 
@@ -1453,7 +1519,7 @@ def _hid_dataset_accessor(self, temperature=None, *, band="S", **kwargs):
         Temperature profile on ``height`` (e.g. ``dtree.radarx.sounding()``),
         a temperature field or its name. Default: none.
     band : {"S", "C", "X"}, optional
-        Radar band. Default ``"S"``.
+        Radar band. Default None: from the radar frequency in the data.
     **kwargs
         Options of :func:`radarx.retrieve.hid`, e.g. ``method``, ``mask``
         or the field names.
@@ -1471,7 +1537,7 @@ def _hid_dataset_accessor(self, temperature=None, *, band="S", **kwargs):
 
 
 @accessor_method("datatree", name="hid")
-def _hid_datatree_accessor(self, temperature=None, *, band="S", **kwargs):
+def _hid_datatree_accessor(self, temperature=None, *, band=None, **kwargs):
     """
     Classify hydrometeors with fuzzy logic for every sweep.
 
@@ -1485,7 +1551,7 @@ def _hid_datatree_accessor(self, temperature=None, *, band="S", **kwargs):
         Temperature profile on ``height`` (e.g. ``dtree.radarx.sounding()``)
         or the name of a temperature field in each sweep. Default: none.
     band : {"S", "C", "X"}, optional
-        Radar band. Default ``"S"``.
+        Radar band. Default None: from the radar frequency in the data.
     **kwargs
         Options of :func:`radarx.retrieve.hid`, e.g. ``method``, ``mask``
         or the field names.

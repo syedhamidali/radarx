@@ -137,6 +137,24 @@ DEFAULT_MODEL = "tornet-baseline-v1"
 CHIP = (120, 240)
 _AZ_STEP = 0.5
 _GATE = 250.0
+#: Gates (rays and range) covered by one value of the heat map of the TorNet
+#: CNN: four 2 x 2 max-pooling stages. Other networks (the tiny test graphs)
+#: have fewer stages; the stride is found from the shape of the heat map.
+_HEATMAP_STRIDE = 16
+
+
+def _heatmap_stride(shape, n_rays, n_gates):
+    """
+    Gates per heat-map cell: the power of two ``s`` with
+    ``ceil(n / s) == cells`` in both directions (max pooling with ceil mode).
+    """
+    for k in range(9):
+        stride = 2**k
+        if -(-n_rays // stride) == shape[0] and -(-n_gates // stride) == shape[1]:
+            return stride
+    return _HEATMAP_STRIDE
+
+
 #: First gate (m): ``min_range_m`` in tornet/data/preprocess.py of the TorNet
 #: code (github.com/mit-ll/tornet).
 _FIRST_GATE = 2125.0
@@ -613,9 +631,8 @@ def tornado_probability(
     n_az, n_rng = arrays["DBZ"].shape[:2]
     best = np.full((n_az, n_rng), -np.inf)
     for (a, r), hm in zip(windows, maps):
-        cell_az = -(-CHIP[0] // hm.shape[0])
-        cell_rng = -(-n_rng_chip // hm.shape[1])
-        up = np.repeat(np.repeat(hm, cell_az, 0), cell_rng, 1)[: CHIP[0], :n_rng_chip]
+        cell = _heatmap_stride(hm.shape, CHIP[0], n_rng_chip)
+        up = np.repeat(np.repeat(hm, cell, 0), cell, 1)[: CHIP[0], :n_rng_chip]
         rows = np.mod(np.arange(a, a + CHIP[0]), n_az)
         best[rows, r : r + n_rng_chip] = np.maximum(best[rows, r : r + n_rng_chip], up)
     prob = np.where(np.isfinite(best), _sigmoid(best), np.nan).astype(np.float32)
@@ -679,25 +696,25 @@ def _label_regions(candidate, az):
 
 
 def _delta_v(vel, az, rng, peak, diameter):
-    """Largest velocity difference within ``diameter / 2`` of the peak gate."""
+    """
+    Peak velocity difference along the azimuth at the range of the peak gate.
+
+    The rays whose gate at the peak range lies within ``diameter / 2`` of the
+    peak gate are used: the largest minus the smallest velocity among them,
+    that is the inbound and outbound maxima at one range. Radial divergence
+    (a gradient along the beam) does not enter. NaN if no gate has data.
+    """
     ia, ir = peak
-    r0, a0 = rng[ir], np.radians(az[ia])
-    dtheta = np.radians(np.median(np.diff(np.sort(np.mod(az, 360.0)))))
-    dr = rng[1] - rng[0] if rng.size > 1 else _GATE
-    half_rays = int(np.ceil(diameter / 2 / max(r0 * dtheta, 1.0)))
-    half_gates = int(np.ceil(diameter / 2 / dr))
-    rays = np.mod(np.arange(ia - half_rays, ia + half_rays + 1), az.size)
-    g0, g1 = max(ir - half_gates, 0), min(ir + half_gates + 1, rng.size)
-    rr = rng[g0:g1][None, :]
-    aa = np.radians(az[rays])[:, None]
-    dist = np.hypot(
-        rr * np.sin(aa) - r0 * np.sin(a0), rr * np.cos(aa) - r0 * np.cos(a0)
-    )
-    v = np.where(dist <= diameter / 2, vel[rays, g0:g1], np.nan)
+    r0 = rng[ir]
+    d_az = np.radians(np.mod(az - az[ia] + 180.0, 360.0) - 180.0)
+    arc = np.abs(r0 * d_az)
+    v = np.where(arc <= diameter / 2, vel[:, ir], np.nan)
     return np.nanmax(v) - np.nanmin(v) if np.isfinite(v).any() else np.nan
 
 
-def _couplets_sweep(ds, field, threshold, window, min_area, diameter, min_reflectivity):
+def _couplets_sweep(
+    ds, field, threshold, window, min_area, diameter, min_reflectivity, rotation
+):
     from .shear import llsd
 
     da = ds[field]
@@ -710,7 +727,11 @@ def _couplets_sweep(ds, field, threshold, window, min_area, diameter, min_reflec
     )
     az = np.asarray(ds["azimuth"].values, dtype=np.float64)
     rng = np.asarray(ds["range"].values, dtype=np.float64)
-    candidate = np.nan_to_num(shear) >= threshold
+    if rotation == "both":
+        signed = np.abs(shear)
+    else:
+        signed = shear if rotation == "cyclonic" else -shear
+    candidate = np.nan_to_num(signed, nan=-np.inf) >= threshold
     if min_reflectivity is not None:
         dbz_name = _first(ds, ("DBZH", "DBZ", "reflectivity"))
         if dbz_name is not None:
@@ -729,7 +750,7 @@ def _couplets_sweep(ds, field, threshold, window, min_area, diameter, min_reflec
         area = gate_area[sel].sum()
         if area < min_area:
             continue
-        flat = np.where(sel, shear, -np.inf)
+        flat = np.where(sel, signed, -np.inf)
         ia, ir = np.unravel_index(np.argmax(flat), flat.shape)
         dv = _delta_v(vel, az, rng, (ia, ir), diameter)
         rows.append(
@@ -743,13 +764,14 @@ def _couplets_sweep(ds, field, threshold, window, min_area, diameter, min_reflec
                 y[ia, ir] if y is not None else np.nan,
             )
         )
-    rows.sort(key=lambda t: -t[2])
+    rows.sort(key=lambda t: -abs(t[2]))
     cols = list(zip(*rows)) if rows else [[]] * 7
     arr = [np.asarray(c, dtype=np.float64) for c in cols]
     method = {
         "method": "LLSD azimuthal shear maxima",
         "source_field": field,
         "shear_threshold": threshold,
+        "rotation": rotation,
         "window_range_m": float(window[0]),
         "window_azimuth_m": float(window[1]),
         "diameter_m": float(diameter),
@@ -806,6 +828,7 @@ def rotation_couplets(
     min_area=0.5e6,
     diameter=5000.0,
     min_reflectivity=None,
+    rotation="cyclonic",
 ):
     """
     Rotation couplets: compact maxima of LLSD azimuthal shear.
@@ -818,8 +841,8 @@ def rotation_couplets(
     field : str, optional
         Dealiased radial velocity (m s⁻¹). Default ``"VRADH"``.
     threshold : float, optional
-        Azimuthal shear (s⁻¹) above which gates belong to a candidate
-        circulation. Default 0.006, the threshold that Veillette et al. (2025)
+        Azimuthal shear (s⁻¹, its magnitude for the chosen ``rotation``) above
+        which gates belong to a candidate circulation. Default 0.006, the threshold that Veillette et al. (2025)
         [3]_ apply to the azimuthal shear field of their feature-based
         baselines (appendix); the same value is credited here to the NWS
         Tornado Probability Algorithm (Sandmæl et al. 2023 [1]_) on the 0.5°
@@ -833,11 +856,18 @@ def rotation_couplets(
         Smallest area (m²) of a region above the threshold. Default 0.5 km²,
         a radarx choice without a published source.
     diameter : float, optional
-        Diameter (m) of the circle around the shear peak in which the
-        largest velocity difference ``delta_v`` is measured. Default 5 km, a
-        radarx choice without a published source.
+        Length (m) of the arc, centred on the shear peak, along which the
+        largest velocity difference ``delta_v`` is measured at the range of
+        the peak. Default 5 km, a radarx choice without a published source.
     min_reflectivity : float, optional
         If given, only gates with at least this reflectivity (dBZ) count.
+    rotation : {"cyclonic", "anticyclonic", "both"}, optional
+        Sense of rotation to detect. ``"cyclonic"`` (default) is positive
+        azimuthal shear, the mesocyclones of the Northern Hemisphere;
+        ``"anticyclonic"`` is negative shear, which is the sense of
+        mesocyclones in the Southern Hemisphere (and of anticyclonic
+        tornadoes in the north); ``"both"`` uses the magnitude of the shear.
+        The reported ``azimuthal_shear`` keeps its sign.
 
     Returns
     -------
@@ -853,8 +883,11 @@ def rotation_couplets(
     -----
     A couplet is an 8-connected region of gates with LLSD azimuthal shear at
     or above ``threshold`` (and optionally ``min_reflectivity``); the peak
-    shear, the velocity difference within ``diameter`` of the peak and the
-    area are reported, and ``rotational_velocity`` is ``delta_v / 2`` (the
+    shear, the velocity difference along the azimuth at the range of the peak
+    (the inbound and outbound extremes within ``diameter`` of arc, as in
+    the usual description of rotational velocity; not checked against a
+    reference) and the area are
+    reported, and ``rotational_velocity`` is ``delta_v / 2`` (the
     usual definition of rotational velocity, not taken from the cited
     papers). This is a simplified physical diagnostic, not the Tornado
     Probability Algorithm of Sandmæl et al. (2023) [1]_, which is a machine-
@@ -880,7 +913,19 @@ def rotation_couplets(
        polarimetric weather radar data. *Artif. Intell. Earth Syst.*, **4**
        (1), https://doi.org/10.1175/AIES-D-24-0006.1
     """
-    options = (field, threshold, window, min_area, diameter, min_reflectivity)
+    if rotation not in ("cyclonic", "anticyclonic", "both"):
+        raise ValueError(
+            f"rotation must be 'cyclonic', 'anticyclonic' or 'both', not {rotation!r}"
+        )
+    options = (
+        field,
+        threshold,
+        window,
+        min_area,
+        diameter,
+        min_reflectivity,
+        rotation,
+    )
     if isinstance(obj, xr.Dataset):
         if field not in obj:
             raise KeyError(f"{field!r} is not in the sweep")

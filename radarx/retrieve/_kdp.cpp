@@ -67,6 +67,8 @@ struct Params {
     int method;
     double rhohv_min;
     double tex_limit;  // exp(-texture_max^2), texture_max in radians
+    int tex_mode;      // 0: circular std of the phase, 1: std of its second differences
+    double tex_max;    // texture_max [degrees] (tex_mode 1)
     int64_t n_offset;
     int offset_mode;
     double offset_value;
@@ -136,9 +138,10 @@ inline void prefix_valid(const uint8_t* v, int64_t n, double* out) {
 }
 
 struct MaskScratch {
-    std::vector<double> c, s, b, pc, ps, pb;
+    std::vector<double> c, s, b, pc, ps, pb, q, n2, pq, pn;
     explicit MaskScratch(int64_t ng)
-        : c(ng), s(ng), b(ng), pc(ng + 1), ps(ng + 1), pb(ng + 1) {}
+        : c(ng), s(ng), b(ng), pc(ng + 1), ps(ng + 1), pb(ng + 1), q(ng), n2(ng),
+          pq(ng + 1), pn(ng + 1) {}
 };
 
 // Per-thread buffers, sized once for the longest ray and the widest filter so
@@ -275,6 +278,21 @@ void mask_ray(const Params& p, const Sweep& sw, int64_t r, MaskScratch& s,
     prefix(s.c.data(), ng, s.pc.data());
     prefix(s.s.data(), ng, s.ps.data());
     prefix(s.b.data(), ng, s.pb.data());
+    if (p.tex_mode == 1) {
+        // squared second differences of the wrapped phase: zero for a ramp
+        for (int64_t g = 0; g < ng; ++g) {
+            s.q[g] = 0.0;
+            s.n2[g] = 0.0;
+            if (g >= 1 && g + 1 < ng && s.b[g - 1] != 0.0 && s.b[g] != 0.0 &&
+                s.b[g + 1] != 0.0) {
+                const double d2 = wrap180(wrap180(x[g + 1] - x[g]) - wrap180(x[g] - x[g - 1]));
+                s.q[g] = d2 * d2;
+                s.n2[g] = 1.0;
+            }
+        }
+        prefix(s.q.data(), ng, s.pq.data());
+        prefix(s.n2.data(), ng, s.pn.data());
+    }
     uint8_t* v = sw.valid + r * ng;
     const double need = static_cast<double>(sw.htex + 1);
     rank = 0;
@@ -282,11 +300,19 @@ void mask_ray(const Params& p, const Sweep& sw, int64_t r, MaskScratch& s,
     for (int64_t g = 0; g < ng; ++g) {
         const int64_t lo = std::max<int64_t>(g - sw.htex, 0);
         const int64_t hi = std::min<int64_t>(g + sw.htex, ng - 1) + 1;
-        const double sc = s.pc[hi] - s.pc[lo];
-        const double ss = s.ps[hi] - s.ps[lo];
-        const double sn = s.pb[hi] - s.pb[lo];
-        // circular std <= limit  <=>  R^2 >= exp(-limit^2), R = |sum| / n
-        const bool ok = sn >= need && sc * sc + ss * ss >= sn * sn * p.tex_limit;
+        bool ok;
+        if (p.tex_mode == 1) {
+            // noise std = rms(second difference) / sqrt(6) <= texture_max
+            const double sq = s.pq[hi] - s.pq[lo];
+            const double nq = s.pn[hi] - s.pn[lo];
+            ok = nq >= need && sq <= 6.0 * p.tex_max * p.tex_max * nq;
+        } else {
+            const double sc = s.pc[hi] - s.pc[lo];
+            const double ss = s.ps[hi] - s.ps[lo];
+            const double sn = s.pb[hi] - s.pb[lo];
+            // circular std <= limit  <=>  R^2 >= exp(-limit^2), R = |sum| / n
+            ok = sn >= need && sc * sc + ss * ss >= sn * sn * p.tex_limit;
+        }
         v[g] = (s.b[g] != 0.0 && ok) ? 1 : 0;
         if (v[g] && rank < p.n_offset) {
             cr += s.c[g];
@@ -454,7 +480,8 @@ py::tuple process_phidp(const std::vector<DArray>& phi, const std::vector<py::ob
                         double tex_limit, int64_t n_offset, int offset_mode,
                         double offset_value, int n_iter, double delta_thr, double z_thr,
                         double kdp_min, double kdp_max, double min_valid_fraction,
-                        int phidp_sign, int n_threads) {
+                        int phidp_sign, int texture_mode, double texture_max,
+                        int n_threads) {
     const size_t ns = phi.size();
     if (rho.size() != ns || dbz.size() != ns || dr.size() != ns || htex.size() != ns ||
         hf.size() != ns || hk_short.size() != ns || hk_long.size() != ns)
@@ -463,8 +490,9 @@ py::tuple process_phidp(const std::vector<DArray>& phi, const std::vector<py::ob
     if (offset_mode < 0 || offset_mode > 2) throw std::invalid_argument("unknown offset mode");
     if (phidp_sign < -1 || phidp_sign > 1)
         throw std::invalid_argument("phidp_sign must be -1, 0 (auto) or 1");
-    Params p{method, rhohv_min, tex_limit, n_offset, offset_mode, offset_value,
-             n_iter, delta_thr, z_thr,     kdp_min,  kdp_max,     min_valid_fraction,
+    if (texture_mode < 0 || texture_mode > 1) throw std::invalid_argument("unknown texture mode");
+    Params p{method, rhohv_min, tex_limit, texture_mode, texture_max, n_offset, offset_mode,
+             offset_value, n_iter, delta_thr, z_thr, kdp_min, kdp_max, min_valid_fraction,
              1.0};
 
     std::vector<DArray> rho_keep(ns), z_keep(ns);
@@ -586,5 +614,6 @@ PYBIND11_MODULE(_kdp, m) {
           py::arg("offset_mode"), py::arg("offset_value"), py::arg("n_iter"),
           py::arg("delta_threshold"), py::arg("z_threshold"), py::arg("kdp_min"),
           py::arg("kdp_max"), py::arg("min_valid_fraction") = 0.5,
-          py::arg("phidp_sign") = 0, py::arg("n_threads") = 0);
+          py::arg("phidp_sign") = 0, py::arg("texture_mode") = 0,
+          py::arg("texture_max") = 20.0, py::arg("n_threads") = 0);
 }

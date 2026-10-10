@@ -242,6 +242,11 @@ def _trapezoid(x, limits):
     return np.where((x <= a) | (x >= d), 0.0, m)
 
 
+def _wrap180(d):
+    """Differences wrapped into [-180, 180) degrees."""
+    return d - 360.0 * np.floor(d / 360.0 + 0.5)
+
+
 def _valid(x, floor, echo):
     if x is None:
         return None
@@ -297,7 +302,23 @@ def _features_numpy(sweep, p):
             add("zdr_texture", np.sqrt(np.maximum(var, 0.0)), n >= 3)
     phi = sweep["phidp"]
     ok = _valid(phi, floors[3], echo)
-    if ok is not None:
+    if ok is not None and p.get("phidp_detrended", False):
+        # noise std = rms(second difference of the wrapped phase) / sqrt(6)
+        okq = np.zeros(phi.shape, dtype=bool)
+        q = np.zeros(phi.shape)
+        if ng >= 3:
+            x = np.where(ok, phi, 0.0)
+            d2 = _wrap180(
+                _wrap180(x[:, 2:] - x[:, 1:-1]) - _wrap180(x[:, 1:-1] - x[:, :-2])
+            )
+            okq[:, 1:-1] = ok[:, :-2] & ok[:, 1:-1] & ok[:, 2:]
+            q[:, 1:-1] = np.where(okq[:, 1:-1], d2 * d2, 0.0)
+        n = _span(_prefix(okq.astype(np.float64)), lo, hi)
+        sq = _span(_prefix(q), lo, hi)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            sd = np.sqrt(sq / n / 6.0)
+        add("phidp_texture", sd, n >= 3)
+    elif ok is not None:
         rad = np.deg2rad(np.where(ok, phi, 0.0))
         n = _span(_prefix(ok.astype(np.float64)), lo, hi)
         c = _span(_prefix(np.where(ok, np.cos(rad), 0.0)), lo, hi)
@@ -435,6 +456,7 @@ def _classify_compiled(sweeps, p, n_threads):
         float(p["spin_threshold"]),
         float(p["threshold"]),
         int(p["min_size"]),
+        bool(p.get("phidp_detrended", False)),
         int(n_threads or 0),
     )
 
@@ -676,6 +698,7 @@ def echo_mask(
     spin_threshold=2.0,
     min_size=10,
     snr_min=3.0,
+    phidp_texture="circular",
     nodata="auto",
     split_cuts=True,
     n_threads=None,
@@ -727,6 +750,16 @@ def echo_mask(
         Connected meteorological regions with fewer gates are speckle.
         Default 10 (radarx choice, not from the cited papers); 1 or less
         disables the filter.
+    phidp_texture : {"circular", "detrended"}, optional
+        ``"circular"`` (default) is the circular standard deviation of the
+        phase along the ray, which includes the rain ramp (about 0.58
+        degrees per degree/km of KDP over a 2 km window). ``"detrended"``
+        uses the noise standard deviation from the second differences of the
+        wrapped phase (their rms divided by the square root of 6), which is
+        zero for a ramp of any slope; see ``texture_method`` of
+        :func:`radarx.retrieve.estimate_kdp`. On synthetic rain with KDP 5 to
+        30 degrees/km both classify all gates as meteorological. Both rules
+        are radarx choices.
     snr_min : float, optional
         Gates with an SNR below this (dB) have no echo, if an SNR field is
         used. Default 3 (radarx choice).
@@ -900,6 +933,10 @@ def echo_mask(
     """
     if not window > 0:
         raise ValueError("window must be positive")
+    if phidp_texture not in ("circular", "detrended"):
+        raise ValueError(
+            f"phidp_texture must be 'circular' or 'detrended', not {phidp_texture!r}"
+        )
     lim, wts = _options(limits, weights)
     use_compiled = _use_compiled(engine)
     fields = (dbzh, zdr, rhohv, phidp, snr)
@@ -913,6 +950,7 @@ def echo_mask(
             "spin_threshold": float(spin_threshold),
             "threshold": float(threshold),
             "min_size": int(min_size),
+            "phidp_detrended": phidp_texture == "detrended",
         }
 
     if isinstance(obj, xr.Dataset):

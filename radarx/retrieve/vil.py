@@ -53,6 +53,19 @@ lowest value is extended down to the base height (compare the pseudo-CAPPI).
 Between two samples (the tilts of a volume, or a gap of missing levels) the
 reflectivity varies linearly with height; a column needs two samples.
 
+Compared with the Level III digital VIL (DVL) of one event (KGWX, 30 March
+2022, four volumes, one cut per elevation) the default VIL is about 0.71 of
+DVL at 30 to 60 km from the radar and 0.35 at 150 to 230 km (correlation
+0.92, median ratio 0.53), because the layer under the lowest beam is left
+out. With ``fill_below=True`` the correlation is 0.965 and the ratio is flat
+at about 0.78 for DVL below 10 kg m-2: a deficit of 22 % remains whose cause
+was not found (how the operational product extends the lowest and highest
+beam was not checked). The VIL matches MRMS VIL closely (ratio 0.99,
+correlation 0.90), and MRMS VIL is itself 0.57 of DVL. Use ``fill_below=True``
+to compare with operational products. The layer between the last sample with
+echo and the next sample without echo contributes the mean of the two ends
+as in the sum above; ``partial_layers=False`` leaves such layers out.
+
 Reflectivity above ``dbz_cap`` (default 56 dBZ, a radarx choice that follows
 the operational product, where it limits the contribution of hail) is set to
 that value; ``dbz_cap=None`` uses the data as they are. Values below
@@ -168,6 +181,7 @@ def _columns_numpy(
     fill_below,
     base_height,
     interpolate,
+    partial_layers=True,
 ):
     """
     NumPy implementation of the kernel ``_vil.columns`` (same results).
@@ -198,6 +212,9 @@ def _columns_numpy(
         pair = ok[:-1] & ok[1:]
         dh = np.where(pair, h1 - h0, 0.0)
         layer = np.where(pair, np.power(0.5 * (z0 + z1), EXPONENT) * dh, 0.0)
+        # a layer between a sample with echo and one without
+        edge = pair & ((z0 > 0) != (z1 > 0)) & (not partial_layers)
+        layer = np.where(edge, 0.0, layer)
         total = layer.sum(axis=0)
         has = pair.any(axis=0)
 
@@ -207,7 +224,7 @@ def _columns_numpy(
         dh_safe = np.where(dh > 0, dh, 1.0)
         zc = z0 + (z1 - z0) * (c - h0) / dh_safe
         full = h1 <= c
-        part = np.power(0.5 * (z0 + zc), EXPONENT) * (c - h0)
+        part = np.where(edge, 0.0, np.power(0.5 * (z0 + zc), EXPONENT) * (c - h0))
         liquid_layer = np.where(use, np.where(full, layer, part), 0.0)
         total_liquid = liquid_layer.sum(axis=0)
         has_liquid = use.any(axis=0)
@@ -273,6 +290,7 @@ def _columns(
         bool(options["fill_below"]),
         float(base_height),
         bool(options["interpolate"]),
+        bool(options.get("partial_layers", True)),
     )
     if use_compiled:
         return _vil.columns(*args, n_threads=int(n_threads or 0))
@@ -570,8 +588,10 @@ def _options(
     top_threshold=18.0,
     no_echo_dbz=-14.0,
     interpolate=True,
+    partial_layers=True,
 ):
     return {
+        "partial_layers": bool(partial_layers),
         "dbz_cap": dbz_cap,
         "min_dbz": min_dbz,
         "fill_below": fill_below,
@@ -673,6 +693,7 @@ def vil(
     dbz_cap=56.0,
     min_dbz=0.0,
     fill_below=False,
+    partial_layers=True,
     melting=None,
     kind=None,
     missing=None,
@@ -711,6 +732,20 @@ def vil(
     fill_below : bool, optional
         Extend the lowest valid value down to ``base_height`` (like a
         pseudo-CAPPI) instead of leaving that layer out. Default False.
+        Compared with the Level III digital VIL (DVL), the default VIL is
+        about 0.7 of it at 30-60 km from the radar and 0.35 at 150-230 km,
+        because the layer under the lowest beam is missing; with
+        ``fill_below=True`` the ratio is flat at about 0.78 for DVL below
+        10 kg m-2 (correlation 0.965 against 0.92), so a deficit of about
+        22 % is left whose cause is not known. Compared with MRMS VIL the
+        ratio is 0.99 (correlation 0.90). These numbers are from one event
+        (KGWX, 30 March 2022, four volumes, one cut per elevation) and are
+        not a calibration.
+    partial_layers : bool, optional
+        The layer between a sample with echo and the next one without
+        contributes ``(Z / 2)**(4/7) dh`` (the mean of the two ends), which
+        adds up to several tenths of kg m-2 for coarse upper tilts. Default
+        True; with False those layers are left out (a lower bound).
     melting : float or xarray.DataArray or xarray.Dataset, optional
         Height (m above sea level) of the melting level, a number, an array
         that broadcasts against the columns (e.g. the 0 degC height of a
@@ -790,7 +825,7 @@ def vil(
     >>> out = radarx.retrieve.vil(grid)  # doctest: +SKIP
     >>> out = dtree.radarx.vil(fill_below=True)  # doctest: +SKIP
     """
-    options = _options(dbz_cap, min_dbz, fill_below)
+    options = _options(dbz_cap, min_dbz, fill_below, partial_layers=partial_layers)
     products, template, base, attrs = _column_products(
         obj,
         dbz,
@@ -1092,9 +1127,12 @@ vil_density.__doc__ = vil_density.__doc__.replace(
 _UNIT_FACTOR = {"g m-3": 1.0, "kg m-3": 1.0e-3}
 
 
-def _lwc_zm(ds, dbz, mask, factor, units):
+def _lwc_zm(ds, dbz, mask, factor, units, dbz_cap=None):
     name = _find_dbz(ds, dbz)
-    z = np.power(10.0, ds[name].astype(np.float64) / 10.0)
+    values = ds[name].astype(np.float64)
+    if dbz_cap is not None:
+        values = values.clip(max=float(dbz_cap))
+    z = np.power(10.0, values / 10.0)
     lwc = 3.44e-3 * factor * z**EXPONENT  # g m-3 times the unit factor
     if mask is not None:
         lwc = lwc.where(mask)
@@ -1106,6 +1144,11 @@ def _lwc_zm(ds, dbz, mask, factor, units):
         "comment": (
             "power law LWC = 3.44e-3 Z^(4/7) g m-3 (Z in mm6 m-3), exponential "
             "drop size distribution; valid in rain only, overestimates in ice"
+            + (
+                ""
+                if dbz_cap is None
+                else f"; reflectivity capped at {float(dbz_cap):g} dBZ"
+            )
         ),
     }
     return lwc
@@ -1145,6 +1188,7 @@ def liquid_water_content(
     dbz=None,
     mask=None,
     units="g m-3",
+    dbz_cap=None,
     n_threads=None,
     engine="auto",
     **dsd_kwargs,
@@ -1184,6 +1228,11 @@ def liquid_water_content(
         one boolean variable, or a dict by sweep name).
     units : {"g m-3", "kg m-3"}, optional
         Units of the result. Default ``"g m-3"``.
+    dbz_cap : float or None, optional
+        ``"zm"`` only: reflectivity (dBZ) above which values are set to this
+        cap, as :func:`vil` does with its default of 56 dBZ to limit the
+        contribution of hail. Default None: no cap, so the water content of
+        hail echoes is the power law of the measured reflectivity.
     n_threads, engine : optional
         For ``"dsd"``, see :func:`radarx.retrieve.dsd`. The power law is a
         single array expression and needs no kernel.
@@ -1231,12 +1280,14 @@ def liquid_water_content(
         raise ValueError(
             f"{sorted(dsd_kwargs)} are options of method='dsd', not of 'zm'"
         )
+    if method == "dsd" and dbz_cap is not None:
+        raise ValueError("dbz_cap is an option of method='zm'")
     factor = _UNIT_FACTOR[units]
 
     def one(ds, node_mask):
         if method == "zm":
             m = ds[node_mask] if isinstance(node_mask, str) else node_mask
-            return _lwc_zm(ds, dbz, m, factor, units)
+            return _lwc_zm(ds, dbz, m, factor, units, dbz_cap)
         return _lwc_dsd(
             ds, dbz, factor, units, node_mask, dsd_kwargs, n_threads, engine
         )

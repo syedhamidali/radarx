@@ -796,3 +796,80 @@ def test_sweep_helpers_fallbacks():
     vel = xr.Dataset({"VRADH": ((), 0.0, {"nyquist_velocity": 27.0})})
     assert tor_mod._nyquist(vel, "VRADH", None, 0.5) == 27.0
     assert tor_mod._nyquist(xr.Dataset({"VRADH": 0.0}), "VRADH", None, 0.5) is None
+
+
+# --------------------------------------------------------------------------
+# heat-map registration and rotation sense
+# --------------------------------------------------------------------------
+
+
+class _HotCell:
+    """Stub network whose heat map fires in a single cell."""
+
+    attrs = {"ml_model": "stub"}
+
+    def __init__(self, row, col):
+        self.row, self.col = row, col
+
+    def run(self, feed):
+        n = feed["DBZ"].shape[0]
+        hm = np.full((n, 8, 15), -10.0, np.float32)
+        hm[:, self.row, self.col] = 5.0
+        return {"logit": np.full((n, 1), 5.0, np.float32), "heatmap": hm}
+
+
+@pytest.mark.parametrize("row,col", [(6, 7), (7, 14), (0, 0)])
+def test_heatmap_cell_covers_16_by_16_gates(row, col):
+    """One heat-map value is painted on exactly 16 rays by 16 gates."""
+    az = np.arange(0.25, 360, 0.5)
+    rng = np.arange(2125.0, 2125 + 240 * 250, 250.0)
+    shape = (az.size, rng.size, 2)
+    names = list(tor_mod._VARIABLES) + ["range_folded_mask"]
+    ds = xr.Dataset(
+        {k: (("azimuth", "range", "tilt"), np.zeros(shape, np.float32)) for k in names},
+        coords={"azimuth": az, "range": rng, "elevation": ("tilt", [0.5, 0.9])},
+    )
+    out = tor_mod.tornado_probability(ds, _HotCell(row, col), stride=(720, 240))
+    p = out.tornado_probability.isel(azimuth=slice(0, 120)).values
+    rays = np.flatnonzero(p.max(1) > 0.5)
+    gates = np.flatnonzero(p.max(0) > 0.5)
+    assert (rays[0], rays[-1]) == (16 * row, min(16 * row + 15, 119))
+    assert (gates[0], gates[-1]) == (16 * col, min(16 * col + 15, 239))
+
+
+def test_rotation_couplets_sense():
+    ds = rankine()
+    cyc = rotation_couplets(ds)
+    assert cyc.sizes["couplet"] >= 1 and float(cyc.azimuthal_shear[0]) > 0
+    anti_ds = ds.assign(VRADH=-ds.VRADH)
+    assert rotation_couplets(anti_ds).sizes["couplet"] == 0 or (
+        np.hypot(
+            rotation_couplets(anti_ds).x + 21e3, rotation_couplets(anti_ds).y - 2e3
+        ).min()
+        > 400.0
+    )
+    south = rotation_couplets(anti_ds, rotation="anticyclonic")
+    assert south.sizes["couplet"] >= 1
+    first = south.isel(couplet=0)
+    assert np.hypot(float(first.x) + 21e3, float(first.y) - 2e3) < 1000.0
+    assert float(first.azimuthal_shear) < -0.01
+    assert 60.0 < float(first.delta_v) <= 81.0
+    assert south.attrs["rotation"] == "anticyclonic"
+    both = rotation_couplets(anti_ds, rotation="both")
+    assert both.sizes["couplet"] >= 1
+    flank = rotation_couplets(ds, rotation="anticyclonic")
+    if flank.sizes["couplet"]:
+        d = np.hypot(flank.x + 21e3, flank.y - 2e3)
+        assert float(d.min()) > 400.0
+    with pytest.raises(ValueError, match="rotation"):
+        rotation_couplets(ds, rotation="left")
+
+
+def test_delta_v_ignores_radial_gradients():
+    """Velocity difference is taken along the azimuth at the peak range."""
+    ds = rankine(vmax=15.0)
+    base = float(rotation_couplets(ds).delta_v[0])
+    # a velocity ramp along the beam (radial divergence) adds nothing along
+    # the azimuth; a max - min over a circle picked up 12 m/s of it
+    ramp = ds.assign(VRADH=ds.VRADH + 8e-3 * (ds.range - 21e3))
+    assert float(rotation_couplets(ramp).delta_v[0]) == pytest.approx(base, abs=1.0)

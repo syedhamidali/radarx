@@ -447,3 +447,60 @@ def test_kgwx_biological_echo_removed_squall_line_kept(kgwx):
     assert np.mean(cls[squall] == 1) > 0.995
     # NEXRAD no-data codes never count as echo
     assert (cls[z <= -32] == 0).all()
+
+
+def _ramp_rain(kdp, nray=30, ng=200, seed=0):
+    """Rain with a constant KDP (a phase ramp) and phase noise of 3 degrees."""
+    rnd = np.random.default_rng(seed)
+    r_km = (np.arange(ng) + 0.5) * DR / 1000.0
+    phi = (100.0 + 2.0 * kdp * r_km + rnd.normal(0, 3.0, (nray, ng)) + 180) % 360 - 180
+    return xr.Dataset(
+        {
+            "DBZH": (("azimuth", "range"), np.full((nray, ng), 35.0)),
+            "PHIDP": (("azimuth", "range"), phi, {"units": "degrees"}),
+        },
+        coords={
+            "azimuth": np.arange(nray) * 360.0 / nray,
+            "range": (np.arange(ng) + 0.5) * DR,
+            "elevation": ("azimuth", np.full(nray, 0.5)),
+        },
+    )
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_detrended_phidp_texture_ignores_the_rain_ramp(engine):
+    """Only phidp_texture counts: the ramp of KDP 30 lowers the circular score."""
+    only = {k: 0.0 for k in qcmod.FEATURES if k != "phidp_texture"}
+    scores = {}
+    for kdp in (0.0, 30.0):
+        ds = _ramp_rain(kdp)
+        for rule in ("circular", "detrended"):
+            out = echo_mask(
+                ds, weights=only, phidp_texture=rule, min_size=1, engine=engine
+            )
+            scores[kdp, rule] = float(out.METEO_SCORE.isel(range=slice(20, 180)).mean())
+    assert scores[0.0, "circular"] == pytest.approx(1.0, abs=0.01)
+    assert scores[30.0, "circular"] < 0.8
+    assert scores[30.0, "detrended"] == pytest.approx(1.0, abs=0.01)
+    assert scores[0.0, "detrended"] == pytest.approx(1.0, abs=0.01)
+
+
+@pytest.mark.skipif(not qcmod.HAS_COMPILED_KERNEL, reason="compiled kernel not built")
+def test_detrended_phidp_texture_engines_agree():
+    ds, _ = _sweep(2)
+    a = echo_mask(ds, phidp_texture="detrended", engine="numpy")
+    b = echo_mask(ds, phidp_texture="detrended", engine="compiled")
+    np.testing.assert_allclose(
+        a.METEO_SCORE.values, b.METEO_SCORE.values, atol=1e-6, equal_nan=True
+    )
+    np.testing.assert_array_equal(a.ECHO_CLASS.values, b.ECHO_CLASS.values)
+    # random phase (biological echo, clutter) is still rejected
+    ds, truth = _sweep(2)
+    got = b.ECHO_CLASS.values
+    assert (got[truth == 2] == 2).mean() > 0.9
+
+
+def test_phidp_texture_option_is_checked():
+    ds, _ = _sweep(0)
+    with pytest.raises(ValueError, match="phidp_texture"):
+        echo_mask(ds, phidp_texture="x")

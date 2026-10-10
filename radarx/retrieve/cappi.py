@@ -35,7 +35,7 @@ from the inverse-distance weighting concept of Shepard (1968), which is
 cited for the weighting only, the methods and every default above and
 below (``k``, search radius, ``power``, ``vertical_scale``,
 ``min_neighbors``, the two default vertical tolerances, the 50-gate window,
-the threshold rule and the -10 to 75 dBZ limits of the gate filter) are
+the 8 m/s velocity-texture limit and the -10 to 75 dBZ limits of the gate filter) are
 radarx's own choices, not values from a paper, and have not been tuned
 against a reference.
 
@@ -57,6 +57,8 @@ from __future__ import annotations
 __all__ = ["create_cappi"]
 
 __doc__ = __doc__.format("\n   ".join(__all__))
+
+import warnings
 
 import numpy as np
 import xarray as xr
@@ -85,6 +87,9 @@ _COMMON_REFLECTIVITY_FIELDS = (
     "DBZ",
     "REF",
 )
+#: Default velocity-texture limit (m/s) of the gate filter: a radarx choice.
+_DEFAULT_TEXTURE_THRESHOLD = 8.0
+
 _METHOD_ALIASES = {
     "cartesian": _CARTESIAN_IDW_METHOD,
     _CARTESIAN_IDW_METHOD: _CARTESIAN_IDW_METHOD,
@@ -381,9 +386,14 @@ def _apply_velocity_texture_gate_filter(
     Apply simple gate-level quality control using Doppler-velocity texture and
     reflectivity limits.
 
-    A radarx heuristic, not a published method: the default velocity texture
-    threshold is var + std of the texture field and the reflectivity limits
-    are -10 and 75 dBZ (radarx choices).
+    A radarx heuristic, not a published method: gates whose velocity texture
+    (standard deviation of the velocity in a ``texture_window``-gate window
+    along range) is at or above ``texture_threshold`` (m/s; default
+    ``_DEFAULT_TEXTURE_THRESHOLD``) are removed, and so are gates outside the
+    reflectivity limits (-10 and 75 dBZ). The defaults are radarx choices.
+    Before this version the default threshold was ``var + std`` of the
+    texture field, which adds m2/s2 to m/s and removed 50 to 100% of the
+    gates of clean data.
     """
     filtered = ds.copy()
 
@@ -403,18 +413,8 @@ def _apply_velocity_texture_gate_filter(
                 .std()
             )
 
-        if velocity_texture is not None and texture_threshold is None:
-            texture_values = np.asarray(velocity_texture.values, dtype=float)
-            finite_texture = texture_values[np.isfinite(texture_values)]
-
-            if finite_texture.size == 0:
-                texture_threshold = np.inf
-            elif finite_texture.size == 1:
-                texture_threshold = abs(float(finite_texture[0]))
-            else:
-                texture_threshold = abs(
-                    float(np.nanvar(finite_texture)) + float(np.nanstd(finite_texture))
-                )
+        if texture_threshold is None:
+            texture_threshold = _DEFAULT_TEXTURE_THRESHOLD
 
         if velocity_texture is not None:
             filtered = filtered.where(velocity_texture < float(texture_threshold))
@@ -426,6 +426,47 @@ def _apply_velocity_texture_gate_filter(
         )
 
     return filtered
+
+
+_LOG_UNITS = {"dbz", "db"}
+_LOG_NAMES = {n.lower() for n in _COMMON_REFLECTIVITY_FIELDS} | {
+    "zdr",
+    "differential_reflectivity",
+    "corrected_differential_reflectivity",
+}
+_NOT_INTERPOLABLE = ("VRAD", "VEL", "DOPPLER", "PHI", "UPHI", "DIFFERENTIAL_PHASE")
+
+
+def _is_logarithmic(name, attrs):
+    """Reflectivity or differential reflectivity (dBZ, dB)."""
+    units = str(attrs.get("units", "")).strip().lower()
+    return units in _LOG_UNITS or str(name).lower() in _LOG_NAMES
+
+
+def _to_linear(values):
+    return np.power(10.0, np.asarray(values, dtype=float) / 10.0)
+
+
+def _to_db(values):
+    values = np.asarray(values, dtype=float)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return np.where(
+            values > 0.0, 10.0 * np.log10(np.where(values > 0, values, 1.0)), np.nan
+        )
+
+
+def _warn_not_interpolable(fields, method):
+    """Radial velocity and phase do not average between gates of other sweeps."""
+    bad = [f for f in fields if str(f).upper().startswith(_NOT_INTERPOLABLE)]
+    if bad:
+        warnings.warn(
+            f"{', '.join(bad)} interpolated with method {method!r}: radial "
+            "velocity from different look directions and differential phase "
+            "(a cumulative angle) are not meaningful when averaged between "
+            "gates; select the fields with fields=[...] to leave them out",
+            UserWarning,
+            stacklevel=4,
+        )
 
 
 def _normalize_cappi_method(method):
@@ -460,6 +501,7 @@ def _create_cappi_cartesian_idw(
     power=2.0,
     vertical_scale=3.0,
     min_neighbors=3,
+    linear_units=False,
 ):
     """
     Create CAPPI on a Cartesian ``x``/``y`` plane using 3D IDW.
@@ -496,6 +538,9 @@ def _create_cappi_cartesian_idw(
         mismatch more strongly than horizontal mismatch.
     min_neighbors : int, optional
         Minimum valid neighbors required to produce a grid value.
+    linear_units : bool, optional
+        Average reflectivity and differential reflectivity in linear units
+        (mm6 m-3, ratio) instead of dB. Default False.
 
     Returns
     -------
@@ -524,7 +569,16 @@ def _create_cappi_cartesian_idw(
         x, y = _build_target_grid(x, y)
 
     data_vars = {}
+    linearised = []
+    _warn_not_interpolable(field_store, _CARTESIAN_IDW_METHOD)
     for field, (xyz_src, values) in field_store.items():
+        ref_sweep = sweeps[0] if sweeps else _iter_sweeps(radar)[0]
+        ref_ds = _node_to_dataset(radar[ref_sweep])
+        attrs = ref_ds[field].attrs if field in ref_ds else {}
+        in_linear = linear_units and _is_logarithmic(field, attrs)
+        if in_linear:
+            values = _to_linear(values)
+            linearised.append(field)
         cappi = _idw_interpolate_to_cappi(
             xyz_src=xyz_src,
             values=values,
@@ -537,10 +591,8 @@ def _create_cappi_cartesian_idw(
             vertical_scale=vertical_scale,
             min_neighbors=min_neighbors,
         )
-        attrs = {}
-        ref_sweep = sweeps[0] if sweeps else _iter_sweeps(radar)[0]
-        ref_ds = _node_to_dataset(radar[ref_sweep])
-        attrs = ref_ds[field].attrs if field in ref_ds else {}
+        if in_linear:
+            cappi = _to_db(cappi)
         data_vars[field] = (("y", "x"), cappi, attrs)
 
     ref_coords, ref_attrs = _cappi_reference_metadata(radar, sweeps=sweeps)
@@ -563,6 +615,7 @@ def _create_cappi_cartesian_idw(
             "idw_power": float(power),
             "vertical_scale": float(vertical_scale),
             "min_neighbors": int(min_neighbors),
+            "interpolated_in_linear_units": " ".join(linearised),
             **ref_attrs,
         },
     )
@@ -707,6 +760,7 @@ def _create_cappi_polar_vertical_interpolation(
     max_vertical_distance=None,
     vertical_interpolation="linear",
     ground_range=True,
+    linear_units=False,
 ):
     """
     Create CAPPI in native polar coordinates using sweep-wise vertical interpolation.
@@ -744,6 +798,10 @@ def _create_cappi_polar_vertical_interpolation(
 
     z_stack = []
     field_stack = {field: [] for field in fields}
+    _warn_not_interpolable(fields, _POLAR_VERTICAL_INTERPOLATION_METHOD)
+    linear_fields = [
+        f for f in fields if linear_units and _is_logarithmic(f, ref[f].attrs)
+    ]
 
     for sw in sweeps:
         ds = _node_to_dataset(radar[sw])
@@ -754,6 +812,10 @@ def _create_cappi_polar_vertical_interpolation(
         z_stack.append(z_interp)
 
         for field in fields:
+            if field in linear_fields:
+                ds = ds.assign(
+                    {field: ds[field].copy(data=_to_linear(ds[field].values))}
+                )
             data = _interp_to_reference(ds, field, az, r)
             if ground is not None:
                 data = _onto_ground_range(data, ground, ground_ref)
@@ -823,6 +885,10 @@ def _create_cappi_polar_vertical_interpolation(
 
             cappi = np.ma.array(cappi, mask=linear_mask)
 
+        if field in linear_fields:
+            cappi = np.ma.array(
+                _to_db(np.ma.getdata(cappi)), mask=np.ma.getmaskarray(cappi)
+            )
         data_vars[field] = (("time", "range"), cappi, ref[field].attrs)
 
     sweep_mode = _get_reference_metadata_value(
@@ -870,6 +936,7 @@ def _create_cappi_polar_vertical_interpolation(
             "method": _POLAR_VERTICAL_INTERPOLATION_METHOD,
             "vertical_interpolation": vertical_interpolation,
             "max_vertical_distance": float(tol),
+            "interpolated_in_linear_units": " ".join(linear_fields),
             **(
                 {"radar_altitude": float(radar_altitude)}
                 if radar_altitude is not None
@@ -1053,6 +1120,8 @@ def create_cappi(
     x_res=1000.0,
     y_res=1000.0,
     padding=0.0,
+    texture_threshold=None,
+    linear_units=False,
 ):
     """
     Create a Constant Altitude Plan Position Indicator (CAPPI).
@@ -1102,6 +1171,20 @@ def create_cappi(
     padding : float, optional
         Extra padding, in meters, applied to the Cartesian output domain.
         Used only with ``method="cartesian_idw"``.
+    texture_threshold : float or None, optional
+        Velocity-texture limit (m/s) of the gate filter, used with
+        ``apply_filter=True``: gates where the standard deviation of the
+        radial velocity in a 50-gate window along range is at or above it are
+        removed. Default 8 m/s (a radarx choice, not a published value).
+    linear_units : bool, optional
+        ``"cartesian_idw"`` and ``"polar_vertical_interpolation"``: average
+        reflectivity (dBZ) and differential reflectivity (dB) in linear
+        units and convert back, instead of averaging the dB values, which
+        biases the result low. Default False (the dB values are averaged).
+        Radial velocity and differential phase are interpolated as they
+        are, with a warning: velocity from different look directions and a
+        cumulative phase are not meaningful when averaged, so leave them out
+        with ``fields``. Gates without echo (NaN) never enter the weights.
 
     Returns
     -------
@@ -1140,6 +1223,7 @@ def create_cappi(
             y_res=y_res,
             padding=padding,
             vertical_window=vertical_tolerance,
+            linear_units=linear_units,
         )
 
     if method == _POLAR_VERTICAL_INTERPOLATION_METHOD:
@@ -1149,6 +1233,7 @@ def create_cappi(
             fields=fields,
             sweeps=sweeps,
             max_vertical_distance=vertical_tolerance,
+            linear_units=linear_units,
         )
 
     if method == _HEIGHT_WINDOW_COMPOSITE_METHOD:
@@ -1163,6 +1248,7 @@ def create_cappi(
             apply_quality_control=apply_filter,
             velocity_field=_infer_field_name(ref_ds, _COMMON_VELOCITY_FIELDS),
             reflectivity_field=_infer_field_name(ref_ds, _COMMON_REFLECTIVITY_FIELDS),
+            texture_threshold=texture_threshold,
         )
 
     raise ValueError(f"Unsupported CAPPI method '{method}'.")
