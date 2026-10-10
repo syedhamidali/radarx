@@ -101,6 +101,12 @@ Park et al. (2005, Part I) at X band is 0.254 dB per degree with a range of
 ``alpha``, ``beta`` and ``b`` where a better value is known for the radar and
 the rain.
 
+The scattering quantities behind the coefficients come from the T-matrix
+tables of :func:`radarx.retrieve.scattering_table` (with the
+:math:`|K_w|^2 = 0.93` convention of the table), not from the Rayleigh
+functions of :mod:`radarx.fundamentals.scattering`, which are for spheres and
+give no differential terms.
+
 Choices of radarx
 -----------------
 The papers leave these open; the defaults are radarx's.
