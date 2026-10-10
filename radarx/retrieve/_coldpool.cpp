@@ -42,6 +42,9 @@ using DArray = py::array_t<double, py::array::c_style | py::array::forcecast>;
 namespace {
 
 constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
+// Heights closer than this [m] to the first or last level are that level: a
+// layer limit computed as ground + depth can miss the level by rounding.
+constexpr double kZTol = 1e-6;
 constexpr double kRd = 287.04749;
 constexpr double kRv = 461.52311;
 constexpr double kEps = kRd / kRv;
@@ -217,13 +220,23 @@ inline bool interp_at(const double* z, const double* u, const double* v, int64_t
             return true;
         }
         if (z[k] > h) {
-            if (prev < 0) return false;
+            if (prev < 0) {
+                if (z[k] - h > kZTol) return false;
+                *uo = u[k];
+                *vo = v[k];
+                return true;
+            }
             const double w = (h - z[prev]) / (z[k] - z[prev]);
             *uo = u[prev] + w * (u[k] - u[prev]);
             *vo = v[prev] + w * (v[k] - v[prev]);
             return true;
         }
         prev = k;
+    }
+    if (prev >= 0 && h - z[prev] <= kZTol) {
+        *uo = u[prev];
+        *vo = v[prev];
+        return true;
     }
     return false;
 }

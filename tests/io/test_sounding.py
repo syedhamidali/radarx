@@ -1108,3 +1108,35 @@ def test_small_branches(tmp_path, monkeypatch):
     with pytest.raises(ImportError):
         sounding.saturation_vapor_pressure(273.15, engine="compiled")
     np.testing.assert_allclose(sounding.saturation_vapor_pressure(273.15), 611.2)
+
+
+# ---------------------------------------------------------------------------
+# failure modes reported against MetPy (Unidata/MetPy #973, #2637, #596, #788,
+# #178, #794, #165, #3640), checked against analytic profiles
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_layer_limit_matches_level_to_rounding(engine):
+    # heights (g + k dz) * 1000 versus g * 1000 + 6000 differ by 9e-13 m for
+    # g = 0.347 km: the layer is still spanned by the profile
+    g, dz = 0.347, 0.1
+    z = (g + np.arange(61) * dz) * 1000.0
+    assert z[-1] < g * 1000.0 + 6000.0
+    prof = xr.Dataset(
+        {"u": ("height", np.linspace(0, 12, 61)), "v": ("height", np.zeros(61))},
+        coords={"height": z},
+    )
+    mw = sounding.mean_wind(prof, g * 1000.0, g * 1000.0 + 6000.0, engine=engine)
+    assert float(mw["u"]) == pytest.approx(6.0)
+    out = sounding.interpolate_profile(
+        prof, [g * 1000.0 + 6000.0], ["u"], engine=engine
+    )
+    assert float(out["u"][0]) == pytest.approx(12.0)
+    # a real gap is still outside the profile
+    assert np.isnan(
+        float(
+            sounding.interpolate_profile(prof, [z[-1] + 0.01], ["u"], engine=engine)[
+                "u"
+            ][0]
+        )
+    )
