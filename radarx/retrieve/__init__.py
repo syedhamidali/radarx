@@ -25,6 +25,8 @@ _SECTIONS = {
         "dealias",
         "kdp",
         "attenuation",
+        "noise",
+        "calibration",
         "advection",
     ],
     "Products and profiles": ["cappi", "vertical_profiles"],

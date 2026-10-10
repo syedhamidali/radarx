@@ -1926,5 +1926,101 @@
   "publisher": "American Meteorological Society",
   "pages": "P5.6",
   "url": "https://ams.confex.com/ams/11aram22sls/techprogram/paper_81827.htm"
+ },
+ "10.1109/36.175319": {
+  "authors": [
+   "Gorgucci, E.",
+   "Scarchilli, G.",
+   "Chandrasekar, V."
+  ],
+  "year": 1992,
+  "title": "Calibration of radars using polarimetric techniques",
+  "type": "article",
+  "journal": "IEEE Transactions on Geoscience and Remote Sensing",
+  "volume": "30",
+  "issue": "5",
+  "pages": "853-858",
+  "doi": "10.1109/36.175319"
+ },
+ "10.1175/1520-0450(1974)013<0808:ODOTNL>2.0.CO;2": {
+  "authors": [
+   "Hildebrand, P. H.",
+   "Sekhon, R. S."
+  ],
+  "year": 1974,
+  "title": "Objective Determination of the Noise Level in Doppler Spectra",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology",
+  "volume": "13",
+  "issue": "7",
+  "pages": "808-811",
+  "doi": "10.1175/1520-0450(1974)013<0808:ODOTNL>2.0.CO;2"
+ },
+ "10.1175/2008JTECHA1152.1": {
+  "authors": [
+   "Gourley, J. J.",
+   "Illingworth, A. J.",
+   "Tabary, P."
+  ],
+  "year": 2009,
+  "title": "Absolute Calibration of Radar Reflectivity Using Redundancy of the Polarization Observations and Implied Constraints on Drop Shapes",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "26",
+  "issue": "4",
+  "pages": "689-703",
+  "doi": "10.1175/2008JTECHA1152.1"
+ },
+ "10.1175/JTECH-D-13-00045.1": {
+  "authors": [
+   "Kollias, P.",
+   "Jo, I.",
+   "Borque, P.",
+   "Tatarevic, A.",
+   "Lamer, K.",
+   "Bharadwaj, N.",
+   "Widener, K.",
+   "Johnson, K.",
+   "Clothiaux, E. E."
+  ],
+  "year": 2014,
+  "title": "Scanning ARM Cloud Radars. Part II: Data Quality Control and Processing",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "31",
+  "issue": "3",
+  "pages": "583-598",
+  "doi": "10.1175/JTECH-D-13-00045.1"
+ },
+ "10.1175/JTECH1772.1": {
+  "authors": [
+   "Ryzhkov, A. V.",
+   "Giangrande, S. E.",
+   "Melnikov, V. M.",
+   "Schuur, T. J."
+  ],
+  "year": 2005,
+  "title": "Calibration Issues of Dual-Polarization Radar Measurements",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "22",
+  "issue": "8",
+  "pages": "1138-1155",
+  "doi": "10.1175/JTECH1772.1"
+ },
+ "10.1175/JTECH1912.1": {
+  "authors": [
+   "Gourley, J. J.",
+   "Tabary, P.",
+   "Parent du Chatelet, J."
+  ],
+  "year": 2006,
+  "title": "Data Quality of the Meteo-France C-Band Polarimetric Radar",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "23",
+  "issue": "10",
+  "pages": "1340-1356",
+  "doi": "10.1175/JTECH1912.1"
  }
 }
