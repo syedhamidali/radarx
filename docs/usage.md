@@ -28,6 +28,7 @@ notebooks/Interactive_Plots
 notebooks/Echo_QC
 notebooks/Dealiasing
 notebooks/KDP
+notebooks/Attenuation_Correction
 notebooks/Advection_Correction
 ```
 
