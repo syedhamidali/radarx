@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import xarray as xr
 
+from .._provenance import inherit_provenance
+
 
 def product_tree(obj, nodes):
     """
@@ -70,7 +72,8 @@ def assign_dataset(ds, products, inherited=None):
     products = products.drop_vars(duplicate)
     if any(name in full.indexes for name in products.indexes):
         _, products = xr.align(full, products, join="left", copy=False)
-    return ds.assign(dict(products.data_vars))
+    out = ds.assign(dict(products.data_vars))
+    return inherit_provenance(out, products)
 
 
 def assign_products(target, products):
