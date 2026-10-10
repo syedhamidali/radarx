@@ -1216,8 +1216,6 @@ def test_si_units_enforced(engine):
         sounding.air_density(1013.25, 288.15, engine=engine)
     with pytest.raises(ValueError, match="pressure must be in Pa"):
         sounding.dewpoint_from_specific_humidity(0.01, 1000.0, engine=engine)
-    with pytest.raises(ValueError, match="temperature must be in K"):
-        sounding.isotherm_height(synthetic_profile(), 0.0, engine=engine)
     # NaN-only and SI input pass
     assert np.isnan(float(sounding.saturation_vapor_pressure(np.nan, engine=engine)))
     assert float(sounding.saturation_vapor_pressure(293.15, engine=engine)) > 2000

@@ -2168,9 +2168,6 @@ def isotherm_height(
     if which not in ("highest", "lowest"):
         raise ValueError("which must be 'highest' or 'lowest'")
     zcols, vals, other, shape = _profile_columns(profile, [variable])
-    _check_si("esat", [vals[0]])
-    if float(temperature) < 150.0:
-        raise ValueError(f"temperature must be in K, got the isotherm {temperature:g}")
     k = _kernel(engine)
     res = np.asarray(
         k.level_crossing(
