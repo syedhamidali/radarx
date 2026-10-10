@@ -1093,7 +1093,6 @@ def _wrap(prep, cls, conf, scores, classes, table, info):
         "band": table["band"],
         "comment": comment + "; 0: not classified",
         "references": table["references"],
-        "_FillValue": np.int8(0),
     }
     out = xr.Dataset(
         {
