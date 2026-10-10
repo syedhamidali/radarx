@@ -19,7 +19,9 @@ with a valid wind of every column (the surface for a sounding, the first gate
 of a profiler); pass ``ground=0`` for heights that are already above ground
 level, or the station altitude for heights above sea level. Winds at the
 limits are interpolated linearly between valid levels; a layer that the valid
-winds do not span gives NaN.
+winds do not span gives NaN (a limit within 1e-6 m of the lowest or highest
+valid level counts as that level, so ``ground + top`` rounding does not void
+the layer). The direction of a calm wind is NaN.
 
 Definitions
 -----------

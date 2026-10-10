@@ -2036,7 +2036,9 @@ def interpolate_profile(
 
     Values are interpolated linearly in height between the nearest valid
     levels, pressure linearly in its logarithm; wind speed and direction are
-    recomputed from the interpolated ``u`` and ``v``.
+    recomputed from the interpolated ``u`` and ``v`` (direction the wind comes
+    from, in [0, 360), 0 for calm). Levels may be stored top-down. A target
+    within 1e-6 m of the lowest or highest valid level counts as that level.
 
     Parameters
     ----------
@@ -2260,7 +2262,9 @@ def mean_wind(
 
     The height-weighted mean of ``u`` and ``v`` over ``[bottom, top]``,
     integrating the profile linearly interpolated between valid levels
-    (trapezoidal rule).
+    (trapezoidal rule). Levels may be stored top-down; a limit within 1e-6 m
+    of the lowest or highest valid level counts as that level. The direction
+    of a calm mean wind is 0.
 
     Parameters
     ----------
