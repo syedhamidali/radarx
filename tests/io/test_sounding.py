@@ -1202,3 +1202,22 @@ def test_wind_direction_range_and_calm(engine):
     )
     np.testing.assert_allclose(d, [0.0, 90.0, 180.0, 270.0, 225.0])
     assert np.isnan(sounding._wind_from_direction(np.nan, 1.0))
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_si_units_enforced(engine):
+    with pytest.raises(ValueError, match="temperature must be in K"):
+        sounding.saturation_vapor_pressure(20.0, engine=engine)
+    with pytest.raises(ValueError, match="pressure must be in Pa"):
+        sounding.wet_bulb_temperature(1000.0, 293.15, 283.15, engine=engine)
+    with pytest.raises(ValueError, match="temperature must be in K"):
+        sounding.wet_bulb_temperature(1e5, 20.0, 10.0, engine=engine)
+    with pytest.raises(ValueError, match="pressure must be in Pa"):
+        sounding.air_density(1013.25, 288.15, engine=engine)
+    with pytest.raises(ValueError, match="pressure must be in Pa"):
+        sounding.dewpoint_from_specific_humidity(0.01, 1000.0, engine=engine)
+    with pytest.raises(ValueError, match="temperature must be in K"):
+        sounding.isotherm_height(synthetic_profile(), 0.0, engine=engine)
+    # NaN-only and SI input pass
+    assert np.isnan(float(sounding.saturation_vapor_pressure(np.nan, engine=engine)))
+    assert float(sounding.saturation_vapor_pressure(293.15, engine=engine)) > 2000

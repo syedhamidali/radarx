@@ -441,9 +441,38 @@ def _f64(a):
     return np.ascontiguousarray(a, dtype=np.float64)
 
 
+# Units expected by the thermodynamic kernels, per argument: "K", "Pa" or None
+# (no check: vapour pressures and humidities have no usable lower bound).
+_OP_UNITS = {
+    "esat": ("K",),
+    "wet_bulb": ("Pa", "K", "K"),
+    "density": ("Pa", "K", None),
+    "vapor_pressure": (None, "Pa"),
+    "specific_humidity": (None, "Pa"),
+}
+
+
+def _check_si(op, arrays):
+    """Raise for temperatures in degC or pressures in hPa (a silent wrong answer)."""
+    for kind, a in zip(_OP_UNITS.get(op, ()), arrays):
+        fin = a[np.isfinite(a)]
+        if not fin.size:
+            continue
+        if kind == "K" and fin.max() < 150.0:
+            raise ValueError(
+                f"temperature must be in K, got values up to {fin.max():g} "
+                "(degC input?)"
+            )
+        if kind == "Pa" and fin.max() < 2000.0:
+            raise ValueError(
+                f"pressure must be in Pa, got values up to {fin.max():g} (hPa input?)"
+            )
+
+
 def _thermo(op, *arrays, engine="auto", n_threads=None):
     """Run an elementwise kernel on broadcast NumPy arrays, keeping the shape."""
     arrays = np.broadcast_arrays(*(np.asarray(a, dtype=np.float64) for a in arrays))
+    _check_si(op, arrays)
     shape = arrays[0].shape
     k = _kernel(engine)
     out = k.thermo(op, [_f64(a).ravel() for a in arrays], n_threads=int(n_threads or 0))
@@ -2123,6 +2152,9 @@ def isotherm_height(
     if which not in ("highest", "lowest"):
         raise ValueError("which must be 'highest' or 'lowest'")
     zcols, vals, other, shape = _profile_columns(profile, [variable])
+    _check_si("esat", [vals[0]])
+    if float(temperature) < 150.0:
+        raise ValueError(f"temperature must be in K, got the isotherm {temperature:g}")
     k = _kernel(engine)
     res = np.asarray(
         k.level_crossing(
