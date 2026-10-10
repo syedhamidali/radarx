@@ -48,6 +48,8 @@ def _volume(
     start=T0,
     fields=("DBZH", "ZDR", "VRADH", "RHOHV"),
     max_range=80e3,
+    k_e=cone.K_E,
+    sweep_dt=0.0,
 ):
     """Synthetic volume measuring ``truth`` at each gate's grid position."""
     rng_m = np.arange(250.0, max_range, 500.0)
@@ -57,7 +59,11 @@ def _volume(
     for k, el in enumerate(elevations):
         az = np.roll(azimuth, 23 * k)
         gx, gy, gz = antenna_to_cartesian(
-            rng_m[None, :], az[:, None], np.full((az.size, 1), el), site_altitude=alt
+            rng_m[None, :],
+            az[:, None],
+            np.full((az.size, 1), el),
+            site_altitude=alt,
+            **cone._antenna_kwargs(k_e),
         )
         glon, glat = radar(gx, gy, inverse=True)
         X, Y = grid(glon, glat)
@@ -74,7 +80,10 @@ def _volume(
                 "azimuth": az,
                 "range": rng_m,
                 "elevation": ("azimuth", np.full(az.size, el)),
-                "time": ("azimuth", np.full(az.size, start)),
+                "time": (
+                    "azimuth",
+                    np.full(az.size, start + np.timedelta64(int(k * sweep_dt), "s")),
+                ),
             },
         )
     root = xr.Dataset(coords={"latitude": lat, "longitude": lon, "altitude": alt})
@@ -560,3 +569,330 @@ def test_column_geodesics_match_proj(origin):
         for key, tol in (("antenna_azimuth", 1e-6), ("azimuth", 2e-3)):
             diff = (a[key][r] - b[key][r] + 180.0) % 360.0 - 180.0
             assert np.abs(diff[away]).max() < tol, key
+
+
+# ---------------------------------------------------------------------------
+# effective Earth radius (#226)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_k_e_in_grid_and_merge(engine):
+    """Radars measuring with k_e = 1.1 are gridded and merged with k_e = 1.1."""
+    k_e = 1.1
+    (la1, lo1), (la2, lo2), _ = _sites()
+    radars = [
+        _volume(la1, lo1, name="AAA", k_e=k_e),
+        _volume(la2, lo2, name="BBB", k_e=k_e),
+    ]
+    kw = dict(**GRID, origin=ORIGIN, data_vars="DBZH", merge="DBZH", engine=engine)
+    out = multi.grid_radars(radars, k_e=k_e, **kw)
+    assert out.attrs["k_e"] == pytest.approx(k_e)
+    x, y, z = xr.broadcast(out.x, out.y, out.z)
+    expected = truth(x, y, z).transpose("z", "y", "x")
+    errors = []
+    for r in range(2):
+        field = out.DBZH.isel(radar=r)
+        ok = np.isfinite(field.values)
+        assert ok.mean() > 0.2
+        errors.append(np.abs((field - expected).values[ok]).max())
+    assert max(errors) < 0.1
+    # with the default 4/3 the same gates sit at other heights
+    default = multi.grid_radars(radars, **kw)
+    ok = np.isfinite(default.DBZH.isel(radar=0).values)
+    wrong = np.abs((default.DBZH.isel(radar=0) - expected).values[ok]).max()
+    assert wrong > 1.3 * max(errors)
+    # beam geometry follows k_e: the beam is flatter than for 4/3
+    assert float(np.nanmax(np.abs(out.elevation - default.elevation))) > 0.01
+    # merge_radars takes k_e from the grid, or from its argument
+    same = multi.merge_radars(out, "DBZH", engine=engine)
+    again = multi.merge_radars(out, "DBZH", k_e=k_e, engine=engine)
+    np.testing.assert_array_equal(same.DBZH.values, again.DBZH.values)
+    other = multi.merge_radars(out, "DBZH", k_e=4 / 3, engine=engine)
+    assert not np.array_equal(
+        same.DBZH_weight.values, other.DBZH_weight.values, equal_nan=True
+    )
+
+
+@needs_kernel
+def test_k_e_engines_agree(network):
+    kw = dict(origin=ORIGIN, data_vars=["DBZH", "VRADH"], merge="DBZH", k_e=1.2)
+    a = multi.grid_radars(network, **GRID, **kw, engine="compiled", fill_below=True)
+    b = multi.grid_radars(network, **GRID, **kw, engine="numpy", fill_below=True)
+    for name in ("DBZH", "VRADH", "coverage", "elevation", "range", "DBZH_merged"):
+        np.testing.assert_allclose(
+            a[name].values, b[name].values, rtol=1e-5, atol=1e-3, equal_nan=True
+        )
+
+
+def test_k_e_default_changes_nothing(network):
+    a = multi.grid_radars(network, **GRID, origin=ORIGIN, data_vars="DBZH")
+    b = multi.grid_radars(network, **GRID, origin=ORIGIN, data_vars="DBZH", k_e=4 / 3)
+    np.testing.assert_array_equal(a.DBZH.values, b.DBZH.values)
+    np.testing.assert_array_equal(a.range.values, b.range.values)
+
+
+# ---------------------------------------------------------------------------
+# pseudo-CAPPI limits in the multi-radar grid (#228)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_multi_fill_depth_and_velocity(engine):
+    dtree = _volume(*ORIGIN, alt=100.0)
+    z = np.arange(200.0, 1300.0, 100.0)
+    grid = dict(x=np.array([50e3]), y=np.array([0.0]), z=z)
+    kw = dict(origin=ORIGIN, data_vars=["DBZH", "VRADH"], engine=engine, **grid)
+    old = multi.grid_radars([dtree], fill_below=True, fill_velocity=True, **kw)
+    assert np.isfinite(old.DBZH.values).all() and np.isfinite(old.VRADH.values).all()
+    new = multi.grid_radars(
+        [dtree], fill_below=True, fill_velocity=True, fill_depth=300.0, **kw
+    )
+    refl = new.DBZH.values.ravel()
+    assert np.isfinite(refl).sum() < refl.size and np.isfinite(refl[-1])
+    assert np.isnan(refl[0])  # far below the lowest beam
+    # velocity is not filled below the lowest sweep, reflectivity is
+    plain = multi.grid_radars([dtree], fill_below=True, **kw)
+    assert np.isnan(plain.VRADH.values.ravel()[0])
+    assert np.isfinite(plain.DBZH.values.ravel()[0])
+    np.testing.assert_array_equal(plain.DBZH.values, old.DBZH.values)
+
+
+# ---------------------------------------------------------------------------
+# coverage, no echo and the merge (#227)
+# ---------------------------------------------------------------------------
+
+
+def _two_radars_with_sensitivity_gap(threshold=34.0, bias=0.0):
+    """B sees the same field as A but reports nothing where it is below threshold."""
+    (la1, lo1), (la2, lo2), _ = _sites()
+    a = _volume(la1, lo1, name="AAA")
+    b = _volume(la2, lo2, name="BBB", bias=bias)
+    for name in list(b.children):
+        ds = b[name].to_dataset()
+        ds["DBZH"] = ds["DBZH"].where(ds["DBZH"] >= threshold)
+        b[name] = xr.DataTree(ds)
+    return [a, b]
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_coverage_separates_no_echo_from_outside(engine):
+    radars = _two_radars_with_sensitivity_gap()
+    out = multi.grid_radars(
+        radars, **GRID, origin=ORIGIN, data_vars="DBZH", engine=engine
+    )
+    cover = out["coverage"]
+    assert cover.dims == ("radar", "z", "y", "x") and cover.dtype == np.uint8
+    dbz = out.DBZH
+    # a defined value is always inside the coverage
+    assert (cover.values[np.isfinite(dbz.values)] == 1).all()
+    # radar B: some covered cells without an echo, some cells not covered at all
+    b_cover = cover.isel(radar=1).values > 0
+    b_nan = ~np.isfinite(dbz.isel(radar=1).values)
+    assert (b_cover & b_nan).any() and (~b_cover).any()
+    # beyond the 80 km range of the radar the cell is not covered
+    far = cover.isel(radar=1).sel(x=-60e3, y=-50e3)  # 125 km from radar B
+    assert (far.values == 0).all()
+    # the mask can be left out
+    without = multi.grid_radars(
+        radars, **GRID, origin=ORIGIN, data_vars="DBZH", coverage=False, engine=engine
+    )
+    assert "coverage" not in without
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_merge_counts_covered_cells_without_echo(engine):
+    radars = _two_radars_with_sensitivity_gap(threshold=20.0, bias=-8.0)
+    out = multi.grid_radars(
+        radars, **GRID, origin=ORIGIN, data_vars="DBZH", engine=engine
+    )
+    old = multi.merge_radars(out, "DBZH", no_echo=None, engine=engine)
+    new = multi.merge_radars(out, "DBZH", engine=engine)
+    a = out.DBZH.isel(radar=0)
+    b_nan = (out.coverage.isel(radar=1) > 0) & ~np.isfinite(out.DBZH.isel(radar=1))
+    floor = float(out.DBZH.isel(radar=1).min())
+    only_a = (np.isfinite(a) & b_nan & (a > floor + 1.0)).values
+    assert only_a.sum() > 100
+    # before: the radar that sees an echo alone decides
+    np.testing.assert_allclose(old.DBZH.values[only_a], a.values[only_a], atol=1e-4)
+    # now: radar B pulls the value down, but not below its own lowest value
+    assert (new.DBZH.values[only_a] < a.values[only_a] - 1e-4).all()
+    assert (new.DBZH.values[only_a] >= floor - 1e-4).all()
+    # outside the coverage of B nothing changes
+    outside = (np.isfinite(a) & (out.coverage.isel(radar=1) == 0)).values
+    assert outside.sum() > 100
+    np.testing.assert_allclose(new.DBZH.values[outside], a.values[outside], atol=1e-4)
+    # an explicit value
+    low = multi.merge_radars(out, "DBZH", no_echo=-10.0, engine=engine)
+    assert (low.DBZH.values[only_a] < new.DBZH.values[only_a]).all()
+    # a grid without coverage merges as before
+    legacy = multi.merge_radars(out.drop_vars("coverage"), "DBZH", engine=engine)
+    np.testing.assert_allclose(
+        legacy.DBZH.values, old.DBZH.values, atol=1e-5, equal_nan=True
+    )
+    with pytest.raises(ValueError, match="no_echo"):
+        multi.merge_radars(out, "DBZH", no_echo="zero")
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_merge_averages_in_linear_units(engine):
+    (la1, lo1), _, _ = _sites()
+    radars = [_volume(la1, lo1, name="AAA"), _volume(la1, lo1, bias=10.0, name="BBB")]
+    out = multi.grid_radars(
+        radars, **GRID, origin=ORIGIN, data_vars="DBZH", engine=engine
+    )
+    kw = dict(range_scale=None, time_scale=None, engine=engine)
+    db = multi.merge_radars(out, "DBZH", **kw)
+    lin = multi.merge_radars(out, "DBZH", average="linear", **kw)
+    a = out.DBZH.isel(radar=0)
+    ok = np.isfinite(a.values)
+    assert ok.sum() > 100
+    np.testing.assert_allclose(db.DBZH.values[ok], a.values[ok] + 5.0, atol=1e-3)
+    expected = a.values[ok] + 10 * np.log10((1 + 10.0) / 2)
+    np.testing.assert_allclose(lin.DBZH.values[ok], expected, atol=1e-3)
+    assert lin.DBZH.attrs["merge_average"] == "linear"
+    with pytest.raises(ValueError, match="average"):
+        multi.merge_radars(out, "DBZH", average="log")
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_time_weight_is_not_applied_twice_after_advection(engine):
+    (la1, lo1), (la2, lo2), _ = _sites()
+    a = _volume(la1, lo1, name="AAA")
+    b = _volume(la2, lo2, bias=10.0, name="BBB", start=T0 + np.timedelta64(600, "s"))
+    kw = dict(origin=ORIGIN, data_vars="DBZH", engine=engine, time=T0)
+    still = multi.grid_radars([a, b], **GRID, **kw)
+    moved = multi.grid_radars([a, b], **GRID, motion=(0.0, 0.0), **kw)
+    both = np.isfinite(moved.DBZH).all("radar")
+    # not advected: B is 600 s from the analysis time and is down-weighted
+    w_still = multi.merge_radars(still, "DBZH", range_scale=None, engine=engine)
+    # advected: the echoes are already at the analysis time, both count alike
+    auto = multi.merge_radars(moved, "DBZH", range_scale=None, engine=engine)
+    first = moved.DBZH.isel(radar=0)
+    mean_shift = float((auto.DBZH - first).where(both).mean())
+    assert mean_shift > 1.5
+    assert float((w_still.DBZH - first).where(both).mean()) < 0.5
+    # the earlier double weighting stays available
+    old = multi.merge_radars(
+        moved, "DBZH", range_scale=None, time_weight=True, engine=engine
+    )
+    assert float((old.DBZH - first).where(both).mean()) < 0.5
+    # the advected coverage is kept
+    assert "coverage" in moved
+
+
+def test_merge_bias_dataset_only_for_its_own_field(network):
+    out = multi.grid_radars(network, **GRID, origin=ORIGIN, data_vars=["DBZH", "ZDR"])
+    bias = multi.network_bias(out, "DBZH")
+    multi.merge_radars(out, "DBZH", bias=bias)
+    with pytest.raises(ValueError, match="belongs to 'DBZH'"):
+        multi.merge_radars(out, ["DBZH", "ZDR"], bias=bias)
+    fixed = multi.merge_radars(
+        out, ["DBZH", "ZDR"], bias={"DBZH": bias.bias, "ZDR": bias.bias * 0}
+    )
+    assert set(fixed.data_vars) >= {"DBZH", "ZDR"}
+
+
+# ---------------------------------------------------------------------------
+# selection of the overlap on a third quantity (#229)
+# ---------------------------------------------------------------------------
+
+
+def _overlap_grid(n=400_000, true_bias=3.0, scatter=2.0, seed=1):
+    """Two radars seeing the same cells with independent scatter."""
+    rnd = np.random.default_rng(seed)
+    truth_dbz = 12.0 + rnd.exponential(10.0, n)  # weak echo is most common
+    a = truth_dbz + rnd.normal(0, scatter, n)
+    b = truth_dbz + true_bias + rnd.normal(0, scatter, n)
+    shape = (2, 1, 1, n)
+    values = np.stack([a, b]).reshape(shape).astype(np.float32)
+    return xr.Dataset(
+        {
+            "DBZH": (("radar", "z", "y", "x"), values, {"units": "dBZ"}),
+            "range": (("radar", "z", "y", "x"), np.full(shape, 30e3, np.float32)),
+        },
+        coords={
+            "radar": ["A", "B"],
+            "z": [1000.0],
+            "y": [0.0],
+            "x": np.arange(n, dtype=float),
+        },
+    )
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_network_bias_selection_on_a_third_quantity(engine):
+    grid = _overlap_grid()
+    # B reads 3 dB higher than A: A - B = -3
+    both = multi.network_bias(grid, "DBZH", select_on="both", engine=engine)
+    mean = multi.network_bias(grid, "DBZH", engine=engine)
+    err_both = abs(float(both.pair_bias.sel(radar="B", other="A")) - 3.0)
+    err_mean = abs(float(mean.pair_bias.sel(radar="B", other="A")) - 3.0)
+    # censoring each radar's value pulls the median difference towards 0
+    assert err_both > 0.1
+    assert err_mean < 0.05
+    assert err_mean < err_both / 3
+    assert mean.attrs["select_on"] == "mean"
+    with pytest.raises(ValueError, match="select_on"):
+        multi.network_bias(grid, "DBZH", select_on="median")
+
+
+@needs_kernel
+def test_network_bias_engines_agree_with_selection(network):
+    out = multi.grid_radars(network, **GRID, origin=ORIGIN, data_vars=["DBZH", "ZDR"])
+    for field in ("DBZH", "ZDR"):
+        for select_on in ("mean", "both"):
+            a = multi.network_bias(out, field, select_on=select_on, engine="compiled")
+            b = multi.network_bias(out, field, select_on=select_on, engine="numpy")
+            np.testing.assert_allclose(a.bias.values, b.bias.values, atol=1e-6)
+            np.testing.assert_array_equal(a.pair_count.values, b.pair_count.values)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_advect_sweeps_moves_each_sweep_from_its_own_time(engine):
+    """With advect_sweeps the radar matches cone gridding with motion (#223)."""
+    dtree = _volume(*ORIGIN, sweep_dt=90.0)
+    kw = dict(x=GRID["x"], y=GRID["y"], z=GRID["z"], engine=engine)
+    motion = (20.0, -5.0)
+    out = multi.grid_radars(
+        [dtree],
+        origin=ORIGIN,
+        data_vars="DBZH",
+        motion=motion,
+        advect_sweeps=True,
+        **kw,
+    )
+    ref = cone.grid_cones(dtree, "DBZH", motion=motion, **kw)
+    np.testing.assert_allclose(
+        out.DBZH.isel(radar=0).values, ref.DBZH.values, atol=1e-4, equal_nan=True
+    )
+    assert "advection" in out.attrs and "analysis_time" in out.attrs
+    # moving the finished grid of the volume instead gives something else
+    volume = multi.grid_radars(
+        [dtree], origin=ORIGIN, data_vars="DBZH", motion=motion, **kw
+    )
+    still = multi.grid_radars([dtree], origin=ORIGIN, data_vars="DBZH", **kw)
+    assert np.nanmax(np.abs(out.DBZH.values - still.DBZH.values)) > 0.1
+    assert np.nanmax(np.abs(out.DBZH.values - volume.DBZH.values)) > 0.01
+    assert "coverage" in out
+    with pytest.raises(ValueError, match="advect_sweeps"):
+        multi.grid_radars([dtree], origin=ORIGIN, advect_sweeps=True, **kw)
+    with pytest.raises(ValueError, match="advect_sweeps"):
+        multi.grid_radars(
+            [dtree],
+            origin=ORIGIN,
+            motion=xr.Dataset({"u": 1.0, "v": 1.0}),
+            advect_sweeps=True,
+            **kw,
+        )
+
+
+@needs_kernel
+def test_advect_sweeps_engines_agree(network):
+    kw = dict(origin=ORIGIN, data_vars="DBZH", motion=(15.0, 5.0), advect_sweeps=True)
+    a = multi.grid_radars(network, **GRID, **kw, engine="compiled")
+    b = multi.grid_radars(network, **GRID, **kw, engine="numpy")
+    np.testing.assert_allclose(
+        a.DBZH.values, b.DBZH.values, rtol=1e-6, atol=1e-3, equal_nan=True
+    )
+    np.testing.assert_array_equal(a.coverage.values, b.coverage.values)

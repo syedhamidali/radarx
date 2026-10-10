@@ -67,11 +67,49 @@ except ImportError:  # pragma: no cover - depends on the build
     _cone = None
     HAS_COMPILED_KERNEL = False
 
-# Earth radius [m] of the beam geometry (multiplied by 4/3 in the kernels):
+# Earth radius [m] of the beam geometry (multiplied by k_e in the kernels):
 # the commonly used mean radius, a radarx choice that matches xradar.georeference.
 # Doviak and Zrnic (1993), Eqs. 2.28, only require the radius "a" of the Earth
-# and the factor k_e = 4/3 (Eq. 2.28d).
+# and the factor k_e (4/3 in a standard atmosphere, Eq. 2.28d).
 EARTH_RADIUS = 6371000.0
+
+# Default effective Earth radius factor of the standard atmosphere.
+K_E = 4.0 / 3.0
+
+
+def _antenna_kwargs(k_e):
+    """
+    Keyword of ``xradar.georeference.antenna_to_cartesian`` for ``k_e``.
+
+    Nothing for the standard 4/3, which every xradar version uses by default.
+    """
+    if k_e == K_E:
+        return {}
+    import inspect
+
+    from xradar.georeference import antenna_to_cartesian
+
+    params = inspect.signature(antenna_to_cartesian).parameters
+    for name in ("effective_radius_fraction", "ke"):
+        if name in params:
+            return {name: k_e}
+    raise ImportError(  # pragma: no cover
+        "this xradar version cannot change k_e; use engine='compiled' or upgrade"
+    )
+
+
+_VELOCITY_NAMES = ("VRAD", "VEL", "VR", "velocity", "mean_doppler_velocity")
+
+
+def _is_velocity(name, attrs=None):
+    """Whether a field is a radial velocity (by name or CF standard name)."""
+    attrs = attrs or {}
+    standard = str(attrs.get("standard_name", "")).lower()
+    return (
+        "doppler_velocity" in standard
+        or "radial_velocity" in standard
+        or str(name).startswith(_VELOCITY_NAMES)
+    )
 
 
 def _sweep_names(dtree):
@@ -123,6 +161,60 @@ def _select_sweeps(sweeps, variable, tolerance=0.1):
     return [ds for ds, _, _ in sorted(best.values(), key=lambda item: item[2])]
 
 
+def _mean_time(ds):
+    """Mean time of a sweep as datetime64[ns], or ``NaT``."""
+    if "time" not in ds:
+        return np.datetime64("NaT", "ns")
+    t = np.ravel(ds["time"].values).astype("datetime64[ns]")
+    t = t[~np.isnat(t)]
+    if t.size == 0:
+        return np.datetime64("NaT", "ns")
+    t0 = t.min()
+    return t0 + (t - t0).astype(np.int64).mean().astype("timedelta64[ns]")
+
+
+def _motion_pair(motion):
+    """``(u, v)`` in m/s from the ``motion`` argument."""
+    try:
+        u, v = (float(m) for m in motion)
+    except (TypeError, ValueError) as err:
+        raise ValueError(
+            "motion must be a pair (u, v) of eastward and northward speed in m/s"
+        ) from err
+    return u, v
+
+
+def _sweep_shifts(selected, motion, time, default_time):
+    """
+    Displacement (dx, dy) in metres of every sweep to the analysis time.
+
+    A cell at ``x`` at the analysis time ``time`` holds what the sweep saw
+    at ``x - (u, v) (time - t_sweep)``, so the cone is sampled there: the
+    storm is assumed to move steadily with ``(u, v)``.
+    """
+    u, v = _motion_pair(motion)
+    t0 = np.datetime64(default_time if time is None else time, "ns")
+    shifts = []
+    for ds in selected:
+        dt = (t0 - _mean_time(ds)) / np.timedelta64(1, "s")
+        dt = 0.0 if np.isnan(dt) else float(dt)
+        shifts.append((u * dt, v * dt))
+    return shifts
+
+
+def _volume_time(sweeps):
+    """Mean time of all rays of the volume as datetime64[ns], or ``NaT``."""
+    times = [np.ravel(ds["time"].values) for ds in sweeps if "time" in ds]
+    if not times:
+        return np.datetime64("NaT", "ns")
+    t = np.concatenate(times).astype("datetime64[ns]")
+    t = t[~np.isnat(t)]
+    if t.size == 0:
+        return np.datetime64("NaT", "ns")
+    t0 = t.min()
+    return t0 + (t - t0).astype(np.int64).mean().astype("timedelta64[ns]")
+
+
 def _sweep_arrays(ds, variable):
     """Contiguous float64 arrays (data, azimuth, elevation, range) of a sweep."""
     ray_dim = (
@@ -143,20 +235,24 @@ def _sweep_arrays(ds, variable):
 
 
 def _cone_numpy(
-    data, azimuth, elevation, rng, s, az, site_altitude, max_gap, min_weight
+    data, azimuth, elevation, rng, s, az, site_altitude, max_gap, min_weight, k_e=K_E
 ):
     """
     Value and beam height of one sweep at ground distance ``s``, azimuth ``az``.
 
     NumPy reference of the compiled kernel: bilinear interpolation of the four
     surrounding gates (weights from azimuth and ground distance), the beam
-    height from the 4/3 Earth model of xradar (Doviak and Zrnic 1993,
-    Eq. 2.28b); ``max_gap`` and ``min_weight`` are radarx choices.
+    height from the effective Earth radius model of xradar (Doviak and Zrnic
+    1993, Eq. 2.28b, ``k_e`` = 4/3 unless given); ``max_gap`` and
+    ``min_weight`` are radarx choices.
     """
     from xradar.georeference import antenna_to_cartesian
 
     el_med = float(np.median(elevation))
-    gx, gy, _ = antenna_to_cartesian(rng, 0.0, el_med, site_altitude=site_altitude)
+    kw = _antenna_kwargs(k_e)
+    gx, gy, _ = antenna_to_cartesian(
+        rng, 0.0, el_med, site_altitude=site_altitude, **kw
+    )
     ground = np.hypot(gx, gy)
     ir = np.interp(s, ground, np.arange(rng.size), left=np.nan, right=np.nan)
 
@@ -179,7 +275,7 @@ def _cone_numpy(
     fr = np.where(inside, ir - i0, 0.0)
     r0, r1 = ray_ext[j], ray_ext[j + 1]
     _, _, gate_z = antenna_to_cartesian(
-        rng[None, :], 0.0, elevation[:, None], site_altitude=site_altitude
+        rng[None, :], 0.0, elevation[:, None], site_altitude=site_altitude, **kw
     )
 
     num = np.zeros(s.shape)
@@ -200,17 +296,61 @@ def _cone_numpy(
     return value, height
 
 
-def _grid_numpy(x, y, z, arrays, site_altitude, max_gap, min_weight, fill_below):
+def _grid_numpy(
+    x,
+    y,
+    z,
+    arrays,
+    site_altitude,
+    max_gap,
+    min_weight,
+    fill_below,
+    k_e=K_E,
+    fill_depth=np.inf,
+    shifts=None,
+):
     """NumPy implementation of the compiled kernel (same results)."""
     X, Y = np.meshgrid(x, y)
     s = np.hypot(X, Y)
     az = np.mod(np.degrees(np.arctan2(X, Y)), 360.0)
     return _columns_numpy(
-        s, az, z, arrays, site_altitude, max_gap, min_weight, fill_below
+        s,
+        az,
+        z,
+        arrays,
+        site_altitude,
+        max_gap,
+        min_weight,
+        fill_below,
+        k_e,
+        fill_depth,
+        shifts,
     )
 
 
-def _columns_numpy(s, az, z, arrays, site_altitude, max_gap, min_weight, fill_below):
+def _displaced(s, az, dx, dy):
+    """Ground distance and azimuth (deg) of the columns shifted by (-dx, -dy)."""
+    if dx == 0.0 and dy == 0.0:
+        return s, az
+    a = np.radians(az)
+    px = s * np.sin(a) - dx
+    py = s * np.cos(a) - dy
+    return np.hypot(px, py), np.mod(np.degrees(np.arctan2(px, py)), 360.0)
+
+
+def _columns_numpy(
+    s,
+    az,
+    z,
+    arrays,
+    site_altitude,
+    max_gap,
+    min_weight,
+    fill_below,
+    k_e=K_E,
+    fill_depth=np.inf,
+    shifts=None,
+):
     """
     Cone gridding of columns at ground distance ``s`` and azimuth ``az``.
 
@@ -218,12 +358,23 @@ def _columns_numpy(s, az, z, arrays, site_altitude, max_gap, min_weight, fill_be
     result is float32 on ``(z,) + s.shape``. Between the two cones that
     bracket a level the value is interpolated linearly in beam height (compare
     the vertical interpolation of Zhang et al. 2005, Eqs. 5-7, which
-    interpolates in elevation angle).
+    interpolates in elevation angle). With a finite ``fill_depth`` the lowest
+    cone fills at most that many metres below itself and not below the radar
+    altitude. ``shifts`` gives a displacement ``(dx, dy)`` in metres per
+    sweep: the cone is sampled at the column position minus the shift.
     """
+    shifts = shifts if shifts is not None else [(0.0, 0.0)] * len(arrays)
     values, heights = zip(
         *(
-            _cone_numpy(*sweep, s, az, site_altitude, max_gap, min_weight)
-            for sweep in arrays
+            _cone_numpy(
+                *sweep,
+                *_displaced(s, az, dx, dy),
+                site_altitude,
+                max_gap,
+                min_weight,
+                k_e,
+            )
+            for sweep, (dx, dy) in zip(arrays, shifts)
         )
     )
     V = np.stack(values)
@@ -251,9 +402,10 @@ def _columns_numpy(s, az, z, arrays, site_altitude, max_gap, min_weight, fill_be
             (k >= 0) & (k <= nk - 2) & np.isfinite(h1), v0 + t * (v1 - v0), np.nan
         )
         if fill_below:
-            result = np.where(
-                (k < 0) & np.isfinite(H[0]), V[0], result
-            )  # lowest present cone
+            fill = (k < 0) & np.isfinite(H[0])
+            if np.isfinite(fill_depth):
+                fill &= (level >= H[0] - fill_depth) & (level >= site_altitude)
+            result = np.where(fill, V[0], result)  # lowest present cone
         out[iz] = result
     return out
 
@@ -280,6 +432,11 @@ def grid_cones(
     z=None,
     *,
     fill_below=False,
+    fill_depth=None,
+    fill_velocity=False,
+    k_e=K_E,
+    motion=None,
+    time=None,
     max_gap=2.0,
     min_weight=0.5,
     n_threads=None,
@@ -303,6 +460,35 @@ def grid_cones(
     fill_below : bool, optional
         Fill levels below the lowest sweep with the lowest sweep's value
         (pseudo-CAPPI). Default ``False`` leaves them empty.
+    fill_depth : float, optional
+        Fill at most this many metres below the lowest sweep, and never below
+        the radar altitude. Default ``None`` (or ``numpy.inf``) fills every
+        level below the lowest sweep, as before; at long range that spreads the
+        lowest beam (2.5 km up at 150 km) down to the ground. Only used with
+        ``fill_below=True``.
+    fill_velocity : bool, optional
+        Also fill radial velocity fields. Default ``False``: a velocity
+        is a projection on the beam direction, which differs from level to
+        level, so it is never copied downward. ``True`` restores the old
+        behaviour.
+    k_e : float, optional
+        Effective Earth radius factor of the beam height, ``a_e = k_e a``
+        (Doviak and Zrnić 1993, Eq. 2.28). Default 4/3, the standard
+        atmosphere. :func:`radarx.fundamentals.geometry.k_e_from_refractivity`
+        derives it from a sounding or reanalysis profile.
+    motion : tuple of float, optional
+        Storm motion ``(u, v)`` in m/s. When given, every sweep is moved from
+        its own mean time to the analysis time ``time`` before the vertical
+        interpolation (Gal-Chen 1982 [4]_, equations not checked against the
+        paper): low and high tilts of a volume are minutes apart, and a storm
+        moving at 15 m/s travels 4.5 km in five minutes, so an echo seen by
+        the lowest and the highest tilt would otherwise appear at positions
+        that differ by that distance. The motion is steady and the same
+        everywhere; the displacement is applied per sweep, not per ray.
+        Default ``None``: no advection, as before.
+    time : datetime-like, optional
+        Analysis time for ``motion``. Default: the mean time of the volume.
+        Also the ``time`` of the result when given.
     max_gap : float, optional
         Do not interpolate between rays more than this many median ray
         spacings apart (sector edges, missing rays). Default 2.
@@ -334,10 +520,11 @@ def grid_cones(
     Notes
     -----
     Beam height. The height of a gate above sea level is computed with the
-    4/3 effective Earth radius model, h = [r^2 + (k_e a)^2 + 2 r k_e a
-    sin(theta_e)]^(1/2) - k_e a with k_e = 4/3 (Doviak and Zrnić 1993 [2]_,
-    Eq. 2.28b, p. 21; the same model is Eqs. 3-4, p. 32, of Zhang et al. 2005
-    [3]_).
+    effective Earth radius model, h = [r^2 + (k_e a)^2 + 2 r k_e a
+    sin(theta_e)]^(1/2) - k_e a with k_e = 4/3 by default (Doviak and Zrnić
+    1993 [2]_, Eq. 2.28b, p. 21; the same model is Eqs. 3-4, p. 32, of Zhang
+    et al. 2005 [3]_). Other values of ``k_e`` describe sub- or super-refractive
+    conditions.
     The Earth radius ``a`` (6371 km) is a radarx choice.
 
     What is taken from the literature, and what is not. Bilinear
@@ -369,6 +556,10 @@ def grid_cones(
        three-dimensional multiple-radar reflectivity mosaics: Examples of
        convective storms and stratiform rain echoes. *J. Atmos. Oceanic
        Technol.*, **22**, 30-42, https://doi.org/10.1175/JTECH-1689.1
+    .. [4] Gal-Chen, T., 1982: Errors in fixed and moving frame of references:
+       Applications for conventional and Doppler radar analysis. *J. Atmos.
+       Sci.*, **39**, 2279-2300,
+       https://doi.org/10.1175/1520-0469(1982)039<2279:EIFAMF>2.0.CO;2
 
     Examples
     --------
@@ -389,21 +580,67 @@ def grid_cones(
     elif isinstance(data_vars, str):
         data_vars = [data_vars]
 
-    options = dict(max_gap=max_gap, min_weight=min_weight, fill_below=fill_below)
+    k_e = _check_k_e(k_e)
+    fill_depth = _fill_depth(fill_depth)
+    volume_time = _volume_time(sweeps)
     gridded = {}
     for variable in data_vars:
         selected = _select_sweeps(sweeps, variable)
         if not selected:
             raise ValueError(f"No sweep contains {variable!r}.")
         arrays = [_sweep_arrays(ds, variable) for ds in selected]
+        attrs = dict(selected[0][variable].attrs)
+        shifts = (
+            _sweep_shifts(selected, motion, time, volume_time)
+            if motion is not None
+            else None
+        )
+        options = dict(
+            max_gap=max_gap,
+            min_weight=min_weight,
+            fill_below=bool(
+                fill_below and (fill_velocity or not _is_velocity(variable, attrs))
+            ),
+            k_e=k_e,
+            fill_depth=fill_depth,
+            shifts=shifts,
+        )
         site_altitude = site.get("altitude", 0.0)
         if use_compiled:
             field = _grid_compiled(x, y, z, arrays, site_altitude, n_threads, **options)
         else:
             field = _grid_numpy(x, y, z, arrays, site_altitude, **options)
-        gridded[variable] = (("z", "y", "x"), field, dict(selected[0][variable].attrs))
+        gridded[variable] = (("z", "y", "x"), field, attrs)
     out = _to_dataset(gridded, x, y, z, sweeps, site, dtree.attrs)
+    out.attrs["k_e"] = k_e
+    if motion is not None:
+        u, v = _motion_pair(motion)
+        out = out.assign_coords(
+            time=volume_time if time is None else np.datetime64(time, "ns")
+        )
+        out.attrs["advection"] = (
+            f"each sweep moved from its own time to the analysis time with "
+            f"u = {u} m/s, v = {v} m/s"
+        )
     return out.assign_coords(site_coords)
+
+
+def _check_k_e(k_e):
+    """``k_e`` as a positive float."""
+    k_e = float(k_e)
+    if not np.isfinite(k_e) or k_e <= 0:
+        raise ValueError(f"k_e must be a positive number, not {k_e!r}")
+    return k_e
+
+
+def _fill_depth(depth):
+    """``fill_depth`` as a float, ``numpy.inf`` for no limit."""
+    if depth is None:
+        return np.inf
+    depth = float(depth)
+    if depth < 0:
+        raise ValueError(f"fill_depth must not be negative, not {depth!r}")
+    return depth
 
 
 def _use_compiled(engine):
@@ -450,6 +687,9 @@ def _load_volume(dtree):
 def _grid_compiled(x, y, z, arrays, site_altitude, n_threads, **options):
     """Run the C++ kernel on per-sweep (data, azimuth, elevation, range) arrays."""
     data, azimuth, elevation, rng = (list(a) for a in zip(*arrays))
+    shifts = options.pop("shifts", None)
+    if shifts is not None:
+        options["shift"] = [float(c) for pair in shifts for c in pair]
     return _cone.grid_cones(
         x,
         y,

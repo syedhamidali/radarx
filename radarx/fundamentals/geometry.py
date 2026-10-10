@@ -37,6 +37,7 @@ __all__ = [
     "effective_radius",
     "ground_range",
     "half_power_radius",
+    "k_e_from_refractivity",
     "sample_volume_gaussian",
 ]
 __doc__ = __doc__.format("\n   ".join(__all__))
@@ -104,6 +105,80 @@ def _beam_distance(range_m, elevation_deg, radar_height, reff):
     return np.sqrt(
         range_m**2 + a**2 + 2.0 * range_m * a * np.sin(np.deg2rad(elevation_deg))
     )
+
+
+def k_e_from_refractivity(height, refractivity, layer=(0.0, 1000.0)):
+    """
+    Effective Earth radius factor ``k_e`` from a refractivity profile.
+
+    The gradient ``dn/dh`` of the refractive index is taken as the mean
+    gradient of the refractivity ``N`` over ``layer`` (the profile is
+    interpolated linearly to the layer bounds), ``dn/dh = 1e-6 dN/dh``, and
+    ``k_e = a_e / a`` with ``a_e`` from :func:`effective_radius`, that is the
+    equivalent-Earth relation of [1]_ (Eqs. 2.27 and 2.28). Pass the result as
+    ``k_e`` to the gridding, merging and cone functions of
+    :mod:`radarx.grid`.
+
+    The refractivity ``N`` (N-units) must be computed beforehand from the
+    pressure, temperature and humidity of a sounding or of reanalysis (for
+    example ERA5) levels; this function does not do that. The layer is the
+    part of the profile the lowest beams travel through; the default of the
+    lowest kilometre above the first height is a radarx choice. The model
+    assumes a constant gradient (see :func:`beam_center_height`), so it
+    describes only the mean bending of that layer.
+
+    Parameters
+    ----------
+    height : array-like
+        Heights of the profile levels [m], in the same reference as ``layer``.
+    refractivity : array-like
+        Refractivity ``N`` at the levels [N-units].
+    layer : tuple of float, optional
+        Lower and upper height [m] of the layer whose gradient is used.
+        Default ``(0, 1000)``.
+
+    Returns
+    -------
+    float
+        ``k_e``; 4/3 corresponds to ``dn/dh`` of about -39 N-units per km.
+
+    Raises
+    ------
+    ValueError
+        If the profile has fewer than two levels, the layer is empty, or the
+        gradient is at or below the trapping value (-157 N-units/km for the
+        radarx Earth radius), for which no effective radius exists.
+
+    References
+    ----------
+    .. [1] Doviak, R. J., and D. S. Zrnic, 1993: *Doppler Radar and Weather
+           Observations*, 2nd ed. Academic Press, ISBN 0-12-221422-6 (book, no
+           DOI).
+    """
+    h = np.asarray(height, dtype=float).ravel()
+    n = np.asarray(refractivity, dtype=float).ravel()
+    if h.shape != n.shape:
+        raise ValueError("height and refractivity must have the same length")
+    good = np.isfinite(h) & np.isfinite(n)
+    h, n = h[good], n[good]
+    if h.size < 2:
+        raise ValueError("the profile needs at least two valid levels")
+    order = np.argsort(h)
+    h, n = h[order], n[order]
+    lo, hi = float(layer[0]), float(layer[1])
+    if not hi > lo:
+        raise ValueError("the layer must have a positive depth")
+    lo, hi = max(lo, h[0]), min(hi, h[-1])
+    if not hi > lo:
+        raise ValueError("the profile does not reach the layer")
+    n_lo, n_hi = np.interp([lo, hi], h, n)
+    dndh_per_km = 1e-6 * (n_hi - n_lo) / (hi - lo) * 1000.0
+    if 1.0 / (EARTH_RADIUS / 1000.0) + dndh_per_km <= 0:
+        raise ValueError(
+            "refractivity gradient at or below the trapping value: the beam "
+            "curves at least as much as the Earth, no effective radius exists"
+        )
+    return float(effective_radius(dndh_per_km) / EARTH_RADIUS)
 
 
 def beam_center_height(

@@ -53,6 +53,7 @@ except ImportError:  # pragma: no cover - depends on the build
     HAS_COMPILED_KERNEL = False
 
 EARTH_RADIUS = cone.EARTH_RADIUS
+K_E = cone.K_E
 _LN_005 = np.log(0.005)
 _GEOMETRY = ("azimuth", "elevation", "range")
 
@@ -170,13 +171,14 @@ def _column_geometry_numpy(x, y, origin, sites, step=100.0):
     return out
 
 
-def _cell_angles(ground, z, site_altitude, earth_radius=EARTH_RADIUS):
+def _cell_angles(ground, z, site_altitude, earth_radius=EARTH_RADIUS, k_e=K_E):
     """
-    Slant range, local and antenna elevation (deg) of cells (4/3 Earth).
+    Slant range, local and antenna elevation (deg) of cells (effective Earth).
 
     The radar is at distance ``a = R + site_altitude`` and the cell at
     ``b = R + z`` from the centre of an Earth of effective radius
-    ``R = 4/3 * earth_radius``, separated by the central angle ``ground / R``.
+    ``R = k_e * earth_radius`` (``k_e`` = 4/3 unless given), separated by the
+    central angle ``ground / R``.
     The slant range is the law of cosines in that triangle; the elevation
     angles follow from the same triangle. This is the geometry behind the
     effective Earth radius model, Doviak and Zrnic (1993), Eqs. 2.28b-d,
@@ -184,7 +186,7 @@ def _cell_angles(ground, z, site_altitude, earth_radius=EARTH_RADIUS):
     of height; the algebra is radarx's own. The Earth radius of 6371 km is a
     radarx choice.
     """
-    R = earth_radius * 4.0 / 3.0
+    R = earth_radius * k_e
     a = R + site_altitude
     b = R + np.asarray(z, dtype=np.float64).reshape((-1,) + (1,) * np.ndim(ground))
     th = np.asarray(ground) / R
@@ -195,11 +197,11 @@ def _cell_angles(ground, z, site_altitude, earth_radius=EARTH_RADIUS):
     return rng, local, antenna
 
 
-def _geometry_numpy(ground, z, site_altitude, earth_radius=EARTH_RADIUS):
+def _geometry_numpy(ground, z, site_altitude, earth_radius=EARTH_RADIUS, k_e=K_E):
     """NumPy implementation of ``_multi.beam_geometry``."""
     rng, el = [], []
     for g, alt in zip(ground, site_altitude):
-        r, local, _ = _cell_angles(g, z, alt, earth_radius)
+        r, local, _ = _cell_angles(g, z, alt, earth_radius, k_e)
         rng.append(r.astype(np.float32))
         el.append(local.astype(np.float32))
     return np.stack(rng), np.stack(el)
@@ -252,6 +254,7 @@ def _merge_numpy(
     range_scale,
     time_scale,
     earth_radius=EARTH_RADIUS,
+    k_e=K_E,
 ):
     """
     NumPy implementation of ``_multi.merge``.
@@ -265,7 +268,9 @@ def _merge_numpy(
     num = np.zeros(values.shape[1:])
     den = np.zeros(values.shape[1:])
     for r in range(values.shape[0]):
-        rng, _, antenna = _cell_angles(ground[r], z, site_altitude[r], earth_radius)
+        rng, _, antenna = _cell_angles(
+            ground[r], z, site_altitude[r], earth_radius, k_e
+        )
         w = _beam_weight_numpy(antenna, elevations[r], beamwidth[r])
         if range_scale > 0:
             w = w * np.exp(-((rng / range_scale) ** 2))
@@ -280,7 +285,16 @@ def _merge_numpy(
     return merged.astype(np.float32), den.astype(np.float32)
 
 
-def _pair_histograms_numpy(values, rng, max_range_ratio, bin_width, max_difference):
+def _pair_histograms_numpy(
+    values,
+    rng,
+    max_range_ratio,
+    bin_width,
+    max_difference,
+    select=None,
+    select_lo=-np.inf,
+    select_hi=np.inf,
+):
     """NumPy implementation of ``_multi.pair_histograms``."""
     nr = values.shape[0]
     nbin = int(np.ceil(2.0 * max_difference / bin_width))
@@ -290,6 +304,10 @@ def _pair_histograms_numpy(values, rng, max_range_ratio, bin_width, max_differen
     sumsq = np.zeros(len(pairs))
     for p, (i, j) in enumerate(pairs):
         ok = np.isfinite(values[i]) & np.isfinite(values[j])
+        if select is not None and select.size:
+            mean = 0.5 * (select[i].astype(np.float64) + select[j].astype(np.float64))
+            with np.errstate(invalid="ignore"):
+                ok &= (mean >= select_lo) & (mean <= select_hi)
         if max_range_ratio > 0:
             lo = np.minimum(rng[i], rng[j]).astype(np.float64)
             hi = np.maximum(rng[i], rng[j]).astype(np.float64)
@@ -395,6 +413,11 @@ def grid_radars(
     range_scale=50e3,
     time_scale=300.0,
     fill_below=False,
+    fill_depth=None,
+    fill_velocity=False,
+    k_e=K_E,
+    coverage=True,
+    advect_sweeps=False,
     max_gap=2.0,
     min_weight=0.5,
     n_threads=None,
@@ -489,8 +512,25 @@ def grid_radars(
         Merge weight scales, see :func:`merge_radars`. Defaults 50 km (the
         value of Fig. 15 of Zhang et al. 2005 [3]_) and 300 s (a radarx
         choice).
-    fill_below, max_gap, min_weight : optional
+    fill_below, fill_depth, fill_velocity, max_gap, min_weight : optional
         Cone gridding options, see :func:`radarx.grid.grid_cones`.
+    k_e : float, optional
+        Effective Earth radius factor of the beam geometry (Doviak and Zrnic
+        1993, Eq. 2.28). Default 4/3. It is stored in the ``k_e`` attribute
+        so that :func:`merge_radars` uses the same value. See
+        :func:`radarx.fundamentals.geometry.k_e_from_refractivity`.
+    advect_sweeps : bool, optional
+        With ``motion`` as a pair ``(u, v)``: move every sweep from its own
+        mean time to the analysis time before the vertical interpolation, as
+        in :func:`radarx.grid.grid_cones`, instead of moving the finished
+        grid of each radar from its volume time. The tilts of a volume are
+        minutes apart, so the latter leaves echoes at different positions
+        in the lowest and highest tilt. Default ``False``: the volume is
+        moved as a whole.
+    coverage : bool, optional
+        Add the ``coverage`` mask (default ``True``), which tells a cell a
+        radar looks at but sees no echo in from a cell it does not look at.
+        :func:`merge_radars` needs it to treat the two differently.
     n_threads : int, optional
         Threads for the compiled kernels. Default: all cores.
     engine : {"auto", "compiled", "numpy"}, optional
@@ -503,6 +543,10 @@ def grid_radars(
         On dimensions ``radar``, ``z``, ``y``, ``x``:
 
         * every gridded field on ``(radar, z, y, x)``, float32;
+        * ``coverage`` on ``(radar, z, y, x)``, 1 where the radar's cones
+          bracket the cell (the cell is inside the volume the radar scans,
+          whether or not it measured an echo there) and 0 outside; the
+          sweeps of the field with the most sweeps define it;
         * ``azimuth`` on ``(radar, y, x)``, ``elevation`` and ``range`` on
           ``(radar, z, y, x)``, float32;
         * coordinates ``radar`` (names), ``radar_x``, ``radar_y``,
@@ -597,7 +641,12 @@ def grid_radars(
     beamwidths = np.broadcast_to(np.asarray(beamwidth, dtype=float), (len(radars),))
 
     columns = _column_geometry(x, y, origin, sites, use_compiled, n_threads)
-    tasks, task_keys = [], []
+    if advect_sweeps and (motion is None or isinstance(motion, xr.Dataset)):
+        raise ValueError("advect_sweeps needs motion as a pair (u, v) in m/s")
+    analysis_time = (
+        np.datetime64(time, "ns") if time is not None else _volume_time(volumes[0][0])
+    )
+    tasks, task_keys, shifts = [], [], []
     sweep_el = []
     for r, (sweeps, _, _) in enumerate(volumes):
         elevations = []
@@ -608,15 +657,54 @@ def grid_radars(
             arrays = [_task_arrays(ds, name, rhohv, rhohv_min) for ds in selected]
             tasks.append((r, arrays))
             task_keys.append((r, name, dict(selected[0][name].attrs)))
+            shifts.append(
+                cone._sweep_shifts(selected, motion, analysis_time, analysis_time)
+                if advect_sweeps
+                else None
+            )
             if len(selected) > len(elevations):
                 elevations = _sweep_elevations(selected)
         sweep_el.append(elevations)
     if not tasks:
         raise ValueError(f"No sweep of any radar contains {data_vars!r}.")
 
-    options = dict(max_gap=max_gap, min_weight=min_weight, fill_below=fill_below)
+    k_e = cone._check_k_e(k_e)
+    options = dict(
+        max_gap=max_gap,
+        min_weight=min_weight,
+        k_e=k_e,
+        fill_depth=cone._fill_depth(fill_depth),
+    )
+    fills = [
+        bool(fill_below and (fill_velocity or not cone._is_velocity(name, attrs)))
+        for _, name, attrs in task_keys
+    ]
     gridded = _grid_tasks(
-        columns, z, altitudes, tasks, use_compiled, n_threads, **options
+        columns,
+        z,
+        altitudes,
+        tasks,
+        fills,
+        use_compiled,
+        n_threads,
+        shifts=shifts,
+        **options,
+    )
+    covered = (
+        _coverage(
+            columns,
+            z,
+            altitudes,
+            tasks,
+            len(radars),
+            bool(fill_below),
+            use_compiled,
+            n_threads,
+            shifts=shifts,
+            **options,
+        )
+        if coverage
+        else None
     )
     if use_compiled:
         rng, elevation = _multi.beam_geometry(
@@ -625,9 +713,10 @@ def grid_radars(
             altitudes,
             earth_radius=EARTH_RADIUS,
             n_threads=int(n_threads or 0),
+            k_e=k_e,
         )
     else:
-        rng, elevation = _geometry_numpy(columns["ground"], z, altitudes)
+        rng, elevation = _geometry_numpy(columns["ground"], z, altitudes, k_e=k_e)
 
     out = _assemble(
         gridded,
@@ -647,8 +736,15 @@ def grid_radars(
         sweep_el,
         beamwidths,
         max_range,
+        covered,
     )
-    if motion is not None:
+    out.attrs["k_e"] = k_e
+    if motion is not None and advect_sweeps:
+        out.attrs["analysis_time"] = str(analysis_time)
+        out.attrs["advection"] = (
+            "each sweep advected from its own time to analysis_time"
+        )
+    elif motion is not None:
         out = _advect_radars(out, data_vars, motion, time, engine, n_threads)
     elif time is not None:
         out.attrs["analysis_time"] = str(np.datetime64(time, "ns"))
@@ -674,8 +770,45 @@ def grid_radars(
     return out
 
 
-def _grid_tasks(columns, z, altitudes, tasks, use_compiled, n_threads, **options):
-    """Cone-grid every (radar, field) task onto the shared columns."""
+def _grid_tasks(
+    columns, z, altitudes, tasks, fills, use_compiled, n_threads, shifts=None, **options
+):
+    """
+    Cone-grid every (radar, field) task onto the shared columns.
+
+    ``fills`` tells for each task whether it fills below its lowest sweep; the
+    tasks are gridded in one kernel call per distinct value.
+    """
+    out = [None] * len(tasks)
+    for flag in sorted(set(fills)):
+        index = [i for i, f in enumerate(fills) if f == flag]
+        part = _grid_task_group(
+            columns,
+            z,
+            altitudes,
+            [tasks[i] for i in index],
+            use_compiled,
+            n_threads,
+            shifts=None if shifts is None else [shifts[i] for i in index],
+            fill_below=flag,
+            **options,
+        )
+        for i, result in zip(index, part):
+            out[i] = result
+    return out
+
+
+def _grid_task_group(
+    columns, z, altitudes, tasks, use_compiled, n_threads, shifts=None, **options
+):
+    """Cone-grid tasks that share their cone gridding options."""
+    if shifts is None or all(sh is None for sh in shifts):
+        shifts = None
+    else:
+        shifts = [
+            sh if sh is not None else [(0.0, 0.0)] * len(t[1])
+            for sh, t in zip(shifts, tasks)
+        ]
     if use_compiled:
         radar = [r for r, _ in tasks]
         parts = [list(zip(*arrays)) for _, arrays in tasks]
@@ -691,6 +824,13 @@ def _grid_tasks(columns, z, altitudes, tasks, use_compiled, n_threads, **options
             altitudes,
             earth_radius=EARTH_RADIUS,
             n_threads=int(n_threads or 0),
+            **(
+                {}
+                if shifts is None
+                else {
+                    "shift": [[float(c) for pair in sh for c in pair] for sh in shifts]
+                }
+            ),
             **options,
         )
     return [
@@ -703,9 +843,65 @@ def _grid_tasks(columns, z, altitudes, tasks, use_compiled, n_threads, **options
             options["max_gap"],
             options["min_weight"],
             options["fill_below"],
+            options["k_e"],
+            options["fill_depth"],
+            None if shifts is None else shifts[i],
         )
-        for r, arrays in tasks
+        for i, (r, arrays) in enumerate(tasks)
     ]
+
+
+def _coverage(
+    columns,
+    z,
+    altitudes,
+    tasks,
+    nradar,
+    fill_below,
+    use_compiled,
+    n_threads,
+    shifts=None,
+    **options,
+):
+    """
+    Mask of the cells inside the volume each radar scans, uint8 (radar, z, y, x).
+
+    The sweeps of every radar's field with the most sweeps are gridded with
+    all gates set to 1, so a cell is covered where the cones bracket it (or
+    the lowest cone fills it), whether or not a gate there holds an echo.
+    """
+    best, best_shift = {}, {}
+    for i, (r, arrays) in enumerate(tasks):
+        if r not in best or len(arrays) > len(best[r]):
+            best[r] = arrays
+            best_shift[r] = None if shifts is None else shifts[i]
+    shape = (nradar, z.size) + columns["ground"][0].shape
+    covered = np.zeros(shape, dtype=np.uint8)
+    radars = sorted(best)
+    ones = [
+        (
+            r,
+            [
+                (np.ones(a[0].shape, dtype=np.float32), a[1], a[2], a[3])
+                for a in best[r]
+            ],
+        )
+        for r in radars
+    ]
+    grids = _grid_task_group(
+        columns,
+        z,
+        altitudes,
+        ones,
+        use_compiled,
+        n_threads,
+        shifts=[best_shift[r] for r in radars],
+        fill_below=fill_below,
+        **options,
+    )
+    for r, grid in zip(radars, grids):
+        covered[r] = np.isfinite(grid)
+    return covered
 
 
 def _assemble(
@@ -726,6 +922,7 @@ def _assemble(
     sweep_el,
     beamwidths,
     max_range,
+    covered=None,
 ):
     """Stack per-radar results into the output Dataset."""
     nr = len(names)
@@ -744,6 +941,19 @@ def _assemble(
         if too_far is not None:
             stack[too_far] = np.nan
         fields[name] = (dims, stack, attrs)
+    if covered is not None:
+        covered = covered.copy()
+        if too_far is not None:
+            covered[too_far] = 0
+        fields["coverage"] = (
+            dims,
+            covered,
+            {
+                "long_name": "cell is inside the volume the radar scans",
+                "flag_values": np.array([0, 1], dtype=np.uint8),
+                "flag_meanings": "outside_coverage inside_coverage",
+            },
+        )
     fields["azimuth"] = (
         ("radar", "y", "x"),
         np.stack(columns["azimuth"]).astype(np.float32),
@@ -846,15 +1056,26 @@ def _advect_radars(out, data_vars, motion, time, engine, n_threads):
     else:
         u, v = motion
     fields = [name for name in data_vars if name in out]
+    has_cover = "coverage" in out
     moved = []
     for r in range(out.sizes["radar"]):
         part = out[fields].isel(radar=r).drop_vars("time")
+        if has_cover:
+            # advected like a field: a cell is covered if its departure point was
+            cover = out["coverage"].isel(radar=r).drop_vars("time")
+            part["coverage"] = xr.where(cover > 0, np.float32(1), np.float32(np.nan))
         dt = float((time - out["time"].values[r]) / np.timedelta64(1, "s"))
         moved.append(advect(part, u, v, dt=dt, engine=engine, n_threads=n_threads))
     for name in fields:
         dims = out[name].dims
         stack = np.stack([m[name].transpose(*dims[1:]).values for m in moved])
         out[name] = out[name].copy(data=stack)
+    if has_cover:
+        dims = out["coverage"].dims
+        stack = np.stack(
+            [np.isfinite(m["coverage"].transpose(*dims[1:]).values) for m in moved]
+        ).astype(np.uint8)
+        out["coverage"] = out["coverage"].copy(data=stack)
     out.attrs["analysis_time"] = str(time)
     out.attrs["advection"] = "fields advected from each volume time to analysis_time"
     return out
@@ -876,6 +1097,25 @@ def _radar_columns(grid, use_compiled=False, n_threads=None):
     return _column_geometry(x, y, origin, sites, use_compiled, n_threads)
 
 
+def _no_echo_floor(no_echo, values, da):
+    """
+    Value of covered cells without an echo, one per radar, or ``None``.
+
+    ``"min"`` is each radar's lowest defined value, for reflectivity only.
+    """
+    if no_echo is None:
+        return None
+    if no_echo == "min":
+        if not _is_reflectivity(da):
+            return None
+        floor = np.full(values.shape[0], np.nan)
+        for r in range(values.shape[0]):
+            if np.isfinite(values[r]).any():
+                floor[r] = np.nanmin(values[r])
+        return floor
+    return np.full(values.shape[0], float(no_echo))
+
+
 @provenance("Weighted merge of gridded radars, after Zhang et al. (2005)")
 def merge_radars(
     grid,
@@ -886,6 +1126,10 @@ def merge_radars(
     range_scale=50e3,
     time_scale=300.0,
     beamwidth=None,
+    no_echo="min",
+    average="dbz",
+    time_weight=None,
+    k_e=None,
     n_threads=None,
     engine="auto",
 ):
@@ -919,7 +1163,9 @@ def merge_radars(
     * ``dt`` is the time between the radar's volume and the analysis time and
       ``tau = time_scale``, so the most recent radar dominates. This time
       factor is a radarx choice (a Gaussian with ``tau`` = 300 s) and is not
-      taken from either paper.
+      taken from either paper. If the grid was advected to the analysis time
+      (``grid_radars(motion=...)``) the radars' echoes already stand at that
+      time, so the factor is switched off unless ``time_weight=True``.
 
     Difference from Lakshmanan et al. (2006). That paper weights an
     observation (an "agent", including repeated scans of the same radar) by
@@ -939,8 +1185,27 @@ def merge_radars(
     also describes the agent weight simply as an exponentially declining
     function of the distance from the radar.
 
-    A scale of ``None`` or 0 switches its factor off. Values are averaged in
-    the units of the field (dBZ for reflectivity).
+    A scale of ``None`` or 0 switches its factor off.
+
+    Coverage and echo. Where one radar has an echo and another looks at the
+    cell (``coverage`` in the grid) but reports nothing, the second radar is
+    below its sensitivity there, not absent. Skipping it, as an average over
+    defined values does, lets the nearer and more sensitive radar decide alone
+    and biases the merge high at the edges of storms. With ``no_echo`` a
+    covered cell without an echo takes a low value instead and takes part
+    in the average; a cell outside a radar's coverage never does. ``"min"``
+    (default) uses the lowest value that radar reports in the field, only
+    for reflectivity (units dBZ); a number is used as it is, for any field;
+    ``None`` skips undefined values, as before. A covered undefined cell can
+    also be a gate removed by quality control, which this cannot tell from
+    a sub-threshold gate. Grids without ``coverage`` behave as ``None``.
+
+    Averaging. ``average="dbz"`` (default) averages in the units of the
+    field. ``average="linear"`` averages the linear value ``10**(x / 10)``
+    (for reflectivity the linear reflectivity factor Z) and converts back to
+    dB, which is what a mean over a sample volume of several radars measures
+    when the radars see the same scatterers. Which of the two Zhang et al.
+    (2005) use was not checked against the paper.
 
     Parameters
     ----------
@@ -960,6 +1225,17 @@ def merge_radars(
         ``tau`` in seconds. Default 300 s.
     beamwidth : float or list of float, optional
         Beamwidth (degrees) per radar. Default: the grid's ``beamwidth``.
+    no_echo : {"min", None} or float, optional
+        Value of cells a radar covers but has no echo in, see above. Default
+        ``"min"``; ``None`` restores skipping them.
+    average : {"dbz", "linear"}, optional
+        Average in the units of the field (default) or in linear units.
+    time_weight : bool, optional
+        Apply the time factor. Default: off for a grid advected to the
+        analysis time, on otherwise.
+    k_e : float, optional
+        Effective Earth radius factor of the beam geometry. Default: the
+        grid's ``k_e`` attribute, else 4/3.
     n_threads : int, optional
         Threads for the compiled kernel. Default: all cores.
     engine : {"auto", "compiled", "numpy"}, optional
@@ -974,7 +1250,8 @@ def merge_radars(
     Raises
     ------
     ValueError
-        If a field is not in ``grid``.
+        If a field is not in ``grid``, ``average`` or ``no_echo`` is not
+        valid, or a ``bias`` Dataset belongs to another field.
 
     References
     ----------
@@ -1000,6 +1277,15 @@ def merge_radars(
         raise ValueError(f"grid has no {missing}")
     if time is None:
         time = grid.attrs.get("analysis_time", grid["time"].values[0])
+    if average not in ("dbz", "linear"):
+        raise ValueError(f"average must be 'dbz' or 'linear', not {average!r}")
+    if no_echo is False:
+        no_echo = None
+    if isinstance(no_echo, str) and no_echo != "min":
+        raise ValueError(f"no_echo must be 'min', None or a number, not {no_echo!r}")
+    k_e = cone._check_k_e(grid.attrs.get("k_e", K_E) if k_e is None else k_e)
+    if time_weight is None:
+        time_weight = "advection" not in grid.attrs
     time = np.datetime64(time, "ns")
     offsets = list(
         ((grid["time"].values - time) / np.timedelta64(1, "s")).astype(float)
@@ -1017,24 +1303,57 @@ def merge_radars(
     ground = _radar_columns(grid, use_compiled, n_threads)["ground"]
     z = grid["z"].values.astype(np.float64)
     L = float(range_scale or 0.0)
-    tau = float(time_scale or 0.0)
+    tau = float(time_scale or 0.0) if time_weight else 0.0
+    covered = (
+        grid["coverage"].transpose("radar", "z", "y", "x").values > 0
+        if "coverage" in grid
+        else None
+    )
 
     out = {}
     for name in data_vars:
         da = grid[name].transpose("radar", "z", "y", "x")
         if bias is not None:
-            b = bias[name] if not isinstance(bias, xr.Dataset) else bias["bias"]
+            if isinstance(bias, xr.Dataset):
+                target = bias.attrs.get("field")
+                if target is not None and target != name:
+                    raise ValueError(
+                        f"bias belongs to {target!r}, not {name!r}; pass "
+                        "{field: bias} to give each field its own"
+                    )
+                b = bias["bias"]
+            else:
+                b = bias[name]
             da = da - b.fillna(0.0).astype(np.float32)
         values = np.ascontiguousarray(da.values, dtype=np.float32)
+        floor = (
+            _no_echo_floor(no_echo, values, grid[name]) if covered is not None else None
+        )
+        if floor is not None:
+            fill = covered & np.isnan(values)
+            values = np.where(
+                fill, floor.astype(np.float32)[:, None, None, None], values
+            )
+        if average == "linear":
+            values = np.power(10.0, values.astype(np.float64) / 10.0).astype(np.float32)
+        values = np.ascontiguousarray(values, dtype=np.float32)
         args = (values, ground, z, altitudes, elevations, beamwidth, offsets, L, tau)
         if use_compiled:
             merged, weight = _multi.merge(
-                *args, earth_radius=EARTH_RADIUS, n_threads=int(n_threads or 0)
+                *args,
+                earth_radius=EARTH_RADIUS,
+                n_threads=int(n_threads or 0),
+                k_e=k_e,
             )
         else:
-            merged, weight = _merge_numpy(*args)
+            merged, weight = _merge_numpy(*args, k_e=k_e)
+        if average == "linear":
+            with np.errstate(invalid="ignore", divide="ignore"):
+                merged = np.where(merged > 0, 10.0 * np.log10(merged), np.nan)
+            merged = merged.astype(np.float32)
         attrs = dict(grid[name].attrs)
         attrs["comment"] = "weighted merge of all radars"
+        attrs["merge_average"] = average
         out[name] = (("z", "y", "x"), merged, attrs)
         out[f"{name}_weight"] = (
             ("z", "y", "x"),
@@ -1131,6 +1450,7 @@ def network_bias(
     min_count=200,
     bin_width=0.01,
     max_difference=20.0,
+    select_on="mean",
     n_threads=None,
     engine="auto",
 ):
@@ -1156,6 +1476,20 @@ def network_bias(
     so that every radar connected to the reference through a chain of
     overlaps gets a bias, closed loops of overlaps are made consistent and
     well-sampled pairs count most. The corrected field is ``X - bias``.
+
+    Selection. Cells are chosen by ``valid_range`` (and, for fields other
+    than reflectivity, ``reflectivity_range``). Applying these limits to each
+    radar's own value censors the two samples separately and biases the
+    median difference: with a true bias of 3 dB and 2 dB of scatter in each
+    radar, the median came out 2.89 dB, and 2.59 dB with weak echo near the
+    lower limit. ``select_on="mean"`` (default) applies the limits to the
+    mean of the two radars' values for the pair instead, a quantity that
+    for equal scatter in the two radars is independent of their difference;
+    ``"both"`` restores the earlier censoring of each value. (Selecting on
+    one radar's own value, for instance the reference radar's, censors that
+    radar's sample and so does not remove the bias.) The sample volumes of
+    the two radars should also be similar, which ``max_range_ratio``
+    enforces.
 
     The median pair bias, the interquartile-range spread (1.349 is the ratio
     of the interquartile range of a normal distribution to its standard
@@ -1197,6 +1531,8 @@ def network_bias(
     bin_width, max_difference : float, optional
         Resolution and span of the difference histograms. Differences beyond
         ``max_difference`` (default 20) are discarded as outliers.
+    select_on : {"mean", "both"}, optional
+        Quantity the value limits act on, see above. Default ``"mean"``.
     n_threads : int, optional
         Threads for the compiled kernel. Default: all cores.
     engine : {"auto", "compiled", "numpy"}, optional
@@ -1213,7 +1549,8 @@ def network_bias(
     Raises
     ------
     ValueError
-        If ``field`` is not in ``grid`` or ``reference`` is unknown.
+        If ``field`` is not in ``grid``, ``reference`` is unknown or
+        ``select_on`` is not valid.
 
     References
     ----------
@@ -1242,18 +1579,31 @@ def network_bias(
         if not 0 <= ref < nr:
             raise ValueError(f"reference index {reference} out of range")
 
+    if select_on not in ("mean", "both"):
+        raise ValueError(f"select_on must be 'mean' or 'both', not {select_on!r}")
     da = grid[field].transpose("radar", "z", "y", "x")
     keep = xr.ones_like(da, dtype=bool)
     is_refl = _is_reflectivity(grid[field])
     if valid_range is None and is_refl:
         valid_range = (15.0, 50.0)
-    if valid_range is not None:
-        keep &= (da >= valid_range[0]) & (da <= valid_range[1])
+    # quantity and window of the selection on a third quantity
+    select, window = None, (-np.inf, np.inf)
+    if select_on == "both":
+        if valid_range is not None:
+            keep &= (da >= valid_range[0]) & (da <= valid_range[1])
+    else:
+        if is_refl:
+            select, window = da, valid_range
+        elif valid_range is not None:
+            keep &= (da >= valid_range[0]) & (da <= valid_range[1])
     if not is_refl and reflectivity in grid:
         if reflectivity_range is None:
             reflectivity_range = (20.0, 40.0)
         zh = grid[reflectivity].transpose(*da.dims)
-        keep &= (zh >= reflectivity_range[0]) & (zh <= reflectivity_range[1])
+        if select_on == "both":
+            keep &= (zh >= reflectivity_range[0]) & (zh <= reflectivity_range[1])
+        else:
+            select, window = zh, reflectivity_range
     if z_range is not None:
         keep &= (grid["z"] >= z_range[0]) & (grid["z"] <= z_range[1])
     rng = grid["range"].transpose(*da.dims)
@@ -1262,6 +1612,11 @@ def network_bias(
     values = np.ascontiguousarray(
         da.where(keep).values.reshape(nr, -1), dtype=np.float32
     )
+    select_arr = np.zeros((0, 0), dtype=np.float32)
+    if select is not None:
+        select_arr = np.ascontiguousarray(
+            select.where(keep).values.reshape(nr, -1), dtype=np.float32
+        )
     ratio = float(max_range_ratio or 0.0)
     rng_arr = (
         np.ascontiguousarray(rng.values.reshape(nr, -1), dtype=np.float32)
@@ -1276,10 +1631,20 @@ def network_bias(
             float(bin_width),
             float(max_difference),
             n_threads=int(n_threads or 0),
+            select=select_arr,
+            select_lo=float(window[0]),
+            select_hi=float(window[1]),
         )
     else:
         counts, sums, sumsq = _pair_histograms_numpy(
-            values, rng_arr, ratio, float(bin_width), float(max_difference)
+            values,
+            rng_arr,
+            ratio,
+            float(bin_width),
+            float(max_difference),
+            select_arr,
+            float(window[0]),
+            float(window[1]),
         )
     edges = -max_difference + bin_width * np.arange(counts.shape[1] + 1)
     quant = _histogram_quantiles(counts, edges, [0.25, 0.5, 0.75])
@@ -1351,6 +1716,7 @@ def network_bias(
         "field": field,
         "reference": names[ref],
         "method": "median pair differences, weighted least-squares network solution",
+        "select_on": select_on,
     }
     with np.errstate(invalid="ignore"):
         out["pair_mean"] = (

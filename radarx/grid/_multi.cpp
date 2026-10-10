@@ -5,11 +5,11 @@
 // weighted merge of several radars' gridded fields, and the pairwise
 // difference histograms used to estimate relative calibration biases.
 //
-// Geometry follows the 4/3 effective Earth radius model used by
+// Geometry follows the effective Earth radius model used by
 // xradar.georeference.antenna_to_cartesian and the cone gridding kernel: a
 // cell at ground distance s and height z (above sea level) sits at central
-// angle theta = s / R from the radar, where R = 4/3 Earth radius, and the
-// beam is a straight line in that frame.
+// angle theta = s / R from the radar, where R = k_e * Earth radius (k_e = 4/3
+// by default), and the beam is a straight line in that frame.
 
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
@@ -272,7 +272,7 @@ column_geometry(const DArray& x, const DArray& y, double origin_lat, double orig
 // Returns float32 arrays (nradar, nz, ny, nx).
 std::tuple<py::array_t<float>, py::array_t<float>> beam_geometry(
     const std::vector<DArray>& ground, const DArray& z, const std::vector<double>& site_altitude,
-    double earth_radius, int n_threads) {
+    double earth_radius, int n_threads, double k_e) {
     const int64_t nr = static_cast<int64_t>(ground.size());
     if (nr == 0 || static_cast<int64_t>(site_altitude.size()) != nr)
         throw std::invalid_argument("need one ground array and site altitude per radar");
@@ -288,7 +288,7 @@ std::tuple<py::array_t<float>, py::array_t<float>> beam_geometry(
     std::vector<const double*> pg(nr);
     for (int64_t r = 0; r < nr; ++r) pg[r] = ground[r].data();
     const double* pz = z.data();
-    const double R = earth_radius * 4.0 / 3.0;
+    const double R = earth_radius * k_e;
     {
         py::gil_scoped_release release;
         const int64_t block = 4096;
@@ -329,7 +329,7 @@ std::tuple<py::array_t<float>, py::array_t<float>> merge(
     const FArray& values, const std::vector<DArray>& ground, const DArray& z,
     const std::vector<double>& site_altitude, const std::vector<std::vector<double>>& elevations,
     const std::vector<double>& beamwidth, const std::vector<double>& time_offset,
-    double range_scale, double time_scale, double earth_radius, int n_threads) {
+    double range_scale, double time_scale, double earth_radius, int n_threads, double k_e) {
     const int64_t nr = static_cast<int64_t>(ground.size());
     if (nr == 0 || values.ndim() < 2 || values.shape(0) != nr)
         throw std::invalid_argument("values must be (nradar, nz, ...) with one ground per radar");
@@ -359,7 +359,7 @@ std::tuple<py::array_t<float>, py::array_t<float>> merge(
     std::vector<const double*> pg(nr);
     for (int64_t r = 0; r < nr; ++r) pg[r] = ground[r].data();
     const double* pz = z.data();
-    const double R = earth_radius * 4.0 / 3.0;
+    const double R = earth_radius * k_e;
     {
         py::gil_scoped_release release;
         const int64_t block = 4096;
@@ -394,9 +394,13 @@ std::tuple<py::array_t<float>, py::array_t<float>> merge(
 // where max(range) / min(range) <= max_range_ratio. Bins of bin_width span
 // [-max_difference, max_difference). Returns counts (npair, nbin) and the
 // sum and sum of squares of the differences inside that span (npair).
+// If select (nradar, ncell) is given, a pair is only used where the mean of
+// its two select values lies in [select_lo, select_hi]: the selection runs on
+// a third quantity, not on the two values being differenced.
 std::tuple<py::array_t<int64_t>, py::array_t<double>, py::array_t<double>> pair_histograms(
     const FArray& values, const FArray& range, double max_range_ratio, double bin_width,
-    double max_difference, int n_threads) {
+    double max_difference, int n_threads, const FArray& select, double select_lo,
+    double select_hi) {
     if (values.ndim() != 2) throw std::invalid_argument("values must be (nradar, ncell)");
     const int64_t nr = values.shape(0), ncell = values.shape(1);
     const bool use_range = max_range_ratio > 0;
@@ -404,6 +408,9 @@ std::tuple<py::array_t<int64_t>, py::array_t<double>, py::array_t<double>> pair_
         throw std::invalid_argument("range must match values");
     if (!(bin_width > 0) || !(max_difference > 0))
         throw std::invalid_argument("bin_width and max_difference must be positive");
+    const bool use_select = select.size() > 0;
+    if (use_select && (select.ndim() != 2 || select.shape(0) != nr || select.shape(1) != ncell))
+        throw std::invalid_argument("select must match values");
     const int64_t nbin = static_cast<int64_t>(std::ceil(2.0 * max_difference / bin_width));
     const int64_t npair = nr * (nr - 1) / 2;
     py::array_t<int64_t> counts({npair, nbin});
@@ -416,6 +423,7 @@ std::tuple<py::array_t<int64_t>, py::array_t<double>, py::array_t<double>> pair_
     std::fill(pq, pq + npair, 0.0);
     const float* pv = values.data();
     const float* prg = use_range ? range.data() : nullptr;
+    const float* psel = use_select ? select.data() : nullptr;
     {
         py::gil_scoped_release release;
         const int64_t block = 16384;
@@ -446,6 +454,11 @@ std::tuple<py::array_t<int64_t>, py::array_t<double>, py::array_t<double>> pair_
                             const double lo = std::min(ri, rj), hi = std::max(ri, rj);
                             if (!(hi <= max_range_ratio * lo)) continue;
                         }
+                        if (use_select) {
+                            const double m = 0.5 * (static_cast<double>(psel[i * ncell + c]) +
+                                                    static_cast<double>(psel[j * ncell + c]));
+                            if (!(m >= select_lo && m <= select_hi)) continue;  // also NaN
+                        }
                         const double d = static_cast<double>(vi) - static_cast<double>(vj);
                         const int64_t b = static_cast<int64_t>(std::floor((d + max_difference) / bin_width));
                         if (b < 0 || b >= nbin) continue;
@@ -473,12 +486,16 @@ PYBIND11_MODULE(_multi, m) {
           py::arg("origin_lat"), py::arg("origin_lon"), py::arg("radar_lat"),
           py::arg("radar_lon"), py::arg("n_threads") = 0);
     m.def("beam_geometry", &beam_geometry, py::arg("ground"), py::arg("z"),
-          py::arg("site_altitude"), py::arg("earth_radius") = 6371000.0, py::arg("n_threads") = 0);
+          py::arg("site_altitude"), py::arg("earth_radius") = 6371000.0, py::arg("n_threads") = 0,
+          py::arg("k_e") = 4.0 / 3.0);
     m.def("merge", &merge, py::arg("values"), py::arg("ground"), py::arg("z"),
           py::arg("site_altitude"), py::arg("elevations"), py::arg("beamwidth"),
           py::arg("time_offset"), py::arg("range_scale"), py::arg("time_scale"),
-          py::arg("earth_radius") = 6371000.0, py::arg("n_threads") = 0);
+          py::arg("earth_radius") = 6371000.0, py::arg("n_threads") = 0,
+          py::arg("k_e") = 4.0 / 3.0);
     m.def("pair_histograms", &pair_histograms, py::arg("values"), py::arg("range"),
           py::arg("max_range_ratio"), py::arg("bin_width"), py::arg("max_difference"),
-          py::arg("n_threads") = 0);
+          py::arg("n_threads") = 0, py::arg("select") = FArray(),
+          py::arg("select_lo") = -std::numeric_limits<double>::infinity(),
+          py::arg("select_hi") = std::numeric_limits<double>::infinity());
 }

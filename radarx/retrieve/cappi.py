@@ -19,12 +19,16 @@ three ways to build one from the sweeps of a georeferenced volume:
   ``vertical_tolerance`` (default 3000 m) of the requested height are
   considered.
 - ``"polar_vertical_interpolation"``: linear interpolation in height, gate
-  by gate on the ``azimuth``/``range`` grid of the first sweep, between the
-  sweeps of the volume.
+  by gate on the ``azimuth`` grid and the ground distance of the first
+  sweep, between the sweeps of the volume. A pixel is valid only if a gate
+  lies within ``vertical_tolerance`` (default 500 m) of the requested height.
+  The ``range`` of the result is that ground distance (a gate at height H
+  and slant range r is at about sqrt(r^2 - H^2) from the radar, not at r),
+  when the sweeps carry ``x`` and ``y``; otherwise the slant range.
 - ``"height_window_composite"``: for every gate of the reference grid the
   value of the sweep whose gate height is closest to the requested height
-  within ``vertical_tolerance`` (default 500 m); with ``apply_filter`` a
-  simple gate filter is applied first.
+  within ``vertical_tolerance`` (default 500 m), on the same ground-distance
+  axis; with ``apply_filter`` a simple gate filter is applied first.
 
 None of these is an implementation of a published CAPPI algorithm: apart
 from the inverse-distance weighting concept of Shepard (1968), which is
@@ -646,6 +650,55 @@ def _interp_vertical_column(z_col, v_col, height):
     return float(np.interp(height, z_valid, v_valid)), False
 
 
+_DEFAULT_POLAR_TOLERANCE = 500.0
+
+
+def _reference_ground_range(ref):
+    """
+    Ground distance of the gates of the reference sweep, one value per gate.
+
+    The median over rays of the horizontal distance ``hypot(x, y)`` from the
+    radar. ``None`` if the sweep carries no ``x``/``y`` (then the slant range
+    is kept as the horizontal axis) or the distance does not increase with
+    range.
+    """
+    if "x" not in ref or "y" not in ref:
+        return None
+    x = np.asarray(ref["x"].values, dtype=float)
+    y = np.asarray(ref["y"].values, dtype=float)
+    if x.ndim != 2 or x.shape != y.shape:
+        return None
+    ground = np.nanmedian(np.hypot(x, y), axis=0)
+    if not np.all(np.isfinite(ground)) or np.any(np.diff(ground) <= 0):
+        return None
+    return ground
+
+
+def _onto_ground_range(values, ground, ground_ref):
+    """
+    Resample rays from their own ground distances onto ``ground_ref``.
+
+    ``values`` and ``ground`` are ``(ray, gate)`` arrays of one sweep; the
+    result has the gates of ``ground_ref`` and is NaN outside the ground range
+    the sweep covers.
+    """
+    out = np.full((values.shape[0], ground_ref.size), np.nan)
+    for i in range(values.shape[0]):
+        g = ground[i]
+        ok = np.isfinite(g)
+        if np.count_nonzero(ok) < 2:
+            continue
+        out[i] = np.interp(ground_ref, g[ok], values[i][ok], left=np.nan, right=np.nan)
+    return out
+
+
+def _sweep_ground_range(ds, az, r):
+    """Ground distance of the gates of a sweep on the reference azimuths."""
+    gx = _interp_to_reference(ds, "x", az, r)
+    gy = _interp_to_reference(ds, "y", az, r)
+    return np.hypot(gx, gy)
+
+
 def _create_cappi_polar_vertical_interpolation(
     radar,
     height,
@@ -653,9 +706,18 @@ def _create_cappi_polar_vertical_interpolation(
     sweeps=None,
     max_vertical_distance=None,
     vertical_interpolation="linear",
+    ground_range=True,
 ):
     """
     Create CAPPI in native polar coordinates using sweep-wise vertical interpolation.
+
+    A pixel is valid only where the sweep gate nearest to ``height`` is at most
+    ``max_vertical_distance`` (default 500 m, a radarx choice) from it, for the
+    linear and the nearest mode; ``numpy.inf`` switches the limit off. The
+    ``range`` of the result is the ground distance of the reference sweep when
+    the sweeps carry ``x`` and ``y`` and ``ground_range`` is true; otherwise
+    it is the slant range of the reference sweep, which is not the horizontal
+    position of a constant-height surface.
     """
     sweeps = _iter_sweeps(radar, sweeps=sweeps)
     if not sweeps:
@@ -675,17 +737,29 @@ def _create_cappi_polar_vertical_interpolation(
     if vertical_interpolation not in {"linear", "nearest"}:
         raise ValueError("vertical_interpolation must be either 'linear' or 'nearest'.")
 
+    # A gate at height H and slant range r lies at ground distance about
+    # sqrt(r^2 - H^2): sweeps are resampled onto the ground distance of the
+    # reference sweep and the output is labelled with it.
+    ground_ref = _reference_ground_range(ref) if ground_range else None
+
     z_stack = []
     field_stack = {field: [] for field in fields}
 
     for sw in sweeps:
         ds = _node_to_dataset(radar[sw])
         z_interp = _interp_to_reference(ds, "z", az, r)
+        ground = _sweep_ground_range(ds, az, r) if ground_ref is not None else None
+        if ground is not None:
+            z_interp = _onto_ground_range(z_interp, ground, ground_ref)
         z_stack.append(z_interp)
 
         for field in fields:
             data = _interp_to_reference(ds, field, az, r)
+            if ground is not None:
+                data = _onto_ground_range(data, ground, ground_ref)
             field_stack[field].append(data)
+    if ground_ref is not None:
+        r = ground_ref
 
     z_3d = np.stack(z_stack, axis=0)
 
@@ -705,9 +779,7 @@ def _create_cappi_polar_vertical_interpolation(
     ).squeeze(0)
 
     if max_vertical_distance is None:
-        dz = np.diff(np.sort(z_3d.ravel()))
-        dz = dz[dz > 0]
-        tol = 2.0 * np.median(dz) if dz.size else 1000.0
+        tol = _DEFAULT_POLAR_TOLERANCE
     else:
         tol = float(max_vertical_distance)
 
@@ -745,6 +817,9 @@ def _create_cappi_polar_vertical_interpolation(
                     axis=0,
                 ).squeeze(0)
                 linear_mask = mask.copy()
+            else:
+                # no value without a gate within the tolerance of the height
+                linear_mask |= mask
 
             cappi = np.ma.array(cappi, mask=linear_mask)
 
@@ -819,11 +894,16 @@ def _create_cappi_height_window_composite(
     texture_threshold=None,
     reflectivity_min=-10.0,
     reflectivity_max=75.0,
+    ground_range=True,
 ):
     """
     Create a CAPPI-like horizontal composite by selecting gates within a
     vertical window around the target height and compositing the closest gates
     after sweep alignment.
+
+    The sweeps are aligned on the ground distance of the reference sweep when
+    they carry ``x`` and ``y`` and ``ground_range`` is true, and the result is
+    labelled with that distance; otherwise on its slant range.
     """
     sweeps = _iter_sweeps(radar, sweeps=sweeps)
     if not sweeps:
@@ -841,6 +921,8 @@ def _create_cappi_height_window_composite(
         raise ValueError(
             "No 2D azimuth/range fields available for height-window compositing."
         )
+
+    ground_ref = _reference_ground_range(ref) if ground_range else None
 
     z_stack = []
     field_stack = {field: [] for field in fields}
@@ -860,10 +942,18 @@ def _create_cappi_height_window_composite(
             )
 
         z_interp = _interp_to_reference(ds, "z", az, r)
+        ground = _sweep_ground_range(ds, az, r) if ground_ref is not None else None
+        if ground is not None:
+            z_interp = _onto_ground_range(z_interp, ground, ground_ref)
         z_stack.append(z_interp)
 
         for field in fields:
-            field_stack[field].append(_interp_to_reference(ds, field, az, r))
+            data = _interp_to_reference(ds, field, az, r)
+            if ground is not None:
+                data = _onto_ground_range(data, ground, ground_ref)
+            field_stack[field].append(data)
+    if ground_ref is not None:
+        r = ground_ref
 
     z_3d = np.stack(z_stack, axis=0)
     distance = np.abs(z_3d - float(height))
@@ -989,7 +1079,11 @@ def create_cappi(
     vertical_tolerance : float or None, optional
         Maximum vertical distance above and below the requested CAPPI height,
         in meters, used by the selected retrieval method. If omitted, a
-        method-specific default is used.
+        method-specific default is used (3000 m, 500 m and 500 m for the
+        three methods in the order above). For ``"polar_vertical_interpolation"``
+        a pixel without a gate this close to ``height`` is masked, also in the
+        linear interpolation, and ``numpy.inf`` interpolates across any gap as
+        before.
     apply_filter : bool, optional
         Apply built-in gate filtering when supported by the selected method.
         Currently this is used by ``method="height_window_composite"``.

@@ -725,3 +725,87 @@ def test_create_cappi_height_window_no_2d_fields_raises():
     tree = DataTree.from_dict({"sweep_0": ds_1d})
     with pytest.raises(ValueError, match="No 2D azimuth/range fields"):
         _create_cappi_height_window_composite(tree, height=150.0)
+
+
+def _tall_volume(field):
+    """
+    Eleven sweeps from 0.5 to 19.5 degrees, georeferenced with xradar.
+
+    ``field`` is ``"z"`` (gate height in km) or ``"ground"`` (ground distance
+    of the gate in km).
+    """
+    from xradar.georeference import antenna_to_cartesian
+
+    azimuth = np.arange(0.0, 360.0, 10.0)
+    ranges = np.arange(1000.0, 120_001.0, 1000.0)
+    sweeps = {}
+    for k, elevation in enumerate(np.linspace(0.5, 19.5, 11)):
+        x, y, z = antenna_to_cartesian(
+            ranges[None, :], azimuth[:, None], np.full((azimuth.size, 1), elevation)
+        )
+        data = z / 1000.0 if field == "z" else np.hypot(x, y) / 1000.0
+        sweeps[f"sweep_{k}"] = xr.Dataset(
+            {"DBZH": (("azimuth", "range"), data, {"units": "dBZ"})},
+            coords={
+                "azimuth": ("azimuth", azimuth),
+                "range": ("range", ranges),
+                "x": (("azimuth", "range"), x),
+                "y": (("azimuth", "range"), y),
+                "z": (("azimuth", "range"), z),
+                "time": np.datetime64("2024-01-01T00:00:00"),
+                "latitude": 28.61,
+                "longitude": 77.23,
+                "altitude": 0.0,
+            },
+            attrs={"sweep_mode": "azimuth_surveillance"},
+        )
+    return DataTree.from_dict(sweeps)
+
+
+def test_polar_cappi_applies_the_vertical_tolerance():
+    """No value where no gate is near the height, however wide the gap (#165)."""
+    volume = _tall_volume("z")
+    ds = create_cappi(
+        volume, 18000.0, method="polar", fields=["DBZH"], vertical_tolerance=100.0
+    )
+    dbz = ds["DBZH"]
+    assert dbz.dims == ("time", "range")
+    ground = ds["range"].values
+    # at 60 km ground range the 15 and 19.5 degree sweeps are 4.5 km apart and
+    # neither is within 100 m of 18 km
+    column = dbz.isel(time=0).values[np.argmin(np.abs(ground - 60e3))]
+    assert np.isnan(column)
+    # a pixel with a gate within the tolerance keeps the interpolated height
+    valid = dbz.isel(time=0).to_masked_array().compressed()
+    assert valid.size > 0
+    np.testing.assert_allclose(valid, 18.0, atol=0.1)
+    # the tolerance matters: wider keeps more pixels, infinity restores the
+    # interpolation across any gap
+    counts = [
+        create_cappi(
+            volume, 18000.0, method="polar", fields=["DBZH"], vertical_tolerance=tol
+        )["DBZH"]
+        .to_masked_array()
+        .count()
+        for tol in (100.0, 1000.0, np.inf)
+    ]
+    assert counts[0] < counts[1] < counts[2]
+    # the default is a limit as well
+    default = create_cappi(volume, 18000.0, method="polar", fields=["DBZH"])
+    assert 0 < default["DBZH"].to_masked_array().count() < counts[2]
+
+
+@pytest.mark.parametrize("method", ["polar_vertical_interpolation", "pseudo_cappi"])
+def test_polar_and_window_cappi_are_labelled_with_ground_range(method):
+    """The value at a pixel comes from the ground distance it is labelled with (#166)."""
+    volume = _tall_volume("ground")
+    ds = create_cappi(volume, 3000.0, method=method, fields=["DBZH"])
+    ground = ds["range"].values / 1000.0
+    value = ds["DBZH"].isel(time=0).to_masked_array()
+    ok = ~np.ma.getmaskarray(value)
+    assert ok.sum() > 20
+    # a field equal to the gate's ground distance is reproduced at the label;
+    # labelled with the slant range the error was 0.5 km at 10 km, 0.2 km at 20 km
+    err = np.abs(value.filled(np.nan) - ground)[ok]
+    assert err.max() < 0.05
+    assert np.all(np.diff(ds["range"].values) > 0)
