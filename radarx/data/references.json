@@ -1485,6 +1485,20 @@
   "pages": "2772-2792",
   "doi": "10.1175/MWR3226.1"
  },
+ "10.1175/MWR3324.1": {
+  "authors": [
+   "Alpert, J. C.",
+   "Kumar, V. K."
+  ],
+  "year": 2007,
+  "title": "Radial Wind Super-Obs from the WSR-88D Radars in the NCEP Operational Assimilation System",
+  "type": "article",
+  "journal": "Monthly Weather Review",
+  "volume": "135",
+  "issue": "3",
+  "pages": "1090-1109",
+  "doi": "10.1175/MWR3324.1"
+ },
  "10.1175/MWR3396.1": {
   "authors": [
    "Ziegler, C. L.",
