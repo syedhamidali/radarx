@@ -55,6 +55,62 @@ def test_make_3d_grid(mock_dtree):
     assert lon.shape == x.shape, "Shapes should be equal"
 
 
+def test_make_3d_grid_axes_are_independent(mock_dtree):
+    """lon runs along y = 0 and lat along x = 0, so unequal axes work (#169)."""
+    import pyproj
+
+    ds = _sweep_dataset(mock_dtree, "sweep_0")
+    lat, lon, x, y, z, _ = make_3d_grid(ds, x_lim=(-100e3, 100e3), y_lim=(-50e3, 50e3))
+    assert lon.shape == x.shape and lat.shape == y.shape
+    assert lon.shape != lat.shape
+    site = (float(ds["latitude"]), float(ds["longitude"]))
+    aeqd = pyproj.Proj(proj="aeqd", lat_0=site[0], lon_0=site[1], datum="WGS84")
+    lon0, _ = aeqd(x, np.zeros_like(x), inverse=True)
+    _, lat0 = aeqd(np.zeros_like(y), y, inverse=True)
+    assert np.abs(lon - lon0).max() * 111.3e3 < 5.0
+    assert np.abs(lat - lat0).max() * 111.3e3 < 5.0
+
+
+def test_grid_radar_barnes_cells_are_where_they_are_labelled(mock_dtree):
+    """Barnes runs on the metric grid; lat/lon are those of every cell (#225)."""
+    import pyproj
+
+    pytest.importorskip("fastbarnes")
+    gdt = mock_dtree.xradar.georeference()
+    for name in ("sweep_0", "sweep_1"):
+        node = gdt[name]
+        node["DBZH"] = node["x"].astype("float64").copy()  # the field is x [m]
+        node["DBZH"].attrs = {"units": "dBZ"}
+    out = grid_radar(
+        gdt,
+        data_vars=["DBZH"],
+        pseudo_cappi=False,
+        x_lim=(-60e3, 60e3),
+        y_lim=(-60e3, 60e3),
+        z_lim=(1250, 3250),
+        x_step=2000,
+        y_step=2000,
+        z_step=500,
+        method="barnes",
+    )
+    x = out["x"].values[None, None, :] * np.ones(out["DBZH"].shape)
+    err = np.abs(out["DBZH"].values - x)
+    # with the regular lon/lat lattice of #225 the median error was 380 m
+    assert np.nanmedian(err) < 50.0
+    assert out["lat"].dims == out["lon"].dims == ("y", "x")
+    site = _sweep_dataset(gdt, "sweep_0")
+    aeqd = pyproj.Proj(
+        proj="aeqd",
+        lat_0=float(site["latitude"]),
+        lon_0=float(site["longitude"]),
+        datum="WGS84",
+    )
+    X, Y = np.meshgrid(out["x"].values, out["y"].values)
+    lon, lat = aeqd(X, Y, inverse=True)
+    np.testing.assert_allclose(out["lon"].values, lon, atol=1e-6)
+    np.testing.assert_allclose(out["lat"].values, lat, atol=1e-6)
+
+
 @pytest.mark.parametrize("pseudo_cappi", [True, False])
 def test_grid_radar_barnes(mock_dtree, pseudo_cappi):
     """The Barnes method stays available next to the default cone method."""
@@ -94,12 +150,11 @@ def test_grid_radar(mock_dtree):
         pseudo_cappi=True,
         x_lim=(-50e3, 50e3),
         y_lim=(-50e3, 50e3),
-        z_lim=(0, 5e3),
+        z_lim=(1250, 6250),  # KLBB is at 1029 m: levels below it are not filled
         x_step=2000,
         y_step=2000,
         z_step=1000,
     )
-    print(gridded_ds["DBZH"].shape)
     # Assertions
     assert isinstance(
         gridded_ds, xr.Dataset
@@ -134,3 +189,23 @@ def test_sweep_dataset_falls_back_for_older_xarray(mock_dtree, monkeypatch):
     ds = _sweep_dataset(mock_dtree, "sweep_0")
     assert isinstance(ds, xr.Dataset)
     assert "DBZH" in ds
+
+
+def test_grid_radar_passes_fill_depth_and_k_e(mock_dtree):
+    kw = dict(
+        data_vars=["DBZH"],
+        x_lim=(-50e3, 50e3),
+        y_lim=(-50e3, 50e3),
+        z_lim=(0, 5e3),
+        x_step=2000,
+        y_step=2000,
+        z_step=1000,
+    )
+    # the lowest beam is above 1029 m; levels at the radar altitude and below
+    # are only filled with fill_depth=inf (the earlier behaviour)
+    limited = grid_radar(mock_dtree, **kw)
+    old = grid_radar(mock_dtree, fill_depth=np.inf, **kw)
+    assert np.isfinite(limited["DBZH"].values[:2]).sum() == 0
+    assert np.isfinite(old["DBZH"].values[:2]).sum() > 0
+    assert limited.attrs["k_e"] == pytest.approx(4 / 3)
+    assert grid_radar(mock_dtree, k_e=1.2, **kw).attrs["k_e"] == pytest.approx(1.2)
