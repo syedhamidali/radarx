@@ -806,16 +806,44 @@ def _raw_cds(
     )
 
 
+def _raw_cds_surface(times, lat, lon, sp=95000.0, orography=500.0, point=False):
+    """The single-level download (cfgrib names): surface fields of a 500 m hill."""
+    shape = (len(times), len(lat), len(lon))
+    dims = ("valid_time", "latitude", "longitude")
+    full = lambda v: (dims, np.full(shape, v))  # noqa: E731
+    ds = xr.Dataset(
+        {
+            "sp": full(sp),
+            "z": full(orography * 9.80665),
+            "t2m": full(290.0),
+            "d2m": full(280.0),
+            "u10": full(3.0),
+            "v10": full(-1.0),
+        },
+        coords={
+            "valid_time": np.array(times, dtype="datetime64[ns]"),
+            "latitude": np.asarray(lat, dtype=float),
+            "longitude": np.asarray(lon, dtype=float),
+            "number": 0,
+            "expver": "0001",
+        },
+    )
+    return ds.isel(latitude=0, longitude=0) if point else ds
+
+
 def test_era5_cds_request(tmp_path, monkeypatch):
     monkeypatch.setenv("RADARX_CACHE_DIR", str(tmp_path))
     seen = {}
+    surface_seen = {}
 
     def fake_retrieve(dataset, request, path):
-        seen.update(dataset=dataset, request=request)
         times = [np.datetime64("2022-03-30T23:00"), np.datetime64("2022-03-31T00:00")]
-        return _raw_cds(
-            times, np.arange(34.5, 33.24, -0.25), np.arange(-89.0, -87.74, 0.25)
-        )
+        lat, lon = np.arange(34.5, 33.24, -0.25), np.arange(-89.0, -87.74, 0.25)
+        if dataset == "reanalysis-era5-single-levels":
+            surface_seen.update(dataset=dataset, request=request)
+            return _raw_cds_surface(times, lat, lon)
+        seen.update(dataset=dataset, request=request)
+        return _raw_cds(times, lat, lon)
 
     monkeypatch.setattr(sounding, "_cds_retrieve", fake_retrieve)
     prof = sounding.era5_profile(33.9, -88.33, "2022-03-30T23:30", source="cds")
@@ -826,24 +854,42 @@ def test_era5_cds_request(tmp_path, monkeypatch):
     north, west, south, east = req["area"]
     assert south < 33.9 < north and west < -88.33 < east
     assert prof.attrs["era5_source"] == "cds"
-    np.testing.assert_allclose(prof["u"], 5.0)
+    # the surface fields come from the single-level dataset, same box and times
+    assert "pressure_level" not in surface_seen["request"]
+    assert surface_seen["request"]["area"] == req["area"]
+    assert surface_seen["request"]["time"] == req["time"]
+    assert "surface_pressure" in surface_seen["request"]["variable"]
+    assert "geopotential" in surface_seen["request"]["variable"]
+    # the 1000 hPa level is below the 950 hPa surface (the hill): it is dropped
+    # and the surface level comes first
+    assert prof.sizes["height"] == 4
+    np.testing.assert_allclose(prof["pressure"].values[0], 95000.0)
+    np.testing.assert_allclose(prof["temperature"].values[0], 290.0)
+    np.testing.assert_allclose(prof["u"].values[0], 3.0)
+    np.testing.assert_allclose(prof["u"].values[1:], 5.0)
+    assert float(prof["pressure"].max()) == 95000.0
     # cached: no second request
     seen.clear()
+    surface_seen.clear()
     sounding.era5_profile(33.9, -88.33, "2022-03-30T23:30", source="cds")
-    assert not seen
+    assert not seen and not surface_seen
 
 
 def test_era5_arco_request(tmp_path, monkeypatch):
     monkeypatch.setenv("RADARX_CACHE_DIR", str(tmp_path))
     seen = {}
+    surface_seen = {}
 
     def fake_retrieve(dataset, request, path):
-        seen.update(dataset=dataset, request=request)
         times = np.arange(
             np.datetime64("2022-03-30T00", "h"),
             np.datetime64("2022-03-31T19", "h"),
             np.timedelta64(6, "h"),
         )
+        if dataset == "reanalysis-era5-single-levels-timeseries":
+            surface_seen.update(dataset=dataset, request=request)
+            return _raw_cds_surface(times, [34.0], [271.75], point=True)
+        seen.update(dataset=dataset, request=request)
         raw = _raw_cds(times, [34.0], [271.75], level_dim="pressureLevel")
         return raw.isel(latitude=0, longitude=0)  # point: scalar coordinates
 
@@ -855,7 +901,13 @@ def test_era5_arco_request(tmp_path, monkeypatch):
     assert seen["request"]["date"] == ["2022-03-30/2022-03-31"]
     assert prof.attrs["era5_times"] == "2022-03-30T18:00:00, 2022-03-31T00:00:00"
     assert prof.attrs["era5_grid_point"] == "34.00N -88.25E (nearest)"
-    np.testing.assert_allclose(prof["v"], -2.0)
+    np.testing.assert_allclose(prof["v"].values[1:], -2.0)  # [0]: the 10 m wind
+    assert surface_seen["request"]["location"] == {
+        "latitude": 33.9,
+        "longitude": -88.33,
+    }
+    assert prof.attrs["era5_surface_pressure"] == "950.0 hPa"
+    assert prof.attrs["era5_orography"].endswith(" m")
     # an area request (grid columns)
     sounding._era5_arco(
         (33.0, 34.0, -89.0, -88.0), [np.datetime64("2022-03-31")], tmp_path / "x.nc"
@@ -1108,3 +1160,135 @@ def test_small_branches(tmp_path, monkeypatch):
     with pytest.raises(ImportError):
         sounding.saturation_vapor_pressure(273.15, engine="compiled")
     np.testing.assert_allclose(sounding.saturation_vapor_pressure(273.15), 611.2)
+
+
+# ---------------------------------------------------------------------------
+# surface layer and terrain mask of ERA5 columns (issue 224)
+
+
+def _synthetic_era5_hill(times, sp=90000.0, orography=1000.0, **kw):
+    """_synthetic_era5 plus surface fields: a plateau of 1000 m, 900 hPa."""
+    ds, H = _synthetic_era5(times, **kw)
+    shape = (len(times), ds.sizes["latitude"], ds.sizes["longitude"])
+    dims = ("time", "latitude", "longitude")
+    surf = {
+        "sp": sp,
+        "orography": orography * 9.80665,
+        "t2m": 291.0,
+        "d2m": 281.0,
+        "u10": 4.0,
+        "v10": -2.0,
+    }
+    for name, value in surf.items():
+        ds[name] = (dims, np.full(shape, value))
+    return ds
+
+
+def _fake_hill_fields(source, box, times, cache=True, surface=True):
+    ds = _synthetic_era5_hill(times)
+    return (
+        ds if surface else ds.drop_vars(["sp", "orography", "t2m", "d2m", "u10", "v10"])
+    )
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_era5_profile_surface_layer_and_terrain_mask(monkeypatch, engine):
+    monkeypatch.setattr(sounding, "_era5_fields", _fake_hill_fields)
+    monkeypatch.setattr(sounding, "_cds_available", lambda: False)
+    prof = sounding.era5_profile(33.9, -88.33, "2022-03-30T23:00", engine=engine)
+    # 1000 and 925 hPa are below the 900 hPa surface; the 850 hPa level is not
+    assert prof.sizes["height"] == 1 + 6
+    assert float(prof["pressure"].max()) == pytest.approx(90000.0)
+    assert float(prof["height"][0]) == pytest.approx(1002.157, abs=0.01)
+    assert float(prof["temperature"][0]) == pytest.approx(291.0)
+    assert float(prof["dewpoint"][0]) == pytest.approx(281.0, abs=1e-6)
+    assert float(prof["u"][0]) == pytest.approx(4.0)
+    assert float(prof["v"][0]) == pytest.approx(-2.0)
+    assert bool(np.isnan(prof["w"][0]))
+    assert (np.diff(prof["height"].values) > 0).all()
+    assert (np.diff(prof["pressure"].values) < 0).all()
+    assert prof.attrs["era5_surface_pressure"] == "900.0 hPa"
+    assert prof.attrs["era5_orography"] == "1000.2 m"  # geometric height
+    # no level below the ground is left (the extrapolated 1000 hPa level was
+    # at 0 m and 6.5 K warmer than the air at 1000 m)
+    assert float(prof["height"].min()) > 1000.0
+    # without the surface layer the earlier behaviour: all levels
+    old = sounding.era5_profile(
+        33.9, -88.33, "2022-03-30T23:00", surface=False, engine=engine
+    )
+    assert old.sizes["height"] == 8 and float(old["height"].min()) < 200.0
+
+
+def test_era5_fields_without_surface_are_unchanged(monkeypatch):
+    """A download without surface fields gives the pressure levels only."""
+    monkeypatch.setattr(
+        sounding, "_era5_fields", lambda s, b, t, cache=True: _synthetic_era5(t)[0]
+    )
+    monkeypatch.setattr(sounding, "_cds_available", lambda: False)
+    prof = sounding.era5_profile(33.9, -88.33, "2022-03-30T23:00")
+    assert prof.sizes["height"] == 8 and "era5_surface" not in prof.attrs
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_era5_column_masks_levels_below_the_terrain(monkeypatch, engine):
+    monkeypatch.setattr(sounding, "_era5_fields", _fake_hill_fields)
+    monkeypatch.setattr(sounding, "_cds_available", lambda: False)
+    grid = _grid()  # levels from 200 m to 12 km above sea level
+    bg = sounding.era5_column(grid, engine=engine)
+    below = bg.z < 1002.0
+    assert below.sum() >= 1
+    assert bg["temperature"].sel(z=bg.z[below]).isnull().all()
+    assert bg["u"].sel(z=bg.z[below]).isnull().all()
+    above = bg.sel(z=bg.z[~below])
+    assert above["temperature"].notnull().all()
+    assert bg["u"].isel(z=0).isnull().all()  # 200 m: underground, not extrapolated
+    plain = sounding.era5_column(grid, surface=False, engine=engine)
+    assert plain["temperature"].isel(z=0).notnull().all()  # the earlier behaviour
+    # the freezing level is not affected by the ground
+    np.testing.assert_allclose(bg["freezing_level"], plain["freezing_level"], rtol=1e-3)
+
+
+def test_surface_standardization():
+    raw = _raw_cds_surface(
+        [np.datetime64("2022-03-31T00:00")],
+        np.arange(34.5, 33.24, -0.25),
+        np.arange(-89, -87.74, 0.25),
+    )
+    out = sounding._standardize_era5_surface(raw)
+    assert out["sp"].dims == ("time", "latitude", "longitude")
+    assert out["latitude"][0] < out["latitude"][-1]
+    # the geopotential of a pressure-level file is not a surface field
+    assert (
+        sounding._standardize_era5_surface(
+            _raw_cds(
+                [np.datetime64("2022-03-31T00:00")], [34.0, 33.75], [-89.0, -88.75]
+            )
+        )
+        is None
+    )
+    # a static orography (as in the ARCO-ERA5 store) is repeated for every time
+    store = xr.Dataset(
+        {
+            "surface_pressure": raw["sp"],
+            "geopotential_at_surface": raw["z"].isel(valid_time=0, drop=True),
+        }
+    )
+    out = sounding._standardize_era5_surface(store)
+    assert out["orography"].dims == ("time", "latitude", "longitude")
+
+
+def test_surface_request_failure_warns_and_keeps_the_levels(tmp_path, monkeypatch):
+    monkeypatch.setenv("RADARX_CACHE_DIR", str(tmp_path))
+
+    def fake_retrieve(dataset, request, path):
+        times = [np.datetime64("2022-03-30T23:00"), np.datetime64("2022-03-31T00:00")]
+        if "single-levels" in dataset:
+            raise RuntimeError("dataset not available")
+        return _raw_cds(
+            times, np.arange(34.5, 33.24, -0.25), np.arange(-89.0, -87.74, 0.25)
+        )
+
+    monkeypatch.setattr(sounding, "_cds_retrieve", fake_retrieve)
+    with pytest.warns(RuntimeWarning, match="surface fields could not be read"):
+        prof = sounding.era5_profile(33.9, -88.33, "2022-03-30T23:30", source="cds")
+    assert prof.sizes["height"] == 4

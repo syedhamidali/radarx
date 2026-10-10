@@ -93,6 +93,23 @@ ERA5 (:func:`era5_profile`, :func:`era5_column`):
 Downloads are cached under ``pooch.os_cache("radarx")/soundings`` (or the
 ``RADARX_CACHE_DIR`` environment variable).
 
+Surface layer. The pressure-level fields of ERA5 hold extrapolated values at
+the pressure levels below the ground (at 1000 hPa over a 1500 m plateau).
+Together with the pressure levels, :func:`era5_profile` and
+:func:`era5_column` read the surface pressure, the orography (surface
+geopotential), the 2 m temperature and dew point and the 10 m wind, set the
+levels with a pressure above the surface pressure to NaN and add a surface
+level at the height of the orography plus 2 m with the surface pressure, the 2 m
+temperature and dew point and the 10 m wind (so the wind of 10 m is attached to
+the level at 2 m; a radarx simplification). The orography is converted to a
+geometric height like the geopotential of the levels. The CDS single-level
+dataset and, for ``"gcs"``, the same Zarr store give the fields; if they
+cannot be read a ``RuntimeWarning`` is issued and the columns have the pressure
+levels only. ``surface=False`` restores the earlier behaviour. The dataset
+names of the ``"arco"`` single-level time series
+(``reanalysis-era5-single-levels-timeseries``) and of the single-level
+variables were not checked against the services here.
+
 Computation
 -----------
 
@@ -255,6 +272,7 @@ import io
 import json
 import os
 import re
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -286,6 +304,8 @@ ARCO_ERA5_ZARR = (
 )
 CDS_PRESSURE_LEVELS = "reanalysis-era5-pressure-levels"
 CDS_ARCO_TIMESERIES = "reanalysis-era5-pressure-levels-timeseries"
+CDS_SINGLE_LEVELS = "reanalysis-era5-single-levels"
+CDS_ARCO_SINGLE_LEVELS = "reanalysis-era5-single-levels-timeseries"
 GCS_PAD = 8.0  # degrees cached around a Google ARCO-ERA5 request (radarx choice)
 # the 37 standard ERA5 pressure levels [hPa] of the CDS pressure-level dataset (Copernicus
 # Climate Change Service 2018, doi 10.24381/cds.bd0915c6)
@@ -1589,20 +1609,47 @@ _ERA5_NAMES = {
 }
 
 
-def _standardize_era5(ds):
-    """Rename an ERA5 download to (time, level, latitude, longitude) with ascending axes."""
+# Surface fields read with the pressure levels: names in the ARCO-ERA5 Zarr store
+# and in the CDS single-level files (cfgrib short names; "z" is the surface
+# geopotential there). Standard names: surface pressure (Pa), orography as
+# geopotential (m2 s-2), 2 m temperature and dew point (K), 10 m wind (m s-1).
+_ERA5_SURFACE_NAMES = {
+    "sp": ("sp", "surface_pressure"),
+    "orography": ("geopotential_at_surface", "z"),
+    "t2m": ("t2m", "2m_temperature"),
+    "d2m": ("d2m", "2m_dewpoint_temperature"),
+    "u10": ("u10", "10m_u_component_of_wind"),
+    "v10": ("v10", "10m_v_component_of_wind"),
+}
+_ERA5_SURFACE_VARIABLES = [
+    "surface_pressure",
+    "geopotential",
+    "2m_temperature",
+    "2m_dewpoint_temperature",
+    "10m_u_component_of_wind",
+    "10m_v_component_of_wind",
+]
+_ERA5_GCS_SURFACE = (
+    "surface_pressure",
+    "geopotential_at_surface",
+    "2m_temperature",
+    "2m_dewpoint_temperature",
+    "10m_u_component_of_wind",
+    "10m_v_component_of_wind",
+)
+_LEVEL_DIMS = ("level", "pressure_level", "pressureLevel")
+
+
+def _era5_rename(ds):
     rename = {}
     for name in ("valid_time", "pressure_level", "pressureLevel"):
         if name in ds.dims or name in ds.coords:
             rename[name] = {"valid_time": "time"}.get(name, "level")
-    ds = ds.rename(rename)
-    out = {}
-    for std, keys in _ERA5_NAMES.items():
-        for key in keys:
-            if key in ds:
-                out[std] = ds[key]
-                break
-    ds = xr.Dataset(out)
+    return ds.rename(rename)
+
+
+def _era5_axes(ds, dims):
+    """Horizontal axes ascending, longitudes in -180 ... 180, dimensions in order."""
     for dim in ("latitude", "longitude"):
         if dim not in ds.dims:
             ds = ds.expand_dims(dim)
@@ -1611,20 +1658,92 @@ def _standardize_era5(ds):
     )
     lon = ds["longitude"].values
     ds = ds.assign_coords(longitude=((lon + 180.0) % 360.0) - 180.0)
-    ds = ds.sortby(["latitude", "longitude"]).sortby("level", ascending=False)
-    return ds.transpose("time", "level", "latitude", "longitude")
+    ds = ds.sortby(["latitude", "longitude"])
+    if "level" in ds.dims:
+        ds = ds.sortby("level", ascending=False)
+    return ds.transpose(*dims)
+
+
+def _standardize_era5(ds):
+    """Rename an ERA5 download to (time, level, latitude, longitude) with ascending axes."""
+    ds = _era5_rename(ds)
+    out = {}
+    for std, keys in _ERA5_NAMES.items():
+        for key in keys:
+            if key in ds:
+                out[std] = ds[key]
+                break
+    return _era5_axes(xr.Dataset(out), ("time", "level", "latitude", "longitude"))
+
+
+def _standardize_era5_surface(ds):
+    """
+    The surface fields of an ERA5 download on (time, latitude, longitude), or None.
+
+    Needs the surface pressure and the orography; a static orography is
+    repeated for every time. Variables with a pressure-level dimension (the
+    geopotential of the pressure-level files is also called ``z``) are not
+    surface fields.
+    """
+    ds = _era5_rename(ds)
+    out = {}
+    for std, keys in _ERA5_SURFACE_NAMES.items():
+        for key in keys:
+            if key in ds and not set(ds[key].dims) & set(_LEVEL_DIMS):
+                out[std] = ds[key]
+                break
+    if "sp" not in out or "orography" not in out:
+        return None
+    if "time" in ds.coords:
+        times = ds["time"].values
+        out = {
+            k: v.expand_dims(time=times) if "time" not in v.dims else v
+            for k, v in out.items()
+        }
+    return _era5_axes(xr.Dataset(out), ("time", "latitude", "longitude"))
 
 
 def _cache_key(*parts):
     return hashlib.sha256(repr(parts).encode()).hexdigest()[:16]
 
 
-def _era5_fields(source, box, times, cache=True):
+def _merge_surface(fields, surface):
+    """``fields`` with the surface fields on its horizontal grid."""
+    if surface is None:
+        return fields
+    surface = surface.reindex(
+        latitude=fields["latitude"],
+        longitude=fields["longitude"],
+        method="nearest",
+        tolerance=0.01,
+    ).sel(time=fields["time"], method="nearest")
+    return fields.merge(surface.assign_coords(time=fields["time"]))
+
+
+def _surface_or_warn(retrieve, what):
+    """Run ``retrieve()`` for the surface fields; a failure warns and gives None."""
+    try:
+        return retrieve()
+    except Exception as err:  # noqa: BLE001 - any failure of the service
+        warnings.warn(
+            f"the ERA5 surface fields could not be read ({what}: {err}); the "
+            "columns have no surface layer and levels below ground are not "
+            "masked",
+            RuntimeWarning,
+            stacklevel=4,
+        )
+        return None
+
+
+def _era5_fields(source, box, times, cache=True, surface=True):
     """
     ERA5 pressure-level fields covering ``box`` at ``times``.
 
     Returns an (time, level, latitude, longitude) Dataset with geopotential,
-    temperature, specific_humidity, u, v and omega.
+    temperature, specific_humidity, u, v and omega and, with ``surface``, the
+    (time, latitude, longitude) fields ``sp`` (surface pressure, Pa),
+    ``orography`` (surface geopotential, m2 s-2), ``t2m``, ``d2m`` (K), ``u10``
+    and ``v10`` (m s-1) when the service gives them.
     """
     times = [np.datetime64(t, "s") for t in times]
     if source == "gcs":
@@ -1635,6 +1754,12 @@ def _era5_fields(source, box, times, cache=True):
         parts = []
         for t in times:
             part = _gcs_cached(box, t) if cache else None
+            if (
+                part is not None
+                and surface
+                and "era5_surface_checked" not in part.attrs
+            ):
+                part = None  # a cached region from before the surface fields
             if part is None:
                 region = (
                     max(south - GCS_PAD, -90.0),
@@ -1642,7 +1767,11 @@ def _era5_fields(source, box, times, cache=True):
                     west - GCS_PAD,
                     east + GCS_PAD,
                 )
-                part = _standardize_era5(_era5_gcs(region, [t])).load()
+                raw = _era5_gcs(region, [t])
+                part = _standardize_era5(raw).load()
+                if surface:
+                    part = _merge_surface(part, _standardize_era5_surface(raw))
+                    part.attrs["era5_surface_checked"] = 1
                 if cache:
                     stamp = str(t).replace(":", "").replace("-", "")
                     name = "era5_gcs_{}_{:+.2f}_{:+.2f}_{:+.2f}_{:+.2f}.nc".format(
@@ -1656,7 +1785,12 @@ def _era5_fields(source, box, times, cache=True):
             longitude=slice(west - 1e-6, east + 1e-6),
         )
     else:
-        key = _cache_key(source, [round(b, 3) for b in box], [str(t) for t in times])
+        key = _cache_key(
+            source,
+            [round(b, 3) for b in box],
+            [str(t) for t in times],
+            "surface" if surface else "levels",
+        )
         path = _cache_dir("era5") / f"era5_{source}_{key}.nc"
         if cache and path.exists():
             return xr.load_dataset(path)
@@ -1666,6 +1800,14 @@ def _era5_fields(source, box, times, cache=True):
             else _era5_arco(box, times, path)
         )
         ds = _standardize_era5(raw).load()
+        if surface:
+            fetch = _era5_cds_surface if source == "cds" else _era5_arco_surface
+            sraw = _surface_or_warn(
+                lambda: fetch(box, times, path.with_name(path.stem + "_surface.nc")),
+                source,
+            )
+            if sraw is not None:
+                ds = _merge_surface(ds, _standardize_era5_surface(sraw))
         if cache:
             ds.sel(time=np.array(times, dtype="datetime64[ns]")).to_netcdf(path)
     ds = ds.sel(time=np.array(times, dtype="datetime64[ns]"))
@@ -1696,6 +1838,7 @@ def _era5_gcs(box, times):
         consolidated=True,
     )
     names = [keys[1] for keys in _ERA5_NAMES.values()]
+    names += [n for n in _ERA5_GCS_SURFACE if n in store]
     store = store[names].sel(time=np.array(times, dtype="datetime64[ns]"))
     lat = store["latitude"].values
     lon = store["longitude"].values  # 0 ... 359.75
@@ -1718,22 +1861,34 @@ def _cds_retrieve(dataset, request, path):
     return ds
 
 
-def _era5_cds(box, times, path):
+def _era5_cds_request(box, times, variables, levels=True):
     south, north, west, east = box
     dts = [_dt_from64(t) for t in times]
     request = {
         "product_type": ["reanalysis"],
-        "variable": [keys[1] for keys in _ERA5_NAMES.values()],
+        "variable": variables,
         "year": sorted({f"{d:%Y}" for d in dts}),
         "month": sorted({f"{d:%m}" for d in dts}),
         "day": sorted({f"{d:%d}" for d in dts}),
         "time": sorted({f"{d:%H}:00" for d in dts}),
-        "pressure_level": [str(p) for p in ERA5_LEVELS],
         "area": [north, west, south, east],
         "data_format": "netcdf",
         "download_format": "unarchived",
     }
+    if levels:
+        request["pressure_level"] = [str(p) for p in ERA5_LEVELS]
+    return request
+
+
+def _era5_cds(box, times, path):
+    request = _era5_cds_request(box, times, [keys[1] for keys in _ERA5_NAMES.values()])
     return _cds_retrieve(CDS_PRESSURE_LEVELS, request, path)
+
+
+def _era5_cds_surface(box, times, path):
+    """The surface fields of the hourly ERA5 single-level dataset."""
+    request = _era5_cds_request(box, times, _ERA5_SURFACE_VARIABLES, levels=False)
+    return _cds_retrieve(CDS_SINGLE_LEVELS, request, path)
 
 
 def _era5_arco(box, times, path):
@@ -1754,6 +1909,25 @@ def _era5_arco(box, times, path):
     return _cds_retrieve(CDS_ARCO_TIMESERIES, request, path)
 
 
+def _era5_arco_surface(box, times, path):
+    """The surface fields of the ECMWF ARCO single-level time series."""
+    south, north, west, east = box
+    dts = [_dt_from64(t) for t in times]
+    request = {
+        "variable": _ERA5_SURFACE_VARIABLES,
+        "date": [f"{min(dts):%Y-%m-%d}/{max(dts):%Y-%m-%d}"],
+        "data_format": "netcdf",
+    }
+    if north - south < 0.25 and east - west < 0.25:
+        request["location"] = {
+            "latitude": round(0.5 * (south + north), 4),
+            "longitude": round(0.5 * (west + east), 4),
+        }
+    else:
+        request["area"] = [north, west, south, east]
+    return _cds_retrieve(CDS_ARCO_SINGLE_LEVELS, request, path)
+
+
 def _era5_box(lat, lon, pad):
     lat = np.asarray(lat, dtype=np.float64)
     lon = np.asarray(lon, dtype=np.float64)
@@ -1769,10 +1943,17 @@ def _era5_box(lat, lon, pad):
     return (max(south, -90.0), min(north, 90.0), west, east)
 
 
-def _era5_columns(source, lat, lon, time, time_interpolation, cache, engine, n_threads):
+def _era5_columns(
+    source, lat, lon, time, time_interpolation, cache, engine, n_threads, surface=True
+):
     """
     ERA5 columns at points: geometric heights (npts, nlev) ascending and a dict
     of (npts, nlev) arrays: pressure, temperature, specific_humidity, u, v, w.
+
+    With ``surface`` and the surface fields in the download, levels with a
+    pressure above the surface pressure (below ground) are NaN and a surface
+    level is added at the height of the orography plus 2 m with the surface
+    pressure, the 2 m temperature and dew point and the 10 m wind.
     """
     point = np.size(lat) == 1
     src = _resolve_source(source, point)
@@ -1782,7 +1963,9 @@ def _era5_columns(source, lat, lon, time, time_interpolation, cache, engine, n_t
         box = (float(lat), float(lat), float(lon), float(lon))
     else:
         box = _era5_box(lat, lon, 0.25)
-    fields = _era5_fields(src, box, times, cache=cache)
+    fields = _era5_fields(
+        src, box, times, cache=cache, **({} if surface else {"surface": False})
+    )
     names = ["geopotential", "temperature", "specific_humidity", "u", "v", "omega"]
     level = fields["level"].values.astype(np.float64) * 100.0  # Pa, descending
     flat = fields["latitude"].values.astype(np.float64)
@@ -1790,11 +1973,18 @@ def _era5_columns(source, lat, lon, time, time_interpolation, cache, engine, n_t
     arr = np.stack([fields[n].values for n in names], axis=1).astype(np.float64)
     pres = np.broadcast_to(level[None, None, :, None, None], arr[:, :1].shape)
     arr = np.concatenate([arr, pres], axis=1)  # (ntime, nvar, nlev, nlat, nlon)
+    surface_names = ("sp", "orography", "t2m", "d2m", "u10", "v10")
+    sarr = None
+    if surface and all(n in fields for n in surface_names):
+        sarr = np.stack([fields[n].values for n in surface_names], axis=1)
+        sarr = sarr[:, :, None].astype(np.float64)  # (ntime, 6, 1, nlat, nlon)
     if flat.size == 1:  # single grid point (ARCO location request)
         arr = np.repeat(arr, 2, axis=3)
+        sarr = None if sarr is None else np.repeat(sarr, 2, axis=3)
         flat = np.array([flat[0] - 0.125, flat[0] + 0.125])
     if flon.size == 1:
         arr = np.repeat(arr, 2, axis=4)
+        sarr = None if sarr is None else np.repeat(sarr, 2, axis=4)
         flon = np.array([flon[0] - 0.125, flon[0] + 0.125])
     qlat = np.atleast_1d(np.asarray(lat, dtype=np.float64)).ravel()
     qlon = np.atleast_1d(np.asarray(lon, dtype=np.float64)).ravel()
@@ -1821,6 +2011,26 @@ def _era5_columns(source, lat, lon, time, time_interpolation, cache, engine, n_t
             cols[1:],
         )
     )
+    sfc = None
+    if sarr is not None:
+        sfc = np.asarray(
+            k.bilinear_columns(
+                _f64(sarr),
+                _f64(weights),
+                _f64(flat),
+                _f64(flon),
+                _f64(qlat),
+                _f64(qlon),
+                n_threads=int(n_threads or 0),
+            )
+        )[
+            :, :, 0
+        ]  # (6, npts)
+        sp = sfc[0]
+        orography = _thermo("height", sfc[1], engine=engine, n_threads=n_threads)
+        below = out["pressure"] > sp[:, None]  # levels below the ground
+        for name in list(out):
+            out[name] = np.where(below, np.nan, out[name])
     rho = _thermo(
         "density",
         out["pressure"],
@@ -1830,9 +2040,31 @@ def _era5_columns(source, lat, lon, time, time_interpolation, cache, engine, n_t
         n_threads=n_threads,
     )
     out["w"] = -out.pop("omega") / (rho * G0)
-    order = np.argsort(np.nanmean(z, axis=0))  # ascending height
-    z = z[:, order]
-    out = {k_: v[:, order] for k_, v in out.items()}
+    if sfc is not None:
+        # the surface level: orography + 2 m, surface pressure, 2 m temperature and
+        # dew point, 10 m wind (no vertical velocity)
+        q2 = _thermo(
+            "specific_humidity",
+            _thermo("esat", sfc[3], engine=engine, n_threads=n_threads),
+            sp,
+            engine=engine,
+            n_threads=n_threads,
+        )
+        level = dict(
+            pressure=sp,
+            temperature=sfc[2],
+            specific_humidity=q2,
+            u=sfc[4],
+            v=sfc[5],
+            w=np.full_like(sp, np.nan),
+        )
+        z = np.concatenate([z, (orography + 2.0)[:, None]], axis=1)
+        out = {
+            k_: np.concatenate([v, level[k_][:, None]], axis=1) for k_, v in out.items()
+        }
+    order = np.argsort(z, axis=1, kind="stable")  # ascending height in every column
+    z = np.take_along_axis(z, order, axis=1)
+    out = {k_: np.take_along_axis(v, order, axis=1) for k_, v in out.items()}
     meta = {
         "source": {
             "arco": "ERA5 time series on pressure levels (ECMWF ARCO, Copernicus CDS)",
@@ -1851,6 +2083,14 @@ def _era5_columns(source, lat, lon, time, time_interpolation, cache, engine, n_t
     }
     if src == "arco" and point:
         meta["era5_grid_point"] = f"{flat.mean():.2f}N {flon.mean():.2f}E (nearest)"
+    if sfc is not None:
+        meta["era5_surface"] = (
+            "surface level (orography + 2 m: surface pressure, 2 m temperature and "
+            "dew point, 10 m wind) added; levels below the surface pressure masked"
+        )
+        if point:
+            meta["era5_surface_pressure"] = f"{sp[0] / 100.0:.1f} hPa"
+            meta["era5_orography"] = f"{orography[0]:.1f} m"
     return z, out, meta
 
 
@@ -1862,6 +2102,7 @@ def era5_profile(
     source="auto",
     time_interpolation="linear",
     cache=True,
+    surface=True,
     engine="auto",
     n_threads=None,
 ):
@@ -1885,6 +2126,15 @@ def era5_profile(
         series is 6-hourly.
     cache : bool, optional
         Reuse cached downloads. Default True.
+    surface : bool, optional
+        Also read the surface pressure, the orography, the 2 m temperature and
+        dew point and the 10 m wind, drop the pressure levels below the
+        surface pressure (ERA5 fills them with extrapolated values) and add
+        a surface level at the orography plus 2 m with the 2 m temperature and
+        dew point, the surface pressure and the 10 m wind (the wind of 10 m is
+        attached to the level at 2 m). Default True. If the service does not
+        return the surface fields a ``RuntimeWarning`` is issued and the
+        profile has the pressure levels only.
     engine : {"auto", "compiled", "numpy"}, optional
         Kernel implementation.
     n_threads : int, optional
@@ -1906,7 +2156,15 @@ def era5_profile(
     https://doi.org/10.1002/qj.3803
     """
     z, cols, meta = _era5_columns(
-        source, latitude, longitude, time, time_interpolation, cache, engine, n_threads
+        source,
+        latitude,
+        longitude,
+        time,
+        time_interpolation,
+        cache,
+        engine,
+        n_threads,
+        surface,
     )
     t = _to_datetime64(time)
     meta.update(
@@ -1914,15 +2172,16 @@ def era5_profile(
         station_name="ERA5",
         launch_time=str(t),
     )
+    keep = np.isfinite(cols["temperature"][0])  # not below the ground
     return _profile_dataset(
-        height=z[0],
-        pressure=cols["pressure"][0],
+        height=z[0][keep],
+        pressure=cols["pressure"][0][keep],
         geopotential_height=None,
-        temperature=cols["temperature"][0],
-        specific_humidity=cols["specific_humidity"][0],
-        u=cols["u"][0],
-        v=cols["v"][0],
-        w=cols["w"][0],
+        temperature=cols["temperature"][0][keep],
+        specific_humidity=cols["specific_humidity"][0][keep],
+        u=cols["u"][0][keep],
+        v=cols["v"][0][keep],
+        w=cols["w"][0][keep],
         time=t,
         latitude=latitude,
         longitude=longitude,
@@ -2433,6 +2692,7 @@ def era5_column(
     source="auto",
     time_interpolation="linear",
     cache=True,
+    surface=True,
     engine="auto",
     n_threads=None,
 ):
@@ -2458,6 +2718,12 @@ def era5_column(
         Time interpolation. Default ``"linear"``.
     cache : bool, optional
         Reuse cached downloads. Default True.
+    surface : bool, optional
+        Mask the pressure levels below the ground and add the surface level
+        (orography plus 2 m, surface pressure, 2 m temperature and dew point,
+        10 m wind) to every column before the interpolation to the grid
+        levels; see :func:`era5_profile`. Grid levels below the surface level
+        are then NaN. Default True.
     engine : {"auto", "compiled", "numpy"}, optional
         Kernel implementation.
     n_threads : int, optional
@@ -2494,6 +2760,7 @@ def era5_column(
         cache,
         engine,
         n_threads,
+        surface,
     )
     meta["valid_time"] = str(_to_datetime64(time))
     return _background(z, cols, grid, meta, engine, n_threads)
