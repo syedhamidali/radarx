@@ -900,6 +900,20 @@
   "pages": "2238-2255",
   "doi": "10.1175/2008JAMC1732.1"
  },
+ "10.1175/2008JAMC1753.1": {
+  "authors": [
+   "Giangrande, S. E.",
+   "Ryzhkov, A. V."
+  ],
+  "year": 2008,
+  "title": "Estimation of Rainfall Based on the Results of Polarimetric Echo Classification",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology and Climatology",
+  "volume": "47",
+  "issue": "9",
+  "pages": "2445-2462",
+  "doi": "10.1175/2008JAMC1753.1"
+ },
  "10.1175/2008JAMC2026.1": {
   "authors": [
    "Cao, Q.",
@@ -1180,6 +1194,21 @@
   "pages": "E1768-E1799",
   "doi": "10.1175/BAMS-D-22-0064.1"
  },
+ "10.1175/JAM2213.1": {
+  "authors": [
+   "Ryzhkov, A. V.",
+   "Giangrande, S. E.",
+   "Schuur, T. J."
+  ],
+  "year": 2005,
+  "title": "Rainfall Estimation with a Polarimetric Prototype of WSR-88D",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology",
+  "volume": "44",
+  "issue": "4",
+  "pages": "502-515",
+  "doi": "10.1175/JAM2213.1"
+ },
  "10.1175/JAMC-D-10-05024.1": {
   "authors": [
    "Vulpiani, G.",
@@ -1376,6 +1405,22 @@
   "issue": "10",
   "pages": "2266-2280",
   "doi": "10.1175/JTECH-D-13-00036.1"
+ },
+ "10.1175/JTECH-D-13-00038.1": {
+  "authors": [
+   "Ryzhkov, A.",
+   "Diederich, M.",
+   "Zhang, P.",
+   "Simmer, C."
+  ],
+  "year": 2014,
+  "title": "Potential Utilization of Specific Attenuation for Rainfall Estimation, Mitigation of Partial Beam Blockage, and Radar Networking",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "31",
+  "issue": "3",
+  "pages": "599-619",
+  "doi": "10.1175/JTECH-D-13-00038.1"
  },
  "10.1175/JTECH-D-13-00119.1": {
   "authors": [
