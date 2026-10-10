@@ -275,9 +275,12 @@ def _bin_sweep_numpy(
     r = rng[gate]
     a, e = np.radians(az[ray]), np.radians(el[ray])
     saz, caz, sel, cel = np.sin(a), np.cos(a), np.sin(e), np.cos(e)
-    hgt = np.sqrt(r * r + reff * reff + 2.0 * r * reff * sel) - reff
+    # site altitude in the Earth radius, as in xradar and radarx.fundamentals.geometry
+    ra = reff + alt0
+    bd = np.sqrt(r * r + ra * ra + 2.0 * r * ra * sel)
+    hgt = bd - ra
     hm = hgt + alt0
-    s = reff * np.arcsin(r * cel / (reff + hgt))
+    s = reff * np.arcsin(r * cel / bd)
     ok = (hm >= edges[0]) & (hm < edges[-1]) & (s > min_ground)
     ray, gate, r, saz, caz, e, hgt, hm, s = (
         x[ok] for x in (ray, gate, r, saz, caz, e, hgt, hm, s)

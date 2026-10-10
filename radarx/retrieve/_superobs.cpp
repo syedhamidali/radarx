@@ -221,10 +221,13 @@ Table sum_block(int64_t r0, int64_t r1, const double* az, const double* el, cons
             if (rrow && std::isfinite(rrow[g]) && rrow[g] < rho_min) zok = vok = false;
             if (!clear && !zok && !vok) continue;
 
-            const double hgt = std::sqrt(r * r + reff * reff + 2.0 * r * reff * sel) - reff;
+            // site altitude in the Earth radius, as in xradar and radarx.fundamentals.geometry
+            const double ra = reff + alt0;
+            const double bd = std::sqrt(r * r + ra * ra + 2.0 * r * ra * sel);
+            const double hgt = bd - ra;
             const double hm = hgt + alt0;
             if (!(hm >= edges[0] && hm < edges[nedge - 1])) continue;
-            const double s = reff * std::asin(r * cel / (reff + hgt));
+            const double s = reff * std::asin(r * cel / bd);
             if (!(s > min_ground)) continue;
             const int64_t level = (std::upper_bound(edges, edges + nedge, hm) - edges) - 1;
 

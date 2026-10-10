@@ -126,7 +126,7 @@ def oracle_boxes(ds, box, edges, max_range=160e3, min_range=3000.0, clear=False)
     v = ds.VRADH.values
     v = np.where(np.abs(v) > 40, np.nan, v)
     h = beam_center_height(r, el, float(ds.altitude))
-    s = ground_range(r, el)
+    s = ground_range(r, el, radar_height=float(ds.altitude))
     ok = (r <= max_range) & (s > min_range) & (h >= edges[0]) & (h < edges[-1])
     ok &= clear | np.isfinite(z) | np.isfinite(v)
     x, y = s * np.sin(np.radians(az)), s * np.cos(np.radians(az))
@@ -307,7 +307,7 @@ def test_positions_and_unit_vector(engine):
     )
     r = ds.range.values
     h = beam_center_height(r, el, ALT0)
-    s = ground_range(r, el)
+    s = ground_range(r, el, radar_height=ALT0)
     lat, lon = destination(LAT0, LON0, az, s)
     order = np.argsort(so.range.values)
     np.testing.assert_allclose(so.range.values[order], r, rtol=1e-12)
@@ -318,9 +318,9 @@ def test_positions_and_unit_vector(engine):
     # direction of the ray at the gate from vectors: a straight ray in the 4/3 Earth
     reff = EFFECTIVE_RADIUS_4_3
     for k, gate in enumerate(order):
-        # plane of the ray: x along the ground at the radar, y up; radar at (0, reff)
+        # plane of the ray: x along the ground at the radar, y up; radar at (0, reff + altitude)
         direction = np.array([np.cos(np.radians(el)), np.sin(np.radians(el))])
-        point = np.array([0.0, reff]) + r[k] * direction
+        point = np.array([0.0, reff + ALT0]) + r[k] * direction
         up = point / np.hypot(*point)
         elev_local = np.arcsin(direction @ up)
         # horizontal direction on the sphere: tangent of the great circle (true Earth)
