@@ -725,3 +725,78 @@ def test_create_cappi_height_window_no_2d_fields_raises():
     tree = DataTree.from_dict({"sweep_0": ds_1d})
     with pytest.raises(ValueError, match="No 2D azimuth/range fields"):
         _create_cappi_height_window_composite(tree, height=150.0)
+
+
+def _smooth_velocity_sweep(seed=0):
+    rng = np.random.default_rng(seed)
+    az = np.arange(360.0)
+    r = 250.0 * np.arange(1, 801)
+    A, R = np.meshgrid(np.radians(az), r, indexing="ij")
+    vel = 15.0 * np.cos(A - 1.0) * (R / 200e3 + 0.3) + rng.normal(0, 0.5, A.shape)
+    return xr.Dataset(
+        {
+            "VRADH": (("azimuth", "range"), vel),
+            "DBZH": (("azimuth", "range"), np.full(A.shape, 30.0)),
+        },
+        coords={"azimuth": az, "range": r},
+    )
+
+
+def test_velocity_texture_filter_keeps_clean_velocity():
+    """The default limit is in m/s: smooth velocity is not removed."""
+    from radarx.retrieve.cappi import _apply_velocity_texture_gate_filter as gate_filter
+
+    ds = _smooth_velocity_sweep()
+    out = gate_filter(ds, "VRADH", "DBZH")
+    assert np.isfinite(out["VRADH"].values).mean() > 0.99
+
+
+def test_velocity_texture_filter_removes_garbage():
+    from radarx.retrieve.cappi import _apply_velocity_texture_gate_filter as gate_filter
+
+    ds = _smooth_velocity_sweep()
+    rng = np.random.default_rng(1)
+    bad = rng.random(ds["VRADH"].shape) < 0.5
+    ds["VRADH"] = ds["VRADH"].copy(
+        data=np.where(bad, rng.uniform(-25, 25, bad.shape), ds["VRADH"].values)
+    )
+    out = gate_filter(ds, "VRADH", "DBZH")
+    kept = np.isfinite(out["VRADH"].values)
+    assert kept[bad].mean() < 0.1
+    # the limit can be set (m/s)
+    loose = gate_filter(ds, "VRADH", "DBZH", texture_threshold=14.0)
+    assert np.isfinite(loose["VRADH"].values)[bad].mean() > 0.5
+
+
+def test_create_cappi_texture_threshold_is_passed_on(synthetic_volume):
+    kw = dict(
+        height=150.0,
+        fields=["DBZH"],
+        method="height_window_composite",
+        apply_filter=True,
+    )
+    default = create_cappi(synthetic_volume, **kw)
+    strict = create_cappi(synthetic_volume, texture_threshold=0.0, **kw)
+    assert np.isfinite(default["DBZH"].values).any()
+    assert not np.isfinite(strict["DBZH"].values).any()
+
+
+@pytest.mark.parametrize("method", ["cartesian_idw", "polar_vertical_interpolation"])
+def test_create_cappi_linear_units(synthetic_volume, method):
+    """Averaging in linear units gives a higher dBZ than averaging the dB."""
+    kw = dict(height=200.0, method=method, fields=["DBZH"])
+    in_db = create_cappi(synthetic_volume, **kw)
+    lin = create_cappi(synthetic_volume, linear_units=True, **kw)
+    a, b = in_db["DBZH"].values, lin["DBZH"].values
+    both = np.isfinite(a) & np.isfinite(b)
+    assert both.any()
+    assert np.all(b[both] >= a[both] - 1e-9)
+    assert (b[both] - a[both]).max() > 0.1
+    assert lin.attrs["interpolated_in_linear_units"] == "DBZH"
+    assert in_db.attrs["interpolated_in_linear_units"] == ""
+
+
+@pytest.mark.parametrize("method", ["cartesian_idw", "polar_vertical_interpolation"])
+def test_create_cappi_warns_for_velocity(synthetic_volume, method):
+    with pytest.warns(UserWarning, match="VRADH"):
+        create_cappi(synthetic_volume, height=200.0, method=method)
