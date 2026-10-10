@@ -33,6 +33,7 @@ _SECTIONS = {
         "hid",
         "dsd",
         "dsd_bayes",
+        "qpe",
         "disdrometer",
         "evaporation",
     ],
