@@ -183,6 +183,7 @@ __all__ = ["hid", "hid_classes"]
 import numpy as np
 import xarray as xr
 
+from .._fields import align_like
 from .._provenance import provenance
 from .._registry import accessor_method
 
@@ -901,6 +902,7 @@ def _profile_dataset(profile):
 
 def _on(arr, da):
     """``arr`` on the dimensions (and order) of ``da``."""
+    arr = align_like(arr, da, "an input field")
     if set(arr.dims) == set(da.dims) and arr.shape and arr.sizes == da.sizes:
         return arr.transpose(*da.dims)
     return arr.broadcast_like(da).transpose(*da.dims)

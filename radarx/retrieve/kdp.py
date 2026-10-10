@@ -154,6 +154,7 @@ __all__ = ["estimate_kdp"]
 import numpy as np
 import xarray as xr
 
+from .._fields import as_sweep
 from .._provenance import provenance
 from ._products import product_tree
 
@@ -831,9 +832,10 @@ def estimate_kdp(
     Parameters
     ----------
     obj : xarray.Dataset or xarray.DataTree
-        A sweep on ``(azimuth, range)`` (or ``(elevation, range)``), or a
-        volume with ``sweep_*`` groups, e.g. from xradar. Range gates must be
-        uniformly spaced; ``range`` is in metres.
+        A sweep on ``(azimuth, range)`` (or ``(elevation, range)``), a single
+        sweep node (``dtree["sweep_0"]``), or a volume with ``sweep_*`` groups,
+        e.g. from xradar. Range gates must be uniformly spaced; ``range`` is
+        in metres.
     phidp, rhohv, dbzh : str, optional
         Names of the measured (raw) differential phase (degrees), the
         copolar correlation coefficient and the reflectivity (dBZ). By
@@ -1038,6 +1040,7 @@ def estimate_kdp(
         def run(datasets):
             return _run(datasets, fields, params, n_threads, use_compiled)
 
+    obj = as_sweep(obj)
     if isinstance(obj, xr.Dataset):
         return run([obj])[0]
 

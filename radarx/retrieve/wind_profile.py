@@ -113,6 +113,7 @@ __all__ = [
 import numpy as np
 import xarray as xr
 
+from .._fields import VELOCITY, as_sweep
 from .._provenance import provenance
 from .._registry import accessor_method
 from .coldpool import _columns, _f64, _height_of, _kernel, _per_column, _threads
@@ -526,7 +527,7 @@ def storm_relative_helicity(
 # VAD
 # --------------------------------------------------------------------------
 
-_VELOCITY_NAMES = ("VRADH", "VRADV", "VELOCITY", "velocity", "VEL")
+_VELOCITY_NAMES = VELOCITY
 
 
 def _sweep_rings(ds, velocity, min_elevation, max_elevation, max_range):
@@ -590,7 +591,8 @@ def vad_profile(
     Parameters
     ----------
     obj : xarray.Dataset or xarray.DataTree
-        A sweep (``azimuth``, ``range``, ``elevation``, ``altitude``) or a
+        A sweep (``azimuth``, ``range``, ``elevation``, ``altitude``), a
+        single sweep node (``dtree["sweep_0"]``) or a
         volume with ``sweep_*`` groups (xradar layout). The velocities must be
         dealiased (e.g. :func:`radarx.retrieve.dealias_velocity`) and
         no-data codes masked; sweeps without the velocity field are skipped.
@@ -635,6 +637,7 @@ def vad_profile(
            *J. Appl. Meteor.*, **7** (1), 105-113,
            https://doi.org/10.1175/1520-0450(1968)007<0105:TDOKPO>2.0.CO;2
     """
+    obj = as_sweep(obj)
     if isinstance(obj, xr.Dataset):
         datasets = [obj]
         site = obj

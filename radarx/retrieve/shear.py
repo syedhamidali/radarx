@@ -60,6 +60,7 @@ __doc__ = __doc__.format("\n   ".join(__all__))
 import numpy as np
 import xarray as xr
 
+from .._fields import VELOCITY, as_sweep, find_field
 from .._provenance import provenance
 from ._products import product_tree
 
@@ -290,7 +291,7 @@ def _llsd_sweeps(
 )
 def llsd(
     obj,
-    field="VRADH",
+    field=None,
     window=(750.0, 2500.0),
     *,
     weights="uniform",
@@ -306,10 +307,13 @@ def llsd(
     ----------
     obj : xarray.Dataset or xarray.DataTree
         A PPI sweep with ``azimuth`` and ``range`` coordinates (e.g. from
-        xradar), or a volume whose ``sweep_*`` nodes are processed one by one.
+        xradar), a single sweep node of a volume (``dtree["sweep_0"]``), or a
+        volume whose ``sweep_*`` nodes are processed one by one.
     field : str, optional
-        Radial velocity field in m s⁻¹. Default ``"VRADH"``. Velocities must be
-        dealiased (or free of aliasing); folds produce spurious shear.
+        Radial velocity field in m s⁻¹. Default: the first of ``VRADH``,
+        ``VRAD``, ``VRADV``, ``VEL``, ``VELOCITY``, ``velocity`` that the
+        sweep holds. Velocities must be dealiased (or free of aliasing); folds
+        produce spurious shear.
     window : tuple of float, optional
         Window size ``(range_m, azimuth_m)`` in metres: its length along the
         beam and its arc length across it. Default ``(750, 2500)``. The window
@@ -387,6 +391,8 @@ def llsd(
         "n_threads": n_threads,
         "engine": engine,
     }
+    obj = as_sweep(obj)
+    field = find_field(obj, VELOCITY, field)
     if isinstance(obj, xr.Dataset):
         return _llsd_sweeps([obj], field, **options)[0]
     if hasattr(obj, "children"):  # DataTree: all sweeps in one kernel call
@@ -412,7 +418,7 @@ llsd.__doc__ = llsd.__doc__.replace("{references}", _REFERENCES)
 @provenance(
     "Azimuthal shear by LLSD (Smith and Elmore 2004)", extra_refs=("smith-elmore-2004",)
 )
-def azimuthal_shear(obj, field="VRADH", window=(750.0, 2500.0), **kwargs):
+def azimuthal_shear(obj, field=None, window=(750.0, 2500.0), **kwargs):
     """
     Azimuthal shear (s⁻¹) of the radial velocity by LLSD.
 
@@ -441,7 +447,7 @@ def azimuthal_shear(obj, field="VRADH", window=(750.0, 2500.0), **kwargs):
     "Radial divergence by LLSD (Smith and Elmore 2004)",
     extra_refs=("smith-elmore-2004",),
 )
-def radial_divergence(obj, field="VRADH", window=(750.0, 2500.0), **kwargs):
+def radial_divergence(obj, field=None, window=(750.0, 2500.0), **kwargs):
     """
     Radial divergence (s⁻¹) of the radial velocity by LLSD.
 
