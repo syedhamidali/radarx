@@ -1221,3 +1221,28 @@ def test_si_units_enforced(engine):
     # NaN-only and SI input pass
     assert np.isnan(float(sounding.saturation_vapor_pressure(np.nan, engine=engine)))
     assert float(sounding.saturation_vapor_pressure(293.15, engine=engine)) > 2000
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_masked_arrays_are_missing_not_fill_values(engine):
+    # netCDF4 returns masked arrays; the data under the mask (1e20, -9999) must
+    # not enter the result (MetPy #361, #1496, #1516, #973)
+    t = np.ma.masked_array([293.15, 1e20, 280.0], mask=[0, 1, 0])
+    es = sounding.saturation_vapor_pressure(t, engine=engine).values
+    assert np.isnan(es[1]) and np.all(np.isfinite(es[[0, 2]]))
+    p = np.ma.masked_array([1e5, 1e5, 9e4], mask=[0, 0, 0])
+    td = np.ma.masked_array([283.15, -9999.0, 270.0], mask=[0, 1, 0])
+    tw = sounding.wet_bulb_temperature(
+        p, np.array([293.15, 293.15, 280.0]), td, engine=engine
+    ).values
+    assert np.isnan(tw[1]) and 280.0 > tw[2] > 270.0
+    rho = sounding.air_density(
+        np.ma.masked_array([1e5, 1e5], mask=[0, 1]), 290.0, 0.01, engine=engine
+    ).values
+    assert np.isfinite(rho[0]) and np.isnan(rho[1])
+    heights = np.ma.masked_array([500.0, 1e20], mask=[0, 1])
+    out = sounding.interpolate_profile(
+        synthetic_profile(), heights, ["temperature"], engine=engine
+    )
+    assert np.isfinite(float(out["temperature"][0]))
+    assert np.isnan(float(out["temperature"][1]))

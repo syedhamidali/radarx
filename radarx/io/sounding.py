@@ -469,9 +469,22 @@ def _check_si(op, arrays):
             )
 
 
+def _unmask(a):
+    """Masked arrays (netCDF4, MaskedArray) with NaN for the masked values.
+
+    ``np.asarray`` would drop the mask and use the data under it (a fill value
+    such as 1e20 or -9999) as if it were a measurement.
+    """
+    if isinstance(a, np.ma.MaskedArray):
+        return np.ma.filled(a.astype(np.float64), np.nan)
+    return a
+
+
 def _thermo(op, *arrays, engine="auto", n_threads=None):
     """Run an elementwise kernel on broadcast NumPy arrays, keeping the shape."""
-    arrays = np.broadcast_arrays(*(np.asarray(a, dtype=np.float64) for a in arrays))
+    arrays = np.broadcast_arrays(
+        *(np.asarray(_unmask(a), dtype=np.float64) for a in arrays)
+    )
     _check_si(op, arrays)
     shape = arrays[0].shape
     k = _kernel(engine)
@@ -482,7 +495,8 @@ def _thermo(op, *arrays, engine="auto", n_threads=None):
 def _as_dataarray(*args):
     """xarray-aligned DataArrays of the inputs (scalars and arrays allowed)."""
     das = [
-        a if isinstance(a, xr.DataArray) else xr.DataArray(np.asarray(a)) for a in args
+        a if isinstance(a, xr.DataArray) else xr.DataArray(np.asarray(_unmask(a)))
+        for a in args
     ]
     return xr.broadcast(*das)
 
@@ -2058,7 +2072,7 @@ def interpolate_profile(
     if isinstance(heights, xr.Dataset):
         heights = heights["z"]
     if not isinstance(heights, xr.DataArray):
-        heights = xr.DataArray(np.asarray(heights, dtype=np.float64))
+        heights = xr.DataArray(np.asarray(_unmask(heights), dtype=np.float64))
     if variables is None:
         variables = [
             n
