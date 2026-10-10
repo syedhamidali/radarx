@@ -32,7 +32,7 @@ multi-radar steps.
 | 2 | non-meteorological echo removed | `dtree.radarx.echo_mask`, `apply_mask` |
 | 3 | environment: ERA5 profile and radiosonde, 0 °C height, humidity and wind-profile parameters | `dtree.radarx.sounding`, `read_sounding`, `bulk_shear` |
 | 4 | dealiased Doppler velocity, VAD wind profile | `dtree.radarx.dealias`, `vad_profile` |
-| 5 | processed ΦDP and KDP | `dtree.radarx.kdp` |
+| 5 | processed ΦDP and KDP, attenuation correction | `dtree.radarx.kdp`, `correct_attenuation` |
 | 6 | hydrometeor classes | `dtree.radarx.hid` |
 | 7 | rain drop size distribution and rain rate, with the Bayesian posterior | `ds.radarx.dsd`, `dsd_bayesian` |
 | 8 | QVP time series and melting layer | `qvp_timeseries`, `melting_layer` |
@@ -106,9 +106,11 @@ from radarx.io.aws_data import download_file
 from radarx.retrieve import (
     advect,
     apply_mask,
+    attenuation_coefficients,
     azimuthal_shear,
     bulk_shear,
     bunkers_storm_motion,
+    correct_attenuation,
     create_cappi,
     dealias_velocity,
     dsd_bayesian,
@@ -600,6 +602,43 @@ offers several methods (`method="hubbert"` is the default; see the
 sweep_in = volumes[1]["sweep_0"].to_dataset()
 kdp_fn = estimate_kdp(sweep_in, phidp="PHIDP", rhohv="RHOHV", dbzh="DBZH")
 print("same KDP as the accessor:", bool(np.allclose(kdp_fn.KDP, sweep_in.KDP, equal_nan=True)))
+```
+
+### Attenuation correction
+
+Rain attenuates the signal, at S band a little: the two-way attenuation is
+$\alpha\,\Delta\Phi_{DP}$ with $\alpha=0.016$ dB per degree
+(Bringi et al. 1990), so 2.4 dB for a phase of 150° and up to 6 dB for the largest spans of this
+case. `correct_attenuation`
+adds the path attenuation to $Z_H$ and the differential attenuation to $Z_{DR}$
+along every ray, from the processed phase of the step above, with the constrained
+ZPHI solution of Testud et al. (2000) or the linear relation (`method="linear"`).
+The coefficients depend on the band (`attenuation_coefficients`) and can be set.
+The [attenuation notebook](Attenuation_Correction) shows the method on forward-modelled rain at S, C and X
+band and on a C-band volume.
+
+```{code-cell} ipython3
+with timed("5b. Attenuation correction"):
+    att = correct_attenuation(surv, band="S")
+    att_vol = volumes[1].radarx.correct_attenuation(band="S")  # the sweeps of the volume
+att_acc = surv.radarx.correct_attenuation(band="S")  # and the accessor of a sweep
+print("accessor agrees:", bool(att_acc.PIA.equals(att.PIA)),
+      "| sweeps corrected:", list(att_vol.children),
+      "| S band:", attenuation_coefficients("S"))
+print(f"largest path attenuation {float(att.PIA.max()):.1f} dB, largest differential attenuation "
+      f"{float(att.PIDA.max()):.2f} dB")
+fig, axes = plt.subplots(1, 3, figsize=(14, 4.4), sharey=True, layout="constrained")
+panels = [
+    (att.PIA, "path attenuation PIA (dB)", dict(cmap="magma_r", vmin=0, vmax=6)),
+    (att.PIDA, "differential attenuation PIDA (dB)", dict(cmap="magma_r", vmin=0, vmax=1.2)),
+    (att.DBZH_corrected - surv.DBZH, "$Z_H$ corrected minus measured (dB)", dict(cmap="magma_r", vmin=0, vmax=6)),
+]
+for ax, (da, label, style) in zip(axes, panels):
+    pm = ppi(ax, surv.assign(field=da), "field", extent=150, **style)
+    fig.colorbar(pm, ax=ax, label=label, shrink=0.85)
+axes[0].set_ylabel("north of KGWX (km)")
+fig.suptitle("Rain attenuation of the KGWX 0.5° cut, 00:00 UTC")
+plt.show()
 ```
 
 ## 6. Hydrometeor classification
@@ -1604,6 +1643,7 @@ notebooks or from this index.
 | `estimate_motion` | `radarx.retrieve.advection` | [core](Radar_Workflow): 11. Storm motion, common analysis time and time interpolation |
 | `interpolate_time` | `radarx.retrieve.advection` | [core](Radar_Workflow): 11. Storm motion, common analysis time and time interpolation |
 | `biological_echo` | `radarx.retrieve.biology` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
+| `correct_attenuation` | `radarx.retrieve.attenuation` | [core](Radar_Workflow): 5. ΦDP processing and KDP |
 | `create_cappi` | `radarx.retrieve.cappi` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `baroclinic_generation` | `radarx.retrieve.coldpool` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `buoyancy` | `radarx.retrieve.coldpool` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
@@ -1660,6 +1700,7 @@ notebooks or from this index.
 | `size_sorting` | `radarx.retrieve.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `surface_dsd` | `radarx.retrieve.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `trajectory_matched_times` | `radarx.retrieve.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
+| `attenuation_coefficients` | `radarx.retrieve.attenuation` | [core](Radar_Workflow): 5. ΦDP processing and KDP |
 | `azimuthal_shear` | `radarx.retrieve.shear` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `llsd` | `radarx.retrieve.shear` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `radial_divergence` | `radarx.retrieve.shear` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
@@ -1710,6 +1751,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.bunkers_storm_motion` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
 | `.radarx.cluster_flashes` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `.radarx.cold_pool_intensity` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
+| `.radarx.correct_attenuation` | [core](Radar_Workflow): 5. ΦDP processing and KDP |
 | `.radarx.create_cappi` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `.radarx.dealias` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
 | `.radarx.diabatic_lagrangian` | [part 2](Radar_Workflow_Advanced): 9. Diabatic Lagrangian analysis |
