@@ -458,15 +458,16 @@ def _radars(obj):
 
 
 def _sweep_arrays(ds, dbz, vel, rho, use_rho):
-    """Contiguous float64 arrays of a sweep; an empty array for a missing field."""
-    dbz_name = dbz if dbz is not None else _first(ds, _DBZ_NAMES)
-    vel_name = vel if vel is not None else _first(ds, _VEL_NAMES)
-    rho_name = None
-    if use_rho:
-        rho_name = rho if rho is not None else _first(ds, _RHO_NAMES)
-    for given, name in ((dbz, dbz_name), (vel, vel_name), (rho, rho_name)):
-        if given is not None and name not in ds:
-            raise KeyError(f"{name!r} is not in the sweep")
+    """Contiguous float64 arrays of a sweep; an empty array for a field the sweep lacks."""
+
+    def pick(given, names):
+        if given is not None:
+            return given if given in ds else None
+        return _first(ds, names)
+
+    dbz_name = pick(dbz, _DBZ_NAMES)
+    vel_name = pick(vel, _VEL_NAMES)
+    rho_name = pick(rho, _RHO_NAMES) if use_rho else None
     ref = dbz_name or vel_name
     if ref is None:
         return None
@@ -562,6 +563,9 @@ def _merge(parts):
 def _radar_sums(
     radar, dbz, vel, rho, rho_min, geometry, edges, clear, vmax, target, use, n_threads
 ):
+    for given in (dbz, vel, rho if rho_min is not None else None):
+        if given is not None and not any(given in ds for ds in radar.sweeps):
+            raise KeyError(f"{given!r} is not in any sweep of {radar.name!r}")
     parts, used = [], 0
     for ds in radar.sweeps:
         arrays = _sweep_arrays(ds, dbz, vel, rho, rho_min is not None)

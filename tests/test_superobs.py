@@ -890,3 +890,23 @@ def test_real_nexrad_volume():
         np.testing.assert_allclose(
             so.velocity, ref.velocity, rtol=1e-11, equal_nan=True
         )
+
+
+def test_named_fields_apply_to_the_sweeps_that_have_them():
+    tree = volume(elevations=(0.5, 1.5))
+    first = tree["sweep_0"].to_dataset().rename(VRADH="VEL_FIXED")
+    tree["sweep_0"] = xr.DataTree(first)
+    so = superobs(tree, 8.0, vel="VEL_FIXED", missing="gap", min_gates=1, min_valid=1)
+    only = superobs(
+        tree["sweep_0"].to_dataset(),
+        8.0,
+        vel="VEL_FIXED",
+        missing="gap",
+        min_gates=1,
+        min_valid=1,
+    )
+    assert so.velocity_count.sum() == only.velocity_count.sum()
+    with pytest.raises(KeyError, match="NOPE"):
+        superobs(tree, 8.0, vel="NOPE")
+    with pytest.raises(KeyError, match="NOPE"):
+        superobs(tree, 8.0, rho_min=0.8, rho="NOPE")
