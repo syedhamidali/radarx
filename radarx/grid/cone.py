@@ -57,6 +57,7 @@ __doc__ = __doc__.format("\n   ".join(__all__))
 import numpy as np
 import xarray as xr
 
+from .._fields import node_dataset
 from .._provenance import provenance
 
 try:
@@ -121,10 +122,7 @@ def _sweep_names(dtree):
 
 def _sweep_dataset(dtree, name):
     """Sweep node as a Dataset including the radar site coordinates."""
-    try:
-        return dtree[name].to_dataset(inherit="all_coords")
-    except (TypeError, ValueError):  # xarray without "all_coords"
-        return dtree[name].to_dataset()
+    return node_dataset(dtree[name])
 
 
 def _select_sweeps(sweeps, variable, tolerance=0.1):

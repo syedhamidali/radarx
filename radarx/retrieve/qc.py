@@ -127,6 +127,7 @@ __all__ = ["echo_mask", "apply_mask"]
 import numpy as np
 import xarray as xr
 
+from .._fields import align_like, as_sweep
 from .._provenance import provenance
 from .dealias import _ray_links, _sweep_mapping
 from .kdp import _DBZH_NAMES, _PHIDP_NAMES, _RHOHV_NAMES, _find, _gate_spacing
@@ -710,9 +711,10 @@ def echo_mask(
     Parameters
     ----------
     obj : xarray.Dataset or xarray.DataTree
-        A sweep on ``(azimuth, range)`` (or ``(elevation, range)``), or a
-        volume with ``sweep_*`` groups, e.g. from xradar. Range gates must be
-        uniformly spaced; ``range`` is in metres.
+        A sweep on ``(azimuth, range)`` (or ``(elevation, range)``), a single
+        sweep node (``dtree["sweep_0"]``), or a volume with ``sweep_*`` groups,
+        e.g. from xradar. Range gates must be uniformly spaced; ``range`` is
+        in metres.
     dbzh, zdr, rhohv, phidp, snr : str, optional
         Field names of the reflectivity (dBZ, required), differential
         reflectivity (dB), copolar correlation coefficient, differential
@@ -940,6 +942,7 @@ def echo_mask(
     lim, wts = _options(limits, weights)
     use_compiled = _use_compiled(engine)
     fields = (dbzh, zdr, rhohv, phidp, snr)
+    obj = as_sweep(obj)
 
     def params(nexrad):
         return {
@@ -996,7 +999,7 @@ def _keep_array(mask, da, name):
     dims = [d for d in da.dims if d in mask.dims]
     if mask.ndim != 2 or len(dims) != 2:
         raise ValueError(f"the mask does not match the dimensions of {name!r}")
-    keep = mask.transpose(*dims)
+    keep = align_like(mask, da, f"the mask of {name!r}").transpose(*dims)
     if keep.shape != tuple(da.sizes[d] for d in dims):
         raise ValueError(f"the mask does not match the shape of {name!r}")
     return keep.values.astype(bool)
@@ -1039,7 +1042,8 @@ def apply_mask(obj, mask=None, fields=None, *, nodata="auto", **kwargs):
     Parameters
     ----------
     obj : xarray.Dataset or xarray.DataTree
-        A sweep or a volume with ``sweep_*`` groups.
+        A sweep, a single sweep node (``dtree["sweep_0"]``) or a volume with
+        ``sweep_*`` groups.
     mask : xarray.Dataset, xarray.DataTree or xarray.DataArray, optional
         The output of :func:`echo_mask` for ``obj`` (or its boolean
         ``METEO_MASK``, True for gates to keep). By default it is computed
@@ -1078,6 +1082,10 @@ def apply_mask(obj, mask=None, fields=None, *, nodata="auto", **kwargs):
     """
     if nodata not in ("auto", "nexrad", None):
         raise ValueError(f"nodata must be 'auto', 'nexrad' or None, not {nodata!r}")
+    node = isinstance(obj, xr.DataTree)
+    obj = as_sweep(obj)
+    if node and isinstance(mask, xr.DataTree):
+        mask = as_sweep(mask)  # the node of a mask volume
     if mask is None:
         mask = echo_mask(obj, nodata=nodata, **kwargs)
     elif kwargs:

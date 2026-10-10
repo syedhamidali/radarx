@@ -71,8 +71,8 @@ def test_equal_short_citations_get_letters(monkeypatch):
 def test_methods_lists_a_repeated_method_once():
     ds = xr.Dataset({"a": ("x", [1.0]), "b": ("x", [2.0])})
     set_provenance(ds, "A method", [])
-    ds["a"].attrs.update(ds.attrs)  # the same provenance on the data set and a variable
-    assert len(read_provenance(ds)) == 2
+    # the variables repeat what the data set says: one entry
+    assert len(read_provenance(ds)) == 1
     assert citation.methods(ds).count("Method: A method") == 1
 
 

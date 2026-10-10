@@ -521,6 +521,81 @@ def test_accessor_methods_set_the_attributes():
     check_attrs(volume.radarx.echo_top())
 
 
+# merging products into the input
+
+
+def kdp_volume_without_extra():
+    return kdp_volume().drop_nodes("sweep_3")
+
+
+def test_assign_keeps_the_provenance_of_a_volume():
+    vol = kdp_volume_without_extra()
+    products = vol.radarx.kdp()
+    out = vol.radarx.assign(products)
+    assert read_provenance(vol) == []
+    assert len(read_provenance(out)) == 3
+    for name in ("sweep_0", "sweep_1", "sweep_2"):
+        attrs, source = out[name].attrs, products[name].attrs
+        assert attrs[METHOD] == source[METHOD]
+        assert attrs[REFERENCES] == source[REFERENCES]
+        assert attrs[VERSION] == str(radarx.__version__)
+        assert attrs[HISTORY] == "estimate_kdp()"
+    assert METHOD not in out.attrs  # the root stays the input's root
+    assert radarx.cite(out) == radarx.cite(products)[:1] + radarx.cite(out)[1:]
+    assert "10.1175/2009JTECHA1358.1" in cite_dois(out)
+
+
+def test_assign_keeps_the_provenance_of_a_sweep_and_chains():
+    ds, *_ = kdp_sweep(nray=20, ng=300)
+    out = ds.radarx.assign(ds.radarx.kdp())
+    assert out.attrs[HISTORY] == "estimate_kdp()"
+    assert read_provenance(ds) == []
+    again = out.radarx.assign(out.radarx.echo_mask())
+    assert again.attrs[HISTORY].split("\n") == ["estimate_kdp()", "echo_mask()"]
+    assert len(again.attrs[METHOD].split(" | ")) == 2
+    # the same products twice leave one history line
+    twice = again.radarx.assign(out.radarx.kdp())
+    assert twice.attrs[HISTORY].split("\n") == ["estimate_kdp()", "echo_mask()"]
+    # a DataArray of products
+    shear = ds.radarx.azimuthal_shear("PHIDP")
+    da = ds.radarx.assign(shear.rename("shear"))
+    assert da.attrs[HISTORY] == "azimuthal_shear(field='PHIDP')"
+    assert da.attrs[METHOD] == shear.attrs[METHOD]
+
+
+def test_product_variables_carry_the_method():
+    ds, *_ = kdp_sweep(nray=20, ng=300)
+    products = ds.radarx.kdp()
+    for name in products.data_vars:
+        assert products[name].attrs[METHOD] == products.attrs[METHOD]
+        assert products[name].attrs[REFERENCES] == products.attrs[REFERENCES]
+        assert HISTORY not in products[name].attrs
+    out = ds.radarx.assign(products)
+    assert METHOD not in out["DBZH"].attrs  # measured fields stay as they are
+    # a merge or a copy that drops the attributes of the Dataset keeps those of
+    # the variables
+    selected = out[["KDP"]]
+    selected.attrs = {}
+    (item,) = read_provenance(selected)
+    assert item["method"] == [products.attrs[METHOD]]
+    merged = xr.merge([ds, products])
+    assert METHOD not in merged.attrs
+    (item,) = read_provenance(merged)
+    assert item["references"] == products.attrs[REFERENCES].split()
+    assert "10.1175/2009JTECHA1358.1" in cite_dois(merged)
+    # a DataArray converted to a Dataset
+    (item,) = read_provenance(products["KDP"].to_dataset())
+    assert item["method"] == [products.attrs[METHOD]]
+
+
+def test_returned_input_variables_are_not_stamped():
+    ds, _ = qc_sweep()
+    out = radarx.retrieve.apply_mask(ds)
+    assert METHOD in out.attrs
+    assert METHOD not in out["DBZH"].attrs
+    assert read_provenance(ds) == []
+
+
 # NetCDF
 
 

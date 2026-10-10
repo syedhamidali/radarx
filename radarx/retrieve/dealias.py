@@ -96,6 +96,7 @@ from itertools import pairwise
 import numpy as np
 import xarray as xr
 
+from .._fields import VELOCITY, as_sweep, find_field
 from .._provenance import provenance
 from ._products import product_tree
 
@@ -128,7 +129,7 @@ _GATE_PASSES = 2
 )
 def dealias_velocity(
     radar,
-    field="VRADH",
+    field=None,
     nyquist_velocity=None,
     *,
     threshold=0.3,
@@ -149,10 +150,12 @@ def dealias_velocity(
     ----------
     radar : xarray.Dataset or xarray.DataTree
         A PPI sweep on ``(azimuth, range)`` with ``azimuth`` and
-        ``elevation`` coordinates, or a volume with ``sweep_*`` groups,
-        e.g. from xradar.
+        ``elevation`` coordinates, a single sweep node of a volume
+        (``dtree["sweep_0"]``), or a volume with ``sweep_*`` groups, e.g. from
+        xradar.
     field : str, optional
-        Radial velocity field. Default ``"VRADH"``.
+        Radial velocity field. Default: the first of ``VRADH``, ``VRAD``,
+        ``VRADV``, ``VEL``, ``VELOCITY``, ``velocity`` that the sweep holds.
     nyquist_velocity : float or dict, optional
         Nyquist velocity in m/s. By default it is read from the sweep's
         ``nyquist_velocity`` variable or coordinate (xradar), or from the
@@ -261,6 +264,8 @@ def dealias_velocity(
     >>> products = dtree.radarx.dealias("VRADH")  # doctest: +SKIP
     >>> dtree = dtree.radarx.assign(products)  # doctest: +SKIP
     """
+    radar = as_sweep(radar)
+    field = find_field(radar, VELOCITY, field)
     if products_only:
         name = name or f"{field}_dealiased"
     else:

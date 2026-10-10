@@ -98,14 +98,16 @@ class RadarxAccessor:
 class _ShearMixin:
     """Azimuthal shear and radial divergence (LLSD) for sweeps and volumes."""
 
-    def llsd(self, field="VRADH", window=(750.0, 2500.0), **kwargs):
+    def llsd(self, field=None, window=(750.0, 2500.0), **kwargs):
         """
         Azimuthal shear and radial divergence by linear least-squares derivatives.
 
         Parameters
         ----------
         field : str, optional
-            Dealiased radial velocity field. Default ``"VRADH"``.
+            Dealiased radial velocity field. Default: the first of ``VRADH``,
+            ``VRAD``, ``VRADV``, ``VEL``, ``VELOCITY``, ``velocity`` that the
+            sweep holds.
         window : tuple of float, optional
             Window ``(range_m, azimuth_m)`` in metres. Default ``(750, 2500)``.
         **kwargs
@@ -123,7 +125,7 @@ class _ShearMixin:
         """
         return _shear.llsd(self.xarray_obj, field, window, **kwargs)
 
-    def azimuthal_shear(self, field="VRADH", window=(750.0, 2500.0), **kwargs):
+    def azimuthal_shear(self, field=None, window=(750.0, 2500.0), **kwargs):
         """
         Azimuthal shear (s⁻¹) of the radial velocity by LLSD.
 
@@ -140,7 +142,7 @@ class _ShearMixin:
         """
         return _shear.azimuthal_shear(self.xarray_obj, field, window, **kwargs)
 
-    def radial_divergence(self, field="VRADH", window=(750.0, 2500.0), **kwargs):
+    def radial_divergence(self, field=None, window=(750.0, 2500.0), **kwargs):
         """
         Radial divergence (s⁻¹) of the radial velocity by LLSD.
 
@@ -556,14 +558,15 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         """
         return melting_layer(self.xarray_obj, **kwargs)
 
-    def dealias(self, field="VRADH", nyquist_velocity=None, **kwargs):
+    def dealias(self, field=None, nyquist_velocity=None, **kwargs):
         """
         Dealias (unfold) the Doppler velocity of this sweep.
 
         Parameters
         ----------
         field : str, optional
-            Radial velocity field. Default ``"VRADH"``.
+            Radial velocity field. Default: the first of ``VRADH``, ``VRAD``,
+            ``VRADV``, ``VEL``, ``VELOCITY``, ``velocity`` that the sweep holds.
         nyquist_velocity : float, optional
             Nyquist velocity in m/s. By default read from the sweep's
             ``nyquist_velocity`` (xradar).
@@ -1077,14 +1080,15 @@ class RadarxDataTreeAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         """
         return qvp(self.xarray_obj, data_vars, **kwargs)
 
-    def dealias(self, field="VRADH", nyquist_velocity=None, **kwargs):
+    def dealias(self, field=None, nyquist_velocity=None, **kwargs):
         """
         Dealias (unfold) the Doppler velocity of every sweep.
 
         Parameters
         ----------
         field : str, optional
-            Radial velocity field. Default ``"VRADH"``.
+            Radial velocity field. Default: the first of ``VRADH``, ``VRAD``,
+            ``VRADV``, ``VEL``, ``VELOCITY``, ``velocity`` that the sweep holds.
         nyquist_velocity : float or dict, optional
             Nyquist velocity in m/s, or a dict by sweep name. By default read
             from each sweep's ``nyquist_velocity`` (xradar).
