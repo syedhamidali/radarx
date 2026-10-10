@@ -55,3 +55,40 @@ def test_ground_range_and_beam_height_at_ground_range():
     assert geometry.ground_range(50e3, 1.0, reff=6.371e6) != geometry.ground_range(
         50e3, 1.0
     )
+
+
+def test_k_e_from_refractivity_standard_atmosphere():
+    # -39 N-units per km is the standard gradient: k_e close to 4/3
+    height = np.array([0.0, 500.0, 1000.0, 3000.0])
+    n = 300.0 - 39e-3 * height
+    assert geometry.k_e_from_refractivity(height, n) == pytest.approx(
+        geometry.effective_radius(-39e-6) / constants.EARTH_RADIUS
+    )
+    assert geometry.k_e_from_refractivity(height, n) == pytest.approx(4 / 3, abs=0.01)
+
+
+def test_k_e_from_refractivity_sub_and_super_refraction():
+    height = np.array([0.0, 1000.0])
+    sub = geometry.k_e_from_refractivity(height, np.array([300.0, 300.0]))
+    sup = geometry.k_e_from_refractivity(height, np.array([300.0, 200.0]))
+    assert sub == pytest.approx(1.0, abs=0.01)  # no gradient: true Earth radius
+    assert sup > 4 / 3
+    # layer and unsorted profile
+    n = np.array([280.0, 300.0, 250.0])
+    h = np.array([1000.0, 0.0, 3000.0])
+    assert geometry.k_e_from_refractivity(h, n, layer=(0.0, 1000.0)) == pytest.approx(
+        geometry.k_e_from_refractivity([0.0, 1000.0], [300.0, 280.0])
+    )
+
+
+def test_k_e_from_refractivity_errors():
+    with pytest.raises(ValueError, match="two valid levels"):
+        geometry.k_e_from_refractivity([0.0], [300.0])
+    with pytest.raises(ValueError, match="same length"):
+        geometry.k_e_from_refractivity([0.0, 1.0], [300.0])
+    with pytest.raises(ValueError, match="positive depth"):
+        geometry.k_e_from_refractivity([0, 1000.0], [300, 280.0], layer=(5.0, 5.0))
+    with pytest.raises(ValueError, match="does not reach"):
+        geometry.k_e_from_refractivity([0, 1000.0], [300, 280.0], layer=(2e3, 3e3))
+    with pytest.raises(ValueError, match="trapping"):
+        geometry.k_e_from_refractivity([0, 1000.0], [300, 100.0])

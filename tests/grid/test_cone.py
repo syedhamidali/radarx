@@ -20,9 +20,18 @@ ENGINES = ["numpy"] + (["compiled"] if cone.HAS_COMPILED_KERNEL else [])
 
 
 def _volume(
-    field="height", elevations=ELEVATIONS, azimuth=None, nan_fraction=0.0, seed=0
+    field="height",
+    elevations=ELEVATIONS,
+    azimuth=None,
+    nan_fraction=0.0,
+    seed=0,
+    name="DBZH",
+    k_e=cone.K_E,
 ):
-    """Synthetic PPI volume; ``field="height"`` stores each gate's beam height."""
+    """
+    Synthetic PPI volume; ``field="height"`` stores each gate's beam height
+    (for the effective Earth radius factor ``k_e``) in the variable ``name``.
+    """
     rng_m = np.arange(125.0, 60_000.0, 250.0)
     azimuth = np.arange(0.5, 360.0, 1.0) if azimuth is None else azimuth
     rnd = np.random.default_rng(seed)
@@ -32,7 +41,11 @@ def _volume(
         az = np.roll(azimuth, 37 * (k + 1))
         ray_el = el + 0.05 * np.sin(np.deg2rad(az))
         _, _, gz = antenna_to_cartesian(
-            rng_m[None, :], az[:, None], ray_el[:, None], site_altitude=ALT
+            rng_m[None, :],
+            az[:, None],
+            ray_el[:, None],
+            site_altitude=ALT,
+            **cone._antenna_kwargs(k_e),
         )
         if field == "height":
             data = gz.copy()
@@ -41,7 +54,7 @@ def _volume(
         if nan_fraction:
             data[rnd.random(data.shape) < nan_fraction] = np.nan
         sweeps[f"sweep_{k}"] = xr.Dataset(
-            {"DBZH": (("azimuth", "range"), data, {"units": "dBZ"})},
+            {name: (("azimuth", "range"), data, {"units": "dBZ"})},
             coords={
                 "azimuth": az,
                 "range": rng_m,
@@ -184,3 +197,89 @@ def test_sweep_dataset_falls_back_for_older_xarray(monkeypatch):
 
     monkeypatch.setattr(type(node), "to_dataset", old_to_dataset)
     assert "DBZH" in cone._sweep_dataset(dtree, "sweep_0")
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("k_e", [1.0, 1.2])
+def test_k_e_sets_the_beam_height(engine, k_e):
+    """Gridding gate heights computed with k_e returns the level height."""
+    dtree = _volume(k_e=k_e)
+    out = cone.grid_cones(dtree, "DBZH", **GRID, k_e=k_e, engine=engine)["DBZH"]
+    level = xr.broadcast(out["z"], out)[0]
+    filled = np.isfinite(out.values)
+    assert filled.mean() > 0.3
+    np.testing.assert_allclose(out.values[filled], level.values[filled], atol=2.0)
+    assert cone.grid_cones(dtree, "DBZH", **GRID, k_e=k_e, engine=engine).attrs[
+        "k_e"
+    ] == pytest.approx(k_e)
+    # the default 4/3 puts the same gates at other heights
+    default = cone.grid_cones(dtree, "DBZH", **GRID, engine=engine)["DBZH"]
+    both = np.isfinite(default.values) & filled
+    assert np.abs(default.values[both] - level.values[both]).max() > 20.0
+
+
+def test_k_e_default_is_four_thirds():
+    dtree = _volume()
+    for engine in ENGINES:
+        a = cone.grid_cones(dtree, "DBZH", **GRID, engine=engine)
+        b = cone.grid_cones(dtree, "DBZH", **GRID, k_e=4.0 / 3.0, engine=engine)
+        np.testing.assert_array_equal(a.DBZH.values, b.DBZH.values)
+
+
+@pytest.mark.skipif(not cone.HAS_COMPILED_KERNEL, reason="compiled kernel not built")
+@pytest.mark.parametrize("fill_depth", [None, 100.0, 1000.0])
+def test_engines_agree_with_k_e_and_fill_depth(fill_depth):
+    dtree = _volume(field="random", nan_fraction=0.1)
+    kw = dict(k_e=1.1, fill_below=True, fill_depth=fill_depth)
+    z = np.arange(100.0, 3000.0, 150.0)
+    grid = dict(x=GRID["x"], y=GRID["y"], z=z)
+    a = cone.grid_cones(dtree, "DBZH", **grid, engine="compiled", **kw)
+    b = cone.grid_cones(dtree, "DBZH", **grid, engine="numpy", **kw)
+    np.testing.assert_array_equal(np.isnan(a.DBZH.values), np.isnan(b.DBZH.values))
+    np.testing.assert_allclose(a.DBZH.values, b.DBZH.values, atol=1e-4, equal_nan=True)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_k_e_must_be_positive(engine):
+    with pytest.raises(ValueError, match="k_e"):
+        cone.grid_cones(_volume(), "DBZH", **GRID, k_e=0.0, engine=engine)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_fill_depth_limits_the_pseudo_cappi(engine):
+    """The lowest beam fills only a limited depth, never below the radar."""
+    dtree = _volume()
+    z = np.array([100.0, 250.0, 400.0, 500.0, 600.0, 800.0])
+    grid = dict(x=GRID["x"], y=GRID["y"], z=z)
+    far = dict(x=40e3, y=0.0)
+    kw = dict(fill_below=True, engine=engine)
+    unlimited = cone.grid_cones(dtree, "DBZH", **grid, **kw)["DBZH"].sel(**far)
+    # as before: every level below the lowest beam gets its value, even the
+    # levels below the radar altitude (300 m)
+    assert np.isfinite(unlimited.values[:4]).all()
+    limited = cone.grid_cones(dtree, "DBZH", **grid, fill_depth=200.0, **kw)["DBZH"]
+    limited = limited.sel(**far)
+    # the 0.5 degree beam at 40 km is near 740 m: 600 m is within 200 m of it,
+    # 400 m is not, and 250 m lies below the radar
+    assert np.isnan(limited.sel(z=250.0)) and np.isnan(limited.sel(z=400.0))
+    assert np.isfinite(limited.sel(z=600.0))
+    deep = cone.grid_cones(dtree, "DBZH", **grid, fill_depth=1000.0, **kw)["DBZH"]
+    deep = deep.sel(**far)
+    assert np.isnan(deep.sel(z=100.0)) and np.isnan(deep.sel(z=250.0))
+    assert np.isfinite(deep.sel(z=400.0))
+    inf = cone.grid_cones(dtree, "DBZH", **grid, fill_depth=np.inf, **kw)["DBZH"]
+    np.testing.assert_array_equal(inf.sel(**far).values, unlimited.values)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_velocity_is_not_filled_below_the_lowest_beam(engine):
+    dtree = _volume(name="VRADH")
+    far = dict(x=40e3, y=0.0, z=500.0)
+    kw = dict(fill_below=True, engine=engine)
+    default = cone.grid_cones(dtree, "VRADH", **GRID, **kw)["VRADH"]
+    assert np.isnan(float(default.sel(**far)))
+    old = cone.grid_cones(dtree, "VRADH", **GRID, fill_velocity=True, **kw)["VRADH"]
+    assert np.isfinite(float(old.sel(**far)))
+    # a reflectivity field is still filled
+    refl = cone.grid_cones(_volume(), "DBZH", **GRID, **kw)["DBZH"]
+    assert np.isfinite(float(refl.sel(**far)))
