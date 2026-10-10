@@ -48,6 +48,7 @@ EXCEPTIONS = {
     "hid.hid_classes": "list of (code, abbreviation, name) tuples",
     "grid.make_3d_grid": "tuple of NumPy arrays",
     "ugrid.gate_corners": "tuple of NumPy arrays",
+    "attenuation.attenuation_coefficients": "dict of numbers",
 }
 
 # Accessor methods that do not wrap a function of radarx.retrieve or
@@ -313,6 +314,7 @@ def test_sweep_and_volume_results():
         "llsd": shear,
         "azimuthal_shear": radarx.retrieve.azimuthal_shear(sweep_dop, "VRADH"),
         "radial_divergence": radarx.retrieve.radial_divergence(sweep_dop, "VRADH"),
+        "correct_attenuation": radarx.retrieve.correct_attenuation(sweep, band="C"),
         "vil": radarx.retrieve.vil(storm_volume()),
         "echo_top": radarx.retrieve.echo_top(storm_volume()),
     }

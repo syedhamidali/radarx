@@ -353,6 +353,22 @@
   "pages": "118-128",
   "doi": "10.1175/1520-0426(1990)007<0118:EDODVU>2.0.CO;2"
  },
+ "10.1175/1520-0426(1990)007<0829:AEOPEI>2.0.CO;2": {
+  "authors": [
+   "Bringi, V. N.",
+   "Chandrasekar, V.",
+   "Balakrishnan, N.",
+   "Zrnić, D. S."
+  ],
+  "year": 1990,
+  "title": "An Examination of Propagation Effects in Rainfall on Radar Measurements at Microwave Frequencies",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "7",
+  "issue": "6",
+  "pages": "829-840",
+  "doi": "10.1175/1520-0426(1990)007<0829:AEOPEI>2.0.CO;2"
+ },
  "10.1175/1520-0426(1993)010<0798:TDDODV>2.0.CO;2": {
   "authors": [
    "Jing, Z.",
@@ -394,6 +410,22 @@
   "issue": "2",
   "pages": "130-139",
   "doi": "10.1175/1520-0426(2000)017<0130:AODFMS>2.0.CO;2"
+ },
+ "10.1175/1520-0426(2000)017<0332:TRPAAT>2.0.CO;2": {
+  "authors": [
+   "Testud, J.",
+   "Le Bouar, E.",
+   "Obligis, E.",
+   "Ali-Mehenni, M."
+  ],
+  "year": 2000,
+  "title": "The Rain Profiling Algorithm Applied to Polarimetric Weather Radar",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "17",
+  "issue": "3",
+  "pages": "332-356",
+  "doi": "10.1175/1520-0426(2000)017<0332:TRPAAT>2.0.CO;2"
  },
  "10.1175/1520-0426(2001)018<1674:ARTFDD>2.0.CO;2": {
   "authors": [
@@ -640,6 +672,20 @@
   "issue": "4",
   "pages": "165-166",
   "doi": "10.1175/1520-0469(1948)005<0165:TDORWS>2.0.CO;2"
+ },
+ "10.1175/1520-0469(1954)011<0058:EIITRM>2.0.CO;2": {
+  "authors": [
+   "Hitschfeld, W.",
+   "Bordan, J."
+  ],
+  "year": 1954,
+  "title": "Errors Inherent in the Radar Measurement of Rainfall at Attenuating Wavelengths",
+  "type": "article",
+  "journal": "Journal of Meteorology",
+  "volume": "11",
+  "issue": "1",
+  "pages": "58-67",
+  "doi": "10.1175/1520-0469(1954)011<0058:EIITRM>2.0.CO;2"
  },
  "10.1175/1520-0469(1976)033<0851:TVASOC>2.0.CO;2": {
   "authors": [
@@ -1377,6 +1423,22 @@
   "pages": "2266-2280",
   "doi": "10.1175/JTECH-D-13-00036.1"
  },
+ "10.1175/JTECH-D-13-00038.1": {
+  "authors": [
+   "Ryzhkov, A.",
+   "Diederich, M.",
+   "Zhang, P.",
+   "Simmer, C."
+  ],
+  "year": 2014,
+  "title": "Potential Utilization of Specific Attenuation for Rainfall Estimation, Mitigation of Partial Beam Blockage, and Radar Networking",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "31",
+  "issue": "3",
+  "pages": "599-619",
+  "doi": "10.1175/JTECH-D-13-00038.1"
+ },
  "10.1175/JTECH-D-13-00119.1": {
   "authors": [
    "Thompson, E. J.",
@@ -1454,6 +1516,23 @@
   "issue": "5",
   "pages": "529-543",
   "doi": "10.1175/JTECH-D-21-0130.1"
+ },
+ "10.1175/JTECH1803.1": {
+  "authors": [
+   "Park, S.-G.",
+   "Bringi, V. N.",
+   "Chandrasekar, V.",
+   "Maki, M.",
+   "Iwanami, K."
+  ],
+  "year": 2005,
+  "title": "Correction of Radar Reflectivity and Differential Reflectivity for Rain Attenuation at X Band. Part I: Theoretical and Empirical Basis",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "22",
+  "issue": "11",
+  "pages": "1621-1632",
+  "doi": "10.1175/JTECH1803.1"
  },
  "10.1175/JTECH2035.1": {
   "authors": [
