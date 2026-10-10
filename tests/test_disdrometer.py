@@ -89,10 +89,18 @@ def _fine(n0, mu, lam, dmax=8.0, step=0.01, extra=None):
 
 
 def test_terminal_fall_speed():
-    v = terminal_fall_speed(np.array([0.05, 1.0, 5.0]))
+    # above 0.516 mm the drag-balance law is the Atlas et al. law
+    v = terminal_fall_speed(np.array([1.0, 5.0]))
     np.testing.assert_allclose(
-        v, [0.0, 9.65 - 10.3 * np.exp(-0.6), 9.65 - 10.3 * np.exp(-3.0)]
+        v, [9.65 - 10.3 * np.exp(-0.6), 9.65 - 10.3 * np.exp(-3.0)]
     )
+    # the Atlas law alone is zero below 0.109 mm and 27 % low at 0.2 mm
+    atlas = terminal_fall_speed(np.array([0.05, 0.1, 0.2]), law="atlas1973")
+    np.testing.assert_allclose(atlas, [0.0, 0.0, 9.65 - 10.3 * np.exp(-0.12)])
+    small = terminal_fall_speed(np.array([0.05, 0.1, 0.2]))
+    np.testing.assert_allclose(small, [0.0712, 0.2482, 0.7076], atol=5e-4)
+    with pytest.raises(ValueError, match="law"):
+        terminal_fall_speed(1.0, law="beard")
     aloft = terminal_fall_speed(xr.DataArray([2.0], dims="d"), air_density=0.9)
     np.testing.assert_allclose(aloft / terminal_fall_speed(2.0), (1.204 / 0.9) ** 0.4)
     assert aloft.attrs["units"] == "m s-1"
@@ -448,12 +456,11 @@ R_EARTH = 6371000.0
 
 
 def _destination(lat0, lon0, az, s):
-    p0, l0, a, d = np.deg2rad(lat0), np.deg2rad(lon0), np.deg2rad(az), s / R_EARTH
-    p1 = np.arcsin(np.sin(p0) * np.cos(d) + np.cos(p0) * np.sin(d) * np.cos(a))
-    l1 = l0 + np.arctan2(
-        np.sin(a) * np.sin(d) * np.cos(p0), np.cos(d) - np.sin(p0) * np.sin(p1)
-    )
-    return np.rad2deg(p1), np.rad2deg(l1)
+    """Point at the geodesic distance ``s`` (m) and bearing ``az`` on WGS84."""
+    import pyproj
+
+    lon, lat, _ = pyproj.Geod(ellps="WGS84").fwd(lon0, lat0, az, s)
+    return lat, lon
 
 
 def _sweep(t0, angle=0.5, offset=0.0):
@@ -616,3 +623,27 @@ def test_real_nexrad_gate_above_instrument(klbb):
     pairs = match_radar(ds, klbb, fields=["DBZH"])
     assert np.isfinite(pairs.DBZH_disdrometer).all()
     assert 30.0 < pairs.DBZH_disdrometer.item() < 60.0
+
+
+def test_station_is_placed_by_the_geodesic_distance():
+    """Issue 230: a sphere of 6371 km is off by up to 0.56 % (280 m at 50 km)."""
+    import pyproj
+
+    from radarx.retrieve.disdrometer import _ground_position
+
+    geod = pyproj.Geod(ellps="WGS84")
+    worst = 0.0
+    for lat0, lon0 in ((35.0, -90.0), (0.5, 20.0), (60.0, 10.0)):
+        for az in (0.0, 45.0, 90.0, 200.0, 315.0):
+            lon, lat, _ = geod.fwd(lon0, lat0, az, 50e3)
+            s, bearing = _ground_position(lat0, lon0, lat, lon)
+            assert s == pytest.approx(50e3, abs=1e-3)
+            assert bearing == pytest.approx(az, abs=1e-6)
+            # the great-circle distance of the earlier version
+            p0, p1 = np.deg2rad(lat0), np.deg2rad(lat)
+            a = (
+                np.sin((p1 - p0) / 2) ** 2
+                + np.cos(p0) * np.cos(p1) * np.sin(np.deg2rad(lon - lon0) / 2) ** 2
+            )
+            worst = max(worst, abs(2 * 6371000.0 * np.arcsin(np.sqrt(a)) - 50e3))
+    assert worst > 150.0

@@ -34,9 +34,24 @@ RHO0 = 1.204
 FALL = (4.643, 0.9496, 0.1671)  # a D^b exp(-f D), as in drop_evaporation_rate
 
 
+def _sphere(d):
+    """Drag balance of a sphere, solved with a root finder (independent oracle)."""
+    from scipy.optimize import brentq
+
+    dm = d * 1e-3
+    best = 4.0 / 3.0 * 9.81 * RHO0 * (1000.0 - RHO0) * dm**3 / 1.81e-5**2
+    re = brentq(lambda r: 24.0 * r + 3.6 * r**1.687 - best, 1e-12, 1e7, xtol=1e-14)
+    return re * 1.81e-5 / (RHO0 * dm)
+
+
 def v0(d):
-    """Atlas et al. (1973) sea-level fall speed."""
-    return 9.65 - 10.3 * np.exp(-0.6 * np.asarray(d, dtype=float))
+    """Default sea-level fall speed: drag balance below 0.516 mm, else Atlas."""
+    d = np.atleast_1d(np.asarray(d, dtype=float))
+    atlas = 9.65 - 10.3 * np.exp(-0.6 * d)
+    out = np.where(
+        d < 0.5157843, [_sphere(x) if x < 0.5157843 else 0.0 for x in d], atlas
+    )
+    return out if out.size > 1 else out[0]
 
 
 def profile(z, *, t=None, p=None, rh=0.0, u=0.0, v=0.0, w=None):
@@ -708,11 +723,30 @@ def test_fall_speed_laws(engine):
     np.testing.assert_allclose(
         poly.fall_speed_start.values.ravel(), coef[0] + coef[1] * d + coef[2] * d**2
     )
-    # a negative speed is set to zero
+    # a negative speed is set to zero (the Atlas law below 0.109 mm); the
+    # default law gives small drops a speed (issue 231)
     neg = rain_trajectories(
-        src, [0.05], profile=prof, evaporation=False, max_time=0.0, engine=engine
+        src,
+        [0.05],
+        profile=prof,
+        evaporation=False,
+        fall_speed="atlas1973",
+        max_time=0.0,
+        engine=engine,
     )
     assert neg.fall_speed_start.values.item() == 0.0
+    small = rain_trajectories(
+        src,
+        [0.05, 0.2],
+        profile=prof,
+        evaporation=False,
+        density_correction=False,
+        max_time=0.0,
+        engine=engine,
+    )
+    np.testing.assert_allclose(
+        small.fall_speed_start.values.ravel(), [0.0712, 0.7076], rtol=2e-3
+    )
 
 
 # --------------------------------------------------------------------------

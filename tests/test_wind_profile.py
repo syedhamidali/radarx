@@ -72,6 +72,52 @@ def test_bunkers_straight_hodograph(engine):
         wp.bunkers_storm_motion(straight(), mover="middle")
 
 
+def with_pressure(profile, scale_height=8000.0):
+    """Add p = 1000 exp(-z / H) hPa to a profile on ``height``."""
+    p = 1000.0 * np.exp(-profile.height / scale_height)
+    return profile.assign(pressure=p)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_bunkers_pressure_weighted_means(engine):
+    """Issue 233: the pressure-weighted variant, int V dp / (p_bottom - p_top)."""
+    h, b = 8000.0, 6000.0
+    prof = with_pressure(straight(), h)
+    mean_p = (h / 600.0) * (1 - np.exp(-b / h) * (1 + b / h)) / (1 - np.exp(-b / h))
+    assert 4.3 < mean_p < 4.5  # against 5.0 for the height-weighted mean
+    rm = wp.bunkers_storm_motion(prof, weighting="pressure", engine=engine)
+    assert float(rm.u) == pytest.approx(mean_p, rel=2e-3)
+    assert float(rm.v) == pytest.approx(-7.5, abs=1e-9)
+    assert rm.attrs["weighting"] == "pressure"
+    height = wp.bunkers_storm_motion(prof, engine=engine)  # default: unchanged
+    assert float(height.u) == pytest.approx(5.0)
+    assert height.attrs["weighting"] == "height"
+    left = wp.bunkers_storm_motion(
+        prof, mover="left", weighting="pressure", engine=engine
+    )
+    assert float(left.v) == pytest.approx(7.5, abs=1e-9)
+    # a column that is a profile of times: one result per time
+    times = xr.concat([prof, with_pressure(straight(), 4000.0)], dim="time")
+    both = wp.bunkers_storm_motion(times, weighting="pressure", engine=engine)
+    assert both.u.dims == ("time",)
+    assert float(both.u[0]) == pytest.approx(mean_p, rel=2e-3)
+    assert float(both.u[1]) < float(both.u[0])  # thinner air aloft: more weight below
+    with pytest.raises(ValueError, match="needs 'pressure'"):
+        wp.bunkers_storm_motion(straight(), weighting="pressure", engine=engine)
+    with pytest.raises(ValueError, match="weighting"):
+        wp.bunkers_storm_motion(prof, weighting="mass")
+
+
+def test_bunkers_pressure_weighting_engines_agree():
+    if not coldpool.HAS_COMPILED_KERNEL:
+        pytest.skip("compiled kernel not built")
+    prof = with_pressure(straight(dz=50.0))
+    a = wp.bunkers_storm_motion(prof, weighting="pressure", engine="numpy")
+    b = wp.bunkers_storm_motion(prof, weighting="pressure", engine="compiled")
+    np.testing.assert_allclose(a.u, b.u, rtol=1e-12)
+    np.testing.assert_allclose(a.v, b.v, rtol=1e-12)
+
+
 @pytest.mark.parametrize("engine", ENGINES)
 def test_srh_analytic(engine):
     # straight hodograph, storm (5, -7.5): SRH = 7.5 * du = 7.5 * 5 = 37.5

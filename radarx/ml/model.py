@@ -260,8 +260,17 @@ def _fetch(entry, cache):
     tmp = None
     folder = _cache_dir() if cache else Path(tmp := tempfile.mkdtemp(prefix="radarx-"))
     fname = f"{entry['name']}-v{entry.get('version', '1')}.onnx"
+    if not known:
+        warnings.warn(
+            f"model {entry['name']!r} has no SHA-256 hash in the registry: the "
+            "download is not verified",
+            stacklevel=3,
+        )
     path = pooch.retrieve(
-        entry["url"], known_hash=f"sha256:{known}", fname=fname, path=folder
+        entry["url"],
+        known_hash=f"sha256:{known}" if known else None,
+        fname=fname,
+        path=folder,
     )
     return Path(path), tmp
 
@@ -295,6 +304,21 @@ def _tensor_spec(arg):
     dtype = _ONNX_TYPES.get(arg.type)
     name = np.dtype(dtype).name if dtype is not None else arg.type
     return f"{name}[{shape}]"
+
+
+def _check_shape(name, shape, expected):
+    """Raise if ``shape`` does not fit the (possibly dynamic) input shape."""
+    if len(shape) != len(expected):
+        raise ValueError(
+            f"input {name!r} has {len(shape)} dimensions {tuple(shape)}, the model "
+            f"expects {len(expected)}: {tuple(expected)}"
+        )
+    for axis, (n, e) in enumerate(zip(shape, expected)):
+        if isinstance(e, int) and e != n:
+            raise ValueError(
+                f"input {name!r} has size {n} on axis {axis}, the model expects "
+                f"{e} (shape {tuple(shape)} against {tuple(expected)})"
+            )
 
 
 class Model:
@@ -361,7 +385,7 @@ class Model:
             "ml_model_citation": self.citation,
         }
 
-    def run(self, inputs, outputs=None, *, batch_size=None):
+    def run(self, inputs, outputs=None, *, batch_size=None, nan="warn"):
         """
         Run the network.
 
@@ -375,8 +399,18 @@ class Model:
         batch_size : int, optional
             Run the first axis (the batch, e.g. patches) in chunks of this
             size to bound memory; the results are concatenated.
+        nan : {"warn", "raise", "ignore"}, optional
+            What to do when an input holds NaN or infinity, which a network
+            propagates to all outputs it influences. Default ``"warn"``.
 
         Returns
+
+        Raises
+        ------
+        ValueError
+            If an input does not match the rank or the fixed dimensions of the
+            network's input tensor, or ``nan="raise"`` and an input is not
+            finite.
         -------
         dict of numpy.ndarray
             Output tensors by name.
@@ -396,10 +430,19 @@ class Model:
                 f"the model expects the inputs {sorted(expected)}; "
                 f"missing {sorted(missing)}, unknown {sorted(unknown)}"
             )
+        if nan not in ("warn", "raise", "ignore"):
+            raise ValueError(f"nan must be 'warn', 'raise' or 'ignore', not {nan!r}")
         feed = {
             k: np.ascontiguousarray(v, dtype=_ONNX_TYPES.get(expected[k].type))
             for k, v in inputs.items()
         }
+        for k, v in feed.items():
+            _check_shape(k, v.shape, expected[k].shape)
+            if nan != "ignore" and v.dtype.kind == "f" and not np.isfinite(v).all():
+                message = f"input {k!r} holds NaN or infinite values"
+                if nan == "raise":
+                    raise ValueError(message)
+                warnings.warn(message, stacklevel=2)
         names = list(outputs) if outputs is not None else list(self.outputs)
         if batch_size is None:
             return dict(zip(names, self.session.run(names, feed)))

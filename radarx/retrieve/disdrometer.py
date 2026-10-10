@@ -27,18 +27,25 @@ Workflow
 
 Fall speed
 ----------
-The terminal fall speed of raindrops is that of Atlas et al. (1973),
-:math:`v_t(D) = 9.65 - 10.3 e^{-0.6 D}` m s\\ :sup:`-1` (:math:`D` in mm,
-zero below 0.08 mm) at the sea-level air density
+The terminal fall speed of raindrops is the sea-level law of
+:mod:`radarx.retrieve._raindrop_fall` at the sea-level air density
 :math:`\\rho_0 = 1.204` kg m\\ :sup:`-3`, scaled by
 :math:`(\\rho_0/\\rho)^{0.4}` (Foote and du Toit 1969) where the station
-records pressure and temperature (:func:`terminal_fall_speed`).
+records pressure and temperature (:func:`terminal_fall_speed`). By default
+(``law="drag_balance"``) it is the drag-balance speed of a sphere below
+0.516 mm and the law of Atlas et al. (1973),
+:math:`v_t(D) = 9.65 - 10.3 e^{-0.6 D}` m s\\ :sup:`-1` (:math:`D` in mm),
+above it, the same law as in :func:`radarx.retrieve.rain_trajectories` and
+:func:`radarx.retrieve.drop_evaporation_rate`. ``law="atlas1973"`` is the
+Atlas law alone, as in earlier versions, zero below 0.109 mm.
 
 - The Atlas et al. (1973) law is quoted as Eq. 7.65b of Bringi and
   Chandrasekar (2001), where it is the sea-level fit to the Gunn and Kinzer
-  (1949) measurements. It is negative below 0.109 mm (clipped to zero
-  here). Its range of validity in the original paper is not checked; radarx
-  uses it for all classes up to the maximum diameter of the quality control.
+  (1949) measurements. It is negative below 0.109 mm (clipped to zero) and
+  27 % below the drag balance of a sphere at 0.2 mm, which is why small
+  classes were judged against a speed that was too low. Its range of
+  validity in the original paper is not checked; radarx
+  uses it above 0.516 mm up to the maximum diameter of the quality control.
 - The factor :math:`(\\rho_0/\\rho)^{0.4}` is the correction attributed to
   Foote and du Toit (1969), as quoted by Li and Srivastava (2001, after
   their Eq. 4) and Kumjian and Ryzhkov (2010, Eq. 3). The equation number and
@@ -253,6 +260,7 @@ from scipy.special import gammainc, gammaincc, gammaincinv, gammaln
 from .._provenance import provenance
 from .._registry import accessor_method
 from ..fundamentals.geometry import beam_center_height, ground_range
+from . import _raindrop_fall
 from . import dsd as _dsdmod
 
 try:
@@ -393,7 +401,7 @@ def _edges(ds, dim):
 @provenance(
     "Raindrop terminal fall speed of Atlas et al. (1973) with density correction"
 )
-def terminal_fall_speed(diameter, air_density=None):
+def terminal_fall_speed(diameter, air_density=None, law="drag_balance"):
     """
     Terminal fall speed of raindrops.
 
@@ -405,18 +413,25 @@ def terminal_fall_speed(diameter, air_density=None):
         Air density in kg m-3; the speed is scaled by
         :math:`(\\rho_0/\\rho)^{0.4}` with :math:`\\rho_0 = 1.204`
         kg m\\ :sup:`-3`. Default: :math:`\\rho_0` (sea level).
+    law : {"drag_balance", "atlas1973"}, optional
+        Sea-level law. ``"drag_balance"`` (default): the speed at which the
+        weight of a sphere balances its drag below 0.516 mm, Atlas et al.
+        (1973) above; ``"atlas1973"``: the Atlas et al. law alone.
 
     Returns
     -------
     xarray.DataArray
-        Fall speed :math:`9.65 - 10.3 e^{-0.6 D}` m s-1 (Atlas et al.
-        1973; Bringi and Chandrasekar 2001, Eq. 7.65b), at least zero,
-        broadcast over ``diameter`` and ``air_density``.
+        Fall speed in m s-1, at least zero, broadcast over ``diameter`` and
+        ``air_density``. For ``law="atlas1973"`` :math:`9.65 - 10.3
+        e^{-0.6 D}` (Atlas et al. 1973; Bringi and Chandrasekar 2001, Eq.
+        7.65b).
 
     Notes
     -----
-    The law is negative below 0.109 mm (clipped to zero here, a radarx
-    choice). Its range of validity in the original paper is not checked. The exponent 0.4 of the density correction is the
+    The Atlas law is negative below 0.109 mm (clipped to zero here, a radarx
+    choice) and 0.52 m s-1 against 0.71 m s-1 of the drag balance at 0.2 mm;
+    see :mod:`radarx.retrieve._raindrop_fall` for the sphere law. Its range of
+    validity in the original paper is not checked. The exponent 0.4 of the density correction is the
     one attributed to Foote and du Toit (1969) in Li and Srivastava (2001,
     text after their Eq. 4) and Kumjian and Ryzhkov (2010, Eq. 3); the
     equation and range of validity of the original paper are not checked. Beard (1976), used as the reference by Raupach
@@ -456,7 +471,7 @@ def terminal_fall_speed(diameter, air_density=None):
     343-365, https://doi.org/10.5194/amt-8-343-2015
     """
     d = diameter if isinstance(diameter, xr.DataArray) else xr.DataArray(diameter)
-    v = np.maximum(9.65 - 10.3 * np.exp(-0.6 * d), 0.0)
+    v = d.copy(data=_raindrop_fall.sea_level_speed(d.values, law)[0])
     if air_density is not None:
         v = v * (RHO0 / air_density) ** 0.4
     v = v.rename("terminal_fall_speed")
@@ -483,13 +498,13 @@ def _air_density(ds):
     return rho.where(np.isfinite(rho), RHO0).rename("air_density")
 
 
-def _fall_speed(ds, density_correction):
+def _fall_speed(ds, density_correction, law="drag_balance"):
     """
     Terminal fall speed on (time, diameter) with air density, else on
     (diameter).
     """
     rho = _air_density(ds) if density_correction else None
-    vt = terminal_fall_speed(ds["diameter"], rho)
+    vt = terminal_fall_speed(ds["diameter"], rho, law)
     return vt.transpose(*[d for d in ("time", "diameter") if d in vt.dims])
 
 
@@ -546,6 +561,7 @@ def disdrometer_qc(
     drop_unmeasured=True,
     max_wind=None,
     density_correction=True,
+    fall_speed="drag_balance",
 ):
     """
     Remove particles that are not plausible raindrops.
@@ -578,6 +594,8 @@ def disdrometer_qc(
         Scale fall speeds to the air density from ``air_pressure``,
         ``air_temperature`` and ``relative_humidity`` when present. Default
         True.
+    fall_speed : {"drag_balance", "atlas1973"}, optional
+        Sea-level fall speed law of :func:`terminal_fall_speed`.
 
     Returns
     -------
@@ -609,7 +627,7 @@ def disdrometer_qc(
         raise ValueError(f"method must be 'relative' or 'raupach2015', not {method!r}")
     if not tolerance > 0:
         raise ValueError("tolerance must be positive")
-    vt = _fall_speed(ds, density_correction)
+    vt = _fall_speed(ds, density_correction, fall_speed)
     v = ds["velocity"]
     d = ds["diameter"]
     if method == "relative":
@@ -658,6 +676,7 @@ def raupach_berne_correction(
     counts="counts",
     max_wind=None,
     density_correction=True,
+    fall_speed="drag_balance",
     engine="auto",
     n_threads=None,
 ):
@@ -685,7 +704,7 @@ def raupach_berne_correction(
         :func:`disdrometer_qc`, so that particles far from the fall speed
         (e.g. splashing drops) do not shift the mean velocity of their size
         class.
-    max_wind, density_correction : optional
+    max_wind, density_correction, fall_speed : optional
         See :func:`disdrometer_qc`.
     engine : {"auto", "compiled", "numpy"}, optional
         Compiled kernel or NumPy implementation of the velocity shift.
@@ -716,7 +735,7 @@ def raupach_berne_correction(
         raise ValueError("the correction needs 'rain_rate_instrument'")
     if ds.sizes["diameter"] != 32 or ds.sizes["velocity"] != 32:
         raise ValueError("the correction needs the 32 x 32 Parsivel classes")
-    vt = _fall_speed(ds, density_correction)
+    vt = _fall_speed(ds, density_correction, fall_speed)
     _, _, vlo, vup = _edges(ds, "velocity")
     c = np.asarray(counts.values, float)
     vtv = _fall_speed_values(vt, counts.shape[0])
@@ -776,6 +795,7 @@ def number_concentration(
     counts=None,
     velocity="measured",
     sample_interval=None,
+    fall_speed="drag_balance",
     engine="auto",
     n_threads=None,
 ):
@@ -797,6 +817,9 @@ def number_concentration(
     sample_interval : float, optional
         Integration time in s. Default: the ``sample_interval`` variable,
         else the spacing of ``time``.
+    fall_speed : {"drag_balance", "atlas1973"}, optional
+        Sea-level law of :func:`terminal_fall_speed` for ``velocity="terminal"``
+        when the dataset has no ``terminal_fall_speed``.
     engine : {"auto", "compiled", "numpy"}, optional
         Compiled kernel or NumPy implementation.
     n_threads : int, optional
@@ -862,7 +885,7 @@ def number_concentration(
                 (
                     ds["terminal_fall_speed"]
                     if "terminal_fall_speed" in ds
-                    else _fall_speed(ds, False)
+                    else _fall_speed(ds, False, fall_speed)
                 ),
                 n,
             )
@@ -913,7 +936,7 @@ def _diameter_dim(nd, dim):
 
 
 @provenance("Integral quantities of measured drop size distributions")
-def dsd_moments(nd, dim="diameter"):
+def dsd_moments(nd, dim="diameter", fall_speed="drag_balance"):
     """
     Integral quantities of measured drop size distributions.
 
@@ -942,7 +965,8 @@ def dsd_moments(nd, dim="diameter"):
     -----
     The moments are :math:`M_n = \\sum N(D_i) D_i^n \\Delta D_i`. The rain rate
     is :math:`0.6\\pi\\times10^{-3} \\sum v D^3 N \\Delta D` (Bringi and
-    Chandrasekar 2001, Eq. 7.66a) with the Atlas et al. (1973) fall speed,
+    Chandrasekar 2001, Eq. 7.66a) with the sea-level fall speed of
+    :func:`terminal_fall_speed` (``fall_speed``),
     :math:`D_m = M_4/M_3` (their Eq. 7.13), :math:`N_w` the :math:`D_m` form of
     Testud et al. (2001). The standard deviation of the mass distribution and
     the within-class interpolation of :math:`D_0` are the usual definitions,
@@ -979,7 +1003,7 @@ def dsd_moments(nd, dim="diameter"):
         return (nw_ * d**k).sum(-1)
 
     m0, m3, m4, m6 = mom(0), mom(3), mom(4), mom(6)
-    vt = np.maximum(9.65 - 10.3 * np.exp(-0.6 * d), 0.0)
+    vt = _raindrop_fall.sea_level_speed(d, fall_speed)[0]
     with np.errstate(divide="ignore", invalid="ignore"):
         dm = m4 / m3
         sig = np.sqrt((nw_ * d**3 * (d - dm[..., None]) ** 2).sum(-1) / m3)
@@ -1522,8 +1546,11 @@ def process_disdrometer(
             "qc must be 'relative', 'raupach2015', 'raupach_berne' or None, "
             f"not {qc!r}"
         )
-    nd = number_concentration(ds, velocity=velocity, engine=engine, n_threads=n_threads)
-    out = dsd_moments(nd)
+    law = qc_kwargs.get("fall_speed", "drag_balance")
+    nd = number_concentration(
+        ds, velocity=velocity, fall_speed=law, engine=engine, n_threads=n_threads
+    )
+    out = dsd_moments(nd, fall_speed=law)
     valid = np.isfinite(out["NT"])
     radar = _dsdmod.radar_from_dsd(nd.fillna(0.0), band=band, temperature=temperature)
     for name in _RADAR_VARS:
@@ -1572,17 +1599,10 @@ def _disdrometer_accessor(self, **kwargs):
 
 
 def _ground_position(lat0, lon0, lat, lon):
-    """Great-circle distance (m) and bearing (degrees) from (lat0, lon0)."""
-    p0, p1 = np.deg2rad(lat0), np.deg2rad(lat)
-    dl = np.deg2rad(lon - lon0)
-    a = np.sin((p1 - p0) / 2) ** 2 + np.cos(p0) * np.cos(p1) * np.sin(dl / 2) ** 2
-    s = 2 * EARTH_RADIUS * np.arcsin(np.sqrt(a))
-    az = np.rad2deg(
-        np.arctan2(
-            np.sin(dl) * np.cos(p1),
-            np.cos(p0) * np.sin(p1) - np.sin(p0) * np.cos(p1) * np.cos(dl),
-        )
-    )
+    """Geodesic distance (m) and bearing (degrees) on the WGS84 ellipsoid."""
+    import pyproj
+
+    az, _, s = pyproj.Geod(ellps="WGS84").inv(lon0, lat0, lon, lat)
     return s, az % 360.0
 
 
@@ -1672,7 +1692,9 @@ def radar_at_location(
     No published method is implemented here: the gate sampling is radarx's
     own, and the beam height is that of
     :func:`radarx.fundamentals.geometry.beam_center_height` (4/3 effective
-    Earth radius; see that function).
+    Earth radius; see that function). The location is placed from the radar by
+    the geodesic distance and bearing on the WGS84 ellipsoid (a sphere of
+    6371 km, used earlier, is off by -0.2 to +0.56 %, up to 280 m at 50 km).
     """
     rows = []
     for ds in _sweeps(radar, sweep):
@@ -1892,9 +1914,9 @@ def match_radar(
         w = _dsdmod._bin_widths(nd, "diameter").values
         with np.errstate(invalid="ignore", divide="ignore"):
             dm = (avg * w * d**4).sum(-1) / (avg * w * d**3).sum(-1)
-        # fall speed of the mass-weighted mean drop, Atlas et al. (1973), at
+        # fall speed of the mass-weighted mean drop (terminal_fall_speed), at
         # least 0.1 m s-1, without density correction (radarx choice)
-        vt = np.maximum(9.65 - 10.3 * np.exp(-0.6 * dm), 0.1)
+        vt = np.maximum(_raindrop_fall.sea_level_speed(dm)[0], 0.1)
         sec = pts["height_above_ground"].values / vt
         lag = np.where(np.isfinite(sec), sec * 1e9, 0).astype("timedelta64[ns]")
     else:

@@ -232,6 +232,19 @@
   "pages": "1153-1160",
   "doi": "10.1109/TASSP.1981.1163711"
  },
+ "10.1109/TIP.2011.2181402": {
+  "authors": [
+   "Padfield, D."
+  ],
+  "year": 2012,
+  "title": "Masked Object Registration in the Fourier Domain",
+  "type": "article",
+  "journal": "IEEE Transactions on Image Processing",
+  "volume": "21",
+  "issue": "5",
+  "pages": "2706-2718",
+  "doi": "10.1109/TIP.2011.2181402"
+ },
  "10.1111/2041-210X.13280": {
   "authors": [
    "Lin, T.",
@@ -470,6 +483,20 @@
   "issue": "5",
   "pages": "673-686",
   "doi": "10.1175/1520-0426(2002)019<0673:UOTDRS>2.0.CO;2"
+ },
+ "10.1175/1520-0434(1994)009<0625:TEONTV>2.0.CO;2": {
+  "authors": [
+   "Doswell, C. A.",
+   "Rasmussen, E. N."
+  ],
+  "year": 1994,
+  "title": "The Effect of Neglecting the Virtual Temperature Correction on CAPE Calculations",
+  "type": "article",
+  "journal": "Weather and Forecasting",
+  "volume": "9",
+  "issue": "4",
+  "pages": "625-629",
+  "doi": "10.1175/1520-0434(1994)009<0625:TEONTV>2.0.CO;2"
  },
  "10.1175/1520-0434(1997)012<0473:VDAAHI>2.0.CO;2": {
   "authors": [
@@ -813,6 +840,19 @@
   "issue": "4",
   "pages": "361-382",
   "doi": "10.1175/1520-0469(2004)061<0361:ATFSLS>2.0.CO;2"
+ },
+ "10.1175/1520-0477-37.10.528": {
+  "authors": [
+   "Galway, J. G."
+  ],
+  "year": 1956,
+  "title": "The Lifted Index as a Predictor of Latent Instability",
+  "type": "article",
+  "journal": "Bulletin of the American Meteorological Society",
+  "volume": "37",
+  "issue": "10",
+  "pages": "528-529",
+  "doi": "10.1175/1520-0477-37.10.528"
  },
  "10.1175/1520-0493(1972)100<0548:VILWNA>2.3.CO;2": {
   "authors": [
