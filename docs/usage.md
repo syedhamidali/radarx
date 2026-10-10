@@ -29,6 +29,7 @@ notebooks/Echo_QC
 notebooks/Dealiasing
 notebooks/KDP
 notebooks/Advection_Correction
+notebooks/Superobs_Data_Assimilation
 ```
 
 ```{toctree}
