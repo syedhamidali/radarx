@@ -133,7 +133,8 @@ back
 
 A real model comes from the registry (`ml.list_models()`); here we build a
 network in a few lines with the ONNX helper functions: a 5 × 5 box filter, a
-convolution with fixed weights and zero padding. Any network exported from
+convolution with fixed weights and zero padding. The filter only shows how a
+model file is built, registered and run; it is not a trained model. Any network exported from
 PyTorch (`torch.onnx.export`) is loaded the same way.
 
 ```{code-cell} ipython3

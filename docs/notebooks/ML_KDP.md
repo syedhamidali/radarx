@@ -21,39 +21,43 @@ pre-processing (masking, sign convention, system offset, unfolding) is the
 one of the other methods; only the filtering is learned. The real network of
 radarx (a one-dimensional U-Net, `ml/models/kdp` in the repository) is
 trained on simulated rays whose $K_{DP}$ and $\delta$ are known exactly. Its
-weights are **not published yet**, so this notebook cannot run it.
+weights are not published yet, so this notebook cannot run it.
 
-What it does instead is run the **whole workflow** with the repository's own
-tools and a deliberately tiny network:
+This notebook runs the whole workflow on real data with the repository's own
+tools and a deliberately small network:
 
-1. simulate rays with known $K_{DP}$ and $\delta$ (`ml/models/kdp/simulate.py`,
-   the generator of the real training set: T-matrix scattering of
-   normalized-gamma drop size distributions, Testud et al. 2001, melting layer, hail, noise,
-   clutter, folding, offsets),
-2. train a model on them,
-3. export it to ONNX with exactly the inputs and outputs `radarx.ml` expects,
-4. run `estimate_kdp(..., method="ml")` on a real C-band sweep and compare with
-   the classical estimators.
+1. build training examples from the rays of a real C-band sweep (CSAPR2,
+   ARM, 11 November 2018), with the inputs the network reads and, as the
+   target, the $K_{DP}$ computed by the radar processor,
+2. train on some azimuth sectors, test on others,
+3. export the model to ONNX with exactly the inputs and outputs `radarx.ml`
+   expects,
+4. run `estimate_kdp(..., method="ml")` and compare with the classical
+   estimators on the rays held out from training.
 
-**What is real and what is a toy.** The simulator, the feature extraction
-(`radarx.retrieve.kdp._ml_features`), the ONNX interface, the registry and the
-retrieval are the real ones. The network is a toy: a single linear
-convolution along range (25 gates, 7 input channels, 2 fitted outputs, 352
-parameters) fitted by least squares in a couple of seconds on a CPU, for one
-gate spacing and one wavelength band. The real network has 0.43 million
-parameters, is trained for hours with physics terms in the loss and
-handles all gate spacings and bands. Do not read the numbers below as the
-performance of the radarx network; they show that the pipeline works and what
-a minimal learned filter does.
+**What the target is.** The target is a reference estimate, not the truth.
+There is no measurement of the true $K_{DP}$ in a radar volume. The radar
+processor derives it from the same differential phase with its own filter
+and quality control, so the network learns to reproduce that filter on gates
+that the processor kept as precipitation. Agreement with it measures how well
+a filter can be learned from real rays, not the error against the truth. The
+classical estimators are compared with the same reference.
+
+**What is real and what is small.** The features (`radarx.retrieve.kdp._ml_features`),
+the ONNX interface, the registry and the retrieval are the real ones. The
+network is a single linear convolution along range (81 gates of 100 m, 7
+input channels, 2 fitted outputs) fitted by least squares in under a second
+on a CPU, for one gate spacing and one wavelength band. The real network has
+0.43 million parameters, is trained for hours on simulated rays with physics
+terms in the loss, and handles all gate spacings and bands. Do not read the
+numbers below as the performance of the radarx network.
 
 PyTorch is not needed here. The training code of the real network uses it
-(`train.py`, `export.py`); the toy model has a closed-form solution and is
+(`train.py`, `export.py`); the linear model has a closed-form solution and is
 written to ONNX with the `onnx` package.
 
 ```{code-cell} ipython3
 import hashlib
-import os
-import sys
 import time
 from pathlib import Path
 
@@ -61,7 +65,6 @@ import cmweather  # noqa: F401  registers the radar colormaps
 import matplotlib.pyplot as plt
 import numpy as np
 import onnx
-import xarray as xr
 import xradar as xd
 from numpy.lib.stride_tricks import sliding_window_view
 from onnx import TensorProto, helper, numpy_helper
@@ -71,23 +74,14 @@ import radarx
 from radarx import ml
 from radarx.retrieve import estimate_kdp
 from radarx.retrieve.kdp import ML_FEATURES
-
-# the training code lives in the repository, not in the installed package: look
-# for the checkout from the package, the Python path (pytest adds the project
-# root) and the folders the docs builds are run from
-candidates = [Path(p) for p in sys.path if p]
-candidates += [Path(os.environ[k]) for k in ("READTHEDOCS_REPOSITORY_PATH", "GITHUB_WORKSPACE") if k in os.environ]
-candidates += [Path(__import__("radarx").__file__).parents[1], Path.cwd()]
-repo = next(p for c in candidates for p in [c, *c.parents] if (p / "ml" / "models" / "kdp").is_dir())
-sys.path.insert(0, str(repo / "ml" / "models" / "kdp"))
-import simulate
 ```
 
 ## The radar sweep
 
-The same C-band (CSAPR2) PPI of deep convection as in the KDP notebook. The
-toy network is trained for the gate spacing of this radar, because a linear
-filter cannot rescale itself with the spacing as the real network can.
+The C-band (CSAPR2) PPI of deep convection used in the KDP notebook, from the
+open-radar-data collection (ARM data, CC BY 4.0). It has 361 rays of 1100 gates
+spaced 100 m. The linear filter is trained for this gate spacing, because it
+cannot rescale itself with the spacing as the real network can.
 
 ```{code-cell} ipython3
 file = DATASETS.fetch("corcsapr2cmacppiM1.c1.20181111.030003.nc")
@@ -102,85 +96,95 @@ dr = float(np.diff(sweep.range.values).mean()) / 1000.0  # km
 print(f"gate spacing {dr * 1000:.0f} m, {sweep.sizes['azimuth']} rays x {sweep.sizes['range']} gates")
 ```
 
-## Simulated rays with known truth
+## Training examples from real rays
 
-`simulate_batch` returns the network inputs (`features`, in the order of
-`ML_FEATURES`), the true $K_{DP}$ and $\delta$, and the valid-gate mask. The
-inputs are made by the same function that prepares a real sweep, so training
-and inference see identical features. One simulated ray at C band:
+The network inputs are made by the function that prepares a sweep for
+`method="ml"`, so training and inference see identical features (listed in
+`ML_FEATURES`). To obtain them without calling the private function, a small
+object with the interface of a model records the features that
+`estimate_kdp` passes to it. The target is the radar's $K_{DP}$
+(`specific_differential_phase`), which exists on the gates the processor kept
+as precipitation (19 % of the gates).
 
 ```{code-cell} ipython3
-print(ML_FEATURES)
-demo = simulate.simulate_batch(np.random.default_rng(5), 16, 384, dr=dr, band="C")
-# a ray with a long stretch of rain and moderate K_DP
-score = demo["echo"].sum(axis=1) * (demo["kdp"].max(axis=1) < 12)
-i = int(np.argmax(score))
-r = dr * np.arange(384)
+class Recorder:
+    """Has the interface of a model; stores the features it is given."""
 
-fig, axes = plt.subplots(3, 1, figsize=(9, 7.5), sharex=True, layout="constrained")
-axes[0].plot(r, demo["z"][i], color="k", lw=0.8)
-axes[0].set(ylabel="$Z_H$ (dBZ)", title="a simulated ray")
-axes[1].plot(r, demo["phi"][i], ".", ms=2, color="0.5")
-axes[1].set(ylabel="measured $\\Psi_{DP}$ (°)")
-axes[2].plot(r, demo["kdp"][i], color="C0", label="true $K_{DP}$ (°/km)")
-axes[2].plot(r, demo["delta"][i] / 5, color="C3", label="true $\\delta$ / 5 (°)")
-axes[2].set(xlabel="range along the ray (km)", ylabel="truth")
-axes[2].legend(loc="upper left", frameon=False)
-plt.show()
+    info = {"name": "recorder"}
+
+    def __init__(self):
+        self.chunks = []
+
+    def run(self, inputs):
+        x = inputs["features"]
+        self.chunks.append(x.copy())
+        zero = np.zeros(x.shape[::2], np.float32)
+        return {"kdp": zero, "delta": zero, "kdp_std": zero}
+
+
+recorder = Recorder()
+estimate_kdp(sweep, method="ml", model=recorder, **fields)
+features = np.concatenate(recorder.chunks)  # ray, feature, range
+target = sweep.specific_differential_phase.values
+print(ML_FEATURES, features.shape)
+```
+
+### Training and test rays
+
+The split is by azimuth: rays from 120° to 240° are held out for testing and
+rays outside 118° to 242° are used for training. The 2° gaps keep neighbouring
+rays out of both sets. The features of one ray depend only on that ray, so no
+gate is seen in training and testing, and the two sectors contain different
+storm cells.
+
+```{code-cell} ipython3
+az = sweep.azimuth.values
+test_rays = (az >= 120) & (az < 240)
+train_rays = (az < 118) | (az >= 242)
+usable = np.isfinite(target) & (features[:, 1] > 0)  # reference and valid phase
+for name, rays in (("train", train_rays), ("test", test_rays)):
+    print(f"{name}: {rays.sum()} rays, {usable[rays].sum():,} gates with a reference")
 ```
 
 ## Training
 
-The network sees 25 neighbouring gates of all 7 features and predicts
-$K_{DP}$ and $\delta$ at the centre gate. Because it is linear, the best
-weights follow from the normal equations of least squares, accumulated over
-batches of simulated rays (valid gates only). That takes the place of the
-gradient descent of the real network.
+The network sees 81 neighbouring gates of all 7 features and predicts $K_{DP}$
+at the centre gate. Because it is linear, the best weights follow from the
+normal equations of least squares (with a small ridge term), which replace the
+gradient descent of the real network. The $\delta$ output has zero weights:
+the processor provides no backscatter phase to learn from.
 
 ```{code-cell} ipython3
-K = 25  # gates in the filter
+K = 81  # gates in the filter
 C = len(ML_FEATURES)
 
 
-def design(features):
+def design(feats):
     """Sliding windows of the features: (rays x gates, C * K + 1)."""
-    padded = np.pad(features, ((0, 0), (0, 0), (K // 2, K // 2)))
+    padded = np.pad(feats, ((0, 0), (0, 0), (K // 2, K // 2)))
     win = sliding_window_view(padded, K, axis=2)  # ray, feature, gate, tap
     x = win.transpose(0, 2, 1, 3).reshape(-1, C * K)
     return np.concatenate([x, np.ones((len(x), 1), np.float32)], axis=1)
 
 
-rng = np.random.default_rng(1)
-xtx = np.zeros((C * K + 1, C * K + 1))
-xty = np.zeros((C * K + 1, 2))
-n_gates = 0
 start = time.perf_counter()
-for _ in range(80):  # 80 batches of 32 rays
-    batch = simulate.simulate_batch(rng, 32, 384, dr=dr, band="C")
-    use = batch["valid"].reshape(-1)
-    x = design(batch["features"])[use].astype(np.float64)
-    y = np.stack([batch["kdp"].reshape(-1)[use], batch["delta"].reshape(-1)[use]], axis=1)
-    xtx += x.T @ x
-    xty += x.T @ y
-    n_gates += len(x)
-weights = np.linalg.solve(xtx + 1e-3 * np.eye(len(xtx)), xty)
-print(f"{n_gates:,} gates of 2560 simulated rays, trained in {time.perf_counter() - start:.1f} s")
+x_train = design(features[train_rays])[usable[train_rays].reshape(-1)].astype(np.float64)
+y_train = target[train_rays][usable[train_rays]]
+w_kdp = np.linalg.solve(x_train.T @ x_train + 0.1 * np.eye(C * K + 1), x_train.T @ y_train)
+print(f"{len(y_train):,} gates, trained in {time.perf_counter() - start:.1f} s")
+
+pred = (design(features[test_rays]) @ w_kdp).reshape(test_rays.sum(), -1)
+sel = usable[test_rays]
+err = pred[sel] - target[test_rays][sel]
+sigma = float(np.percentile(np.abs(x_train @ w_kdp - y_train), 68))  # one-sigma equivalent
+print(f"held-out sector: RMS difference {np.sqrt(np.mean(err**2)):.2f} deg/km "
+      f"(spread of the reference {target[test_rays][sel].std():.2f})")
 ```
 
-A held-out batch (new random numbers) gives the error of the fitted filter
-for $K_{DP}$ and $\delta$ against the truth. The last output of the network,
-the $K_{DP}$ uncertainty, is the toy version of the real one: a constant, the
-RMS error on this held-out batch.
-
-```{code-cell} ipython3
-held = simulate.simulate_batch(np.random.default_rng(99), 64, 384, dr=dr, band="C")
-pred = (design(held["features"]) @ weights).reshape(64, 384, 2)
-ok = held["valid"]
-rmse_kdp = float(np.sqrt(((pred[..., 0] - held["kdp"]) ** 2)[ok].mean()))
-rmse_delta = float(np.sqrt(((pred[..., 1] - held["delta"]) ** 2)[ok].mean()))
-print(f"held-out K_DP: RMS error {rmse_kdp:.2f} deg/km (spread of the truth {held['kdp'][ok].std():.2f})")
-print(f"held-out delta: RMS error {rmse_delta:.2f} deg (spread of the truth {held['delta'][ok].std():.2f})")
-```
+The last output of the network, the $K_{DP}$ uncertainty, is a constant here:
+the 68th percentile of the absolute difference from the reference on the
+training rays, which is the one-standard-deviation value for a Gaussian error.
+The held-out rays show whether it is a fair number.
 
 ## Export to ONNX
 
@@ -188,13 +192,12 @@ The ONNX graph has the interface of the real export (`export.py`): one input
 `features` (ray, feature, range) and three outputs `kdp`, `delta` and
 `kdp_std` (ray, range), with dynamic ray and range axes. A convolution with
 zero padding does the filtering; the third output channel has zero weights
-and the constant uncertainty as its bias. (The printed parameter count
-includes those zero weights; 352 are fitted.)
+and the constant uncertainty as its bias.
 
 ```{code-cell} ipython3
-w = weights[:-1].T.reshape(2, C, K).astype(np.float32)
-w = np.concatenate([w, np.zeros((1, C, K), np.float32)])
-b = np.concatenate([weights[-1], [rmse_kdp]]).astype(np.float32)
+w = w_kdp[:-1].reshape(C, K)[None].astype(np.float32)
+w = np.concatenate([w, np.zeros((2, C, K), np.float32)])  # delta and kdp_std: zero weights
+b = np.array([w_kdp[-1], 0.0, sigma], np.float32)
 
 nodes = [
     helper.make_node("Conv", ["features", "w", "b"], ["y"], pads=[K // 2] * 2),
@@ -205,7 +208,7 @@ nodes = [
 ]
 graph = helper.make_graph(
     nodes,
-    "toy-kdp",
+    "linear-kdp",
     [helper.make_tensor_value_info("features", TensorProto.FLOAT, ["ray", C, "range"])],
     [helper.make_tensor_value_info(n, TensorProto.FLOAT, ["ray", "range"])
      for n in ("kdp", "delta", "kdp_std")],
@@ -215,10 +218,10 @@ graph = helper.make_graph(
 model_proto = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
 model_proto.ir_version = 8
 onnx.checker.check_model(model_proto)
-path = Path("toy_kdp.onnx")
+path = Path("linear_kdp.onnx")
 onnx.save(model_proto, path)
 sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
-print(f"{path} {path.stat().st_size / 1e3:.1f} kB, {w.size + b.size} parameters")
+print(f"{path} {path.stat().st_size / 1e3:.1f} kB, {C * K + 1} fitted parameters")
 ```
 
 Registering the file with `radarx.ml` records its hash, licence and
@@ -227,83 +230,73 @@ network the same call would use the file of its release.
 
 ```{code-cell} ipython3
 ml.register_model(
-    "toy-kdp",
+    "linear-kdp",
     path,
     sha256,
     licence="MIT",
-    citation="radarx documentation example (2026), toy network",
+    citation="radarx documentation example (2026), linear filter trained on one CSAPR2 sweep",
     task="kdp",
 )
-model = ml.load_model("toy-kdp")
+model = ml.load_model("linear-kdp")
 model
 ```
 
-## Test on simulated rays: the truth is known
+## Held-out rays: network and classical estimators
 
-Before the real radar, the classical estimators and the toy network process a
-held-out batch of simulated rays as one sweep (`estimate_kdp` on a Dataset
-with `azimuth` and `range`). The error is the RMS difference from the true
-$K_{DP}$ on gates in precipitation that the estimator keeps.
-
-```{code-cell} ipython3
-rays = held["phi"].shape[0]
-sim = xr.Dataset(
-    {
-        "PHIDP": (("azimuth", "range"), held["phi"]),
-        "RHOHV": (("azimuth", "range"), held["rho"]),
-        "DBZH": (("azimuth", "range"), held["z"]),
-    },
-    coords={"azimuth": np.arange(rays) * 5.0, "range": (10.0 + dr * np.arange(384)) * 1000.0},
-)
-names = dict(phidp="PHIDP", rhohv="RHOHV", dbzh="DBZH")
-rows = {}
-for method in ("hubbert", "vulpiani", "monotone", "ml"):
-    extra = dict(model=model) if method == "ml" else {}
-    out = estimate_kdp(sim, method=method, offset="ray", **names, **extra)
-    k = out.KDP.values
-    use = held["echo"] & np.isfinite(k)
-    rows[method] = (float(np.sqrt(((k - held["kdp"]) ** 2)[use].mean())), float(np.mean((k - held["kdp"])[use])))
-    print(f"{method:9s} RMS error {rows[method][0]:.2f} deg/km, bias {rows[method][1]:+.2f} deg/km")
-```
-
-The toy network has the smallest error here, which is expected: it was
-trained on exactly this kind of data (same simulator, band and gate
-spacing), and the classical estimators are used with their default settings.
-It is an in-distribution test and says nothing about other radars; the real
-network is evaluated on held-out real volumes in `ml/models/kdp/evaluate.py`.
-
-## The real sweep
-
-On the CSAPR2 sweep the call differs from the classical ones only by
-`method="ml"` and the model; the model may also be given by its registered
-name.
+The call differs from the classical ones only by `method="ml"` and the model
+(which may also be given by its registered name). All estimators run on the
+whole sweep; the numbers use only the gates of the held-out sector where the
+reference exists and the estimator returns a value.
 
 ```{code-cell} ipython3
 start = time.perf_counter()
-ml_out = estimate_kdp(sweep, method="ml", model="toy-kdp", **fields)
-print(f"{time.perf_counter() - start:.1f} s for {sweep.sizes['azimuth']} rays")
-classical = estimate_kdp(sweep, method="hubbert", **fields)
-print(list(ml_out.data_vars))
-print({k: v for k, v in ml_out.KDP.attrs.items() if k.startswith("ml_")})
+results = {"network": estimate_kdp(sweep, method="ml", model="linear-kdp", **fields)}
+print(f"network: {time.perf_counter() - start:.2f} s for {sweep.sizes['azimuth']} rays")
+for method in ("hubbert", "vulpiani", "monotone"):
+    results[method] = estimate_kdp(sweep, method=method, **fields)
+
+ref_test = target[test_rays]
+rows = {}
+for name, res in results.items():
+    k = res.KDP.values[test_rays]
+    ok = np.isfinite(ref_test) & np.isfinite(k)
+    d = k[ok] - ref_test[ok]
+    rows[name] = (np.sqrt(np.mean(d**2)), d.mean(), np.corrcoef(k[ok], ref_test[ok])[0, 1], ok.sum())
+    print(f"{name:9s} RMS difference {rows[name][0]:.2f}, bias {rows[name][1]:+.2f} deg/km, "
+          f"r = {rows[name][2]:.3f}, {rows[name][3]:,} gates")
+
+k = results["network"].KDP.values[test_rays]
+std = results["network"].KDP_UNCERTAINTY.values[test_rays]
+ok = np.isfinite(ref_test) & np.isfinite(k)
+print(f"reference within one network uncertainty: {np.mean(np.abs(k[ok] - ref_test[ok]) <= std[ok]):.0%} "
+      "(68 % for a Gaussian error)")
+print(f"constant uncertainty {np.nanmean(std):.2f} deg/km")
 ```
 
-Besides `KDP` and `PHIDP_processed`, the ML method returns the backscatter
-phase and the uncertainty. The processed phase is $2\int K_{DP}\,dr$ plus the
-constant that fits the measured phase minus $\delta$, so phase and $K_{DP}$ are
-consistent.
+The linear network has a smaller difference from the reference than the
+classical estimators, which is expected: it was fitted to this reference on
+this radar and band, while the classical estimators are used with their default
+settings and do not know the reference. A network trained on one sweep says nothing about
+other radars, bands or weather; with a single sweep there is also no test on a
+different day. The comparison shows that the workflow works and that a filter learned from real
+rays can follow the processor's $K_{DP}$.
 
 ```{code-cell} ipython3
 x, y = sweep.x / 1e3, sweep.y / 1e3
 panels = [
     (sweep[fields["dbzh"]], "$Z_H$ (dBZ)", "ChaseSpectral", -10, 65),
-    (classical.KDP, "$K_{DP}$, Hubbert and Bringi (°/km)", "turbo", -1, 6),
-    (ml_out.KDP, "$K_{DP}$, toy network (°/km)", "turbo", -1, 6),
-    (ml_out.KDP - classical.KDP, "network minus Hubbert (°/km)", "RdBu_r", -3, 3),
+    (sweep.specific_differential_phase, "radar processor $K_{DP}$ (reference, °/km)", "turbo", -1, 6),
+    (results["hubbert"].KDP, "$K_{DP}$, Hubbert and Bringi (°/km)", "turbo", -1, 6),
+    (results["network"].KDP, "$K_{DP}$, linear network (°/km)", "turbo", -1, 6),
 ]
 fig, axes = plt.subplots(2, 2, figsize=(11, 10), sharex=True, sharey=True, layout="constrained")
+phi = np.deg2rad(az)
 for ax, (da, label, cmap, vmin, vmax) in zip(axes.flat, panels):
     pm = ax.pcolormesh(x, y, da, cmap=cmap, vmin=vmin, vmax=vmax)
     fig.colorbar(pm, ax=ax, shrink=0.8, label=label)
+    for edge in (120, 240):  # borders of the held-out sector
+        ax.plot([0, 110 * np.sin(np.deg2rad(edge))], [0, 110 * np.cos(np.deg2rad(edge))],
+                color="k", lw=1.2, ls="--")
     ax.set(aspect="equal", xlim=(-110, 110), ylim=(-110, 110))
 for ax in axes[1]:
     ax.set_xlabel("east (km)")
@@ -312,74 +305,61 @@ for ax in axes[:, 0]:
 plt.show()
 ```
 
+The dashed lines bound the held-out sector (from 120° to 240° clockwise from
+north, to the south); the network was trained on the rest.
+
+```{code-cell} ipython3
+fig, axes = plt.subplots(1, 3, figsize=(12, 4.4), sharex=True, sharey=True, layout="constrained")
+for ax, name in zip(axes, ("hubbert", "vulpiani", "network")):
+    kk = results[name].KDP.values[test_rays]
+    ok = np.isfinite(ref_test) & np.isfinite(kk)
+    ax.hexbin(ref_test[ok], kk[ok], gridsize=50, bins="log", extent=(-1, 7, -1, 7))
+    ax.plot([-1, 7], [-1, 7], color="r", lw=1)
+    ax.set(xlabel="radar processor $K_{DP}$ (°/km)", aspect="equal",
+           title=f"{name}: RMS {rows[name][0]:.2f}, r = {rows[name][2]:.3f}")
+axes[0].set_ylabel("estimate (°/km)")
+plt.show()
+```
+
 ### Along one ray
 
 ```{code-cell} ipython3
-iray = int(np.nanargmax(classical.PHIDP_processed.isel(range=-1).values))
+rays_test = np.flatnonzero(test_rays)
+score = np.where(np.isfinite(target[rays_test]), target[rays_test], 0).sum(axis=1)
+iray = int(rays_test[np.argmax(score)])
 r_km = sweep.range.values / 1e3
 fig, axes = plt.subplots(3, 1, figsize=(9, 8), sharex=True, layout="constrained")
 axes[0].plot(r_km, sweep[fields["dbzh"]].isel(azimuth=iray), color="k", lw=0.8)
-axes[0].set(ylabel="$Z_H$ (dBZ)", title=f"azimuth {float(sweep.azimuth[iray]):.1f}°")
+axes[0].set(ylabel="$Z_H$ (dBZ)", title=f"azimuth {float(sweep.azimuth[iray]):.1f}° (held out)")
 axes[1].plot(r_km, sweep[fields["phidp"]].isel(azimuth=iray), ".", ms=2, color="0.6", label="raw $\\Psi_{DP}$")
-axes[1].plot(r_km, classical.PHIDP_processed.isel(azimuth=iray), color="C0", label="Hubbert")
-axes[1].plot(r_km, ml_out.PHIDP_processed.isel(azimuth=iray), color="C3", label="toy network")
+axes[1].plot(r_km, results["hubbert"].PHIDP_processed.isel(azimuth=iray), color="C0", label="Hubbert")
+axes[1].plot(r_km, results["network"].PHIDP_processed.isel(azimuth=iray), color="C3", label="network")
 axes[1].set(ylabel="phase (°)")
 axes[1].legend(loc="upper left", frameon=False)
-axes[2].plot(r_km, classical.KDP.isel(azimuth=iray), color="C0", label="Hubbert")
-axes[2].plot(r_km, ml_out.KDP.isel(azimuth=iray), color="C3", label="toy network")
-axes[2].fill_between(
-    r_km,
-    (ml_out.KDP - ml_out.KDP_UNCERTAINTY).isel(azimuth=iray),
-    (ml_out.KDP + ml_out.KDP_UNCERTAINTY).isel(azimuth=iray),
-    color="C3", alpha=0.2, lw=0, label="± constant toy uncertainty",
-)
+axes[2].plot(r_km, sweep.specific_differential_phase.isel(azimuth=iray), color="k", lw=1, label="radar processor")
+axes[2].plot(r_km, results["hubbert"].KDP.isel(azimuth=iray), color="C0", label="Hubbert")
+axes[2].plot(r_km, results["network"].KDP.isel(azimuth=iray), color="C3", label="network")
 axes[2].set(xlabel="range (km)", ylabel="$K_{DP}$ (°/km)")
 axes[2].legend(loc="upper right", frameon=False)
 plt.show()
 ```
 
-On the real ray the toy network follows the same structure as the classical
-filter but is noisier, and where the classical estimate ends (low
-$\rho_{hv}$ beyond 65 km) it keeps going with high $K_{DP}$ values, so its
-processed phase keeps rising. That is the expected failure of a linear
-filter trained on simulated rays only: it has no way to learn the
-non-linear rules (what to do in noisy, low-$\rho_{hv}$ gates) that the real
-network picks up from hundreds of thousands of rays and from physics terms in its loss.
-
-### Against the radar's own KDP
-
-The file contains the $K_{DP}$ computed by the radar processor, as in the KDP
-notebook. It is not the truth either, but a third opinion in rain. The
-toy network agrees with it less well than the classical estimator does.
-
-```{code-cell} ipython3
-ref = sweep.specific_differential_phase.values
-rain = (
-    (sweep[fields["dbzh"]].values > 30)
-    & (sweep[fields["rhohv"]].values > 0.95)
-    & np.isfinite(ref)
-)
-fig, axes = plt.subplots(1, 2, figsize=(10, 4.8), sharex=True, sharey=True, layout="constrained")
-for ax, (name, res) in zip(axes, [("Hubbert and Bringi", classical), ("toy network", ml_out)]):
-    k = res.KDP.values
-    sel = rain & np.isfinite(k)
-    ax.hexbin(ref[sel], k[sel], gridsize=60, bins="log", extent=(-1, 7, -1, 7))
-    ax.plot([-1, 7], [-1, 7], color="r", lw=1)
-    ax.set(xlabel="radar $K_{DP}$ (°/km)", ylabel=f"{name} $K_{{DP}}$ (°/km)",
-           title=f"r = {np.corrcoef(ref[sel], k[sel])[0, 1]:.2f}, "
-                 f"RMS difference {np.sqrt(np.mean((k[sel] - ref[sel]) ** 2)):.2f}",
-           aspect="equal")
-plt.show()
-```
+Besides `KDP` and `PHIDP_processed`, the ML method returns the backscatter
+phase (zero here, by construction of this model) and the uncertainty. The
+processed phase is $2\int K_{DP}\,dr$ plus the constant that fits the measured
+phase, so phase and $K_{DP}$ are consistent.
 
 ## What to take from this
 
-- The pipeline is complete and runs in seconds: simulate, train, export,
-  register, retrieve. A trained model of the real architecture goes through
-  the same `ml.register_model` and `estimate_kdp(..., method="ml")` calls;
-  only the file changes.
-- The toy filter is linear, specialised to one gate spacing and band, and
-  carries a constant uncertainty. Its results on the real sweep show what a
+- The pipeline is complete and runs in seconds: build examples from real rays,
+  train, export, register, retrieve. A trained model of the real architecture
+  goes through the same `ml.register_model` and `estimate_kdp(..., method="ml")`
+  calls; only the file changes.
+- The target is the radar processor's $K_{DP}$, an estimate and not the truth.
+  A network trained on it inherits the processor's filter and its mistakes.
+  The real network is trained on simulated rays, where the truth is known.
+- The linear filter is specialised to one gate spacing and band and uses a
+  constant uncertainty. Its results on the held-out sector show what a
   minimal learned filter does, not what the radarx network achieves.
 - To train the real network, run `ml/models/kdp/train.py` and `export.py`
   (see `ml/models/kdp/README.md`); that needs PyTorch and about an hour on a
@@ -391,7 +371,3 @@ plt.show()
   the analysis of copolar differential phase and dual-frequency radar
   measurements. *J. Atmos. Oceanic Technol.*, **12**, 643-648,
   https://doi.org/10.1175/1520-0426(1995)012<0643:AIFTFT>2.0.CO;2
-- Testud, J., S. Oury, R. A. Black, P. Amayenc, and X. Dou, 2001: The concept
-  of "normalized" distribution to describe raindrop spectra: A tool for cloud
-  physics and cloud remote sensing. *J. Appl. Meteor.*, **40**, 1118-1140,
-  https://doi.org/10.1175/1520-0450(2001)040<1118:TCONDT>2.0.CO;2
