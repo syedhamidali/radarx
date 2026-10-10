@@ -741,3 +741,33 @@ def test_projection_threads_match():
     # due east and north of the origin along the axes
     x, y = L._project([LON0, LON0 + 1.0], [LAT0 + 1.0, LAT0], LAT0, LON0)
     assert abs(x[0]) < 1e-6 and y[0] > 110e3 and abs(y[1]) < 2e3 and x[1] > 90e3
+
+
+MIDNIGHT_FILE = """Analysis program: lma_analysis
+Data start time: 03/30/22 23:59:00
+Location: TEST
+Coordinate center (lat,lon,alt): 34.0 -87.0 0
+Sta_info: A Name 34.1 -87.1 200.0 0.0 1 1
+Data: time (UT sec of day), lat, lon, alt(m), reduced chi^2, P(dBW), mask
+Data format: 15.9f 10.6f 10.6f 8.1f 6.2f 5.1f 4x
+*** data ***
+86399.5 34 -87 5000 0.5 10 3f
+86399.9 34 -87 5000 0.5 10 3f
+0.2 34 -87 5000 0.5 10 3f
+0.15 34 -87 5000 0.5 10 3f
+"""
+
+
+@pytest.mark.parametrize("engine", IO_ENGINES)
+def test_read_lma_file_spanning_midnight(tmp_path, engine):
+    """Sources after 00 UT belong to the next day, not 24 h earlier."""
+    path = tmp_path / "t_lma.dat"
+    path.write_text(MIDNIGHT_FILE)
+    ds = read_lma(path, engine=engine)
+    t = ds.event_time.values
+    assert np.all(np.diff(t) >= np.timedelta64(0, "ns"))
+    expected = np.datetime64("2022-03-31T00:00:00.200", "ns")
+    assert t[-1] == expected
+    assert t[-2] == np.datetime64("2022-03-31T00:00:00.150", "ns")
+    assert t[0] == np.datetime64("2022-03-30T23:59:59.500", "ns")
+    assert (t[-1] - t[0]) < np.timedelta64(2, "s")
