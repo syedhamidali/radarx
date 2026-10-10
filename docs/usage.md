@@ -58,6 +58,7 @@ notebooks/Disdrometers
 notebooks/QVP
 notebooks/Evaporation
 notebooks/Bayesian_DSD
+notebooks/Rainfall_Estimation
 ```
 
 ```{toctree}

@@ -1482,12 +1482,16 @@ def rain_rate(
         )
 
     computed = None
+    # the classification is only computed if no sweep and no argument has one
+    given = hid is not None or any(
+        "HID" in obj[name].to_dataset() for name in _sweep_names(obj)
+    )
     nodes_out = {"/": obj.root.to_dataset(inherit=False)}
     for sweep in _sweep_names(obj):
         ds = obj[sweep].to_dataset()
         hid_da = _hid_for(ds, hid, sweep)
-        if hid_da is None and hid is not None:
-            continue  # a classification was given, and it has no such sweep
+        if hid_da is None and given:
+            continue  # a classification exists, and it has no such sweep
         if hid_da is None:
             if computed is None:
                 from .hid import hid as _hid

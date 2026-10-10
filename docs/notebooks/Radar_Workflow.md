@@ -35,6 +35,7 @@ multi-radar steps.
 | 5 | processed ΦDP and KDP | `dtree.radarx.kdp` |
 | 6 | hydrometeor classes | `dtree.radarx.hid` |
 | 7 | rain drop size distribution and rain rate, with the Bayesian posterior | `ds.radarx.dsd`, `dsd_bayesian` |
+| 7c | rain rate from $Z_H$, $Z_{DR}$, $K_{DP}$ and $A$, and from the hydrometeor class | `dtree.radarx.rain_rate`, `rain_rate_z`, `rain_rate_kdp`, `rain_rate_z_zdr`, `rain_rate_a` |
 | 8 | QVP time series and melting layer | `qvp_timeseries`, `melting_layer` |
 | 9 | azimuthal shear and radial divergence | `dtree.radarx.llsd` |
 | 10 | 3D grid, Max-CAPPI, other gridding functions, plotting functions, interactive view, UGRID | `dtree.radarx.to_grid`, `grid_cones`, `plot_ppi`, `to_uxarray` |
@@ -132,6 +133,11 @@ from radarx.retrieve import (
     qvp_timeseries,
     radar_geometry,
     radial_divergence,
+    rain_rate,
+    rain_rate_a,
+    rain_rate_kdp,
+    rain_rate_z,
+    rain_rate_z_zdr,
     storm_relative_helicity,
     storm_relative_wind,
     vad_profile,
@@ -740,6 +746,74 @@ axes[3].set(xlabel="normalized gamma, $\\mu$ = 3: $D_m$ (mm)", ylabel="posterior
 fig.colorbar(h[3], ax=axes[3], label="gates", shrink=0.85)
 fig.suptitle("Bayesian DSD retrieval, KGWX 0.5°, 00:00 UTC")
 plt.show()
+```
+
+### Rain rate
+
+`rain_rate` turns the classes of step 6 into a rain rate. Each gate gets the
+relation of its class: $R(Z, Z_{DR})$ in rain, $R(K_{DP})$ in a rain-hail
+mixture (Giangrande and Ryzhkov 2008), and NaN, with a flag that says why,
+where no relation is valid (graupel, snow, ice, the melting layer). The S-band
+coefficients of the papers are the defaults. At S band $Z_H$ and $Z_{DR}$ are
+only weakly attenuated, so we use them as they are; at C and X band apply an
+attenuation correction first (see the
+[rainfall estimation notebook](Rainfall_Estimation)). The single relations are
+`rain_rate_z`, `rain_rate_kdp`, `rain_rate_z_zdr` and `rain_rate_a`; the last
+needs the specific attenuation, which we approximate here with
+$A = 0.015\,K_{DP}$ dB km$^{-1}$ (the S-band value of Ryzhkov et al. 2014).
+
+```{code-cell} ipython3
+with timed("7c. rain rate"):
+    surv = volumes[1]["sweep_0"].to_dataset()
+    rain_blend = rain_rate(surv)  # classes from surv.HID
+    r_z = rain_rate_z(surv)
+    r_kdp = rain_rate_kdp(surv)
+    r_zdr = rain_rate_z_zdr(surv)
+    r_a = rain_rate_a(surv.assign(AH=0.015 * surv.KDP))
+flag_counts = {
+    m: int((rain_blend.RAIN_RATE_FLAG == i).sum())
+    for i, m in enumerate(rain_blend.RAIN_RATE_FLAG.attrs["flag_meanings"].split())
+}
+print("gates by flag:", flag_counts)
+```
+
+```{code-cell} ipython3
+panels = [
+    (rain_blend.RAIN_RATE, "rain rate by class (mm/h)", dict(cmap="turbo", vmin=0, vmax=60)),
+    (r_z.where(rain_blend.RAIN_RATE.notnull()), "R(Z), same gates (mm/h)", dict(cmap="turbo", vmin=0, vmax=60)),
+    (r_kdp.where(rain_blend.RAIN_RATE.notnull()), "R(KDP), same gates (mm/h)", dict(cmap="turbo", vmin=0, vmax=60)),
+]
+fig, axes = plt.subplots(1, 3, figsize=(17, 4.8), sharey=True, layout="constrained")
+for ax, (da, label, style) in zip(axes, panels):
+    pm = ppi(ax, surv.assign(field=da), "field", extent=120, **style)
+    fig.colorbar(pm, ax=ax, label=label, shrink=0.85)
+axes[0].set_ylabel("north of KGWX (km)")
+fig.suptitle("Rain rate, KGWX 0.5°, 00:00 UTC")
+plt.show()
+```
+
+The rain rate of the classes can be compared with the one of the DSD retrieval
+of step 7, which uses $Z_H$, $Z_{DR}$ and $K_{DP}$ through a gamma
+distribution. The blend uses $Z_{DR}$ on the rain gates and the DSD retrieval
+takes the intercept from $K_{DP}$ where it is at least 1 °/km:
+
+```{code-cell} ipython3
+both = rain_blend.RAIN_RATE.where(rain_near).values, dsd.RAIN_RATE.where(rain_near).values
+ok = np.isfinite(both[0]) & np.isfinite(both[1]) & (both[1] > 1)
+ratio = both[0][ok] / both[1][ok]
+print(f"{ok.sum()} rain gates; median ratio blend / DSD retrieval {np.median(ratio):.2f}, "
+      f"5-95 %: {np.percentile(ratio, 5):.2f}-{np.percentile(ratio, 95):.2f}")
+```
+
+The same functions are methods of the volume, `vol.radarx.rain_rate()`, and of a
+sweep or a field, for example `surv.radarx.rain_rate_z()`:
+
+```{code-cell} ipython3
+same = volumes[1].radarx.rain_rate()["sweep_0"].RAIN_RATE
+print("same rain rate as the function:", bool(np.allclose(same, rain_blend.RAIN_RATE, equal_nan=True)))
+print("per-field accessors:",
+      surv.radarx.rain_rate_z().name, surv.radarx.rain_rate_kdp().name,
+      surv.radarx.rain_rate_z_zdr().name, surv.radarx.rain_rate_a(a="KDP", coefficients=(4120.0, 1.03)).name)
 ```
 
 ## 8. QVP time series and melting layer
@@ -1380,7 +1454,7 @@ summary
 ```
 
 All products of the case in one `DataTree`: the environment profiles,
-the 00:00 UTC polar volume with every derived field, the DSD, the QVPs and melting
+the 00:00 UTC polar volume with every derived field, the DSD, the rain rate, the QVPs and melting
 layer, the VIL products, the grids as observed and at the common analysis time, the storm
 motion, the interpolated frames, the two-radar grid and the wind.
 
@@ -1391,6 +1465,7 @@ for node in kgwx.subtree:
 nodes["/environment/era5"] = era5
 nodes["/environment/radiosonde"] = raob
 nodes["/dsd"] = dsd
+nodes["/rain_rate"] = rain_blend
 nodes["/qvp"] = tqvp
 nodes["/melting_layer"] = ml
 nodes["/vil"] = vil_vol.assign(ECHO_TOP=top, VIL_DENSITY=density)
@@ -1655,6 +1730,11 @@ notebooks or from this index.
 | `radar_geometry` | `radarx.retrieve.multidoppler` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `apply_mask` | `radarx.retrieve.qc` | [core](Radar_Workflow): 2. Remove non-meteorological echo |
 | `echo_mask` | `radarx.retrieve.qc` | [core](Radar_Workflow): 2. Remove non-meteorological echo |
+| `rain_rate` | `radarx.retrieve.qpe` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
+| `rain_rate_a` | `radarx.retrieve.qpe` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
+| `rain_rate_kdp` | `radarx.retrieve.qpe` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
+| `rain_rate_z` | `radarx.retrieve.qpe` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
+| `rain_rate_z_zdr` | `radarx.retrieve.qpe` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
 | `rain_source_points` | `radarx.retrieve.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `rain_trajectories` | `radarx.retrieve.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `size_sorting` | `radarx.retrieve.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
@@ -1742,6 +1822,11 @@ The methods of the `.radarx` accessors:
 | `.radarx.potential_temperatures` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `.radarx.qvp` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `.radarx.radial_divergence` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
+| `.radarx.rain_rate` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
+| `.radarx.rain_rate_a` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
+| `.radarx.rain_rate_kdp` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
+| `.radarx.rain_rate_z` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
+| `.radarx.rain_rate_z_zdr` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
 | `.radarx.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `.radarx.rotation_couplets` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
 | `.radarx.single_doppler_winds` | [part 2](Radar_Workflow_Advanced): 8. Wind from a single Doppler radar |
@@ -1767,12 +1852,14 @@ The methods of the `.radarx` accessors:
 - Cao, Q., G. Zhang, E. Brandes, T. Schuur, A. Ryzhkov, and K. Ikeda, 2008: Analysis of Video Disdrometer and Polarimetric Radar Data to Characterize Rain Microphysics in Oklahoma. *Journal of Applied Meteorology and Climatology*, **47**, 2238-2255, <https://doi.org/10.1175/2008JAMC1732.1>
 - Gao, J., M. Xue, A. Shapiro, and K. K. Droegemeier, 1999: A Variational Method for the Analysis of Three-Dimensional Wind Fields from Two Doppler Radars. *Monthly Weather Review*, **127**, 2128-2142, <https://doi.org/10.1175/1520-0493(1999)127<2128:AVMFTA>2.0.CO;2>
 - Gourley, J. J., P. Tabary, and J. Parent du Chatelet, 2007: A Fuzzy Logic Algorithm for the Separation of Precipitating from Nonprecipitating Echoes Using Polarimetric Radar Observations. *Journal of Atmospheric and Oceanic Technology*, **24**, 1439-1451, <https://doi.org/10.1175/JTECH2035.1>
+- Giangrande, S. E., and A. V. Ryzhkov, 2008: Estimation of Rainfall Based on the Results of Polarimetric Echo Classification. *Journal of Applied Meteorology and Climatology*, **47**, 2445-2462, <https://doi.org/10.1175/2008JAMC1753.1>
 - Greene, D. R., and R. A. Clark, 1972: Vertically Integrated Liquid Water: A New Analysis Tool. *Monthly Weather Review*, **100**, 548-552, <https://doi.org/10.1175/1520-0493(1972)100<0548:VILWNA>2.3.CO;2>
 - Hersbach, H., and Coauthors, 2020: The ERA5 global reanalysis. *Quarterly Journal of the Royal Meteorological Society*, **146**, 1999-2049, <https://doi.org/10.1002/qj.3803>
 - Krause, J. M., 2016: A Simple Algorithm to Discriminate between Meteorological and Nonmeteorological Radar Echoes. *Journal of Atmospheric and Oceanic Technology*, **33**, 1875-1885, <https://doi.org/10.1175/JTECH-D-15-0239.1>
 - Kumjian, M. R., and A. V. Ryzhkov, 2010: The Impact of Evaporation on Polarimetric Characteristics of Rain: Theoretical Model and Practical Implications. *Journal of Applied Meteorology and Climatology*, **49**, 1247-1267, <https://doi.org/10.1175/2010JAMC2243.1>
 - Lakshmanan, V., K. Hondl, C. K. Potvin, and D. Preignitz, 2013: An Improved Method for Estimating Radar Echo-Top Height. *Weather and Forecasting*, **28**, 481-488, <https://doi.org/10.1175/WAF-D-12-00084.1>
 - Park, H. S., A. V. Ryzhkov, D. S. Zrnić, and K.-E. Kim, 2009: The Hydrometeor Classification Algorithm for the Polarimetric WSR-88D: Description and Application to an MCS. *Weather and Forecasting*, **24**, 730-748, <https://doi.org/10.1175/2008WAF2222205.1>
+- Ryzhkov, A., M. Diederich, P. Zhang, and C. Simmer, 2014: Potential Utilization of Specific Attenuation for Rainfall Estimation, Mitigation of Partial Beam Blockage, and Radar Networking. *Journal of Atmospheric and Oceanic Technology*, **31**, 599-619, <https://doi.org/10.1175/JTECH-D-13-00038.1>
 - Seo, B.-C., W. F. Krajewski, and J. A. Smith, 2014: Four-dimensional reflectivity data comparison between two ground-based radars: methodology and statistical analysis. *Hydrological Sciences Journal*, **59**, 1320-1334, <https://doi.org/10.1080/02626667.2013.839872>
 - Seo, B.-C., W. F. Krajewski, and Y. Qi, 2020: Utility of vertically integrated liquid water content for radar-rainfall estimation: Quality control and precipitation type classification. *Atmospheric Research*, **236**, 104800, <https://doi.org/10.1016/j.atmosres.2019.104800>
 - Zhang, G., J. Vivekanandan, and E. Brandes, 2001: A method for estimating rain rate and drop size distribution from polarimetric radar measurements. *IEEE Transactions on Geoscience and Remote Sensing*, **39**, 830-841, <https://doi.org/10.1109/36.917906>
