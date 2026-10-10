@@ -74,6 +74,17 @@ sounding = ["zarr", "fsspec", "aiohttp", "cdsapi"]
 # machine-learning models: ONNX Runtime runs them (PyTorch is only needed to
 # train models, see the ml/ folder of the repository)
 ml = ["onnxruntime", "pooch"]
+# everything the unit tests import, dask and zarr included
+test = [
+    "pytest",
+    "pytest-cov",
+    "pytest-mock",
+    "pytest-xdist",
+    "coverage",
+    "pooch",
+    "dask",
+    "zarr",
+]
 dev = [
     # testing
     "pytest",
@@ -82,6 +93,8 @@ dev = [
     "pytest-xdist",
     "coverage",
     "pooch",
+    "dask",
+    "zarr",
     "jupytext",
     "nbclient",
     # linting
