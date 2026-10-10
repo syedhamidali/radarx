@@ -186,6 +186,7 @@ import warnings
 import numpy as np
 import xarray as xr
 
+from .._provenance import provenance
 from . import _lagrangian_numpy as _np_kernel
 
 try:
@@ -595,6 +596,7 @@ def _valid_fraction(val, npts):
         return np.where(npts > 0, nvalid / np.maximum(npts, 1), np.nan)
 
 
+@provenance("Air trajectories through gridded winds, as used by Ziegler (2013a, b)")
 def trajectories(
     winds,
     time=None,

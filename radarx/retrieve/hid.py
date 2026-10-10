@@ -183,6 +183,7 @@ __all__ = ["hid", "hid_classes"]
 import numpy as np
 import xarray as xr
 
+from .._provenance import provenance
 from .._registry import accessor_method
 
 try:
@@ -1168,6 +1169,9 @@ def _check_inputs(obj, temperature, mask, blockage, ml_gates):
     return lo, hi
 
 
+@provenance(
+    "Fuzzy-logic hydrometeor classification after Park et al. (2009), Dolan et al. (2013)"
+)
 def hid(
     obj,
     temperature=None,

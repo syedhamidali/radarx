@@ -14,6 +14,8 @@ import radarx  # noqa: F401
 from radarx.retrieve import apply_mask, echo_mask
 from radarx.retrieve import qc as qcmod
 
+from .provenance_helpers import without_provenance
+
 ENGINES = ["numpy"] + (["compiled"] if qcmod.HAS_COMPILED_KERNEL else [])
 DR = 250.0  # gate spacing [m]
 NRAY, NG = 360, 400
@@ -358,7 +360,7 @@ def test_apply_mask_volume_and_accessors():
     keep = qc["sweep_1"].ds.METEO_MASK.values
     vel = out["sweep_1"].ds.VRADH.values
     np.testing.assert_array_equal(np.isfinite(vel), keep & (np.arange(NG) >= 10))
-    assert out["sweep_3"].ds.identical(dtree["sweep_3"].ds)
+    assert without_provenance(out["sweep_3"].ds).identical(dtree["sweep_3"].ds)
     assert out.attrs == dtree.attrs
     # a field present in only some sweeps
     only = apply_mask(dtree, qc, "VRADH")

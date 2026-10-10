@@ -42,6 +42,8 @@ __doc__ = __doc__.format("\n   ".join(__all__))
 import numpy as np
 import xarray as xr
 
+from .._provenance import provenance
+
 
 def _edges(centers, full_circle=False):
     """
@@ -174,6 +176,7 @@ def _face_node_connectivity(n_ray_edges, n_range, full_circle):
     return faces.reshape(-1, 4)
 
 
+@provenance("Radar sweep as an unstructured grid with one face per gate")
 def to_uxarray(obj, variables=None):
     """
     Convert a radar sweep into a uxarray dataset with one face per gate.

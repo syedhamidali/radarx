@@ -58,6 +58,8 @@ import numpy as np
 import xarray as xr
 from scipy.spatial import cKDTree
 
+from .._provenance import provenance
+
 _CARTESIAN_IDW_METHOD = "cartesian_idw"
 _POLAR_VERTICAL_INTERPOLATION_METHOD = "polar_vertical_interpolation"
 _HEIGHT_WINDOW_COMPOSITE_METHOD = "height_window_composite"
@@ -944,6 +946,9 @@ def _create_cappi_height_window_composite(
     return ds_cappi
 
 
+@provenance(
+    "CAPPI, radarx's own methods; inverse-distance weighting after Shepard (1968)"
+)
 def create_cappi(
     radar,
     height,

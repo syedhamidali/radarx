@@ -1,0 +1,1822 @@
+{
+ "10.1002/2015JD024663": {
+  "authors": [
+   "Fuchs, B. R.",
+   "Bruning, E. C.",
+   "Rutledge, S. A.",
+   "Carey, L. D.",
+   "Krehbiel, P. R.",
+   "Rison, W."
+  ],
+  "year": 2016,
+  "title": "Climatological analyses of LMA data with an open‐source lightning flash‐clustering algorithm",
+  "type": "article",
+  "journal": "Journal of Geophysical Research: Atmospheres",
+  "volume": "121",
+  "issue": "14",
+  "pages": "8625-8648",
+  "doi": "10.1002/2015JD024663"
+ },
+ "10.1002/9780470316849": {
+  "authors": [
+   "Scott, D. W."
+  ],
+  "year": 1992,
+  "title": "Multivariate Density Estimation",
+  "type": "book",
+  "journal": "Wiley Series in Probability and Statistics",
+  "publisher": "Wiley",
+  "doi": "10.1002/9780470316849"
+ },
+ "10.1002/9780470682104": {
+  "authors": [
+   "Markowski, P.",
+   "Richardson, Y."
+  ],
+  "year": 2010,
+  "title": "Mesoscale Meteorology in Midlatitudes",
+  "type": "book",
+  "publisher": "Wiley",
+  "doi": "10.1002/9780470682104"
+ },
+ "10.1007/978-0-306-48100-0": {
+  "authors": [
+   "Pruppacher, H. R.",
+   "Klett, J. D."
+  ],
+  "year": 2010,
+  "title": "Microphysics of Clouds and Precipitation",
+  "type": "book",
+  "journal": "Atmospheric and Oceanographic Sciences Library",
+  "publisher": "Springer Netherlands",
+  "doi": "10.1007/978-0-306-48100-0"
+ },
+ "10.1007/BF00122492": {
+  "authors": [
+   "Wilson, J. D.",
+   "Sawford, B. L."
+  ],
+  "year": 1996,
+  "title": "Review of Lagrangian stochastic models for trajectories in the turbulent atmosphere",
+  "type": "article",
+  "journal": "Boundary-Layer Meteorology",
+  "volume": "78",
+  "issue": "1-2",
+  "pages": "191-210",
+  "doi": "10.1007/BF00122492"
+ },
+ "10.1016/0020-0190(79)90072-3": {
+  "authors": [
+   "Andrew, A. M."
+  ],
+  "year": 1979,
+  "title": "Another efficient algorithm for convex hulls in two dimensions",
+  "type": "article",
+  "journal": "Information Processing Letters",
+  "volume": "9",
+  "issue": "5",
+  "pages": "216-219",
+  "doi": "10.1016/0020-0190(79)90072-3"
+ },
+ "10.1016/j.atmosres.2019.104800": {
+  "authors": [
+   "Seo, B.-C.",
+   "Krajewski, W. F.",
+   "Qi, Y."
+  ],
+  "year": 2020,
+  "title": "Utility of Vertically Integrated Liquid Water Content for Radar-Rainfall Estimation: Quality Control and Precipitation Type Classification",
+  "type": "article",
+  "journal": "Atmospheric Research",
+  "volume": "236",
+  "pages": "104800",
+  "doi": "10.1016/j.atmosres.2019.104800"
+ },
+ "10.1016/S0022-4073(98)00008-9": {
+  "authors": [
+   "Mishchenko, M. I.",
+   "Travis, L. D."
+  ],
+  "year": 1998,
+  "title": "Capabilities and limitations of a current FORTRAN implementation of the T-matrix method for randomly oriented, rotationally symmetric scatterers",
+  "type": "article",
+  "journal": "Journal of Quantitative Spectroscopy and Radiative Transfer",
+  "volume": "60",
+  "issue": "3",
+  "pages": "309-324",
+  "doi": "10.1016/S0022-4073(98)00008-9"
+ },
+ "10.1017/CBO9780511541094": {
+  "authors": [
+   "Bringi, V. N.",
+   "Chandrasekar, V."
+  ],
+  "year": 2001,
+  "title": "Polarimetric Doppler Weather Radar",
+  "type": "book",
+  "publisher": "Cambridge University Press",
+  "doi": "10.1017/CBO9780511541094"
+ },
+ "10.1017/S0022112068000133": {
+  "authors": [
+   "Benjamin, T. B."
+  ],
+  "year": 1968,
+  "title": "Gravity currents and related phenomena",
+  "type": "article",
+  "journal": "Journal of Fluid Mechanics",
+  "volume": "31",
+  "issue": "2",
+  "pages": "209-248",
+  "doi": "10.1017/S0022112068000133"
+ },
+ "10.1017/S0022112087001940": {
+  "authors": [
+   "Thomson, D. J."
+  ],
+  "year": 1987,
+  "title": "Criteria for the selection of stochastic models of particle trajectories in turbulent flows",
+  "type": "article",
+  "journal": "Journal of Fluid Mechanics",
+  "volume": "180",
+  "pages": "529-556",
+  "doi": "10.1017/S0022112087001940"
+ },
+ "10.1029/2006JD007787": {
+  "authors": [
+   "Mach, D. M.",
+   "Christian, H. J.",
+   "Blakeslee, R. J.",
+   "Boccippio, D. J.",
+   "Goodman, S. J.",
+   "Boeck, W. L."
+  ],
+  "year": 2007,
+  "title": "Performance assessment of the Optical Transient Detector and Lightning Imaging Sensor",
+  "type": "article",
+  "journal": "Journal of Geophysical Research: Atmospheres",
+  "volume": "112",
+  "issue": "D9",
+  "pages": "2006JD007787",
+  "doi": "10.1029/2006JD007787"
+ },
+ "10.1029/RG011i001p00001": {
+  "authors": [
+   "Atlas, D.",
+   "Srivastava, R. C.",
+   "Sekhon, R. S."
+  ],
+  "year": 1973,
+  "title": "Doppler radar characteristics of precipitation at vertical incidence",
+  "type": "article",
+  "journal": "Reviews of Geophysics",
+  "volume": "11",
+  "issue": "1",
+  "pages": "1-35",
+  "doi": "10.1029/RG011i001p00001"
+ },
+ "10.1038/273287a0": {
+  "authors": [
+   "Rinehart, R. E.",
+   "Garvey, E. T."
+  ],
+  "year": 1978,
+  "title": "Three-dimensional storm motion detection by conventional weather radar",
+  "type": "article",
+  "journal": "Nature",
+  "volume": "273",
+  "issue": "5660",
+  "pages": "287-289",
+  "doi": "10.1038/273287a0"
+ },
+ "10.1080/02626667.2013.839872": {
+  "authors": [
+   "Seo, B.-C.",
+   "Krajewski, W. F.",
+   "Smith, J. A."
+  ],
+  "year": 2014,
+  "title": "Four-dimensional reflectivity data comparison between two ground-based radars: methodology and statistical analysis",
+  "type": "article",
+  "journal": "Hydrological Sciences Journal",
+  "volume": "59",
+  "issue": "7",
+  "pages": "1320-1334",
+  "doi": "10.1080/02626667.2013.839872"
+ },
+ "10.1109/36.917906": {
+  "authors": [
+   "Zhang, G.",
+   "Vivekanandan, J.",
+   "Brandes, E."
+  ],
+  "year": 2001,
+  "title": "A method for estimating rain rate and drop size distribution from polarimetric radar measurements",
+  "type": "article",
+  "journal": "IEEE Transactions on Geoscience and Remote Sensing",
+  "volume": "39",
+  "issue": "4",
+  "pages": "830-841",
+  "doi": "10.1109/36.917906"
+ },
+ "10.1109/TASSP.1981.1163711": {
+  "authors": [
+   "Keys, R."
+  ],
+  "year": 1981,
+  "title": "Cubic convolution interpolation for digital image processing",
+  "type": "article",
+  "journal": "IEEE Transactions on Acoustics, Speech, and Signal Processing",
+  "volume": "29",
+  "issue": "6",
+  "pages": "1153-1160",
+  "doi": "10.1109/TASSP.1981.1163711"
+ },
+ "10.1111/2041-210X.13280": {
+  "authors": [
+   "Lin, T.",
+   "Winner, K.",
+   "Bernstein, G.",
+   "Mittal, A.",
+   "Dokter, A. M.",
+   "Horton, K. G.",
+   "Nilsson, C.",
+   "Van Doren, B. M.",
+   "Farnsworth, A.",
+   "La Sorte, F. A.",
+   "Maji, S.",
+   "Sheldon, D."
+  ],
+  "year": 2019,
+  "title": "MistNet: Measuring historical bird migration in the US using archived weather radar data and convolutional neural networks",
+  "type": "article",
+  "journal": "Methods in Ecology and Evolution",
+  "volume": "10",
+  "issue": "11",
+  "pages": "1908-1922",
+  "doi": "10.1111/2041-210X.13280"
+ },
+ "10.1137/0916069": {
+  "authors": [
+   "Byrd, R. H.",
+   "Lu, P.",
+   "Nocedal, J.",
+   "Zhu, C."
+  ],
+  "year": 1995,
+  "title": "A Limited Memory Algorithm for Bound Constrained Optimization",
+  "type": "article",
+  "journal": "SIAM Journal on Scientific Computing",
+  "volume": "16",
+  "issue": "5",
+  "pages": "1190-1208",
+  "doi": "10.1137/0916069"
+ },
+ "10.1137/S0036144598336745": {
+  "authors": [
+   "Strang, G."
+  ],
+  "year": 1999,
+  "title": "The Discrete Cosine Transform",
+  "type": "article",
+  "journal": "SIAM Review",
+  "volume": "41",
+  "issue": "1",
+  "pages": "135-147",
+  "doi": "10.1137/S0036144598336745"
+ },
+ "10.1142/3171": {
+  "authors": [
+   "Rodgers, C. D."
+  ],
+  "year": 2000,
+  "title": "Inverse Methods for Atmospheric Sounding",
+  "type": "book",
+  "journal": "Series on Atmospheric, Oceanic and Planetary Physics",
+  "publisher": "WORLD SCIENTIFIC",
+  "doi": "10.1142/3171"
+ },
+ "10.1145/235815.235821": {
+  "authors": [
+   "Barber, C. B.",
+   "Dobkin, D. P.",
+   "Huhdanpaa, H."
+  ],
+  "year": 1996,
+  "title": "The quickhull algorithm for convex hulls",
+  "type": "article",
+  "journal": "ACM Transactions on Mathematical Software",
+  "volume": "22",
+  "issue": "4",
+  "pages": "469-483",
+  "doi": "10.1145/235815.235821"
+ },
+ "10.1145/279232.279236": {
+  "authors": [
+   "Zhu, C.",
+   "Byrd, R. H.",
+   "Lu, P.",
+   "Nocedal, J."
+  ],
+  "year": 1997,
+  "title": "Algorithm 778: L-BFGS-B",
+  "type": "article",
+  "journal": "ACM Transactions on Mathematical Software",
+  "volume": "23",
+  "issue": "4",
+  "pages": "550-560",
+  "doi": "10.1145/279232.279236"
+ },
+ "10.1145/800186.810616": {
+  "authors": [
+   "Shepard, D."
+  ],
+  "year": 1968,
+  "title": "A two-dimensional interpolation function for irregularly-spaced data",
+  "type": "inproceedings",
+  "journal": "Proceedings of the 1968 23rd ACM national conference on -",
+  "pages": "517-524",
+  "publisher": "ACM Press",
+  "doi": "10.1145/800186.810616"
+ },
+ "10.1175/1520-0426(1990)007<0118:EDODVU>2.0.CO;2": {
+  "authors": [
+   "Eilts, M. D.",
+   "Smith, S. D."
+  ],
+  "year": 1990,
+  "title": "Efficient Dealiasing of Doppler Velocities Using Local Environment Constraints",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "7",
+  "issue": "1",
+  "pages": "118-128",
+  "doi": "10.1175/1520-0426(1990)007<0118:EDODVU>2.0.CO;2"
+ },
+ "10.1175/1520-0426(1993)010<0798:TDDODV>2.0.CO;2": {
+  "authors": [
+   "Jing, Z.",
+   "Wiener, G."
+  ],
+  "year": 1993,
+  "title": "Two-Dimensional Dealiasing of Doppler Velocities",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "10",
+  "issue": "6",
+  "pages": "798-808",
+  "doi": "10.1175/1520-0426(1993)010<0798:TDDODV>2.0.CO;2"
+ },
+ "10.1175/1520-0426(1995)012<0643:AIFTFT>2.0.CO;2": {
+  "authors": [
+   "Hubbert, J.",
+   "Bringi, V. N."
+  ],
+  "year": 1995,
+  "title": "An Iterative Filtering Technique for the Analysis of Copolar Differential Phase and Dual-Frequency Radar Measurements",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "12",
+  "issue": "3",
+  "pages": "643-648",
+  "doi": "10.1175/1520-0426(1995)012<0643:AIFTFT>2.0.CO;2"
+ },
+ "10.1175/1520-0426(2000)017<0130:AODFMS>2.0.CO;2": {
+  "authors": [
+   "Löffler-Mang, M.",
+   "Joss, J."
+  ],
+  "year": 2000,
+  "title": "An Optical Disdrometer for Measuring Size and Velocity of Hydrometeors",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "17",
+  "issue": "2",
+  "pages": "130-139",
+  "doi": "10.1175/1520-0426(2000)017<0130:AODFMS>2.0.CO;2"
+ },
+ "10.1175/1520-0426(2001)018<1674:ARTFDD>2.0.CO;2": {
+  "authors": [
+   "James, C. N.",
+   "Houze, R. A."
+  ],
+  "year": 2001,
+  "title": "A Real-Time Four-Dimensional Doppler Dealiasing Scheme",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "18",
+  "issue": "10",
+  "pages": "1674-1683",
+  "doi": "10.1175/1520-0426(2001)018<1674:ARTFDD>2.0.CO;2"
+ },
+ "10.1175/1520-0426(2002)019<0633:AMFETP>2.0.CO;2": {
+  "authors": [
+   "Bringi, V. N.",
+   "Huang, G.-J.",
+   "Chandrasekar, V.",
+   "Gorgucci, E."
+  ],
+  "year": 2002,
+  "title": "A Methodology for Estimating the Parameters of a Gamma Raindrop Size Distribution Model from Polarimetric Radar Data: Application to a Squall-Line Event from the TRMM/Brazil Campaign",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "19",
+  "issue": "5",
+  "pages": "633-645",
+  "doi": "10.1175/1520-0426(2002)019<0633:AMFETP>2.0.CO;2"
+ },
+ "10.1175/1520-0426(2002)019<0673:UOTDRS>2.0.CO;2": {
+  "authors": [
+   "Steiner, M.",
+   "Smith, J. A."
+  ],
+  "year": 2002,
+  "title": "Use of Three-Dimensional Reflectivity Structure for Automated Detection and Removal of Nonprecipitating Echoes in Radar Data",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "19",
+  "issue": "5",
+  "pages": "673-686",
+  "doi": "10.1175/1520-0426(2002)019<0673:UOTDRS>2.0.CO;2"
+ },
+ "10.1175/1520-0434(1997)012<0473:VDAAHI>2.0.CO;2": {
+  "authors": [
+   "Amburn, S. A.",
+   "Wolf, P. L."
+  ],
+  "year": 1997,
+  "title": "VIL Density as a Hail Indicator",
+  "type": "article",
+  "journal": "Weather and Forecasting",
+  "volume": "12",
+  "issue": "3",
+  "pages": "473-478",
+  "doi": "10.1175/1520-0434(1997)012<0473:VDAAHI>2.0.CO;2"
+ },
+ "10.1175/1520-0434(2000)015<0061:PSMUAN>2.0.CO;2": {
+  "authors": [
+   "Bunkers, M. J.",
+   "Klimowski, B. A.",
+   "Zeitler, J. W.",
+   "Thompson, R. L.",
+   "Weisman, M. L."
+  ],
+  "year": 2000,
+  "title": "Predicting Supercell Motion Using a New Hodograph Technique",
+  "type": "article",
+  "journal": "Weather and Forecasting",
+  "volume": "15",
+  "issue": "1",
+  "pages": "61-79",
+  "doi": "10.1175/1520-0434(2000)015<0061:PSMUAN>2.0.CO;2"
+ },
+ "10.1175/1520-0450(1964)003<0396:ATFMDI>2.0.CO;2": {
+  "authors": [
+   "Barnes, S. L."
+  ],
+  "year": 1964,
+  "title": "A Technique for Maximizing Details in Numerical Weather Map Analysis",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology",
+  "volume": "3",
+  "issue": "4",
+  "pages": "396-409",
+  "doi": "10.1175/1520-0450(1964)003<0396:ATFMDI>2.0.CO;2"
+ },
+ "10.1175/1520-0450(1968)007<0105:TDOKPO>2.0.CO;2": {
+  "authors": [
+   "Browning, K. A.",
+   "Wexler, R."
+  ],
+  "year": 1968,
+  "title": "The Determination of Kinematic Properties of a Wind Field Using Doppler Radar",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology",
+  "volume": "7",
+  "issue": "1",
+  "pages": "105-113",
+  "doi": "10.1175/1520-0450(1968)007<0105:TDOKPO>2.0.CO;2"
+ },
+ "10.1175/1520-0450(1969)008<0249:TVORA>2.0.CO;2": {
+  "authors": [
+   "Foote, G. B.",
+   "Du Toit, P. S."
+  ],
+  "year": 1969,
+  "title": "Terminal Velocity of Raindrops Aloft",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology",
+  "volume": "8",
+  "issue": "2",
+  "pages": "249-253",
+  "doi": "10.1175/1520-0450(1969)008<0249:TVORA>2.0.CO;2"
+ },
+ "10.1175/1520-0450(1981)020<1527:NEFCVP>2.0.CO;2": {
+  "authors": [
+   "Buck, A. L."
+  ],
+  "year": 1981,
+  "title": "New Equations for Computing Vapor Pressure and Enhancement Factor",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology",
+  "volume": "20",
+  "issue": "12",
+  "pages": "1527-1532",
+  "doi": "10.1175/1520-0450(1981)020<1527:NEFCVP>2.0.CO;2"
+ },
+ "10.1175/1520-0450(1983)022<1065:BPOTSF>2.0.CO;2": {
+  "authors": [
+   "Lin, Y.-L.",
+   "Farley, R. D.",
+   "Orville, H. D."
+  ],
+  "year": 1983,
+  "title": "Bulk Parameterization of the Snow Field in a Cloud Model",
+  "type": "article",
+  "journal": "Journal of Climate and Applied Meteorology",
+  "volume": "22",
+  "issue": "6",
+  "pages": "1065-1092",
+  "doi": "10.1175/1520-0450(1983)022<1065:BPOTSF>2.0.CO;2"
+ },
+ "10.1175/1520-0450(1983)022<1764:NVITAF>2.0.CO;2": {
+  "authors": [
+   "Ulbrich, C. W."
+  ],
+  "year": 1983,
+  "title": "Natural Variations in the Analytical Form of the Raindrop Size Distribution",
+  "type": "article",
+  "journal": "Journal of Climate and Applied Meteorology",
+  "volume": "22",
+  "issue": "10",
+  "pages": "1764-1775",
+  "doi": "10.1175/1520-0450(1983)022<1764:NVITAF>2.0.CO;2"
+ },
+ "10.1175/1520-0450(1998)037<0912:RMARPA>2.0.CO;2": {
+  "authors": [
+   "Ulbrich, C. W.",
+   "Atlas, D."
+  ],
+  "year": 1998,
+  "title": "Rainfall Microphysics and Radar Properties: Analysis Methods for Drop Size Spectra",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology",
+  "volume": "37",
+  "issue": "9",
+  "pages": "912-923",
+  "doi": "10.1175/1520-0450(1998)037<0912:RMARPA>2.0.CO;2"
+ },
+ "10.1175/1520-0450(2001)040<1118:TCONDT>2.0.CO;2": {
+  "authors": [
+   "Testud, J.",
+   "Oury, S.",
+   "Black, R. A.",
+   "Amayenc, P.",
+   "Dou, X."
+  ],
+  "year": 2001,
+  "title": "The Concept of “Normalized” Distribution to Describe Raindrop Spectra: A Tool for Cloud Physics and Cloud Remote Sensing",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology",
+  "volume": "40",
+  "issue": "6",
+  "pages": "1118-1140",
+  "doi": "10.1175/1520-0450(2001)040<1118:TCONDT>2.0.CO;2"
+ },
+ "10.1175/1520-0450(2001)040<1607:AASFRE>2.0.CO;2": {
+  "authors": [
+   "Li, X.",
+   "Srivastava, R. C."
+  ],
+  "year": 2001,
+  "title": "An Analytical Solution for Raindrop Evaporation and Its Application to Radar Rainfall Measurements",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology",
+  "volume": "40",
+  "issue": "9",
+  "pages": "1607-1616",
+  "doi": "10.1175/1520-0450(2001)040<1607:AASFRE>2.0.CO;2"
+ },
+ "10.1175/1520-0450(2002)041<0674:EIREWA>2.0.CO;2": {
+  "authors": [
+   "Brandes, E. A.",
+   "Zhang, G.",
+   "Vivekanandan, J."
+  ],
+  "year": 2002,
+  "title": "Experiments in Rainfall Estimation with a Polarimetric Radar in a Subtropical Environment",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology",
+  "volume": "41",
+  "issue": "6",
+  "pages": "674-685",
+  "doi": "10.1175/1520-0450(2002)041<0674:EIREWA>2.0.CO;2"
+ },
+ "10.1175/1520-0450(2004)043<0217:PREBOA>2.0.CO;2": {
+  "authors": [
+   "Vivekanandan, J.",
+   "Zhang, G.",
+   "Brandes, E."
+  ],
+  "year": 2004,
+  "title": "Polarimetric Radar Estimators Based on a Constrained Gamma Drop Size Distribution Model",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology",
+  "volume": "43",
+  "issue": "2",
+  "pages": "217-230",
+  "doi": "10.1175/1520-0450(2004)043<0217:PREBOA>2.0.CO;2"
+ },
+ "10.1175/1520-0469(1948)005<0165:TDORWS>2.0.CO;2": {
+  "authors": [
+   "Marshall, J. S.",
+   "Palmer, W. M. K."
+  ],
+  "year": 1948,
+  "title": "THE DISTRIBUTION OF RAINDROPS WITH SIZE",
+  "type": "article",
+  "journal": "Journal of Meteorology",
+  "volume": "5",
+  "issue": "4",
+  "pages": "165-166",
+  "doi": "10.1175/1520-0469(1948)005<0165:TDORWS>2.0.CO;2"
+ },
+ "10.1175/1520-0469(1976)033<0851:TVASOC>2.0.CO;2": {
+  "authors": [
+   "Beard, K. V."
+  ],
+  "year": 1976,
+  "title": "Terminal Velocity and Shape of Cloud and Precipitation Drops Aloft",
+  "type": "article",
+  "journal": "Journal of the Atmospheric Sciences",
+  "volume": "33",
+  "issue": "5",
+  "pages": "851-864",
+  "doi": "10.1175/1520-0469(1976)033<0851:TVASOC>2.0.CO;2"
+ },
+ "10.1175/1520-0469(1982)039<2279:EIFAMF>2.0.CO;2": {
+  "authors": [
+   "Gal-Chen, T."
+  ],
+  "year": 1982,
+  "title": "Errors in Fixed and Moving Frame of References: Applications for Conventional and Doppler Radar Analysis",
+  "type": "article",
+  "journal": "Journal of the Atmospheric Sciences",
+  "volume": "39",
+  "issue": "10",
+  "pages": "2279-2300",
+  "doi": "10.1175/1520-0469(1982)039<2279:EIFAMF>2.0.CO;2"
+ },
+ "10.1175/1520-0469(1984)041<2991:SVTOOU>2.0.CO;2": {
+  "authors": [
+   "Davies-Jones, R."
+  ],
+  "year": 1984,
+  "title": "Streamwise Vorticity: The Origin of Updraft Rotation in Supercell Storms",
+  "type": "article",
+  "journal": "Journal of the Atmospheric Sciences",
+  "volume": "41",
+  "issue": "20",
+  "pages": "2991-3006",
+  "doi": "10.1175/1520-0469(1984)041<2991:SVTOOU>2.0.CO;2"
+ },
+ "10.1175/1520-0469(1987)044<2754:MASOGA>2.0.CO;2": {
+  "authors": [
+   "Rasmussen, R. M.",
+   "Heymsfield, A. J."
+  ],
+  "year": 1987,
+  "title": "Melting and Shedding of Graupel and Hail. Part I: Model Physics",
+  "type": "article",
+  "journal": "Journal of the Atmospheric Sciences",
+  "volume": "44",
+  "issue": "19",
+  "pages": "2754-2763",
+  "doi": "10.1175/1520-0469(1987)044<2754:MASOGA>2.0.CO;2"
+ },
+ "10.1175/1520-0469(1988)045<0463:ATFSLL>2.0.CO;2": {
+  "authors": [
+   "Rotunno, R.",
+   "Klemp, J. B.",
+   "Weisman, M. L."
+  ],
+  "year": 1988,
+  "title": "A Theory for Strong, Long-Lived Squall Lines",
+  "type": "article",
+  "journal": "Journal of the Atmospheric Sciences",
+  "volume": "45",
+  "issue": "3",
+  "pages": "463-485",
+  "doi": "10.1175/1520-0469(1988)045<0463:ATFSLL>2.0.CO;2"
+ },
+ "10.1175/1520-0469(1994)051<0249:ADMMPF>2.0.CO;2": {
+  "authors": [
+   "Ferrier, B. S."
+  ],
+  "year": 1994,
+  "title": "A Double-Moment Multiple-Phase Four-Class Bulk Ice Scheme. Part I: Description",
+  "type": "article",
+  "journal": "Journal of the Atmospheric Sciences",
+  "volume": "51",
+  "issue": "2",
+  "pages": "249-280",
+  "doi": "10.1175/1520-0469(1994)051<0249:ADMMPF>2.0.CO;2"
+ },
+ "10.1175/1520-0469(1995)052<0838:LTROOT>2.0.CO;2": {
+  "authors": [
+   "Fabry, F.",
+   "Zawadzki, I."
+  ],
+  "year": 1995,
+  "title": "Long-Term Radar Observations of the Melting Layer of Precipitation and Their Interpretation",
+  "type": "article",
+  "journal": "Journal of the Atmospheric Sciences",
+  "volume": "52",
+  "issue": "7",
+  "pages": "838-851",
+  "doi": "10.1175/1520-0469(1995)052<0838:LTROOT>2.0.CO;2"
+ },
+ "10.1175/1520-0469(2003)060<0354:RSDIDC>2.0.CO;2": {
+  "authors": [
+   "Bringi, V. N.",
+   "Chandrasekar, V.",
+   "Hubbert, J.",
+   "Gorgucci, E.",
+   "Randeu, W. L.",
+   "Schoenhuber, M."
+  ],
+  "year": 2003,
+  "title": "Raindrop Size Distribution in Different Climatic Regimes from Disdrometer and Dual-Polarized Radar Analysis",
+  "type": "article",
+  "journal": "Journal of the Atmospheric Sciences",
+  "volume": "60",
+  "issue": "2",
+  "pages": "354-365",
+  "doi": "10.1175/1520-0469(2003)060<0354:RSDIDC>2.0.CO;2"
+ },
+ "10.1175/1520-0469(2004)061<0361:ATFSLS>2.0.CO;2": {
+  "authors": [
+   "Weisman, M. L.",
+   "Rotunno, R."
+  ],
+  "year": 2004,
+  "title": "“A Theory for Strong Long-Lived Squall Lines” Revisited",
+  "type": "article",
+  "journal": "Journal of the Atmospheric Sciences",
+  "volume": "61",
+  "issue": "4",
+  "pages": "361-382",
+  "doi": "10.1175/1520-0469(2004)061<0361:ATFSLS>2.0.CO;2"
+ },
+ "10.1175/1520-0493(1972)100<0548:VILWNA>2.3.CO;2": {
+  "authors": [
+   "Greene, D. R.",
+   "Clark, R. A."
+  ],
+  "year": 1972,
+  "title": "Vertically Integrated Liquid Water—A New Analysis Tool",
+  "type": "article",
+  "journal": "Monthly Weather Review",
+  "volume": "100",
+  "issue": "7",
+  "pages": "548-552",
+  "doi": "10.1175/1520-0493(1972)100<0548:VILWNA>2.3.CO;2"
+ },
+ "10.1175/1520-0493(1980)108<1046:TCOEPT>2.0.CO;2": {
+  "authors": [
+   "Bolton, D."
+  ],
+  "year": 1980,
+  "title": "The Computation of Equivalent Potential Temperature",
+  "type": "article",
+  "journal": "Monthly Weather Review",
+  "volume": "108",
+  "issue": "7",
+  "pages": "1046-1053",
+  "doi": "10.1175/1520-0493(1980)108<1046:TCOEPT>2.0.CO;2"
+ },
+ "10.1175/1520-0493(1982)110<1060:TLCOTG>2.0.CO;2": {
+  "authors": [
+   "Wakimoto, R. M."
+  ],
+  "year": 1982,
+  "title": "The Life Cycle of Thunderstorm Gust Fronts as Viewed with Doppler Radar and Rawinsonde Data",
+  "type": "article",
+  "journal": "Monthly Weather Review",
+  "volume": "110",
+  "issue": "8",
+  "pages": "1060-1082",
+  "doi": "10.1175/1520-0493(1982)110<1060:TLCOTG>2.0.CO;2"
+ },
+ "10.1175/1520-0493(1989)117<0231:AIWSA>2.0.CO;2": {
+  "authors": [
+   "Tao, W.-K.",
+   "Simpson, J.",
+   "McCumber, M."
+  ],
+  "year": 1989,
+  "title": "An Ice-Water Saturation Adjustment",
+  "type": "article",
+  "journal": "Monthly Weather Review",
+  "volume": "117",
+  "issue": "1",
+  "pages": "231-235",
+  "doi": "10.1175/1520-0493(1989)117<0231:AIWSA>2.0.CO;2"
+ },
+ "10.1175/1520-0493(1991)119<2206:SLISFA>2.0.CO;2": {
+  "authors": [
+   "Staniforth, A.",
+   "Côté, J."
+  ],
+  "year": 1991,
+  "title": "Semi-Lagrangian Integration Schemes for Atmospheric Models—A Review",
+  "type": "article",
+  "journal": "Monthly Weather Review",
+  "volume": "119",
+  "issue": "9",
+  "pages": "2206-2223",
+  "doi": "10.1175/1520-0493(1991)119<2206:SLISFA>2.0.CO;2"
+ },
+ "10.1175/1520-0493(1999)127<2128:AVMFTA>2.0.CO;2": {
+  "authors": [
+   "Gao, J.",
+   "Xue, M.",
+   "Shapiro, A.",
+   "Droegemeier, K. K."
+  ],
+  "year": 1999,
+  "title": "A Variational Method for the Analysis of Three-Dimensional Wind Fields from Two Doppler Radars",
+  "type": "article",
+  "journal": "Monthly Weather Review",
+  "volume": "127",
+  "issue": "9",
+  "pages": "2128-2142",
+  "doi": "10.1175/1520-0493(1999)127<2128:AVMFTA>2.0.CO;2"
+ },
+ "10.1175/1520-0493(2002)130<2917:ABSFMN>2.0.CO;2": {
+  "authors": [
+   "Bryan, G. H.",
+   "Fritsch, J. M."
+  ],
+  "year": 2002,
+  "title": "A Benchmark Simulation for Moist Nonhydrostatic Numerical Models",
+  "type": "article",
+  "journal": "Monthly Weather Review",
+  "volume": "130",
+  "issue": "12",
+  "pages": "2917-2928",
+  "doi": "10.1175/1520-0493(2002)130<2917:ABSFMN>2.0.CO;2"
+ },
+ "10.1175/2007JAMC1634.1": {
+  "authors": [
+   "Giangrande, S. E.",
+   "Krause, J. M.",
+   "Ryzhkov, A. V."
+  ],
+  "year": 2008,
+  "title": "Automatic Designation of the Melting Layer with a Polarimetric Prototype of the WSR-88D Radar",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology and Climatology",
+  "volume": "47",
+  "issue": "5",
+  "pages": "1354-1364",
+  "doi": "10.1175/2007JAMC1634.1"
+ },
+ "10.1175/2008JAMC1732.1": {
+  "authors": [
+   "Cao, Q.",
+   "Zhang, G.",
+   "Brandes, E.",
+   "Schuur, T.",
+   "Ryzhkov, A.",
+   "Ikeda, K."
+  ],
+  "year": 2008,
+  "title": "Analysis of Video Disdrometer and Polarimetric Radar Data to Characterize Rain Microphysics in Oklahoma",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology and Climatology",
+  "volume": "47",
+  "issue": "8",
+  "pages": "2238-2255",
+  "doi": "10.1175/2008JAMC1732.1"
+ },
+ "10.1175/2008JAMC2026.1": {
+  "authors": [
+   "Cao, Q.",
+   "Zhang, G."
+  ],
+  "year": 2009,
+  "title": "Errors in Estimating Raindrop Size Distribution Parameters Employing Disdrometer and Simulated Raindrop Spectra",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology and Climatology",
+  "volume": "48",
+  "issue": "2",
+  "pages": "406-425",
+  "doi": "10.1175/2008JAMC2026.1"
+ },
+ "10.1175/2008JTECHA1075.1": {
+  "authors": [
+   "Huang, G.-J.",
+   "Bringi, V. N.",
+   "Thurai, M."
+  ],
+  "year": 2008,
+  "title": "Orientation Angle Distributions of Drops after an 80-m Fall Using a 2D Video Disdrometer",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "25",
+  "issue": "9",
+  "pages": "1717-1723",
+  "doi": "10.1175/2008JTECHA1075.1"
+ },
+ "10.1175/2008WAF2222205.1": {
+  "authors": [
+   "Park, H. S.",
+   "Ryzhkov, A. V.",
+   "Zrnić, D. S.",
+   "Kim, K.-E."
+  ],
+  "year": 2009,
+  "title": "The Hydrometeor Classification Algorithm for the Polarimetric WSR-88D: Description and Application to an MCS",
+  "type": "article",
+  "journal": "Weather and Forecasting",
+  "volume": "24",
+  "issue": "3",
+  "pages": "730-748",
+  "doi": "10.1175/2008WAF2222205.1"
+ },
+ "10.1175/2009JAMC2227.1": {
+  "authors": [
+   "Cao, Q.",
+   "Zhang, G.",
+   "Brandes, E. A.",
+   "Schuur, T. J."
+  ],
+  "year": 2010,
+  "title": "Polarimetric Radar Rain Estimation through Retrieval of Drop Size Distribution Using a Bayesian Approach",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology and Climatology",
+  "volume": "49",
+  "issue": "5",
+  "pages": "973-990",
+  "doi": "10.1175/2009JAMC2227.1"
+ },
+ "10.1175/2009JAMC2237.1": {
+  "authors": [
+   "Schultz, C. J.",
+   "Petersen, W. A.",
+   "Carey, L. D."
+  ],
+  "year": 2009,
+  "title": "Preliminary Development and Evaluation of Lightning Jump Algorithms for the Real-Time Detection of Severe Weather",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology and Climatology",
+  "volume": "48",
+  "issue": "12",
+  "pages": "2543-2563",
+  "doi": "10.1175/2009JAMC2237.1"
+ },
+ "10.1175/2009JTECHA1208.1": {
+  "authors": [
+   "Dolan, B.",
+   "Rutledge, S. A."
+  ],
+  "year": 2009,
+  "title": "A Theory-Based Hydrometeor Identification Algorithm for X-Band Polarimetric Radars",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "26",
+  "issue": "10",
+  "pages": "2071-2088",
+  "doi": "10.1175/2009JTECHA1208.1"
+ },
+ "10.1175/2009JTECHA1256.1": {
+  "authors": [
+   "Shapiro, A.",
+   "Potvin, C. K.",
+   "Gao, J."
+  ],
+  "year": 2009,
+  "title": "Use of a Vertical Vorticity Equation in Variational Dual-Doppler Wind Analysis",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "26",
+  "issue": "10",
+  "pages": "2089-2106",
+  "doi": "10.1175/2009JTECHA1256.1"
+ },
+ "10.1175/2009JTECHA1332.1": {
+  "authors": [
+   "Battaglia, A.",
+   "Rustemeier, E.",
+   "Tokay, A.",
+   "Blahak, U.",
+   "Simmer, C."
+  ],
+  "year": 2010,
+  "title": "PARSIVEL Snow Observations: A Critical Assessment",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "27",
+  "issue": "2",
+  "pages": "333-344",
+  "doi": "10.1175/2009JTECHA1332.1"
+ },
+ "10.1175/2009JTECHA1358.1": {
+  "authors": [
+   "Wang, Y.",
+   "Chandrasekar, V."
+  ],
+  "year": 2009,
+  "title": "Algorithm for Estimation of the Specific Differential Phase",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "26",
+  "issue": "12",
+  "pages": "2565-2578",
+  "doi": "10.1175/2009JTECHA1358.1"
+ },
+ "10.1175/2010JAMC2243.1": {
+  "authors": [
+   "Kumjian, M. R.",
+   "Ryzhkov, A. V."
+  ],
+  "year": 2010,
+  "title": "The Impact of Evaporation on Polarimetric Characteristics of Rain: Theoretical Model and Practical Implications",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology and Climatology",
+  "volume": "49",
+  "issue": "6",
+  "pages": "1247-1267",
+  "doi": "10.1175/2010JAMC2243.1"
+ },
+ "10.1175/2010JAS3465.1": {
+  "authors": [
+   "Shapiro, A.",
+   "Willingham, K. M.",
+   "Potvin, C. K."
+  ],
+  "year": 2010,
+  "title": "Spatially Variable Advection Correction of Radar Data. Part I: Theoretical Considerations",
+  "type": "article",
+  "journal": "Journal of the Atmospheric Sciences",
+  "volume": "67",
+  "issue": "11",
+  "pages": "3445-3456",
+  "doi": "10.1175/2010JAS3465.1"
+ },
+ "10.1175/2010JAS3466.1": {
+  "authors": [
+   "Shapiro, A.",
+   "Willingham, K. M.",
+   "Potvin, C. K."
+  ],
+  "year": 2010,
+  "title": "Spatially Variable Advection Correction of Radar Data. Part II: Test Results",
+  "type": "article",
+  "journal": "Journal of the Atmospheric Sciences",
+  "volume": "67",
+  "issue": "11",
+  "pages": "3457-3470",
+  "doi": "10.1175/2010JAS3466.1"
+ },
+ "10.1175/2010JTECHA1402.1": {
+  "authors": [
+   "Collis, S.",
+   "Protat, A.",
+   "Chung, K.-S."
+  ],
+  "year": 2010,
+  "title": "The Effect of Radial Velocity Gridding Artifacts on Variationally Retrieved Vertical Velocities",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "27",
+  "issue": "7",
+  "pages": "1239-1246",
+  "doi": "10.1175/2010JTECHA1402.1"
+ },
+ "10.1175/AIES-D-22-0084.1": {
+  "authors": [
+   "Veillette, M. S.",
+   "Kurdzo, J. M.",
+   "Stepanian, P. M.",
+   "McDonald, J.",
+   "Samsi, S.",
+   "Cho, J. Y. N."
+  ],
+  "year": 2023,
+  "title": "A Deep Learning–Based Velocity Dealiasing Algorithm Derived from the WSR-88D Open Radar Product Generator",
+  "type": "article",
+  "journal": "Artificial Intelligence for the Earth Systems",
+  "volume": "2",
+  "issue": "3",
+  "doi": "10.1175/AIES-D-22-0084.1"
+ },
+ "10.1175/AIES-D-24-0006.1": {
+  "authors": [
+   "Veillette, M. S.",
+   "Kurdzo, J. M.",
+   "Stepanian, P. M.",
+   "Cho, J. Y. N.",
+   "Reis, T.",
+   "Samsi, S.",
+   "McDonald, J.",
+   "Chisler, N."
+  ],
+  "year": 2025,
+  "title": "A Benchmark Dataset for Tornado Detection and Prediction Using Full-Resolution Polarimetric Weather Radar Data",
+  "type": "article",
+  "journal": "Artificial Intelligence for the Earth Systems",
+  "volume": "4",
+  "issue": "1",
+  "doi": "10.1175/AIES-D-24-0006.1"
+ },
+ "10.1175/BAMS-D-22-0064.1": {
+  "authors": [
+   "Kosiba, K. A.",
+   "Lyza, A. W.",
+   "Trapp, R. J.",
+   "Rasmussen, E. N.",
+   "Parker, M.",
+   "Biggerstaff, M. I.",
+   "Nesbitt, S. W.",
+   "Weiss, C. C.",
+   "Wurman, J.",
+   "Knupp, K. R.",
+   "Coffer, B.",
+   "Chmielewski, V. C.",
+   "Dawson, D. T.",
+   "Bruning, E.",
+   "Bell, T. M.",
+   "Coniglio, M. C.",
+   "Murphy, T. A.",
+   "French, M.",
+   "Blind-Doskocil, L.",
+   "Reinhart, A. E.",
+   "Wolff, E.",
+   "Schneider, M. E.",
+   "Silcott, M.",
+   "Smith, E.",
+   "Aikins, J.",
+   "Wagner, M.",
+   "Robinson, P.",
+   "Wilczak, J. M.",
+   "White, T.",
+   "Diedrichsen, M. R.",
+   "Bodine, D.",
+   "Kumjian, M. R.",
+   "Waugh, S. M.",
+   "Alford, A. A.",
+   "Elmore, K.",
+   "Kollias, P.",
+   "Turner, D. D."
+  ],
+  "year": 2024,
+  "title": "The Propagation, Evolution, and Rotation in Linear Storms (PERiLS) Project",
+  "type": "article",
+  "journal": "Bulletin of the American Meteorological Society",
+  "volume": "105",
+  "issue": "10",
+  "pages": "E1768-E1799",
+  "doi": "10.1175/BAMS-D-22-0064.1"
+ },
+ "10.1175/JAMC-D-10-05024.1": {
+  "authors": [
+   "Vulpiani, G.",
+   "Montopoli, M.",
+   "Passeri, L. D.",
+   "Gioia, A. G.",
+   "Giordano, P.",
+   "Marzano, F. S."
+  ],
+  "year": 2012,
+  "title": "On the Use of Dual-Polarized C-Band Radar for Operational Rainfall Retrieval in Mountainous Areas",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology and Climatology",
+  "volume": "51",
+  "issue": "2",
+  "pages": "405-425",
+  "doi": "10.1175/JAMC-D-10-05024.1"
+ },
+ "10.1175/JAMC-D-12-0101.1": {
+  "authors": [
+   "Cao, Q.",
+   "Zhang, G.",
+   "Xue, M."
+  ],
+  "year": 2013,
+  "title": "A Variational Approach for Retrieving Raindrop Size Distribution from Polarimetric Radar Measurements in the Presence of Attenuation",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology and Climatology",
+  "volume": "52",
+  "issue": "1",
+  "pages": "169-185",
+  "doi": "10.1175/JAMC-D-12-0101.1"
+ },
+ "10.1175/JAMC-D-12-0275.1": {
+  "authors": [
+   "Dolan, B.",
+   "Rutledge, S. A.",
+   "Lim, S.",
+   "Chandrasekar, V.",
+   "Thurai, M."
+  ],
+  "year": 2013,
+  "title": "A Robust C-Band Hydrometeor Identification Algorithm and Application to a Long-Term Polarimetric Radar Dataset",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology and Climatology",
+  "volume": "52",
+  "issue": "9",
+  "pages": "2162-2186",
+  "doi": "10.1175/JAMC-D-12-0275.1"
+ },
+ "10.1175/JAMC-D-13-0124.1": {
+  "authors": [
+   "Trömel, S.",
+   "Kumjian, M. R.",
+   "Ryzhkov, A. V.",
+   "Simmer, C.",
+   "Diederich, M."
+  ],
+  "year": 2013,
+  "title": "Backscatter Differential Phase—Estimation and Variability",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology and Climatology",
+  "volume": "52",
+  "issue": "11",
+  "pages": "2529-2548",
+  "doi": "10.1175/JAMC-D-13-0124.1"
+ },
+ "10.1175/JAMC-D-19-0128.1": {
+  "authors": [
+   "Griffin, E. M.",
+   "Schuur, T. J.",
+   "Ryzhkov, A. V."
+  ],
+  "year": 2020,
+  "title": "A Polarimetric Radar Analysis of Ice Microphysical Processes in Melting Layers of Winter Storms Using S-Band Quasi-Vertical Profiles",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology and Climatology",
+  "volume": "59",
+  "issue": "4",
+  "pages": "751-767",
+  "doi": "10.1175/JAMC-D-19-0128.1"
+ },
+ "10.1175/JAS-D-11-0125.1": {
+  "authors": [
+   "Kumjian, M. R.",
+   "Ryzhkov, A. V."
+  ],
+  "year": 2012,
+  "title": "The Impact of Size Sorting on the Polarimetric Radar Variables",
+  "type": "article",
+  "journal": "Journal of the Atmospheric Sciences",
+  "volume": "69",
+  "issue": "6",
+  "pages": "2042-2060",
+  "doi": "10.1175/JAS-D-11-0125.1"
+ },
+ "10.1175/JAS-D-12-0289.1": {
+  "authors": [
+   "Bruning, E. C.",
+   "MacGorman, D. R."
+  ],
+  "year": 2013,
+  "title": "Theory and Observations of Controls on Lightning Flash Size Spectra",
+  "type": "article",
+  "journal": "Journal of the Atmospheric Sciences",
+  "volume": "70",
+  "issue": "12",
+  "pages": "4012-4029",
+  "doi": "10.1175/JAS-D-12-0289.1"
+ },
+ "10.1175/JAS-D-14-0084.1": {
+  "authors": [
+   "Dawson, D. T.",
+   "Mansell, E. R.",
+   "Kumjian, M. R."
+  ],
+  "year": 2015,
+  "title": "Does Wind Shear Cause Hydrometeor Size Sorting?",
+  "type": "article",
+  "journal": "Journal of the Atmospheric Sciences",
+  "volume": "72",
+  "issue": "1",
+  "pages": "340-348",
+  "doi": "10.1175/JAS-D-14-0084.1"
+ },
+ "10.1175/JTECH-1689.1": {
+  "authors": [
+   "Zhang, J.",
+   "Howard, K.",
+   "Gourley, J. J."
+  ],
+  "year": 2005,
+  "title": "Constructing Three-Dimensional Multiple-Radar Reflectivity Mosaics: Examples of Convective Storms and Stratiform Rain Echoes",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "22",
+  "issue": "1",
+  "pages": "30-42",
+  "doi": "10.1175/JTECH-1689.1"
+ },
+ "10.1175/JTECH-D-11-00019.1": {
+  "authors": [
+   "Potvin, C. K.",
+   "Shapiro, A.",
+   "Xue, M."
+  ],
+  "year": 2012,
+  "title": "Impact of a Vertical Vorticity Constraint in Variational Dual-Doppler Wind Analysis: Tests with Real and Simulated Supercell Data",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "29",
+  "issue": "1",
+  "pages": "32-49",
+  "doi": "10.1175/JTECH-D-11-00019.1"
+ },
+ "10.1175/JTECH-D-12-00194.1": {
+  "authors": [
+   "Ziegler, C. L."
+  ],
+  "year": 2013,
+  "title": "A Diabatic Lagrangian Technique for the Analysis of Convective Storms. Part I: Description and Validation via an Observing System Simulation Experiment",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "30",
+  "issue": "10",
+  "pages": "2248-2265",
+  "doi": "10.1175/JTECH-D-12-00194.1"
+ },
+ "10.1175/JTECH-D-12-00254.1": {
+  "authors": [
+   "Friedrich, K.",
+   "Higgins, S.",
+   "Masters, F. J.",
+   "Lopez, C. R."
+  ],
+  "year": 2013,
+  "title": "Articulating and Stationary PARSIVEL Disdrometer Measurements in Conditions with Strong Winds and Heavy Rainfall",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "30",
+  "issue": "9",
+  "pages": "2063-2080",
+  "doi": "10.1175/JTECH-D-12-00254.1"
+ },
+ "10.1175/JTECH-D-13-00036.1": {
+  "authors": [
+   "Ziegler, C. L."
+  ],
+  "year": 2013,
+  "title": "A Diabatic Lagrangian Technique for the Analysis of Convective Storms. Part II: Application to a Radar-Observed Storm",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "30",
+  "issue": "10",
+  "pages": "2266-2280",
+  "doi": "10.1175/JTECH-D-13-00036.1"
+ },
+ "10.1175/JTECH-D-13-00119.1": {
+  "authors": [
+   "Thompson, E. J.",
+   "Rutledge, S. A.",
+   "Dolan, B.",
+   "Chandrasekar, V.",
+   "Cheong, B. L."
+  ],
+  "year": 2014,
+  "title": "A Dual-Polarization Radar Hydrometeor Classification Algorithm for Winter Precipitation",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "31",
+  "issue": "7",
+  "pages": "1457-1481",
+  "doi": "10.1175/JTECH-D-13-00119.1"
+ },
+ "10.1175/JTECH-D-13-00174.1": {
+  "authors": [
+   "Tokay, A.",
+   "Wolff, D. B.",
+   "Petersen, W. A."
+  ],
+  "year": 2014,
+  "title": "Evaluation of the New Version of the Laser-Optical Disdrometer, OTT Parsivel2",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "31",
+  "issue": "6",
+  "pages": "1276-1288",
+  "doi": "10.1175/JTECH-D-13-00174.1"
+ },
+ "10.1175/JTECH-D-15-0020.1": {
+  "authors": [
+   "Ryzhkov, A.",
+   "Zhang, P.",
+   "Reeves, H.",
+   "Kumjian, M.",
+   "Tschallener, T.",
+   "Trömel, S.",
+   "Simmer, C."
+  ],
+  "year": 2016,
+  "title": "Quasi-Vertical Profiles—A New Way to Look at Polarimetric Radar Data",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "33",
+  "issue": "3",
+  "pages": "551-562",
+  "doi": "10.1175/JTECH-D-15-0020.1"
+ },
+ "10.1175/JTECH-D-15-0239.1": {
+  "authors": [
+   "Krause, J. M."
+  ],
+  "year": 2016,
+  "title": "A Simple Algorithm to Discriminate between Meteorological and Nonmeteorological Radar Echoes",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "33",
+  "issue": "9",
+  "pages": "1875-1885",
+  "doi": "10.1175/JTECH-D-15-0239.1"
+ },
+ "10.1175/JTECH-D-21-0130.1": {
+  "authors": [
+   "Ryzhkov, A.",
+   "Krause, J."
+  ],
+  "year": 2022,
+  "title": "New Polarimetric Radar Algorithm for Melting-Layer Detection and Determination of Its Height",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "39",
+  "issue": "5",
+  "pages": "529-543",
+  "doi": "10.1175/JTECH-D-21-0130.1"
+ },
+ "10.1175/JTECH2035.1": {
+  "authors": [
+   "Gourley, J. J.",
+   "Tabary, P.",
+   "Parent du Chatelet, J."
+  ],
+  "year": 2007,
+  "title": "A Fuzzy Logic Algorithm for the Separation of Precipitating from Nonprecipitating Echoes Using Polarimetric Radar Observations",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "24",
+  "issue": "8",
+  "pages": "1439-1451",
+  "doi": "10.1175/JTECH2035.1"
+ },
+ "10.1175/MWR3226.1": {
+  "authors": [
+   "Bryan, G. H.",
+   "Knievel, J. C.",
+   "Parker, M. D."
+  ],
+  "year": 2006,
+  "title": "A Multimodel Assessment of RKW Theory’s Relevance to Squall-Line Characteristics",
+  "type": "article",
+  "journal": "Monthly Weather Review",
+  "volume": "134",
+  "issue": "10",
+  "pages": "2772-2792",
+  "doi": "10.1175/MWR3226.1"
+ },
+ "10.1175/MWR3396.1": {
+  "authors": [
+   "Ziegler, C. L.",
+   "Buban, M. S.",
+   "Rasmussen, E. N."
+  ],
+  "year": 2007,
+  "title": "A Lagrangian Objective Analysis Technique for Assimilating In Situ Observations with Multiple-Radar-Derived Airflow",
+  "type": "article",
+  "journal": "Monthly Weather Review",
+  "volume": "135",
+  "issue": "7",
+  "pages": "2417-2442",
+  "doi": "10.1175/MWR3396.1"
+ },
+ "10.1175/WAF-D-10-05026.1": {
+  "authors": [
+   "Schultz, C. J.",
+   "Petersen, W. A.",
+   "Carey, L. D."
+  ],
+  "year": 2011,
+  "title": "Lightning and Severe Weather: A Comparison between Total and Cloud-to-Ground Lightning Trends",
+  "type": "article",
+  "journal": "Weather and Forecasting",
+  "volume": "26",
+  "issue": "5",
+  "pages": "744-755",
+  "doi": "10.1175/WAF-D-10-05026.1"
+ },
+ "10.1175/WAF-D-12-00065.1": {
+  "authors": [
+   "Miller, M. L.",
+   "Lakshmanan, V.",
+   "Smith, T. M."
+  ],
+  "year": 2013,
+  "title": "An Automated Method for Depicting Mesocyclone Paths and Intensities",
+  "type": "article",
+  "journal": "Weather and Forecasting",
+  "volume": "28",
+  "issue": "3",
+  "pages": "570-585",
+  "doi": "10.1175/WAF-D-12-00065.1"
+ },
+ "10.1175/WAF-D-12-00084.1": {
+  "authors": [
+   "Lakshmanan, V.",
+   "Hondl, K.",
+   "Potvin, C. K.",
+   "Preignitz, D."
+  ],
+  "year": 2013,
+  "title": "An Improved Method for Estimating Radar Echo-Top Height",
+  "type": "article",
+  "journal": "Weather and Forecasting",
+  "volume": "28",
+  "issue": "2",
+  "pages": "481-488",
+  "doi": "10.1175/WAF-D-12-00084.1"
+ },
+ "10.1175/WAF-D-13-00072.1": {
+  "authors": [
+   "Tang, L.",
+   "Zhang, J.",
+   "Langston, C.",
+   "Krause, J.",
+   "Howard, K.",
+   "Lakshmanan, V."
+  ],
+  "year": 2014,
+  "title": "A Physically Based Precipitation–Nonprecipitation Radar Echo Classifier Using Polarimetric and Environmental Data in a Real-Time National System",
+  "type": "article",
+  "journal": "Weather and Forecasting",
+  "volume": "29",
+  "issue": "5",
+  "pages": "1106-1119",
+  "doi": "10.1175/WAF-D-13-00072.1"
+ },
+ "10.1175/WAF-D-18-0095.1": {
+  "authors": [
+   "Mahalik, M. C.",
+   "Smith, B. R.",
+   "Elmore, K. L.",
+   "Kingfield, D. M.",
+   "Ortega, K. L.",
+   "Smith, T. M."
+  ],
+  "year": 2019,
+  "title": "Estimates of Gradients in Radar Moments Using a Linear Least Squares Derivative Technique",
+  "type": "article",
+  "journal": "Weather and Forecasting",
+  "volume": "34",
+  "issue": "2",
+  "pages": "415-434",
+  "doi": "10.1175/WAF-D-18-0095.1"
+ },
+ "10.1175/WAF-D-22-0123.1": {
+  "authors": [
+   "Sandmæl, T. N.",
+   "Smith, B. R.",
+   "Reinhart, A. E.",
+   "Schick, I. M.",
+   "Ake, M. C.",
+   "Madden, J. G.",
+   "Steeves, R. B.",
+   "Williams, S. S.",
+   "Elmore, K. L.",
+   "Meyer, T. C."
+  ],
+  "year": 2023,
+  "title": "The Tornado Probability Algorithm: A Probabilistic Machine Learning Tornadic Circulation Detection Algorithm",
+  "type": "article",
+  "journal": "Weather and Forecasting",
+  "volume": "38",
+  "issue": "3",
+  "pages": "445-466",
+  "doi": "10.1175/WAF-D-22-0123.1"
+ },
+ "10.1175/WAF942.1": {
+  "authors": [
+   "Lakshmanan, V.",
+   "Smith, T.",
+   "Hondl, K.",
+   "Stumpf, G. J.",
+   "Witt, A."
+  ],
+  "year": 2006,
+  "title": "A Real-Time, Three-Dimensional, Rapidly Updating, Heterogeneous Radar Merger Technique for Reflectivity, Velocity, and Derived Products",
+  "type": "article",
+  "journal": "Weather and Forecasting",
+  "volume": "21",
+  "issue": "5",
+  "pages": "802-823",
+  "doi": "10.1175/WAF942.1"
+ },
+ "10.1179/sre.1975.23.176.88": {
+  "authors": [
+   "Vincenty, T."
+  ],
+  "year": 1975,
+  "title": "DIRECT AND INVERSE SOLUTIONS OF GEODESICS ON THE ELLIPSOID WITH APPLICATION OF NESTED EQUATIONS",
+  "type": "article",
+  "journal": "Survey Review",
+  "volume": "23",
+  "issue": "176",
+  "pages": "88-93",
+  "doi": "10.1179/sre.1975.23.176.88"
+ },
+ "10.1364/AO.11.001836": {
+  "authors": [
+   "Ray, P. S."
+  ],
+  "year": 1972,
+  "title": "Broadband Complex Refractive Indices of Ice and Water",
+  "type": "article",
+  "journal": "Applied Optics",
+  "volume": "11",
+  "issue": "8",
+  "pages": "1836",
+  "doi": "10.1364/AO.11.001836"
+ },
+ "10.1364/OE.22.001655": {
+  "authors": [
+   "Leinonen, J."
+  ],
+  "year": 2014,
+  "title": "High-level interface to T-matrix scattering calculations: architecture, capabilities and limitations",
+  "type": "article",
+  "journal": "Optics Express",
+  "volume": "22",
+  "issue": "2",
+  "pages": "1655",
+  "doi": "10.1364/OE.22.001655"
+ },
+ "10.15191/nwajom.2016.0407": {
+  "authors": [
+   "Schultz, E.",
+   "Schultz, C.",
+   "Carey, L.",
+   "Cecil, D.",
+   "Bateman, M."
+  ],
+  "year": 2016,
+  "title": "Automated storm tracking and the lightning jump algorithm using GOES-R Geostationary Lightning Mapper (GLM) proxy data",
+  "type": "article",
+  "journal": "Journal of Operational Meteorology",
+  "volume": "04",
+  "issue": "07",
+  "pages": "92-107",
+  "doi": "10.15191/nwajom.2016.0407"
+ },
+ "10.26023/HFBG-7W5M-WA00": {
+  "authors": [
+   "Dawson, D.",
+   "Biggerstaff, M.",
+   "Waugh, S."
+  ],
+  "year": 2025,
+  "title": "PERiLS_2022: Portable In Situ Precipitation Stations (PIPS) Data. Version 1.0",
+  "type": "dataset",
+  "publisher": "NSF NCAR Earth Observing Laboratory",
+  "doi": "10.26023/HFBG-7W5M-WA00"
+ },
+ "10.5194/amt-8-343-2015": {
+  "authors": [
+   "Raupach, T. H.",
+   "Berne, A."
+  ],
+  "year": 2015,
+  "title": "Correction of raindrop size distributions measured by Parsivel disdrometers, using a two-dimensional video disdrometer as a reference",
+  "type": "article",
+  "journal": "Atmospheric Measurement Techniques",
+  "volume": "8",
+  "issue": "1",
+  "pages": "343-365",
+  "doi": "10.5194/amt-8-343-2015"
+ },
+ "10.5194/gmd-12-4185-2019": {
+  "authors": [
+   "Pulkkinen, S.",
+   "Nerini, D.",
+   "Pérez Hortal, A. A.",
+   "Velasco-Forero, C.",
+   "Seed, A.",
+   "Germann, U.",
+   "Foresti, L."
+  ],
+  "year": 2019,
+  "title": "Pysteps: an open-source Python library for probabilistic precipitation nowcasting (v1.0)",
+  "type": "article",
+  "journal": "Geoscientific Model Development",
+  "volume": "12",
+  "issue": "10",
+  "pages": "4185-4219",
+  "doi": "10.5194/gmd-12-4185-2019"
+ },
+ "10.5194/gmd-16-1697-2023": {
+  "authors": [
+   "Zürcher, B. K."
+  ],
+  "year": 2023,
+  "title": "Fast approximate Barnes interpolation: illustrated by Python-Numba implementation fast-barnes-py v1.0",
+  "type": "article",
+  "journal": "Geoscientific Model Development",
+  "volume": "16",
+  "issue": "6",
+  "pages": "1697-1711",
+  "doi": "10.5194/gmd-16-1697-2023"
+ },
+ "10.6028/jres.049.044": {
+  "authors": [
+   "Hestenes, M. R.",
+   "Stiefel, E."
+  ],
+  "year": 1952,
+  "title": "Methods of conjugate gradients for solving linear systems",
+  "type": "article",
+  "journal": "Journal of Research of the National Bureau of Standards",
+  "volume": "49",
+  "issue": "6",
+  "pages": "409",
+  "doi": "10.6028/jres.049.044"
+ },
+ "doviak-zrnic-1993": {
+  "authors": [
+   "Doviak, R. J.",
+   "Zrnić, D. S."
+  ],
+  "year": 1993,
+  "title": "Doppler Radar and Weather Observations",
+  "type": "book",
+  "edition": "2nd",
+  "publisher": "Academic Press"
+ },
+ "ester-1996": {
+  "authors": [
+   "Ester, M.",
+   "Kriegel, H.-P.",
+   "Sander, J.",
+   "Xu, X."
+  ],
+  "year": 1996,
+  "title": "A density-based algorithm for discovering clusters in large spatial databases with noise",
+  "type": "inproceedings",
+  "journal": "Proceedings of the Second International Conference on Knowledge Discovery and Data Mining (KDD-96)",
+  "publisher": "AAAI Press",
+  "pages": "226-231"
+ },
+ "maesaka-2012": {
+  "authors": [
+   "Maesaka, T.",
+   "Iwanami, K.",
+   "Maki, M."
+  ],
+  "year": 2012,
+  "title": "Non-negative KDP estimation by monotone increasing PhiDP assumption below melting layer",
+  "type": "inproceedings",
+  "journal": "Proceedings of the Seventh European Conference on Radar in Meteorology and Hydrology (ERAD 2012)"
+ },
+ "radarx": {
+  "authors": [
+   "Syed, H. A."
+  ],
+  "title": "Radarx: An Xarray-based Python package for radar data processing",
+  "type": "software",
+  "publisher": "Zenodo",
+  "doi": "10.5281/zenodo.14699306",
+  "url": "https://github.com/syedhamidali/radarx"
+ },
+ "rogers-yau-1989": {
+  "authors": [
+   "Rogers, R. R.",
+   "Yau, M. K."
+  ],
+  "year": 1989,
+  "title": "A Short Course in Cloud Physics",
+  "type": "book",
+  "edition": "3rd",
+  "publisher": "Elsevier (Butterworth-Heinemann)"
+ },
+ "smith-elmore-2004": {
+  "authors": [
+   "Smith, T. M.",
+   "Elmore, K. L."
+  ],
+  "year": 2004,
+  "title": "The use of radial velocity derivative to diagnose rotation and divergence",
+  "type": "inproceedings",
+  "journal": "Preprints, 11th Conference on Aviation, Range, and Aerospace Meteorology",
+  "publisher": "American Meteorological Society",
+  "pages": "P5.6",
+  "url": "https://ams.confex.com/ams/11aram22sls/techprogram/paper_81827.htm"
+ }
+}

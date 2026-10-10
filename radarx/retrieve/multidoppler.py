@@ -68,6 +68,8 @@ import warnings
 import numpy as np
 import xarray as xr
 
+from .._provenance import provenance
+
 try:
     from . import _multidoppler
 
@@ -269,6 +271,10 @@ def _cost_gradient(problem, state, use_compiled, n_threads):
 # ---------------------------------------------------------------------------
 
 
+@provenance(
+    "Terminal fall speed of precipitation from reflectivity",
+    extra_refs=("doviak-zrnic-1993",),
+)
 def fall_speed(
     reflectivity,
     air_density=None,
@@ -372,6 +378,10 @@ def _beam_angles(dx, dy, z, radar_altitude, earth_radius=EARTH_RADIUS):
     return azimuth, elevation
 
 
+@provenance(
+    "Beam azimuth and elevation on a grid, 4/3 effective Earth radius model",
+    extra_refs=("doviak-zrnic-1993",),
+)
 def radar_geometry(grid, *, earth_radius=EARTH_RADIUS):
     """
     Beam azimuth and elevation of every radar at every grid cell.
@@ -458,6 +468,7 @@ def _site(dtree):
     return site
 
 
+@provenance("Gridding of radar volumes for multi-Doppler retrieval")
 def multi_doppler_input(
     volumes,
     x,
@@ -1116,6 +1127,9 @@ DEFAULT_WEIGHTS = {
 }
 
 
+@provenance(
+    "Variational multi-Doppler winds, cost structure of Gao et al. (1999), own weights"
+)
 def multi_doppler(
     grids,
     background=None,

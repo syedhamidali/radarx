@@ -19,6 +19,7 @@ html_theme.sidebar_secondary.remove: true
 
 installation
 usage
+how_to_cite
 contributing
 authors
 history

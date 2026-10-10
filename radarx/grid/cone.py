@@ -57,6 +57,8 @@ __doc__ = __doc__.format("\n   ".join(__all__))
 import numpy as np
 import xarray as xr
 
+from .._provenance import provenance
+
 try:
     from . import _cone
 
@@ -266,6 +268,10 @@ def _lonlat_axes(x, y, latitude, longitude):
     return np.asarray(lon), np.asarray(lat)
 
 
+@provenance(
+    "Cone gridding of radar volumes, radarx's own method",
+    extra_refs=("doviak-zrnic-1993",),
+)
 def grid_cones(
     dtree,
     data_vars=None,

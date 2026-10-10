@@ -12,6 +12,8 @@ import radarx  # noqa: F401  registers the accessors
 from radarx.retrieve import azimuthal_shear, llsd, radial_divergence
 from radarx.retrieve import shear as shear_mod
 
+from .provenance_helpers import without_provenance
+
 needs_kernel = pytest.mark.skipif(
     not shear_mod.HAS_COMPILED_KERNEL, reason="compiled LLSD kernel not built"
 )
@@ -180,7 +182,9 @@ def test_xarray_interface():
     assert shear.attrs["window_azimuth_m"] == 2500.0
     assert "elevation" in shear.coords
     xr.testing.assert_identical(shear, azimuthal_shear(ds))
-    xr.testing.assert_identical(div, ds.radarx.llsd()["radial_divergence"])
+    xr.testing.assert_identical(
+        without_provenance(div), ds.radarx.llsd()["radial_divergence"]
+    )
 
     root = xr.Dataset({"site": 1.0})
     tree = xr.DataTree.from_dict({"/": root, "sweep_0": ds, "sweep_1": ds})

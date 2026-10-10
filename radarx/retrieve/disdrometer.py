@@ -250,6 +250,7 @@ import pandas as pd
 import xarray as xr
 from scipy.special import gammainc, gammaincc, gammaincinv, gammaln
 
+from .._provenance import provenance
 from .._registry import accessor_method
 from ..fundamentals.geometry import beam_center_height
 from . import dsd as _dsdmod
@@ -389,6 +390,9 @@ def _edges(ds, dim):
 # --------------------------------------------------------------------------
 
 
+@provenance(
+    "Raindrop terminal fall speed of Atlas et al. (1973) with density correction"
+)
 def terminal_fall_speed(diameter, air_density=None):
     """
     Terminal fall speed of raindrops.
@@ -532,6 +536,7 @@ def _finish_qc(ds, keep, valid, vt, counts, attrs, extra=None):
     return out
 
 
+@provenance("Disdrometer particle quality control against the terminal fall speed")
 def disdrometer_qc(
     ds,
     *,
@@ -645,6 +650,7 @@ def _velocity_shift_numpy(counts, lo, up, vt, step):
     return out
 
 
+@provenance("Parsivel spectra correction of Raupach and Berne (2015)")
 def raupach_berne_correction(
     ds,
     *,
@@ -763,6 +769,7 @@ def raupach_berne_correction(
 # --------------------------------------------------------------------------
 
 
+@provenance("Drop number concentration N(D) after Raupach and Berne (2015)")
 def number_concentration(
     ds,
     *,
@@ -905,6 +912,7 @@ def _diameter_dim(nd, dim):
     return d, w
 
 
+@provenance("Integral quantities of measured drop size distributions")
 def dsd_moments(nd, dim="diameter"):
     """
     Integral quantities of measured drop size distributions.
@@ -1219,6 +1227,9 @@ def _truncated_quantities(logn0, mu, lam, dmin, dmax):
     return np.stack([n0, nw, d0, dm, mu, lam, rain, np.pi / 6.0 * 1.0e-3 * m3])
 
 
+@provenance(
+    "Gamma drop size distribution fit by moments, after Ulbrich and Atlas (1998)"
+)
 def fit_gamma(
     nd,
     *,
@@ -1412,6 +1423,9 @@ def fit_gamma(
 _RADAR_VARS = ("DBZH", "ZDR", "KDP", "RHOHV", "AH", "ADP")
 
 
+@provenance(
+    "Disdrometer processing: quality control, N(D), moments, gamma fit, radar variables"
+)
 def process_disdrometer(
     ds,
     *,
@@ -1607,6 +1621,9 @@ def _pick_sweep(tree, sweep):
     return ds
 
 
+@provenance(
+    "Radar variables in the gate above a ground location, radarx's own sampling"
+)
 def radar_at_location(
     radar,
     latitude,
@@ -1763,6 +1780,9 @@ def _window_mean(t_src, values, weights, t_lo, t_hi):
     return out, sw
 
 
+@provenance(
+    "Pairing of disdrometer spectra with radar gates, radarx's own construction"
+)
 def match_radar(
     ds,
     radar,

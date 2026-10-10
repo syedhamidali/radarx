@@ -25,6 +25,8 @@ import radarx  # noqa: F401
 from radarx.retrieve import melting_layer, qvp, qvp_timeseries
 from radarx.retrieve import vertical_profiles as vp
 
+from .provenance_helpers import without_provenance
+
 ALT = 250.0
 ENGINES = ["numpy"] + (["compiled"] if vp.HAS_COMPILED_KERNEL else [])
 RNG = np.arange(125.0, 30_000.0, 250.0)
@@ -353,7 +355,7 @@ def test_melting_layer_search_range(engine):
     assert float(ml["melting_layer_top"][0]) == pytest.approx(3100.0, abs=100)
     fl = xr.DataArray([3300.0], dims="time")
     ml2 = melting_layer(prof, freezing_level=fl, engine=engine)
-    xr.testing.assert_identical(ml, ml2)
+    xr.testing.assert_identical(without_provenance(ml), without_provenance(ml2))
     # or the height range
     ml = melting_layer(prof, height_range=(1000.0, 4000.0), engine=engine)
     assert float(ml["melting_layer_top"][0]) == pytest.approx(3100.0, abs=100)

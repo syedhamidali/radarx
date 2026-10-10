@@ -49,6 +49,7 @@ build-backend = "setuptools.build_meta"
 include = ["radarx*"]
 
 [tool.setuptools.package-data]
+"radarx" = ["data/*.json"]
 "radarx.io" = ["data/*.csv"]
 "radarx.retrieve" = ["data/*.csv"]
 "radarx.ml" = ["models.toml"]

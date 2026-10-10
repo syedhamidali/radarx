@@ -296,6 +296,7 @@ import numpy as np
 import xarray as xr
 from scipy.special import gamma as _gamma_fn
 
+from .._provenance import provenance
 from .._registry import accessor_method
 
 try:
@@ -426,6 +427,7 @@ def _single_drop(band, temperature):
     return tab["wavelength"], tab["diameter"], data
 
 
+@provenance("Single-drop raindrop scattering by the T-matrix method")
 def scattering_table(band="S", temperature=20.0):
     """
     Single-drop scattering properties of raindrops.
@@ -870,6 +872,9 @@ def _kdp_for(ds, kdp, estimated):
     return None if name is None else ds[name]
 
 
+@provenance(
+    "Gamma DSD retrieval after Zhang et al. (2001), Testud et al. (2001), own lookup tables"
+)
 def dsd(
     obj,
     method="constrained",
@@ -1144,6 +1149,7 @@ def dsd(
 # --------------------------------------------------------------------------
 
 
+@provenance("Size classes of the OTT Parsivel disdrometer")
 def parsivel_bins():
     """
     Size classes of the OTT Parsivel disdrometer.
@@ -1218,6 +1224,7 @@ def _diameters(diameter):
     )
 
 
+@provenance("Gamma drop size distribution N(D) from its parameters")
 def dsd_spectrum(params, diameter=None):
     """
     Rebuild the drop size distribution N(D) from gamma DSD parameters.
@@ -1273,6 +1280,7 @@ def _bin_widths(nd, dim):
     return xr.DataArray(width, dims=dim, coords={dim: nd[dim]})
 
 
+@provenance("Gamma drop size distribution by the 2-4-6 method of moments")
 def fit_gamma_moments(nd, dim="diameter"):
     """
     Gamma DSD parameters of measured spectra by the method of moments.
@@ -1345,6 +1353,9 @@ def fit_gamma_moments(nd, dim="diameter"):
     )
 
 
+@provenance(
+    "Polarimetric radar variables from drop size distributions by T-matrix tables"
+)
 def radar_from_dsd(nd, band="S", temperature=20.0, dim="diameter"):
     """
     Polarimetric radar variables of drop size distributions.

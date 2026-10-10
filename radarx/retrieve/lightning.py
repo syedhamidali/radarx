@@ -186,6 +186,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from .._provenance import provenance
 from .._registry import accessor_method
 
 try:
@@ -673,6 +674,10 @@ def _with_flashes(ds, use_compiled, n_threads, distance=3000.0, time=0.15):
     return ds
 
 
+@provenance(
+    "Space-time clustering of LMA sources into flashes, after Fuchs et al. (2016)",
+    extra_refs=("ester-1996",),
+)
 def cluster_flashes(ds, *, distance=3000.0, time=0.15, engine="auto", n_threads=None):
     """
     Group LMA VHF sources into flashes by their space-time separation.
@@ -881,6 +886,7 @@ def _flash_ok(count, min_sources):
     )
 
 
+@provenance("Gridded source, flash extent and flash initiation densities")
 def grid_lightning(
     ds,
     grid=None,
@@ -1080,6 +1086,7 @@ def grid_lightning(
     return out
 
 
+@provenance("Height distribution of LMA sources and flash initiations")
 def vertical_source_distribution(
     ds,
     z,
@@ -1209,6 +1216,7 @@ def _mask_frames(times, mtimes, max_offset):
     return frame, max_off
 
 
+@provenance("Flash rates and source heights of tracked storm cells")
 def cell_flash_rate(
     ds,
     mask,
@@ -1414,6 +1422,7 @@ def _jump_series(rate, period_min, sigma, min_rate, history, group, ddof):
     return dfrdt, level, jump, start
 
 
+@provenance("Lightning jumps by the 2-sigma algorithm of Schultz et al. (2009)")
 def lightning_jump(
     flash_rate,
     *,

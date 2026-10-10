@@ -58,6 +58,7 @@ import warnings
 import numpy as np
 import xarray as xr
 
+from .._provenance import provenance
 from .._registry import accessor_method
 
 # -- input features of the network (shared with the training code) --------
@@ -391,6 +392,9 @@ def _back_to_grid(wind, fine, ds):
 # -- public API ------------------------------------------------------------
 
 
+@provenance(
+    "Single-Doppler winds, cost structure of Gao et al. (1999) applied to one radar"
+)
 def single_doppler_winds(
     grid_or_volume,
     background=None,

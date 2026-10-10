@@ -76,6 +76,8 @@ import warnings
 import numpy as np
 import xarray as xr
 
+from .._provenance import provenance
+
 try:
     from . import _qvp
 
@@ -463,6 +465,7 @@ _QVP_PARAMS = """
         kernel and falls back to NumPy."""
 
 
+@provenance("Quasi-vertical profile of a sweep, after Ryzhkov et al. (2016)")
 def qvp(
     obj,
     data_vars=None,
@@ -590,6 +593,7 @@ def _interp_nan(x_new, x, y):
     return np.where(bad > 0, np.nan, v)
 
 
+@provenance("Time-height quasi-vertical profiles, after Ryzhkov et al. (2016)")
 def qvp_timeseries(
     volumes,
     data_vars=None,
@@ -1017,6 +1021,9 @@ def _apply_time_consistency(top, bottom, peak, flag, template, other, **kwargs):
     return [np.moveaxis(a, -1, axis) for a in arrays]
 
 
+@provenance(
+    "Melting layer from QVPs, radarx's own, loosely after Giangrande et al. (2008)"
+)
 def melting_layer(
     profiles,
     *,

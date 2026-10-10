@@ -168,6 +168,7 @@ __all__ = [
 import numpy as np
 import xarray as xr
 
+from .._provenance import provenance
 from .._registry import accessor_method
 from . import _coldpool_numpy
 
@@ -344,6 +345,9 @@ def _check_si(t, p):
         raise ValueError("pressure must be in Pa")
 
 
+@provenance(
+    "Potential temperatures, equivalent potential temperature after Bolton (1980)"
+)
 def potential_temperatures(
     ds,
     *,
@@ -424,6 +428,7 @@ def potential_temperatures(
     return out
 
 
+@provenance("Buoyancy from the virtual potential temperature with condensate loading")
 def buoyancy(theta_v, reference, *, condensate=None):
     """
     Buoyancy from the virtual potential temperature.
@@ -464,6 +469,7 @@ def buoyancy(theta_v, reference, *, condensate=None):
     return b
 
 
+@provenance("Perturbations from a reference state and buoyancy")
 def cold_pool_perturbation(
     ds,
     reference,
@@ -575,6 +581,7 @@ def _with_thermo(ds, engine, n_threads):
 # --------------------------------------------------------------------------
 
 
+@provenance("Cold-pool intensity C = sqrt(2 int -B dz) of Rotunno et al. (1988)")
 def cold_pool_intensity(
     buoyancy,
     *,
@@ -668,6 +675,7 @@ def cold_pool_intensity(
     return out
 
 
+@provenance("Cold-pool intensity from the hydrostatic surface pressure excess")
 def cold_pool_intensity_from_pressure(pressure_perturbation, density=1.2):
     """
     Cold-pool intensity from the hydrostatic surface pressure excess.
@@ -711,6 +719,7 @@ def cold_pool_intensity_from_pressure(pressure_perturbation, density=1.2):
     return c
 
 
+@provenance("Cold-pool intensity from surface buoyancy and an assumed depth")
 def cold_pool_intensity_from_surface(buoyancy, depth, *, shape="linear"):
     """
         Cold-pool intensity from the surface buoyancy and an assumed depth.
@@ -754,6 +763,7 @@ def cold_pool_intensity_from_surface(buoyancy, depth, *, shape="linear"):
     return c
 
 
+@provenance("RKW ratio of cold-pool strength to low-level wind difference")
 def rkw_ratio(intensity, shear):
     """
         RKW ratio :math:`C / \\Delta u`.
@@ -801,6 +811,7 @@ def rkw_ratio(intensity, shear):
 # --------------------------------------------------------------------------
 
 
+@provenance("Baroclinic generation of horizontal vorticity")
 def baroclinic_generation(
     buoyancy,
     *,

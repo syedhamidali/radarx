@@ -265,6 +265,7 @@ import numpy as np
 import xarray as xr
 from scipy.special import gammaln
 
+from .._provenance import provenance
 from .._registry import accessor_method
 
 try:
@@ -544,6 +545,10 @@ def _rates(arrays, fall, vent, rho0, n_threads, use_compiled):
 # --------------------------------------------------------------------------
 
 
+@provenance(
+    "Evaporation rate of single raindrops, after Kumjian and Ryzhkov (2010)",
+    extra_refs=("rogers-yau-1989",),
+)
 def drop_evaporation_rate(
     diameter, temperature, pressure, specific_humidity, *, fall_speed="atlas1973"
 ):
@@ -761,6 +766,10 @@ def _env_for_node(environment, name):
     return environment
 
 
+@provenance(
+    "Rain evaporation and cooling rates of a gamma DSD, after Kumjian and Ryzhkov (2010)",
+    extra_refs=("rogers-yau-1989",),
+)
 def evaporation(
     dsd,
     environment=None,
@@ -922,6 +931,10 @@ def evaporation(
     return _wrap(res, dims, shape, coords, attrs)
 
 
+@provenance(
+    "Air temperature and humidity under evaporating rain, after Kumjian and Ryzhkov (2010)",
+    extra_refs=("rogers-yau-1989",),
+)
 def integrate_evaporation(
     dsd,
     environment=None,
