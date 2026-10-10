@@ -64,6 +64,114 @@ void parallel_blocks(int64_t total, int n_threads, F&& body) {
     for (auto& th : pool) th.join();
 }
 
+// Samples of column c that have a finite height and a value, sorted by height with a
+// stable insertion sort; returns how many there are.
+int64_t gather_sorted(const double* hp, const double* tp, const double* vp, bool shared,
+                      int64_t nk, int64_t nc, int64_t c, double* sh, double* st, double* sv) {
+    int64_t n = 0;
+    for (int64_t k = 0; k < nk; ++k) {
+        const double hk = shared ? hp[k] : hp[k * nc + c];
+        const double vk = vp[k * nc + c];
+        if (!std::isfinite(hk) || std::isnan(vk)) continue;
+        const double tk = shared ? tp[k] : tp[k * nc + c];
+        int64_t i = n++;
+        while (i > 0 && sh[i - 1] > hk) {
+            sh[i] = sh[i - 1];
+            st[i] = st[i - 1];
+            sv[i] = sv[i - 1];
+            --i;
+        }
+        sh[i] = hk;
+        st[i] = tk;
+        sv[i] = vk;
+    }
+    return n;
+}
+
+struct Integral {
+    double total = 0.0, liquid = 0.0;
+    bool has = false, has_liquid = false;
+};
+
+// Liquid part of the layer between samples i and i + 1 below the ceiling.
+void add_liquid_layer(Integral& r, const double* sh, const double* sz, int64_t i, double ceil_h) {
+    if (std::isnan(ceil_h) || sh[i] >= ceil_h) return;
+    r.has_liquid = true;
+    const double dh = sh[i + 1] - sh[i];
+    if (sh[i + 1] <= ceil_h) {
+        r.liquid += std::pow(0.5 * (sz[i] + sz[i + 1]), kExponent) * dh;
+    } else {
+        const double zc = sz[i] + (sz[i + 1] - sz[i]) * (ceil_h - sh[i]) / dh;
+        r.liquid += std::pow(0.5 * (sz[i] + zc), kExponent) * (ceil_h - sh[i]);
+    }
+}
+
+// The layer from base_height up to the lowest sample takes the value of that sample.
+void add_fill_below(Integral& r, const double* sh, const double* sz, double ceil_h,
+                    double base_height) {
+    const double fill = std::pow(sz[0], kExponent);
+    const double seg = sh[0] - base_height;
+    if (seg > 0.0) {
+        r.total += fill * seg;
+        r.has = true;
+    }
+    if (std::isnan(ceil_h)) return;
+    const double seg_l = std::min(sh[0], ceil_h) - base_height;
+    if (seg_l > 0.0) {
+        r.liquid += fill * seg_l;
+        r.has_liquid = true;
+    }
+}
+
+// VIL and liquid VIL of a column: the layers between consecutive samples.
+Integral integrate_column(const double* sh, const double* sz, int64_t n, double ceil_h,
+                          bool fill_below, double base_height) {
+    Integral r;
+    for (int64_t i = 0; i + 1 < n; ++i) {
+        r.total += std::pow(0.5 * (sz[i] + sz[i + 1]), kExponent) * (sh[i + 1] - sh[i]);
+        r.has = true;
+        add_liquid_layer(r, sh, sz, i, ceil_h);
+    }
+    if (fill_below && std::isfinite(base_height)) add_fill_below(r, sh, sz, ceil_h, base_height);
+    return r;
+}
+
+// Echo top: the highest sample at or above the threshold, interpolated in dBZ towards the
+// next higher sample, or the top of its beam.
+double echo_top_height(const double* sh, const double* st, const double* sv, int64_t n,
+                       double top_threshold, double no_echo_dbz, bool interpolate) {
+    int64_t b = -1;
+    for (int64_t i = n - 1; i >= 0; --i) {
+        if (sv[i] >= top_threshold) {
+            b = i;
+            break;
+        }
+    }
+    if (b < 0) return kNaN;
+    if (interpolate && b + 1 < n) {
+        const double za = std::max(sv[b + 1], no_echo_dbz);
+        const double zb = sv[b];
+        return sh[b] + (zb - top_threshold) / (zb - za) * (sh[b + 1] - sh[b]);
+    }
+    return st[b];
+}
+
+void check_shapes(const DArray& h, const DArray& h_top, const DArray& v, const DArray& ceiling,
+                  bool shared) {
+    if (v.ndim() != 2) throw std::invalid_argument("v must be 2-D (levels, columns)");
+    const int64_t nk = v.shape(0);
+    const int64_t nc = v.shape(1);
+    if (shared) {
+        if (h.ndim() != 1 || h.shape(0) != nk || h_top.ndim() != 1 || h_top.shape(0) != nk)
+            throw std::invalid_argument("shared heights must be 1-D with one value per level");
+    } else if (h.ndim() != 2 || h.shape(0) != nk || h.shape(1) != nc || h_top.ndim() != 2 ||
+               h_top.shape(0) != nk || h_top.shape(1) != nc) {
+        throw std::invalid_argument("heights must have the shape of v");
+    }
+    if (ceiling.ndim() != 1 || ceiling.shape(0) != nc)
+        throw std::invalid_argument("ceiling must be 1-D with one value per column");
+}
+
 }  // namespace
 
 // h, h_top: (nk,) when shared, else (nk, nc); v: (nk, nc); ceiling: (nc,).
@@ -74,23 +182,11 @@ py::array_t<double> columns_py(const DArray& h, const DArray& h_top, const DArra
                                double min_dbz, double top_threshold, double no_echo_dbz,
                                bool fill_below, double base_height, bool interpolate,
                                int n_threads) {
-    if (v.ndim() != 2) throw std::invalid_argument("v must be 2-D (levels, columns)");
+    check_shapes(h, h_top, v, ceiling, shared);
     const int64_t nk = v.shape(0);
     const int64_t nc = v.shape(1);
-    if (shared) {
-        if (h.ndim() != 1 || h.shape(0) != nk || h_top.ndim() != 1 || h_top.shape(0) != nk)
-            throw std::invalid_argument("shared heights must be 1-D with one value per level");
-    } else {
-        if (h.ndim() != 2 || h.shape(0) != nk || h.shape(1) != nc || h_top.ndim() != 2 ||
-            h_top.shape(0) != nk || h_top.shape(1) != nc)
-            throw std::invalid_argument("heights must have the shape of v");
-    }
-    if (ceiling.ndim() != 1 || ceiling.shape(0) != nc)
-        throw std::invalid_argument("ceiling must be 1-D with one value per column");
-
     const double cap = std::isnan(dbz_cap) ? kInf : dbz_cap;
     const double floor_dbz = std::isnan(min_dbz) ? -kInf : min_dbz;
-    const bool have_base = std::isfinite(base_height);
 
     py::array_t<double> out({static_cast<py::ssize_t>(6), static_cast<py::ssize_t>(nc)});
     double* o = out.mutable_data();
@@ -104,24 +200,8 @@ py::array_t<double> columns_py(const DArray& h, const DArray& h_top, const DArra
         parallel_blocks(nc, n_threads, [&](int64_t c0, int64_t c1) {
             std::vector<double> sh(nk), st(nk), sz(nk), sv(nk);
             for (int64_t c = c0; c < c1; ++c) {
-                // valid samples, sorted by height (stable insertion sort)
-                int64_t n = 0;
-                for (int64_t k = 0; k < nk; ++k) {
-                    const double hk = shared ? hp[k] : hp[k * nc + c];
-                    const double vk = vp[k * nc + c];
-                    if (!std::isfinite(hk) || std::isnan(vk)) continue;
-                    const double tk = shared ? tp[k] : tp[k * nc + c];
-                    int64_t i = n++;
-                    while (i > 0 && sh[i - 1] > hk) {
-                        sh[i] = sh[i - 1];
-                        st[i] = st[i - 1];
-                        sv[i] = sv[i - 1];
-                        --i;
-                    }
-                    sh[i] = hk;
-                    st[i] = tk;
-                    sv[i] = vk;
-                }
+                const int64_t n =
+                    gather_sorted(hp, tp, vp, shared, nk, nc, c, sh.data(), st.data(), sv.data());
                 double vil = kNaN, liquid = kNaN, lowest = kNaN, highest = kNaN, top = kNaN, last = kNaN;
                 if (n > 0) {
                     lowest = sh[0];
@@ -129,60 +209,12 @@ py::array_t<double> columns_py(const DArray& h, const DArray& h_top, const DArra
                     last = sv[n - 1];
                     for (int64_t i = 0; i < n; ++i)
                         sz[i] = (sv[i] < floor_dbz) ? 0.0 : std::pow(10.0, std::min(sv[i], cap) / 10.0);
-
-                    // VIL: layers between consecutive samples
-                    const double ceil_h = cp[c];
-                    double total = 0.0, total_liquid = 0.0;
-                    bool has = false, has_liquid = false;
-                    for (int64_t i = 0; i + 1 < n; ++i) {
-                        const double dh = sh[i + 1] - sh[i];
-                        total += std::pow(0.5 * (sz[i] + sz[i + 1]), kExponent) * dh;
-                        has = true;
-                        if (!std::isnan(ceil_h) && sh[i] < ceil_h) {
-                            has_liquid = true;
-                            if (sh[i + 1] <= ceil_h) {
-                                total_liquid += std::pow(0.5 * (sz[i] + sz[i + 1]), kExponent) * dh;
-                            } else {
-                                const double zc = sz[i] + (sz[i + 1] - sz[i]) * (ceil_h - sh[i]) / dh;
-                                total_liquid += std::pow(0.5 * (sz[i] + zc), kExponent) * (ceil_h - sh[i]);
-                            }
-                        }
-                    }
-                    if (fill_below && have_base) {
-                        const double fill = std::pow(sz[0], kExponent);
-                        const double seg = sh[0] - base_height;
-                        if (seg > 0.0) {
-                            total += fill * seg;
-                            has = true;
-                        }
-                        if (!std::isnan(ceil_h)) {
-                            const double seg_l = std::min(sh[0], ceil_h) - base_height;
-                            if (seg_l > 0.0) {
-                                total_liquid += fill * seg_l;
-                                has_liquid = true;
-                            }
-                        }
-                    }
-                    if (has) vil = kCoefficient * total;
-                    if (has_liquid) liquid = kCoefficient * total_liquid;
-
-                    // echo top: highest sample at or above the threshold
-                    int64_t b = -1;
-                    for (int64_t i = n - 1; i >= 0; --i) {
-                        if (sv[i] >= top_threshold) {
-                            b = i;
-                            break;
-                        }
-                    }
-                    if (b >= 0) {
-                        if (interpolate && b + 1 < n) {
-                            const double za = std::max(sv[b + 1], no_echo_dbz);
-                            const double zb = sv[b];
-                            top = sh[b] + (zb - top_threshold) / (zb - za) * (sh[b + 1] - sh[b]);
-                        } else {
-                            top = st[b];
-                        }
-                    }
+                    const Integral r =
+                        integrate_column(sh.data(), sz.data(), n, cp[c], fill_below, base_height);
+                    if (r.has) vil = kCoefficient * r.total;
+                    if (r.has_liquid) liquid = kCoefficient * r.liquid;
+                    top = echo_top_height(sh.data(), st.data(), sv.data(), n, top_threshold,
+                                          no_echo_dbz, interpolate);
                 }
                 o[0 * nc + c] = vil;
                 o[1 * nc + c] = liquid;
