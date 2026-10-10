@@ -1140,3 +1140,25 @@ def test_layer_limit_matches_level_to_rounding(engine):
             ][0]
         )
     )
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_top_down_profile_equals_bottom_up(engine):
+    prof = synthetic_profile()
+    down = prof.isel(height=slice(None, None, -1))
+    target = [500.0, 2500.0, 12000.0]
+    a = sounding.interpolate_profile(prof, target, engine=engine)
+    b = sounding.interpolate_profile(down, target, engine=engine)
+    xr.testing.assert_allclose(a, b)
+    assert float(b["temperature"][0]) == pytest.approx(300.0 - 0.0065 * 500.0)
+    ma = sounding.mean_wind(prof, 1000, 7000, engine=engine)
+    mb = sounding.mean_wind(down, 1000, 7000, engine=engine)
+    assert float(mb["u"]) == pytest.approx(2 + 1e-3 * 4000)
+    xr.testing.assert_allclose(ma, mb)
+    za = sounding.isotherm_height(prof, engine=engine)
+    zb = sounding.isotherm_height(down, engine=engine)
+    assert float(zb) == pytest.approx((300 - 273.15) / 0.0065)
+    assert float(za) == pytest.approx(float(zb))
+    wa = sounding.wet_bulb_zero_height(prof, engine=engine)
+    wb = sounding.wet_bulb_zero_height(down, engine=engine)
+    assert np.isfinite(float(wb)) and float(wa) == pytest.approx(float(wb))
