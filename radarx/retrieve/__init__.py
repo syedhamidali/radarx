@@ -20,7 +20,14 @@ import importlib
 import pkgutil
 
 _SECTIONS = {
-    "Quality control and preprocessing": ["qc", "dealias", "kdp", "advection"],
+    "Quality control and preprocessing": [
+        "qc",
+        "dealias",
+        "kdp",
+        "noise",
+        "calibration",
+        "advection",
+    ],
     "Products and profiles": ["cappi", "vertical_profiles"],
     "Wind retrieval and kinematics": ["single_doppler", "multidoppler", "shear"],
     "Precipitation microphysics": [

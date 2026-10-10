@@ -359,7 +359,10 @@ def _noise_dataset(
     return out
 
 
-@provenance("Noise level of the reflectivity of a sweep")
+@provenance(
+    "Noise level of the reflectivity of a sweep",
+    extra_refs=("doviak-zrnic-1993",),
+)
 def noise_level(
     obj,
     dbz=None,
@@ -558,7 +561,10 @@ def _snr_dataarray(
     return out
 
 
-@provenance("Signal-to-noise ratio from the reflectivity and the noise level")
+@provenance(
+    "Signal-to-noise ratio from the reflectivity and the noise level",
+    extra_refs=("doviak-zrnic-1993",),
+)
 def snr(
     obj,
     noise=None,
