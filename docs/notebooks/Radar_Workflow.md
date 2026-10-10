@@ -1517,6 +1517,7 @@ notebooks or from this index.
 | `round_trip_time` | `radarx.fundamentals.principles` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `snr` | `radarx.fundamentals.principles` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `dbz_attenuation_correction` | `radarx.fundamentals.reflectivity` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
+| `hitschfeld_bordan_correction` | `radarx.fundamentals.reflectivity` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `z_to_r_custom` | `radarx.fundamentals.reflectivity` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `z_to_r_marshall_palmer` | `radarx.fundamentals.reflectivity` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `absorption_coefficient` | `radarx.fundamentals.scattering` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
