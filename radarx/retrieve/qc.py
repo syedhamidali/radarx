@@ -127,6 +127,7 @@ __all__ = ["echo_mask", "apply_mask"]
 import numpy as np
 import xarray as xr
 
+from .._provenance import provenance
 from .dealias import _ray_links, _sweep_mapping
 from .kdp import _DBZH_NAMES, _PHIDP_NAMES, _RHOHV_NAMES, _find, _gate_spacing
 
@@ -657,6 +658,9 @@ def _fixed_angle(ds):
     return None  # pragma: no cover - xradar sweeps have one of the above
 
 
+@provenance(
+    "Fuzzy-logic echo score in the manner of Gourley 2007 and Krause 2016, own memberships and weights"
+)
 def echo_mask(
     obj,
     dbzh=None,
@@ -989,6 +993,7 @@ def _mask_fields(ds, mask, fields, floors):
     return out
 
 
+@provenance("Masking of non-meteorological gates with the radarx echo classification")
 def apply_mask(obj, mask=None, fields=None, *, nodata="auto", **kwargs):
     """
     Set non-meteorological gates to NaN.

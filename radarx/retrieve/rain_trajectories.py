@@ -249,6 +249,7 @@ from collections.abc import Mapping
 import numpy as np
 import xarray as xr
 
+from .._provenance import provenance
 from .._registry import accessor_method
 from . import _rain_trajectories_numpy as _ref
 
@@ -966,6 +967,7 @@ def _check_threads(n_threads):
         raise ValueError("n_threads must be non-negative")
 
 
+@provenance("Raindrop trajectories with evaporation, after Dawson et al. (2015)")
 def rain_trajectories(
     source,
     diameter,
@@ -1325,6 +1327,9 @@ def _sample_source_dsd(field, ds, motion=(0.0, 0.0)):
     return xr.DataArray(vals.reshape(shape), dims=dims, coords=ds["source_x"].coords)
 
 
+@provenance(
+    "Backward raindrop trajectories, radarx's own scheme after Dawson et al. (2015)"
+)
 def rain_source_points(
     target,
     diameter,
@@ -1468,6 +1473,9 @@ def rain_source_points(
     return ds
 
 
+@provenance(
+    "Size sorting relative to a reference diameter, after Kumjian and Ryzhkov (2012)"
+)
 def size_sorting(result, reference_diameter=2.0, *, axis=None):
     """
     Landing (or source) of each size relative to that of a reference size.
@@ -1617,6 +1625,9 @@ def _edges(centers):
     return np.concatenate([[c[0] - (mid[0] - c[0])], mid, [c[-1] + (c[-1] - mid[-1])]])
 
 
+@provenance(
+    "Surface drop size distribution from landed drops, radarx's own accumulation"
+)
 def surface_dsd(
     trajectories,
     nd,
@@ -1836,6 +1847,9 @@ def surface_dsd(
     )
 
 
+@provenance(
+    "Trajectory-matched drop arrival times, radarx's own after Dawson et al. (2015)"
+)
 def trajectory_matched_times(
     source,
     target,

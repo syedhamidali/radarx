@@ -123,6 +123,7 @@ import numpy as np
 import xarray as xr
 
 from .._polar import nearest_ray
+from .._provenance import provenance
 from .._registry import accessor_method
 from . import _onnx_models
 from ._products import product_tree
@@ -295,6 +296,7 @@ def _tilt_fields(sweeps, angle, velocity, dealias, nyquist_velocity, kdp, tolera
     return fields, folded, dop
 
 
+@provenance("Inputs of the TorNet CNN from a WSR-88D volume")
 def tornet_inputs(
     volume,
     *,
@@ -512,6 +514,7 @@ def _sigmoid(x):
     return 1.0 / (1.0 + np.exp(-np.asarray(x, dtype=np.float64)))
 
 
+@provenance("TorNet CNN tornado probability (ONNX network)")
 def tornado_probability(
     volume,
     model=None,
@@ -791,6 +794,9 @@ def _couplets_sweep(ds, field, threshold, window, min_area, diameter, min_reflec
     return out
 
 
+@provenance(
+    "Rotation couplets from LLSD azimuthal shear, radarx's own simple detection"
+)
 def rotation_couplets(
     obj,
     field="VRADH",

@@ -154,6 +154,7 @@ __all__ = ["estimate_kdp"]
 import numpy as np
 import xarray as xr
 
+from .._provenance import provenance
 from ._products import product_tree
 
 try:
@@ -796,6 +797,10 @@ def _run(datasets, fields, params, n_threads, use_compiled):
     ]
 
 
+@provenance(
+    "Differential phase and KDP processing, radarx's own after published concepts",
+    extra_refs=("maesaka-2012",),
+)
 def estimate_kdp(
     obj,
     phidp=None,

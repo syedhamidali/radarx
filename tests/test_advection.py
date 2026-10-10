@@ -18,6 +18,8 @@ import radarx  # noqa: F401
 from radarx.retrieve import advection
 from radarx.retrieve.advection import advect, estimate_motion, interpolate_time
 
+from .provenance_helpers import without_provenance
+
 ENGINES = ["numpy"] + (["compiled"] if advection.HAS_COMPILED_KERNEL else [])
 needs_kernel = pytest.mark.skipif(
     not advection.HAS_COMPILED_KERNEL, reason="compiled kernel not built"
@@ -413,7 +415,9 @@ def test_time_step_types():
         pd.Timedelta(seconds=120),
         xr.DataArray(np.timedelta64(120, "s")),
     ):
-        xr.testing.assert_identical(advect(d0, 10.0, 0.0, dt=dt), ref)
+        xr.testing.assert_identical(
+            without_provenance(advect(d0, 10.0, 0.0, dt=dt)), without_provenance(ref)
+        )
     m = estimate_motion(d0, d1, dt=pd.Timedelta(seconds=300))
     assert abs(float(m.u) - 10.0) < 0.07
 

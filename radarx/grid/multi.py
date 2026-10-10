@@ -40,6 +40,7 @@ __doc__ = __doc__.format("\n   ".join(__all__))
 import numpy as np
 import xarray as xr
 
+from .._provenance import provenance
 from .._registry import accessor_method
 from . import cone
 
@@ -372,6 +373,7 @@ def _sweep_elevations(selected):
 # ---------------------------------------------------------------------------
 
 
+@provenance("Multi-radar gridding on a shared grid", extra_refs=("doviak-zrnic-1993",))
 def grid_radars(
     radars,
     x=None,
@@ -874,6 +876,7 @@ def _radar_columns(grid, use_compiled=False, n_threads=None):
     return _column_geometry(x, y, origin, sites, use_compiled, n_threads)
 
 
+@provenance("Weighted merge of gridded radars, after Zhang et al. (2005)")
 def merge_radars(
     grid,
     data_vars="DBZH",
@@ -1113,6 +1116,7 @@ def _network_solution(pairs, d, w, nr, ref):
     return bias, error, residual
 
 
+@provenance("Relative radar biases from overlaps, radarx's own after Seo et al. (2014)")
 def network_bias(
     grid,
     field="DBZH",

@@ -91,6 +91,7 @@ import numpy as np
 import xarray as xr
 
 from .._polar import nearest_ray
+from .._provenance import provenance
 from .._registry import accessor_method
 from . import _onnx_models
 from ._products import product_tree
@@ -199,6 +200,7 @@ def _select(sweeps, elevations, fields):
     return chosen
 
 
+@provenance("MistNet biological echo segmentation (ONNX network)")
 def biological_echo(
     volume,
     model=None,

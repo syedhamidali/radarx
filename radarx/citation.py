@@ -258,6 +258,18 @@ def _short(key):
     return f"{who} ({entry['year']})" if entry.get("year") else who
 
 
+def _short_list(keys):
+    """Short citations of several references, with a, b, ... if two are alike."""
+    shorts = [_short(k) for k in keys]
+    out = []
+    for i, text in enumerate(shorts):
+        if shorts.count(text) > 1 and text.endswith(")"):
+            letter = chr(ord("a") + shorts[: i + 1].count(text) - 1)
+            text = text[:-1] + letter + ")"
+        out.append(text)
+    return out
+
+
 def methods(obj):
     """
     Short description of the method behind a function or a result.
@@ -281,7 +293,7 @@ def methods(obj):
         lines.append(f"Method: {info['method']}")
         refs = info["references"]
         lines.append(
-            "Based on: " + "; ".join(_short(r) for r in refs)
+            "Based on: " + "; ".join(_short_list(refs))
             if refs
             else "Based on: no published method"
         )
@@ -295,7 +307,7 @@ def methods(obj):
         lines.append("Method: " + " | ".join(item["method"]))
         refs = item["references"]
         lines.append(
-            "Based on: " + "; ".join(_short(r) for r in refs)
+            "Based on: " + "; ".join(_short_list(refs))
             if refs
             else "Based on: no published method"
         )

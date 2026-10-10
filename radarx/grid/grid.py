@@ -33,6 +33,7 @@ __doc__ = __doc__.format("\n   ".join(__all__))
 import numpy as np
 import xarray as xr
 
+from .._provenance import provenance
 from ..utils import find_multidim_vars, get_geocoords  #  noqa
 
 
@@ -62,6 +63,7 @@ def _sweep_dataset(dtree, name):
         return dtree[name].to_dataset()
 
 
+@provenance("Stacking of georeferenced gates into points (no published method)")
 def stack_data(dtree, data_vars=None, geo=False):
     """
     Stack data from a radar DataTree into a single xarray Dataset.
@@ -219,6 +221,7 @@ def make_3d_grid(
     return lat, lon, x, y, z, trg_crs
 
 
+@provenance("Radar volume gridding by cone interpolation or Barnes analysis")
 def grid_radar(
     dtree,
     data_vars=None,

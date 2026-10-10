@@ -228,6 +228,7 @@ import numpy as np
 import xarray as xr
 from scipy.special import erfc, ndtri
 
+from .._provenance import provenance
 from .._registry import accessor_method
 from .dsd import (
     _DBZH_NAMES,
@@ -339,6 +340,7 @@ def _gamma_integrals_ah(band, temperature, n0, mu, lam):
     return zh, zv, kdp, ah
 
 
+@provenance("Forward model of the Bayesian drop size distribution retrieval")
 def forward_grid(band="S", temperature=20.0):
     """
     Forward model of the Bayesian DSD retrieval on its (Dm, mu) grid.
@@ -577,6 +579,7 @@ def _packaged(name):
     return out
 
 
+@provenance("Prior of the Bayesian drop size distribution retrieval")
 def dsd_prior(source="generic", *, weights=None, defensive=0.01, bandwidth=None):
     """
     Prior of the Bayesian DSD retrieval on its (Dm, mu) grid.
@@ -1198,6 +1201,9 @@ def _mask_for(mask, name):
     return node[next(iter(node.data_vars))]
 
 
+@provenance(
+    "Bayesian DSD retrieval after Cao et al. (2010) with own state, error model and prior"
+)
 def dsd_bayesian(
     obj,
     *,

@@ -60,6 +60,7 @@ __doc__ = __doc__.format("\n   ".join(__all__))
 import numpy as np
 import xarray as xr
 
+from .._provenance import provenance
 from ._products import product_tree
 
 try:
@@ -283,6 +284,10 @@ def _llsd_sweeps(
     return results
 
 
+@provenance(
+    "Azimuthal shear and radial divergence by LLSD (Smith and Elmore 2004)",
+    extra_refs=("smith-elmore-2004",),
+)
 def llsd(
     obj,
     field="VRADH",
@@ -404,6 +409,9 @@ def llsd(
 llsd.__doc__ = llsd.__doc__.replace("{references}", _REFERENCES)
 
 
+@provenance(
+    "Azimuthal shear by LLSD (Smith and Elmore 2004)", extra_refs=("smith-elmore-2004",)
+)
 def azimuthal_shear(obj, field="VRADH", window=(750.0, 2500.0), **kwargs):
     """
     Azimuthal shear (s⁻¹) of the radial velocity by LLSD.
@@ -429,6 +437,10 @@ def azimuthal_shear(obj, field="VRADH", window=(750.0, 2500.0), **kwargs):
     return _select(llsd(obj, field, window, **kwargs), "azimuthal_shear")
 
 
+@provenance(
+    "Radial divergence by LLSD (Smith and Elmore 2004)",
+    extra_refs=("smith-elmore-2004",),
+)
 def radial_divergence(obj, field="VRADH", window=(750.0, 2500.0), **kwargs):
     """
     Radial divergence (s⁻¹) of the radial velocity by LLSD.

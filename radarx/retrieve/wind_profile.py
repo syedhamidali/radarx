@@ -113,6 +113,7 @@ __all__ = [
 import numpy as np
 import xarray as xr
 
+from .._provenance import provenance
 from .._registry import accessor_method
 from .coldpool import _columns, _f64, _height_of, _kernel, _per_column, _threads
 
@@ -192,6 +193,7 @@ def _along(u, v, azimuth):
     return u * np.sin(a) + v * np.cos(a)
 
 
+@provenance("Bulk wind difference over a layer")
 def bulk_shear(
     profile,
     bottom=0.0,
@@ -277,6 +279,7 @@ def bulk_shear(
     return out
 
 
+@provenance("Height-weighted mean wind of a layer")
 def layer_mean_wind(
     profile,
     bottom=0.0,
@@ -327,6 +330,7 @@ def layer_mean_wind(
     return out
 
 
+@provenance("Supercell motion of Bunkers et al. (2000), internal dynamics method")
 def bunkers_storm_motion(
     profile,
     *,
@@ -390,6 +394,7 @@ def bunkers_storm_motion(
     return out
 
 
+@provenance("Storm-relative wind profile")
 def storm_relative_wind(profile, storm_motion, *, normal=None):
     """
     Storm-relative wind profile.
@@ -426,6 +431,7 @@ def storm_relative_wind(profile, storm_motion, *, normal=None):
     return out
 
 
+@provenance("Storm-relative helicity of a layer")
 def storm_relative_helicity(
     profile,
     storm_motion="right",
@@ -555,6 +561,9 @@ def _sweep_rings(ds, velocity, min_elevation, max_elevation, max_range):
     )
 
 
+@provenance(
+    "Wind profile by the velocity-azimuth display, after Browning and Wexler (1968)"
+)
 def vad_profile(
     obj,
     velocity=None,

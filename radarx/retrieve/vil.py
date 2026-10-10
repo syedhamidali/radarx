@@ -110,6 +110,7 @@ import numpy as np
 import xarray as xr
 
 from .._polar import beam_width, nearest_ray
+from .._provenance import provenance
 from .._registry import accessor_method
 from ..fundamentals.geometry import beam_height_at_ground_range, ground_range
 from ..grid.cone import _select_sweeps, _sweep_dataset, _sweep_names
@@ -660,6 +661,7 @@ _COMMON_PARAMS = """
         kernel and falls back to NumPy."""
 
 
+@provenance("Vertically integrated liquid of Greene and Clark (1972)")
 def vil(
     obj,
     dbz=None,
@@ -851,6 +853,7 @@ def vil(
 vil.__doc__ = vil.__doc__.replace("{common}", _COMMON_PARAMS.strip("\n"))
 
 
+@provenance("Echo-top height algorithm of Lakshmanan et al. (2013)")
 def echo_top(
     obj,
     dbz=None,
@@ -978,6 +981,7 @@ def echo_top(
 echo_top.__doc__ = echo_top.__doc__.replace("{common}", _COMMON_PARAMS.strip("\n"))
 
 
+@provenance("VIL density of Amburn and Wolf (1997)")
 def vil_density(
     obj,
     dbz=None,
@@ -1127,6 +1131,9 @@ def _lwc_dsd(ds, dbz, factor, units, mask, dsd_kwargs, n_threads, engine):
     return _dsd_lwc(res["LWC"], factor, units)
 
 
+@provenance(
+    "Liquid water content of rain from reflectivity or a drop size distribution"
+)
 def liquid_water_content(
     obj,
     method="zm",

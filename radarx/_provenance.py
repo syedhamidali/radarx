@@ -10,15 +10,17 @@ Every product function of :mod:`radarx.retrieve` and :mod:`radarx.grid` that
 returns an xarray object writes four attributes on it:
 
 ``radarx_method``
-    Short name of the method. Several methods are joined with `` | `` when a
-    result was derived from an earlier radarx result.
+    Short name of the method. Several methods, oldest first, are joined with
+    `` | `` when a result was derived from an earlier radarx result.
 ``radarx_references``
     DOIs (or the keys of references without a DOI) of the papers the
-    docstring cites, joined with ``;`` so the attribute survives NetCDF.
+    docstring cites, separated by a space. A DOI can contain ``;``, so that is
+    no separator. The attribute is one string and survives NetCDF.
 ``radarx_version``
     The radarx version that wrote the result.
 ``history``
-    One line per call, ``function(parameters)``, without a time stamp.
+    One line per call, ``function(parameters)``, without a time stamp. The
+    parameters are those that differ from the defaults.
 
 :func:`radarx.cite` turns these attributes into citations.
 """
@@ -93,12 +95,14 @@ def docstring_dois(doc):
 
 
 def _split(value):
-    return [v for v in (value or "").split(";") if v]
+    return (value or "").split()
 
 
 def _nodes(obj):
+    """Objects that carry the attributes: the sweeps of a tree, not its root."""
     if isinstance(obj, DataTree):
-        return list(obj.subtree)
+        nodes = list(obj.subtree)
+        return nodes[1:] if len(nodes) > 1 else nodes
     return [obj]
 
 
@@ -114,6 +118,19 @@ def _format_param(value):
     return None
 
 
+def _is_default(signature, name, value):
+    """Is ``value`` missing or equal to the default of the parameter?"""
+    if value is None:
+        return True
+    default = signature.parameters[name].default
+    if default is inspect.Parameter.empty:
+        return False
+    try:
+        return bool(type(default) is type(value) and default == value)
+    except Exception:  # pragma: no cover
+        return False
+
+
 def _history_line(function, params):
     items = []
     for key, value in (params or {}).items():
@@ -125,16 +142,13 @@ def _history_line(function, params):
 
 def _write(node, method, refs, line):
     attrs = node.attrs
-    methods = [method]
-    references = list(refs)
-    for old in (attrs.get(METHOD) or "").split(_METHOD_SEP):
-        if old and old not in methods:
-            methods.append(old)
-    for old in _split(attrs.get(REFERENCES)):
-        if old not in references:
-            references.append(old)
+    methods = [m for m in (attrs.get(METHOD) or "").split(_METHOD_SEP) if m]
+    if method not in methods:
+        methods.append(method)
+    references = _split(attrs.get(REFERENCES))
+    references += [r for r in refs if r not in references]
     attrs[METHOD] = _METHOD_SEP.join(methods)
-    attrs[REFERENCES] = ";".join(references)
+    attrs[REFERENCES] = " ".join(references)
     attrs[VERSION] = str(_version())
     attrs[HISTORY] = f"{attrs[HISTORY]}\n{line}" if attrs.get(HISTORY) else line
 
@@ -146,7 +160,8 @@ def set_provenance(obj, method, refs, params=None, function=None):
     Parameters
     ----------
     obj : xarray.DataArray, xarray.Dataset or xarray.DataTree
-        Result to annotate, in place. Every node of a DataTree is annotated.
+        Result to annotate, in place. For a DataTree the sweeps are annotated,
+        not the root (the root is the input's root).
     method : str
         Short name of the method. Say so where radarx differs from the
         paper it cites.
@@ -154,7 +169,7 @@ def set_provenance(obj, method, refs, params=None, function=None):
         DOIs, or registry keys for references without a DOI.
     params : dict, optional
         Key parameters for the history line. Only numbers, strings, booleans
-        and short tuples of them are written.
+        and short tuples of them are written. ``None`` is left out.
     function : str, optional
         Name of the calling function for the history line. Default: ``method``.
 
@@ -190,6 +205,33 @@ def _annotate(result, args, method, refs, params, function):
     return result
 
 
+class _Info:
+    """
+    Method and references of a decorated function.
+
+    The references are read from the docstring when they are first needed,
+    because some modules fill in the docstring after the function is defined.
+    """
+
+    def __init__(self, func, method, extra_refs):
+        self.func = func
+        self.method = method
+        self.extra = list(extra_refs)
+        self._doc = None
+        self._refs = []
+
+    @property
+    def references(self):
+        doc = self.func.__doc__
+        if doc is not self._doc:
+            self._doc = doc
+            self._refs = docstring_dois(inspect.cleandoc(doc or "")) + self.extra
+        return list(self._refs)
+
+    def __getitem__(self, key):
+        return getattr(self, key)
+
+
 def provenance(method, extra_refs=()):
     """
     Decorator that records the method on the xarray results of a function.
@@ -209,7 +251,6 @@ def provenance(method, extra_refs=()):
     """
 
     def decorate(func):
-        refs = docstring_dois(inspect.getdoc(func)) + list(extra_refs)
         signature = inspect.signature(func)
         module = func.__module__.replace("radarx.retrieve.", "").replace(
             "radarx.grid.", ""
@@ -232,18 +273,19 @@ def provenance(method, extra_refs=()):
             params = {
                 k: v
                 for k, v in bound.items()
-                if k not in _SKIP_PARAMS and v is not None
+                if k not in _SKIP_PARAMS and not _is_default(signature, k, v)
             }
             return _annotate(
                 result,
                 list(args) + list(kwargs.values()),
                 method,
-                refs,
+                info.references,
                 params,
                 func.__name__,
             )
 
-        wrapper.__radarx_provenance__ = {"method": method, "references": refs}
+        info = _Info(wrapper, method, extra_refs)
+        wrapper.__radarx_provenance__ = info
         DECORATED[f"{module}.{func.__name__}"] = wrapper
         return wrapper
 
@@ -257,8 +299,8 @@ def read_provenance(obj):
     Parameters
     ----------
     obj : xarray.DataArray, xarray.Dataset or xarray.DataTree
-        Object to read. Every node of a DataTree and every data variable is
-        read.
+        Object to read. Every node of a DataTree (root included) and every
+        data variable is read.
 
     Returns
     -------

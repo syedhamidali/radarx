@@ -583,6 +583,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
+from .._provenance import provenance
 from . import _lagrangian_numpy as _nk
 from . import lagrangian as _traj
 
@@ -883,6 +884,9 @@ def _closure_output(ref, qr, nr, qg, ng, attrs):
     )
 
 
+@provenance(
+    "Rain and graupel from polarimetric data, radarx's own closure after Ziegler (2013a)"
+)
 def polarimetric_precipitation(
     radar,
     base,
@@ -1136,6 +1140,7 @@ _PROFILE_META = {
 }
 
 
+@provenance("Regression profiles of the Ziegler (2013a) closure")
 def ziegler2013_profiles(name="cm1_squall_line"):
     """
     Regression profiles of the Ziegler (2013a) closure shipped with radarx.
@@ -1213,6 +1218,7 @@ def ziegler2013_profiles(name="cm1_squall_line"):
     )
 
 
+@provenance("Rain and graupel from reflectivity, closure of Ziegler (2013a)")
 def ziegler2013_precipitation(
     radar,
     base,
@@ -1447,6 +1453,7 @@ def _switches(processes):
     return on, bits
 
 
+@provenance("Microphysical rates of Lin et al. (1983) and the resulting DLA tendencies")
 def microphysical_rates(
     theta,
     pressure,
@@ -1910,6 +1917,9 @@ def _run_kernel(
     )
 
 
+@provenance(
+    "Diabatic Lagrangian analysis of Ziegler (2013a, b), radarx choices where silent"
+)
 def diabatic_lagrangian(
     winds,
     sounding,

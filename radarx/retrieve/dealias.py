@@ -96,6 +96,7 @@ from itertools import pairwise
 import numpy as np
 import xarray as xr
 
+from .._provenance import provenance
 from ._products import product_tree
 
 try:
@@ -121,6 +122,9 @@ _MAX_RAY_GAP = 10  # empty rays bridged between regions
 _GATE_PASSES = 2
 
 
+@provenance(
+    "Region-based velocity dealiasing, radarx's own combination of published concepts"
+)
 def dealias_velocity(
     radar,
     field="VRADH",
