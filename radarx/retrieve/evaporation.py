@@ -55,7 +55,9 @@ deviates from the paper in these points (the first four change the numbers):
   (Kumjian and Ryzhkov, Eq. A3, use the Prandtl number for heat);
 - the saturation vapour pressure is Buck (1981) instead of their
   :math:`e_s = A \\exp(-5420/T)`, :math:`A = 2.53\\times10^9` hPa (Eq. A8);
-- the fall speed is the exponential fit to Atlas et al. (1973), below,
+- the fall speed is the exponential fit to the drag-balance law of
+  :mod:`radarx.retrieve._raindrop_fall` (the fit to Atlas et al. 1973 of
+  earlier versions is ``fall_speed="drag_balance"``), below,
   instead of the power law :math:`3.78 D^{0.67} (\\rho_0/\\rho)^{0.4}` m
   s\\ :sup:`-1` of Atlas and Ulbrich (1977) in their Eq. 3;
 - the air temperature and humidity are those of the profile at the cell
@@ -110,21 +112,22 @@ consistency with Kumjian and Ryzhkov (2010).
 
 Fall speed
 ----------
-The terminal fall speed of Atlas et al. (1973),
-:math:`V = 9.65 - 10.3 e^{-0.6 D}` m s\\ :sup:`-1` (:math:`D` in mm; the law
-is quoted at sea level as Eq. 7.65b of Bringi and Chandrasekar 2001, where
-it is described as a fit to the Gunn and Kinzer 1949 measurements), does
-not integrate in closed form under the square root of the ventilation term.
-The Atlas et al. law is negative below :math:`D` = 0.109 mm and its range of
-validity in the original paper is not checked. radarx uses the exponential
-fit below, which is meant for 0.5-7 mm; its extrapolation to small drops is a
-radarx choice.
-It is therefore represented by :math:`V = a D^b e^{-f D}` with
-:math:`a = 4.643` m s\\ :sup:`-1` mm\\ :sup:`-b`, :math:`b = 0.9496`,
-:math:`f = 0.1671` mm\\ :sup:`-1`, a least-squares fit (relative error) to
-the Atlas et al. (1973) law for 0.5-7 mm (radarx's own fit, not from the
-cited papers): 2 % r.m.s. and at most 9.5 % (at 0.5 mm; -3.7 % at 7 mm), i.e. at most 5 %
-on :math:`V^{1/2}`. Other coefficients can be given
+The sea-level fall speed of the drag-balance law (spheres below 0.516 mm,
+the Atlas et al. 1973 law above; see :mod:`radarx.retrieve._raindrop_fall`,
+shared with :func:`radarx.retrieve.terminal_fall_speed` and
+:func:`radarx.retrieve.rain_trajectories`) does not integrate in closed form
+under the square root of the ventilation term. It is therefore represented by
+:math:`V = a D^b e^{-f D}` with :math:`a = 5.287` m s\\ :sup:`-1`
+mm\\ :sup:`-b`, :math:`b = 1.2227`, :math:`f = 0.2953` mm\\ :sup:`-1`, a
+minimax fit (relative error) to that law for 0.15-5 mm (radarx's own fit, not
+from the cited papers): at most 5.4 % in that range (at most 2.7 % on
+:math:`V^{1/2}`), 24 % at 0.1 mm and 34 % at 8 mm. The previous fit,
+``fall_speed="drag_balance"`` (:math:`a = 4.643`, :math:`b = 0.9496`,
+:math:`f = 0.1671`), to the Atlas et al. (1973) law for 0.5-7 mm
+(Atlas et al.: :math:`V = 9.65 - 10.3 e^{-0.6 D}`, quoted at sea level as Eq.
+7.65b of Bringi and Chandrasekar 2001), is 9.5 % high at 0.5 mm, 38 % high at
+0.2 mm compared with that law's fit and made the evaporation rate of the small
+drops too large (issue 231). Other coefficients can be given
 (``fall_speed=(a, b, f)``). Fall speeds aloft are increased by
 :math:`(\\rho_0 / \\rho)^{0.4}`, the correction attributed to Foote and
 du Toit (1969) in Li and Srivastava (2001, text after their Eq. 4:
@@ -267,6 +270,7 @@ from scipy.special import gammaln
 
 from .._provenance import provenance
 from .._registry import accessor_method
+from . import _raindrop_fall
 
 try:
     from . import _evaporation
@@ -291,9 +295,14 @@ VENTILATION = (0.78, 0.308)
 # fall speeds are taken to hold (radarx choice; Foote and du Toit 1969 call it
 # the surface reference density)
 RHO0 = 1.204
-# V = a D^b exp(-f D) (D in mm, V in m s-1): radarx least-squares fit (relative
-# error) to Atlas et al. (1973), V = 9.65 - 10.3 exp(-0.6 D), over 0.5-7 mm
-FALL_SPEED = {"atlas1973": (4.643, 0.9496, 0.1671)}
+# V = a D^b exp(-f D) (D in mm, V in m s-1). "drag_balance": minimax fit to the
+# law of _raindrop_fall over 0.15-5 mm. "atlas1973": radarx least-squares fit
+# (relative error) to Atlas et al. (1973), V = 9.65 - 10.3 exp(-0.6 D), over
+# 0.5-7 mm
+FALL_SPEED = {
+    "drag_balance": _raindrop_fall.ABF,
+    "atlas1973": (4.643, 0.9496, 0.1671),
+}
 
 _OUT_NAMES = (
     "EVAPORATION_RATE",
@@ -550,7 +559,7 @@ def _rates(arrays, fall, vent, rho0, n_threads, use_compiled):
     extra_refs=("rogers-yau-1989",),
 )
 def drop_evaporation_rate(
-    diameter, temperature, pressure, specific_humidity, *, fall_speed="atlas1973"
+    diameter, temperature, pressure, specific_humidity, *, fall_speed="drag_balance"
 ):
     """
     Evaporation rate of single raindrops.
@@ -561,7 +570,7 @@ def drop_evaporation_rate(
         Equal-volume drop diameter (mm).
     temperature, pressure, specific_humidity : float, array-like or xarray.DataArray
         Air temperature (K), pressure (Pa) and specific humidity (kg kg-1).
-    fall_speed : "atlas1973" or (float, float, float), optional
+    fall_speed : "drag_balance", "atlas1973" or (float, float, float), optional
         Fall speed :math:`V = a D^b e^{-f D}` (m s-1, :math:`D` in mm) at
         :math:`\\rho_0` = 1.204 kg m-3; see :mod:`radarx.retrieve.evaporation`.
 
@@ -778,7 +787,7 @@ def evaporation(
     pressure=None,
     specific_humidity=None,
     relative_humidity=None,
-    fall_speed="atlas1973",
+    fall_speed="drag_balance",
     rho0=RHO0,
     n_threads=None,
     engine="auto",
@@ -810,10 +819,11 @@ def evaporation(
         Fields that override (or replace) those of ``environment``, in the
         same units. ``relative_humidity`` is used only if no specific
         humidity is given.
-    fall_speed : "atlas1973" or (float, float, float), optional
+    fall_speed : "drag_balance", "atlas1973" or (float, float, float), optional
         Raindrop fall speed :math:`V = a D^b e^{-f D}` (m s-1, :math:`D` in
-        mm) at the density ``rho0``. ``"atlas1973"`` (default) is the fit to
-        Atlas et al. (1973) given in :mod:`radarx.retrieve.evaporation`.
+        mm) at the density ``rho0``. ``"drag_balance"`` (default) is the fit
+        to the drag-balance law and ``"atlas1973"`` the fit to Atlas et al.
+        (1973), both given in :mod:`radarx.retrieve.evaporation`.
     rho0 : float, optional
         Air density (kg m-3) at which ``fall_speed`` holds. Default 1.204.
     n_threads : int, optional
@@ -945,7 +955,7 @@ def integrate_evaporation(
     relative_humidity=None,
     time_dim="time",
     max_step=60.0,
-    fall_speed="atlas1973",
+    fall_speed="drag_balance",
     rho0=RHO0,
     n_threads=None,
     engine="auto",

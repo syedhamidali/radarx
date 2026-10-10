@@ -38,14 +38,22 @@ integration is stable up to complete evaporation.
 
 Fall speed
 ----------
-By default :math:`V_t = V_0(D) (\\rho_0/\\rho)^{0.4}` with the sea-level speed
-of Atlas et al. (1973), :math:`V_0 = 9.65 - 10.3 e^{-0.6 D}` m s\\ :sup:`-1`
-(:math:`D` in mm, at least zero, negative below 0.109 mm; the same as
-:func:`radarx.retrieve.terminal_fall_speed`, where the source of the formula
-and its range of validity are discussed), and the air-density
-correction of Foote and du Toit (1969) as quoted by Li and Srivastava (2001)
-and Kumjian and Ryzhkov (2010, Eq. 3), where :math:`\\rho` is the density of
-moist air at the height of the drop and :math:`\\rho_0` = 1.204 kg
+By default :math:`V_t = V_0(D) (\\rho_0/\\rho)^{0.4}`, where :math:`V_0` is
+the sea-level speed of ``fall_speed="drag_balance"`` (the same law as
+:func:`radarx.retrieve.terminal_fall_speed` and
+:func:`radarx.retrieve.drop_evaporation_rate`, defined in
+``radarx.retrieve._raindrop_fall``): for drops smaller than 0.516 mm the speed
+at which the weight of a sphere balances its drag, with the drag coefficient
+of a sphere of Schiller and Naumann (1935) (quoted from memory, not checked
+against the paper), solved by Newton iterations; above that size the speed of
+Atlas et al. (1973), :math:`V_0 = 9.65 - 10.3 e^{-0.6 D}` m s\\ :sup:`-1`
+(:math:`D` in mm), which crosses the sphere law at 0.516 mm. The Atlas law
+alone (``fall_speed="atlas1973"``, the default of earlier versions) is zero
+below 0.109 mm and 27 % below the sphere law at 0.2 mm, so that a 0.3 mm
+drop fell 11 % too short a distance in a minute (issue 231). The air-density
+correction is that of Foote and du Toit (1969) as quoted by Li and Srivastava
+(2001) and Kumjian and Ryzhkov (2010, Eq. 3), where :math:`\\rho` is the
+density of moist air at the height of the drop and :math:`\\rho_0` = 1.204 kg
 m\\ :sup:`-3` (dry air at 1013.25 hPa and 20 °C, a radarx choice).
 ``fall_speed=(a, b, f)`` gives :math:`V_0 = a D^b e^{-f D}` (the form of
 :func:`radarx.retrieve.drop_evaporation_rate`) and
@@ -252,6 +260,7 @@ import xarray as xr
 from .._provenance import provenance
 from .._registry import accessor_method
 from . import _rain_trajectories_numpy as _ref
+from . import _raindrop_fall
 
 try:
     from . import _rain_trajectories
@@ -301,19 +310,23 @@ def _f64(x):
 def _fall(fall_speed):
     """(kind, coefficients) of a fall-speed specification."""
     if isinstance(fall_speed, str):
-        if fall_speed != "atlas1973":
-            raise ValueError(
-                f"fall_speed must be 'atlas1973', (a, b, f) or ('polynomial', "
-                f"c0, c1, ...), not {fall_speed!r}"
-            )
-        return 0, np.zeros(1)
+        if fall_speed == "atlas1973":
+            return 0, np.zeros(1)
+        if fall_speed == "drag_balance":
+            return 3, _f64([_raindrop_fall.D_JOIN])
+        raise ValueError(
+            f"fall_speed must be 'drag_balance', 'atlas1973', (a, b, f) or "
+            f"('polynomial', c0, c1, ...), not {fall_speed!r}"
+        )
     seq = list(fall_speed)
     if seq and isinstance(seq[0], str):
         if seq[0] != "polynomial" or len(seq) < 2:
             raise ValueError("fall_speed polynomial needs ('polynomial', c0, ...)")
         return 2, _f64([float(c) for c in seq[1:]])
     if len(seq) != 3:
-        raise ValueError("fall_speed must be 'atlas1973', (a, b, f) or a polynomial")
+        raise ValueError(
+            "fall_speed must be 'drag_balance', 'atlas1973', (a, b, f) or a polynomial"
+        )
     a, b, f = (float(v) for v in seq)
     if not (a > 0 and b > -1 and f >= 0):
         raise ValueError("fall_speed (a, b, f) needs a > 0, b > -1 and f >= 0")
@@ -981,7 +994,7 @@ def rain_trajectories(
     terrain=None,
     offset=(0.0, 0.0, 0.0),
     evaporation=None,
-    fall_speed="atlas1973",
+    fall_speed="drag_balance",
     density_correction=True,
     wind_divergence=False,
     concentration=True,
@@ -1048,7 +1061,7 @@ def rain_trajectories(
         the radar in the frame of the wind grid.
     evaporation : bool, optional
         Evaporate the drops. Default: if the profile has humidity.
-    fall_speed : "atlas1973", (a, b, f) or ("polynomial", c0, c1, ...)
+    fall_speed : "drag_balance", "atlas1973", (a, b, f) or ("polynomial", c0, c1, ...)
         Sea-level terminal speed law (see the module description).
     density_correction : bool, optional
         Multiply by :math:`(\\rho_0/\\rho)^{0.4}`. Default True.
@@ -1345,7 +1358,7 @@ def rain_source_points(
     offset=(0.0, 0.0, 0.0),
     source_dsd=None,
     evaporation=None,
-    fall_speed="atlas1973",
+    fall_speed="drag_balance",
     density_correction=True,
     wind_divergence=False,
     dispersion=None,
@@ -1863,7 +1876,7 @@ def trajectory_matched_times(
     surface_height=0.0,
     offset=(0.0, 0.0, 0.0),
     evaporation=None,
-    fall_speed="atlas1973",
+    fall_speed="drag_balance",
     density_correction=True,
     wind_divergence=False,
     time_step=5.0,
