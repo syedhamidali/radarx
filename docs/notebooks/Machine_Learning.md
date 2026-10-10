@@ -190,7 +190,8 @@ start = time.perf_counter()
 out = model.run({"x": patches[:, None]}, batch_size=64)["y"][:, 0]
 print(f"{len(patches)} patches in {time.perf_counter() - start:.2f} s")
 smoothed = ml.denormalize(
-    ml.reassemble(out, index, attrs=model.attrs).assign_attrs(dbz.attrs)
+    ml.reassemble(out, index, attrs=model.attrs).assign_attrs(dbz.attrs),
+    mask=sweep.DBZH.isnull(),  # the gates that were filled with 0 come back as NaN
 )
 smoothed.attrs
 ```

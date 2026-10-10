@@ -1506,7 +1506,10 @@ print("models in the registry:", [m["name"] for m in ml.list_models()])
 dbz_n = ml.normalize(sweep_ml.DBZH, offset=0.0, scale=60.0, fill_value=0.0)
 patches, index = ml.polar_patches(dbz_n, (64, 128))
 out = model.run({"x": patches[:, None]}, batch_size=64)["y"][:, 0]
-smoothed = ml.denormalize(ml.reassemble(out, index, attrs=model.attrs).assign_attrs(dbz_n.attrs))
+smoothed = ml.denormalize(
+    ml.reassemble(out, index, attrs=model.attrs).assign_attrs(dbz_n.attrs),
+    mask=sweep_ml.DBZH.isnull(),  # the gates that were filled with 0 come back as NaN
+)
 print(f"{len(patches)} patches, array shape {patches.shape}; the PatchIndex remembers where each came from:",
       isinstance(index, PatchIndex))
 ```
