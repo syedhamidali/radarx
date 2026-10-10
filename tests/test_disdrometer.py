@@ -493,7 +493,8 @@ def test_radar_at_location_geometry():
     assert out.gate_distance.item() < 200.0
     re = 4.0 / 3.0 * R_EARTH
     r = out.range.item()
-    h = np.sqrt(r**2 + re**2 + 2 * r * re * np.sin(np.deg2rad(0.5))) - re + 150.0
+    a = re + 150.0  # the site altitude is part of the Earth radius
+    h = np.sqrt(r**2 + a**2 + 2 * r * a * np.sin(np.deg2rad(0.5))) - re
     assert out.beam_height.item() == pytest.approx(h)
     assert out.height_above_ground.item() == pytest.approx(h - 70.0)
     assert out.DBZH.item() == pytest.approx(20.0 + r / 2000.0)

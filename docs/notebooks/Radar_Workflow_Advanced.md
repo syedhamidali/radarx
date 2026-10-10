@@ -313,10 +313,13 @@ constants.Z_TO_DBZ_FACTOR
 constants.RADAR_BANDS
 constants.TYPICAL_BEAMWIDTH
 constants.TYPICAL_PULSE_WIDTHS
+reflectivity.hitschfeld_bordan_correction(np.array([30.0, 40.0, 40.0]), np.array([1e3, 2e3, 3e3]), a=1e-4, b=0.8)[-1]
 """.strip().splitlines()
 rows = []
 for line in calls:
-    value = eval(line, dict(modules, np=np))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)  # dbz_attenuation_correction
+        value = eval(line, dict(modules, np=np))
     text = f"{value:.5g}" if isinstance(value, (float, np.floating)) else str(value)
     rows.append((line.split("(")[0], line if "(" in line else "constant", text))
 table = pd.DataFrame(rows, columns=["function", "call", "result"])

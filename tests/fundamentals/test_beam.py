@@ -1,6 +1,7 @@
 import numpy as np
 
 from radarx.fundamentals import beam
+from radarx.fundamentals.constants import C
 
 
 def test_beamwidth_to_radians():
@@ -32,8 +33,23 @@ def test_compute_beamwidth():
     wavelength = 0.1  # 10 cm
     antenna_diameter = 1.0  # 1 meter
     beamwidth = beam.compute_beamwidth(wavelength, antenna_diameter)
-    expected = 1.22 * wavelength / antenna_diameter
+    expected = 1.27 * wavelength / antenna_diameter
     assert np.isclose(beamwidth, expected)
+    assert np.isclose(
+        beam.compute_beamwidth(wavelength, antenna_diameter, factor=1.22),
+        1.22 * wavelength / antenna_diameter,
+    )
+
+
+def test_compute_beamwidth_is_closer_to_the_wsr88d_beamwidth():
+    # WSR-88D, D = 8.54 m: 0.96 deg at 2.7 GHz and 0.88 deg at 3.0 GHz
+    # (published values as quoted in issue #196)
+    for freq, published in ((2.7e9, 0.96), (3.0e9, 0.88)):
+        wavelength = C / freq
+        bw = np.rad2deg(beam.compute_beamwidth(wavelength, 8.54))
+        bw_null = np.rad2deg(beam.compute_beamwidth(wavelength, 8.54, factor=1.22))
+        assert abs(bw / published - 1) < 0.035
+        assert abs(bw_null / published - 1) > 0.05
 
 
 def test_compute_volume_resolution():

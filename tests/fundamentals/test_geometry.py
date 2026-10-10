@@ -41,13 +41,17 @@ def test_ground_range_and_beam_height_at_ground_range():
 
     rng = np.array([2e3, 30e3, 120e3, 300e3])
     for el in (0.5, 4.0, 19.5):
-        s = geometry.ground_range(rng, el)
+        s = geometry.ground_range(rng, el, radar_height=140.0)
         x, y, z = antenna_to_cartesian(rng, 0.0, el, site_altitude=140.0)
-        # xradar projects the arc to x and y slightly differently (2e-5 relative)
-        np.testing.assert_allclose(s, np.hypot(x, y), rtol=5e-5)
+        # the same Earth-curvature model as xradar, with the site altitude in
+        # the Earth radius: no difference left
+        np.testing.assert_allclose(s, np.hypot(x, y), rtol=1e-9)
         h = geometry.beam_height_at_ground_range(s, el, 140.0)
-        np.testing.assert_allclose(h, z, atol=0.5)
+        np.testing.assert_allclose(h, z, atol=1e-6)
         np.testing.assert_allclose(h, geometry.beam_center_height(rng, el, 140.0))
+        np.testing.assert_allclose(
+            geometry.beam_center_height(rng, el, 140.0), z, atol=1e-6
+        )
     # near the radar the ground range is the horizontal range, the height the rise
     assert np.isclose(geometry.ground_range(1000.0, 0.0), 1000.0, rtol=1e-6)
     assert geometry.beam_height_at_ground_range(0.0, 10.0, 25.0) == pytest.approx(25.0)
@@ -55,3 +59,41 @@ def test_ground_range_and_beam_height_at_ground_range():
     assert geometry.ground_range(50e3, 1.0, reff=6.371e6) != geometry.ground_range(
         50e3, 1.0
     )
+
+
+def test_site_altitude_is_part_of_the_earth_radius():
+    # 200 km, 0.5 deg, 2 km site: sqrt(r^2 + (R + alt)^2 + 2 r (R + alt) sin(e)) - R
+    r, el, alt = 200e3, 0.5, 2000.0
+    a = geometry.EFFECTIVE_RADIUS_4_3 + alt
+    expected = (
+        np.sqrt(r**2 + a**2 + 2 * r * a * np.sin(np.deg2rad(el)))
+        - geometry.EFFECTIVE_RADIUS_4_3
+    )
+    assert geometry.beam_center_height(r, el, alt) == pytest.approx(expected)
+    # not the old form, which differs by about half a metre here
+    old = (
+        np.sqrt(
+            r**2
+            + geometry.EFFECTIVE_RADIUS_4_3**2
+            + 2 * r * geometry.EFFECTIVE_RADIUS_4_3 * np.sin(np.deg2rad(el))
+        )
+        - geometry.EFFECTIVE_RADIUS_4_3
+        + alt
+    )
+    assert abs(geometry.beam_center_height(r, el, alt) - old) > 0.3
+
+
+def test_geometry_agrees_with_the_gridding_code():
+    from radarx.grid.multi import _cell_angles
+
+    for alt in (0.0, 140.0, 2000.0):
+        for el in (0.5, 4.0, 19.5):
+            rng = np.array([5e3, 60e3, 200e3])
+            s = geometry.ground_range(rng, el, radar_height=alt)
+            h = geometry.beam_center_height(rng, el, alt)
+            for k in range(rng.size):
+                slant, _, antenna = _cell_angles(
+                    np.array([s[k]]), np.array([h[k]]), alt
+                )
+                assert slant[0, 0] == pytest.approx(rng[k], abs=1e-3)
+                assert antenna[0, 0] == pytest.approx(el, abs=1e-6)

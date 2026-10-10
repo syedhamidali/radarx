@@ -9,13 +9,12 @@ scattering assumptions.
 Conventions: the efficiencies ``Qa``, ``Qs``, ``Qe`` here are cross sections
 divided by the geometric cross section ``pi a**2`` (``a`` = radius), with
 size parameter ``x = 2 pi a / lambda``, and are built from the Rayleigh-limit
-cross sections of Bringi and Chandrasekar [1]_. They use the convention
-``m = n + j k`` (``Im(K) > 0`` for absorption) and clip negative absorption to
-zero, so a refractive index in the radar-meteorology convention ``n - j k``
-of :mod:`radarx.fundamentals.attenuation` and [1]_ silently gives zero
-absorption. The ``dielectric`` argument of
-:func:`backscatter_cross_section` is squared, see its docstring (the
-literature values of |K|**2 are in [2]_).
+cross sections of Bringi and Chandrasekar [1]_. The absorption uses
+``|Im(K)|``, so the refractive index may be given in either sign convention,
+``m = n - j k`` (radar meteorology, [1]_ and
+:mod:`radarx.fundamentals.attenuation`) or ``m = n + j k``. The ``dielectric`` argument of
+:func:`backscatter_cross_section` is the dielectric factor ``|K|**2`` itself
+(the literature values of |K|**2 are in [2]_).
 
 References
 ----------
@@ -53,15 +52,14 @@ def backscatter_cross_section(diameter, wavelength, dielectric=0.93):
     """
     Rayleigh backscatter cross-section for a water sphere.
 
-    Implements ``pi**5 * dielectric**2 * D**6 / lambda**4``. The Rayleigh
-    backscatter cross section is ``pi**5 |K|**2 D**6 / lambda**4`` with
+    Implements ``pi**5 * dielectric * D**6 / lambda**4``, the Rayleigh
+    backscatter cross section ``pi**5 |K|**2 D**6 / lambda**4`` with
     ``|K|**2 = |(eps - 1)/(eps + 2)|**2`` (about 0.93 for water), Eq. (1.51b)
-    of [1]_ (p. 17; Eq. 3.6 of [2]_, p. 35-36). Here ``dielectric`` is
-    squared, so the function equals the textbook value only if the argument is
-    ``|K|`` (about 0.96 for water). The default 0.93 and the description
-    "dielectric factor" are the literature value of ``|K|**2`` [2]_, so
-    with the default the result is 0.93 times the textbook cross section
-    (about 0.3 dB low).
+    of [1]_ (p. 17; Eq. 3.6 of [2]_, p. 35-36). ``dielectric`` is ``|K|**2``
+    itself (the literature value of [2]_), not ``|K|``. Before this release
+    the argument was squared, so the default 0.93 gave 0.93 times the textbook
+    cross section (0.3 dB low); values were also wrong for any other
+    ``dielectric`` unless it was passed as ``|K|``.
 
     Parameters
     ----------
@@ -70,7 +68,7 @@ def backscatter_cross_section(diameter, wavelength, dielectric=0.93):
     wavelength : float
         Radar wavelength [m]
     dielectric : float
-        Dielectric factor (default: 0.93 for water)
+        Dielectric factor ``|K|**2`` (default: 0.93 for water)
 
     Returns
     -------
@@ -88,7 +86,7 @@ def backscatter_cross_section(diameter, wavelength, dielectric=0.93):
            DOI).
     """
     d = np.asarray(diameter)
-    return (np.pi**5 * dielectric**2 * d**6) / wavelength**4
+    return (np.pi**5 * dielectric * d**6) / wavelength**4
 
 
 def normalized_backscatter_cross_section(diameter, wavelength, dielectric=0.93):
@@ -99,8 +97,7 @@ def normalized_backscatter_cross_section(diameter, wavelength, dielectric=0.93):
     the geometric cross-section of the sphere, the normalization used for
     the "normalized radar cross section" of [1]_ (Section 2.5, Fig. 2.15;
     their normalized extinction cross section is ``sigma_ext / (pi a**2)``).
-    Inherits the squaring of ``dielectric`` of
-    :func:`backscatter_cross_section`.
+    ``dielectric`` is ``|K|**2`` as in :func:`backscatter_cross_section`.
 
     Parameters
     ----------
@@ -109,7 +106,7 @@ def normalized_backscatter_cross_section(diameter, wavelength, dielectric=0.93):
     wavelength : float
         Radar wavelength [m]
     dielectric : float, optional
-        Dielectric factor (default: 0.93)
+        Dielectric factor ``|K|**2`` (default: 0.93)
 
     Returns
     -------
@@ -220,12 +217,14 @@ def absorption_coefficient(radius, wavelength, refractive_index):
     """
     Compute Rayleigh absorption coefficient.
 
-    ``Qa = 4 x Im(K)``, clipped at zero, with ``x = 2 pi a / lambda``. This is
+    ``Qa = 4 x |Im(K)|`` with ``x = 2 pi a / lambda``. This is
     the absorption cross section ``sigma_a = 9 k0 V eps'' / |eps + 2|**2``,
     Eq. (1.59) of [1]_ (consistent with Eq. 2.134c), divided by ``pi a**2``
-    (the ``4 x Im(K)`` form is derived here and is not printed in [1]_). Requires the ``m = n + j k`` convention (``Im(K) > 0``), the
-    opposite of [1]_ (``eps = eps' - j eps''``); with ``n - j k`` the clip
-    returns 0.
+    (the ``4 x |Im(K)|`` form is derived here and is not printed in [1]_).
+    ``Im(K)`` is negative for ``m = n - j k`` ([1]_, ``eps = eps' - j eps''``)
+    and positive for ``m = n + j k``; the absolute value makes the result
+    independent of the convention. Before this release only ``n + j k`` was
+    accepted and ``n - j k`` silently gave 0.
 
     Parameters
     ----------
@@ -251,7 +250,7 @@ def absorption_coefficient(radius, wavelength, refractive_index):
     x = 2 * np.pi * radius / wavelength
     m = refractive_index
     m2 = m * m
-    return np.maximum(4 * x * np.imag((m2 - 1) / (m2 + 2)), 0.0)
+    return 4 * x * np.abs(np.imag((m2 - 1) / (m2 + 2)))
 
 
 def scattering_coefficient(radius, wavelength, refractive_index):

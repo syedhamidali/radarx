@@ -252,7 +252,7 @@ from scipy.special import gammainc, gammaincc, gammaincinv, gammaln
 
 from .._provenance import provenance
 from .._registry import accessor_method
-from ..fundamentals.geometry import beam_center_height
+from ..fundamentals.geometry import beam_center_height, ground_range
 from . import dsd as _dsdmod
 
 try:
@@ -1692,9 +1692,7 @@ def radar_at_location(
         )
         re = 4.0 / 3.0 * EARTH_RADIUS
         h = beam_center_height(rng[None, :], el[:, None], alt0, re)
-        s = re * np.arcsin(
-            rng[None, :] * np.cos(np.deg2rad(el[:, None])) / (re + h - alt0)
-        )
+        s = ground_range(rng[None, :], el[:, None], reff=re, radar_height=alt0)
         x = s * np.sin(np.deg2rad(az[:, None]))
         y = s * np.cos(np.deg2rad(az[:, None]))
         dist = np.hypot(x - xl, y - yl)
