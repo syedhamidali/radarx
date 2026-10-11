@@ -172,6 +172,71 @@ profile = xr.Dataset(
 with_profile = dtree.radarx.dealias("VRADH", wind_profile=profile)
 ```
 
+## Where the fold choice is uncertain
+
+`confidence=True` returns, next to the dealiased velocity, a confidence in the
+fold chosen for every gate (also available on its own as
+`dtree.radarx.dealias_confidence`, for the result of any dealiasing method).
+A gate could have been unfolded to $v \pm 2V_n$ instead. A neighbouring gate is
+closer to the chosen value than to the next candidate if it differs by less
+than $V_n$, and the confidence is the share of the valid neighbours (the 3 x 3
+gates around the gate) that do:
+
+- 1 where all neighbours support the fold, as in a smooth field;
+- 5/8 on both sides of a straight fold line, 3/8 at the corner of a region;
+- 0 for an isolated gate that is unfolded differently from all its neighbours.
+
+It is a radarx definition (no paper defines a confidence for these algorithms)
+and it is computed from the result alone. It marks isolated gates, small
+clusters and the lines along which the fold changes; a large region that was
+unfolded wrongly as a whole has confidence 1 inside and is flagged only along
+its edge. Real shear and turbulence also lower it where the velocity changes by
+more than $V_n$ from gate to gate.
+
+```{code-cell} ipython3
+with_confidence = dtree.radarx.dealias("VRADH", confidence=True)
+node = with_confidence["sweep_1"].to_dataset()
+conf = node.VRADH_dealiased_confidence
+print(f"gates with data: {int(conf.notnull().sum())}")
+for level in (1.0, 0.9, 0.5):
+    print(f"confidence >= {level}: {float((conf >= level).sum() / conf.notnull().sum()):.2%}")
+print(f"confidence below 0.5: {int((conf < 0.5).sum())} gates, "
+      f"of which {int((conf == 0).sum())} disagree with all their neighbours")
+```
+
+```{code-cell} ipython3
+ds = dealiased["sweep_1"].to_dataset().sortby("azimuth")
+conf_sorted = conf.sortby("azimuth")
+fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
+for ax, da, title, kw in zip(
+    axes,
+    [ds.VRADH_dealiased, conf_sorted],
+    ["dealiased velocity (m/s)", "confidence of the fold"],
+    [dict(cmap="RdBu_r", vmin=-60, vmax=60), dict(cmap="viridis", vmin=0, vmax=1)],
+):
+    mesh = da.assign_coords(x=ds.x / 1e3, y=ds.y / 1e3).plot.pcolormesh(
+        x="x", y="y", ax=ax, add_colorbar=True, **kw
+    )
+    ax.set(title=title, xlabel="x (km)", ylabel="", aspect="equal", xlim=(-150, 150), ylim=(-150, 150))
+axes[0].set_ylabel("y (km)")
+plt.show()
+```
+
+## Dual-PRF radars and other methods
+
+A dual-PRF radar unfolds the velocity of each ray with a noisy estimate and
+leaves isolated dealiasing errors of a different kind; they are corrected with
+`correct_dual_prf` (Holleman and Beekhuis 2003), shown on synthetic data in
+section 13 of the [second workflow notebook](Radar_Workflow_Advanced).
+
+The modular algorithm UNRAVEL (Louf et al. 2020) is the open alternative that
+`radarx.retrieve.dealias` cites. It is **not implemented**: its algorithm could
+not be read (the publisher's site refused the automated download of the paper
+and no other open copy was found; only the abstract was seen), and an implementation that cannot be
+checked against the paper would be a guess at its behaviour. Its reference
+implementation is open source (MIT licence, `github.com/vlouf/dealias`) and was
+not ported.
+
 ## References
 
 - Jing, Z., and G. Wiener, 1993: Two-dimensional dealiasing of Doppler
@@ -184,6 +249,13 @@ with_profile = dtree.radarx.dealias("VRADH", wind_profile=profile)
 - James, C. N., and R. A. Houze, 2001: A real-time four-dimensional Doppler
   dealiasing scheme. *J. Atmos. Oceanic Technol.*, **18**, 1674–1683,
   <https://doi.org/10.1175/1520-0426(2001)018<1674:ARTFDD>2.0.CO;2>
+- Holleman, I., and H. Beekhuis, 2003: Analysis and correction of dual PRF
+  velocity data. *J. Atmos. Oceanic Technol.*, **20**, 443–453,
+  <https://doi.org/10.1175/1520-0426(2003)20<443:AACODP>2.0.CO;2>
+- Louf, V., A. Protat, R. C. Jackson, S. M. Collis, and J. Helmus, 2020: UNRAVEL:
+  A robust modular velocity dealiasing technique for Doppler radar. *J. Atmos.
+  Oceanic Technol.*, **37**, 741–758,
+  <https://doi.org/10.1175/JTECH-D-19-0020.1>
 - Browning, K. A., and R. Wexler, 1968: The determination of kinematic
   properties of a wind field using Doppler radar. *J. Appl. Meteor.*, **7**,
   105–113, <https://doi.org/10.1175/1520-0450(1968)007<0105:TDOKPO>2.0.CO;2>

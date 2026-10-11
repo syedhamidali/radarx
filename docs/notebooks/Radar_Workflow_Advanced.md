@@ -38,6 +38,7 @@ written on the fly).
 | 10 | machine-learning plumbing | `radarx.ml` |
 | 11 | beam blockage and terrain clutter from a digital elevation model | `beam_blockage` |
 | 12 | export to CfRadial1, CfRadial2, ODIM_H5, Zarr and CF NetCDF | `write_cfradial1`, `write_cfradial2`, `write_odim`, `write_zarr`, `write_netcdf_cf` |
+| 13 | dual-PRF velocity correction | `correct_dual_prf` |
 
 ```{code-cell} ipython3
 import math
@@ -99,6 +100,7 @@ from radarx.retrieve import (
     cold_pool_intensity_from_pressure,
     cold_pool_intensity_from_surface,
     cold_pool_perturbation,
+    correct_dual_prf,
     dealias_velocity,
     diabatic_lagrangian,
     disdrometer_qc,
@@ -1155,7 +1157,8 @@ squall line, 23:46 UTC. `tornet_inputs` prepares the network inputs
 (dealiased velocity, KDP and the polarimetric fields of the 0.5 and 0.9
 degree tilts), `tornado_probability` runs the network, and
 `rotation_couplets` finds the physical counterpart, compact maxima of the
-linear least-squares derivative (LLSD) azimuthal shear from `azimuthal_shear`.
+linear least-squares derivative (LLSD) azimuthal shear from `azimuthal_shear`;
+with `min_tilts` they must also be vertically continuous.
 
 ```{code-cell} ipython3
 import gzip
@@ -1197,6 +1200,25 @@ print("accessors agree:", bool(np.allclose(tor_acc.tornado_probability, tor.torn
 print(f"{tor.sizes['chip']} chips; highest tornado probability {float(tor.tornado_probability.max()):.2f}; "
       f"{couplets.sizes['couplet']} rotation couplets above 0.006 1/s")
 couplets.isel(couplet=slice(0, 5)).to_dataframe()[["azimuth", "range", "azimuthal_shear", "delta_v"]].round(3)
+```
+
+A circulation that is real extends over several tilts. With `min_tilts`, the
+chain of couplets through each couplet is followed up and down the Doppler cuts
+of the dealiased volume (on the next elevation angle, the nearest couplet of the
+same sense of rotation within `link_distance` of the peak, after the association
+of shear features across elevation angles in the NSSL Mesocyclone Detection
+Algorithm), and only the couplets on a chain of at least that many tilts are
+kept. `n_tilts` says how long the chain is:
+
+```{code-cell} ipython3
+volume = kgwx.radarx.assign(kgwx.radarx.dealias("VRADH"))
+every = rotation_couplets(volume, "VRADH_dealiased")
+continuous = rotation_couplets(volume, "VRADH_dealiased", min_tilts=3)
+n_every = sum(every[n].sizes["couplet"] for n in every.children)
+n_kept = sum(continuous[n].sizes["couplet"] for n in continuous.children)
+print(f"{n_every} couplets on {len(every.children)} Doppler cuts; {n_kept} are on a chain of at least 3 tilts")
+deepest = max(continuous.children, key=lambda n: continuous[n].sizes["couplet"])
+continuous[deepest].to_dataset()[["azimuthal_shear", "delta_v", "n_tilts"]].isel(couplet=slice(0, 4)).to_dataframe().round(3)
 ```
 
 ```{code-cell} ipython3
@@ -1642,11 +1664,71 @@ with xr.open_dataset(work / "grid.nc") as cf_grid:
     print(cf_grid["DBZH"].attrs["grid_mapping"], cf_grid["lat"].dims, cf_grid.attrs["Conventions"])
 ```
 
+## 13. Dual-PRF velocity correction
+
+A dual-PRF radar alternates two pulse repetition frequencies from ray to ray
+and unfolds each ray with the difference of the two velocity estimates. The
+difference is noisy (five times the noise of one estimate for an unfolding
+factor of 3), so some gates (1 % in the C-band data of the paper, 0.5 % below) are unfolded to the wrong Nyquist
+interval of its PRF and stands out as an isolated outlier. `correct_dual_prf`
+moves the outliers back by multiples of twice the unambiguous velocity of their
+ray's PRF, using the local median velocity (Holleman and Beekhuis 2003). The
+data are synthetic: a smooth wind field that the "radar processor" measures at
+alternating Nyquist velocities of 16 and 12 m/s (extended interval 48 m/s)
+with 1 m/s noise:
+
+```{code-cell} ipython3
+vh, vl = 16.0, 12.0  # Nyquist velocities of the high and low PRF
+factor = vl / (vh - vl)  # unfolding factor 3
+vext = vh * vl / (vh - vl)
+rnd = np.random.default_rng(2)
+az = np.arange(720) * 0.5 + 0.25
+rng = 1000.0 + 250.0 * np.arange(240)
+truth = 28.0 * np.sin(np.radians(az)[:, None] + 0.4) * (0.5 + 0.5 * rng[None, :] / rng[-1]) + 5.0 * np.sin(rng[None, :] / 8e3)
+
+
+def fold(v, vu):
+    return (v + vu) % (2 * vu) - vu
+
+
+high = np.arange(az.size) % 2 == 0
+vu = np.where(high, vh, vl)[:, None]
+noisy = truth + rnd.standard_normal(truth.shape)  # what each ray measures, before folding
+measured = fold(noisy, vu)
+previous = np.roll(measured, 1, axis=0)
+primary = fold((factor + 1) * np.where(high[:, None], previous, measured) - factor * np.where(high[:, None], measured, previous), vext)
+radar = measured + 2 * vu * np.round((primary - measured) / (2 * vu))  # the unfolded velocity of the processor
+dual = xr.Dataset(
+    {"VRADH": (("azimuth", "range"), radar)},
+    coords={"azimuth": az, "range": rng, "elevation": ("azimuth", np.full(az.size, 0.5))},
+)
+
+fixed = dual.radarx.correct_dual_prf("VRADH", nyquist_high=vh, nyquist_low=vl)
+direct = correct_dual_prf(dual, "VRADH", nyquist_high=vh, nyquist_low=vl, passes=1)
+outliers = lambda v: float((np.abs(v - noisy) > 5.0).mean())
+print(f"outliers: raw {outliers(radar):.2%}, one pass {outliers(direct.VRADH_dualprf.values):.3%}, "
+      f"two passes {outliers(fixed.VRADH_dualprf.values):.3%}; "
+      f"{int((fixed.VRADH_dualprf_shift != 0).sum())} gates moved, "
+      f"{int((fixed.VRADH_dualprf_shift.values[high] != 0).sum())} of them on high-PRF rays")
+fig, axes = plt.subplots(1, 3, figsize=(15, 4.2), layout="constrained")
+x, y = rng * np.sin(np.radians(az))[:, None] / 1e3, rng * np.cos(np.radians(az))[:, None] / 1e3
+for ax, (name, field) in zip(axes, [("raw dual-PRF velocity", radar), ("corrected", fixed.VRADH_dualprf.values), ("gates moved", fixed.VRADH_dualprf_shift.values != 0)]):
+    pm = ax.pcolormesh(x, y, field, cmap="RdBu_r" if name != "gates moved" else "Greys", vmin=-35 if name != "gates moved" else 0, vmax=35 if name != "gates moved" else 1)
+    ax.set(title=name, aspect="equal", xlim=(-30, 30), ylim=(-30, 30), xlabel="east (km)")
+plt.show()
+```
+
+What it does not do: it does not remove clutter and noise first (the group-size
+filter of the paper), and it does not unfold velocities beyond the extended
+interval; run `dealias_velocity` with `nyquist_velocity` equal to the extended
+interval (48 m/s here) for that.
+
 ## References
 
 - Dawson, D., M. Biggerstaff, and S. Waugh, 2025: PERiLS_2022: Portable In Situ Precipitation Stations (PIPS) Data. Version 1.0. NSF NCAR Earth Observing Laboratory, https://doi.org/10.26023/HFBG-7W5M-WA00.
 - Bruning, E. C., and D. R. MacGorman, 2013: Theory and Observations of Controls on Lightning Flash Size Spectra. *Journal of the Atmospheric Sciences*, **70**, 4012-4029, <https://doi.org/10.1175/JAS-D-12-0289.1>
 - Fuchs, B. R., E. C. Bruning, S. A. Rutledge, L. D. Carey, P. R. Krehbiel, and W. Rison, 2016: Climatological analyses of LMA data with an open-source lightning flash-clustering algorithm. *Journal of Geophysical Research: Atmospheres*, **121**, 8625-8648, <https://doi.org/10.1002/2015JD024663>
+- Holleman, I., and H. Beekhuis, 2003: Analysis and Correction of Dual PRF Velocity Data. *Journal of Atmospheric and Oceanic Technology*, **20**, 443-453, <https://doi.org/10.1175/1520-0426(2003)20<443:AACODP>2.0.CO;2>
 - Gao, J., M. Xue, A. Shapiro, and K. K. Droegemeier, 1999: A Variational Method for the Analysis of Three-Dimensional Wind Fields from Two Doppler Radars. *Monthly Weather Review*, **127**, 2128-2142, <https://doi.org/10.1175/1520-0493(1999)127<2128:AVMFTA>2.0.CO;2>
 - Kumjian, M. R., and A. V. Ryzhkov, 2012: The Impact of Size Sorting on the Polarimetric Radar Variables. *Journal of the Atmospheric Sciences*, **69**, 2042-2060, <https://doi.org/10.1175/JAS-D-11-0125.1>
 - Lin, T.-Y., K. Winner, G. Bernstein, A. Mittal, A. M. Dokter, K. G. Horton, C. Nilsson, B. M. Van Doren, A. Farnsworth, F. A. La Sorte, S. Maji, and D. Sheldon, 2019: MistNet: Measuring historical bird migration in the US using archived weather radar data and convolutional neural networks. *Methods in Ecology and Evolution*, **10**, 1908-1922, <https://doi.org/10.1111/2041-210X.13280>
