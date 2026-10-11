@@ -31,6 +31,7 @@ notebooks/Dealiasing
 notebooks/KDP
 notebooks/Attenuation_Correction
 notebooks/Beam_Blockage
+notebooks/Beam_Refraction
 notebooks/Advection_Correction
 notebooks/Superobs_Data_Assimilation
 ```
@@ -61,6 +62,8 @@ notebooks/DSD_Retrieval
 notebooks/Disdrometers
 notebooks/QVP
 notebooks/Evaporation
+notebooks/Rain_Size_Sorting
+notebooks/Rain_Collisions
 notebooks/Bayesian_DSD
 notebooks/Rainfall_Estimation
 ```

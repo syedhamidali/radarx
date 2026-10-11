@@ -26,10 +26,10 @@ written on the fly).
 
 | Section | What it shows | radarx calls |
 |---|---|---|
-| 1 | radar equation, beam geometry, Doppler and unit helpers | `radarx.fundamentals`, `radarx.core` |
+| 1 | radar equation, beam geometry (4/3 Earth and ray tracing through a refractivity profile), Doppler and unit helpers | `radarx.fundamentals`, `radarx.core`, `refractivity`, `beam_path` |
 | 2 | disdrometer spectra, quality control, gamma fits, radar variables | `radarx.io.read_parsivel`, `disdrometer_qc`, `fit_gamma`, `match_radar` |
 | 3 | Bayesian DSD retrieval with uncertainty | `dsd_prior`, `forward_grid`, `dsd_bayesian` |
-| 4 | raindrop trajectories and size sorting | `rain_trajectories`, `size_sorting`, `surface_dsd` |
+| 4 | raindrop trajectories and size sorting, collisions in a rain shaft, hail and melting snow fall speeds | `rain_trajectories`, `size_sorting`, `surface_dsd`, `rain_shaft`, `hail_fall_speed`, `melting_snow_fall_speed` |
 | 5 | surface stations, profilers, cold pools | `read_sticknet`, `read_pips`, `cold_pool_intensity` |
 | 6 | lightning mapping | `read_lma`, `cluster_flashes`, `lightning_jump` |
 | 7 | tornado detection and biological echo | `tornet_inputs`, `tornado_probability`, `biological_echo` |
@@ -64,6 +64,7 @@ from radarx.fundamentals import (
     power,
     principles,
     reflectivity,
+    refraction,
     scattering,
     system,
     timing,
@@ -80,6 +81,8 @@ from radarx.io import (
     read_sticknet,
     read_sticknet_locations,
     read_wind_profiler,
+    refractivity,
+    saturation_vapor_pressure,
     write_cfradial1,
     write_cfradial2,
     write_netcdf_cf,
@@ -90,6 +93,7 @@ from radarx.retrieve import (
     azimuthal_shear,
     baroclinic_generation,
     beam_blockage,
+    beam_path,
     biological_echo,
     bulk_shear,
     buoyancy,
@@ -114,8 +118,10 @@ from radarx.retrieve import (
     fit_gamma_moments,
     forward_grid,
     grid_lightning,
+    hail_fall_speed,
     lightning_jump,
     match_radar,
+    melting_snow_fall_speed,
     microphysical_rates,
     number_concentration,
     parsivel_bins,
@@ -125,6 +131,7 @@ from radarx.retrieve import (
     radar_at_location,
     radar_from_dsd,
     radar_geometry,
+    rain_shaft,
     rain_source_points,
     rain_trajectories,
     raupach_berne_correction,
@@ -360,6 +367,41 @@ for el, color in zip(elevation, [OKABE["blue"], OKABE["orange"], OKABE["green"]]
 ax2.set(xlabel="range (km)", ylabel="beam centre height (km)")
 ax2.legend(title="elevation", frameon=False)
 plt.show()
+```
+
+### Refraction: the beam through a refractivity profile
+
+The 4/3 Earth stands for a refractivity that decreases by 39 N-units per km.
+`refractivity` computes $N$ from pressure, temperature and vapour pressure
+(Bean and Dutton 1966, Eq. 1.17), `trace_rays` integrates the ray through the
+profile (Snell's law in a spherically stratified atmosphere) and gives the true
+beam height and ground range, `k_e_from_rays` the effective Earth radius factor
+that reproduces a traced beam, and `beam_path`, also a method of a sweep or a
+volume, does it for the gates of a sweep. A moist layer under dry air bends
+the beam down; here a sounding with such a layer is compared with the 4/3 Earth:
+
+```{code-cell} ipython3
+zr = np.arange(0.0, 12001.0, 100.0)
+p_r = 101325.0 * (1.0 - 2.25577e-5 * zr) ** 5.25588
+t_r = np.maximum(288.15 - 0.0065 * zr, 216.65)
+e_r = 0.55 * saturation_vapor_pressure(t_r).values * np.exp(-zr / 1500.0)
+e_r = e_r * (1.0 + 0.5 * np.exp(-zr / 300.0))  # a moist layer at the ground
+n_r = refractivity(p_r, t_r, e_r).values
+ranges_r = np.arange(2e3, 200e3 + 1.0, 2e3)
+ray = refraction.trace_rays(ranges_r, 0.5, zr, n_r, radar_height=100.0)
+h43 = geometry.beam_center_height(ranges_r, 0.5, 100.0)
+k_e = refraction.k_e_from_rays(ranges_r, 0.5, ray.beam_height, 100.0)
+print(f"N at the ground {n_r[0]:.0f}; beam height at 150 km {float(ray.beam_height.sel(range=150e3)):.0f} m "
+      f"(4/3 Earth: {geometry.beam_center_height(150e3, 0.5, 100.0):.0f} m); k_e of the gates {float(k_e.median()):.3f}")
+sweep_r = xr.Dataset(
+    {"DBZH": (("azimuth", "range"), np.zeros((4, ranges_r.size), dtype="f4"))},
+    coords={"azimuth": np.arange(4) * 90.0 + 45.0, "range": ranges_r,
+            "elevation": ("azimuth", np.full(4, 0.5)), "altitude": 100.0},
+)
+profile_r = xr.Dataset({"refractivity": ("height", n_r)}, coords={"height": zr})
+path = beam_path(sweep_r, profile_r)
+print("beam_path, accessor:", float(sweep_r.radarx.beam_path(profile_r).beam_height.isel(azimuth=0, range=-1)),
+      "m =", float(path.beam_height.isel(azimuth=0, range=-1)), "m")
 ```
 
 ## 2. Disdrometers
@@ -814,6 +856,47 @@ ax2.plot(match_sizes, (found.arrival_time.values.ravel() - float(ref.fall_time))
 ax2.axhline(0, color="0.4", lw=0.8)
 ax2.set(xlabel="drop diameter (mm)", ylabel="arrival relative to the 2 mm drops (min)")
 plt.show()
+```
+
+### Collisions in a rain shaft, and hail and melting snow
+
+The trajectories cannot let drop sizes collide. `rain_shaft` evolves the DSD of
+a column of still air with collisions, coalescence and breakup (the scheme of
+Low and List 1982, with the geometric collision kernel) and conserves the rain
+rate; with coalescence only, the drops grow and become few, with breakup the
+large drops that form break up again:
+
+```{code-cell} ipython3
+d_shaft = np.geomspace(0.2, 7.0, 40)
+nd_shaft = xr.DataArray(8000.0 * np.exp(-4.1 * 50.0**-0.21 * d_shaft), dims="diameter",
+                        coords={"diameter": ("diameter", d_shaft, {"units": "mm"})})
+runs = {name: rain_shaft(nd_shaft, depth=[0.0, 2000.0], collisions=name)
+        for name in ("none", "coalescence", "low_list1982")}
+for name, out in runs.items():
+    print(f"{name:13s} drops {float(out.number_concentration.isel(depth=0)):7.0f} -> "
+          f"{float(out.number_concentration.isel(depth=1)):7.0f} m-3, rain rate "
+          f"{float(out.rain_rate.isel(depth=1)):.3f} mm/h")
+via = nd_shaft.radarx.rain_shaft(depth=2000.0)  # the accessor of a DSD
+```
+
+Above and in the melting layer the fall speeds are other laws.
+`hail_fall_speed` is the size relation of Heymsfield et al. (2020) for the
+maximum dimension of a stone, and `melting_snow_fall_speed` mixes the dry-snow
+and raindrop speeds with the weight of Frick et al. (2013) (the dry-snow law has
+to be given: the one here is an example). Both are also `fall_speed` options of
+`rain_trajectories`:
+
+```{code-cell} ipython3
+stones = np.array([8.0, 15.0, 30.0, 60.0])
+print("hail:", ", ".join(f"{d:g} mm {v:.1f} m/s" for d, v in zip(stones, hail_fall_speed(stones).values)))
+print("percentiles at 30 mm:", [float(hail_fall_speed(30.0, f"heymsfield2020_p{p}")) for p in (10, 50, 90)])
+liquid = xr.DataArray([0.0, 0.3, 0.6, 0.9, 1.0], dims="liquid_fraction")
+print("2 mm melting snow:", melting_snow_fall_speed(2.0, liquid, snow=(1.0, 0.3)).values.round(2), "m/s")
+print("accessors:", xr.DataArray(stones, dims="d").radarx.hail_fall_speed().values.round(1),
+      xr.DataArray([1.0, 2.0], dims="d").radarx.melting_snow_fall_speed(0.5, snow=(1.0, 0.3)).values.round(2))
+stone = rain_trajectories({"x": 0.0, "y": 0.0, "z": 4000.0}, stones, profile=profile,
+                          storm_motion=motion, fall_speed=("hail", "heymsfield2020")).squeeze()
+print("hail landing distance (km):", (np.hypot(stone.landing_x, stone.landing_y).values / 1e3).round(1))
 ```
 
 ## 5. Surface stations, profilers and cold pools
@@ -1645,12 +1728,17 @@ with xr.open_dataset(work / "grid.nc") as cf_grid:
 ## References
 
 - Dawson, D., M. Biggerstaff, and S. Waugh, 2025: PERiLS_2022: Portable In Situ Precipitation Stations (PIPS) Data. Version 1.0. NSF NCAR Earth Observing Laboratory, https://doi.org/10.26023/HFBG-7W5M-WA00.
+- Bean, B. R., and E. J. Dutton, 1966: Radio Meteorology. *NBS Monograph 92*, National Bureau of Standards, <https://doi.org/10.6028/NBS.MONO.92>
 - Bruning, E. C., and D. R. MacGorman, 2013: Theory and Observations of Controls on Lightning Flash Size Spectra. *Journal of the Atmospheric Sciences*, **70**, 4012-4029, <https://doi.org/10.1175/JAS-D-12-0289.1>
+- Frick, C., A. Seifert, and H. Wernli, 2013: A bulk parametrization of melting snowflakes with explicit liquid water fraction for the COSMO model. *Geoscientific Model Development*, **6**, 1925-1939, <https://doi.org/10.5194/gmd-6-1925-2013>
 - Fuchs, B. R., E. C. Bruning, S. A. Rutledge, L. D. Carey, P. R. Krehbiel, and W. Rison, 2016: Climatological analyses of LMA data with an open-source lightning flash-clustering algorithm. *Journal of Geophysical Research: Atmospheres*, **121**, 8625-8648, <https://doi.org/10.1002/2015JD024663>
 - Gao, J., M. Xue, A. Shapiro, and K. K. Droegemeier, 1999: A Variational Method for the Analysis of Three-Dimensional Wind Fields from Two Doppler Radars. *Monthly Weather Review*, **127**, 2128-2142, <https://doi.org/10.1175/1520-0493(1999)127<2128:AVMFTA>2.0.CO;2>
+- Heymsfield, A., M. Szakáll, A. Jost, I. Giammanco, R. Wright, and J. Brimelow, 2020: Corrigendum (to: A comprehensive observational study of graupel and hail terminal velocity, mass flux, and kinetic energy). *Journal of the Atmospheric Sciences*, **77**, 405-412, <https://doi.org/10.1175/JAS-D-19-0185.1>
 - Kumjian, M. R., and A. V. Ryzhkov, 2012: The Impact of Size Sorting on the Polarimetric Radar Variables. *Journal of the Atmospheric Sciences*, **69**, 2042-2060, <https://doi.org/10.1175/JAS-D-11-0125.1>
 - Lin, T.-Y., K. Winner, G. Bernstein, A. Mittal, A. M. Dokter, K. G. Horton, C. Nilsson, B. M. Van Doren, A. Farnsworth, F. A. La Sorte, S. Maji, and D. Sheldon, 2019: MistNet: Measuring historical bird migration in the US using archived weather radar data and convolutional neural networks. *Methods in Ecology and Evolution*, **10**, 1908-1922, <https://doi.org/10.1111/2041-210X.13280>
 - Lin, Y.-L., R. D. Farley, and H. D. Orville, 1983: Bulk Parameterization of the Snow Field in a Cloud Model. *Journal of Climate and Applied Meteorology*, **22**, 1065-1092, <https://doi.org/10.1175/1520-0450(1983)022<1065:BPOTSF>2.0.CO;2>
+- Low, T. B., and R. List, 1982: Collision, coalescence and breakup of raindrops. Part I: Experimentally established coalescence efficiencies and fragment size distributions in breakup. *Journal of the Atmospheric Sciences*, **39**, 1591-1606, <https://doi.org/10.1175/1520-0469(1982)039<1591:CCABOR>2.0.CO;2>
+- Low, T. B., and R. List, 1982: Collision, coalescence and breakup of raindrops. Part II: Parameterization of fragment size distributions. *Journal of the Atmospheric Sciences*, **39**, 1607-1619, <https://doi.org/10.1175/1520-0469(1982)039<1607:CCABOR>2.0.CO;2>
 - Mahalik, M. C., B. R. Smith, K. L. Elmore, D. M. Kingfield, K. L. Ortega, and T. M. Smith, 2019: Estimates of Gradients in Radar Moments Using a Linear Least Squares Derivative Technique. *Weather and Forecasting*, **34**, 415-434, <https://doi.org/10.1175/WAF-D-18-0095.1>
 - Rahman, H., 2019: Fundamental Principles of Radar. CRC Press, <https://doi.org/10.1201/9780429279478>
 - Raupach, T. H., and A. Berne, 2015: Correction of raindrop size distributions measured by Parsivel disdrometers, using a two-dimensional video disdrometer as a reference. *Atmospheric Measurement Techniques*, **8**, 343-365, <https://doi.org/10.5194/amt-8-343-2015>

@@ -475,7 +475,7 @@ def test_density_profile_scales_the_fall_speed(engine):
     plain = rain_shaft(
         nd, depth=3000.0, collisions="none", density_correction=False, engine=engine
     )
-    np.testing.assert_allclose(plain.dsd.isel(depth=0), nd, rtol=1e-12)
+    np.testing.assert_allclose(plain.dsd, nd, rtol=1e-12)
     # pressure and temperature (with humidity) give the density; a standard atmosphere
     # is used if only the top is given
     p = 101325.0 * (1.0 - 2.25577e-5 * z) ** 5.25588
@@ -539,10 +539,11 @@ def test_columns_nan_and_dims():
     np.testing.assert_allclose(
         out.rain_rate.isel(point=1, time=0), 0.5 * one.rain_rate, rtol=1e-6
     )
-    # a single depth gives a length-one axis; zero depth returns the input
+    # a single depth is a scalar coordinate; a list of one gives a length-one axis
     zero = rain_shaft(base, depth=0.0)
-    assert zero.dsd.dims == ("depth", "diameter") and zero.sizes["depth"] == 1
-    np.testing.assert_allclose(zero.dsd.isel(depth=0), base, rtol=1e-12)
+    assert zero.dsd.dims == ("diameter",) and float(zero.depth) == 0.0
+    np.testing.assert_allclose(zero.dsd, base, rtol=1e-12)
+    assert rain_shaft(base, depth=[0.0]).sizes["depth"] == 1
 
 
 def test_inputs_are_not_changed_dask_is_lazy_and_provenance():

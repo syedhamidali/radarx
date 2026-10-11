@@ -270,6 +270,7 @@ __all__ = [
     "relative_humidity_from_dewpoint",
     "wet_bulb_temperature",
     "air_density",
+    "refractivity",
     "geopotential_to_height",
 ]
 

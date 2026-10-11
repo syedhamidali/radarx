@@ -190,11 +190,15 @@ def _as_range(range_m):
             raise ValueError("range_m must be one-dimensional")
         if range_m.dims[0] != "range":
             range_m = range_m.rename({range_m.dims[0]: "range"})
-        return range_m.astype(np.float64)
-    arr = np.atleast_1d(np.asarray(range_m, dtype=np.float64))
-    if arr.ndim != 1:
-        raise ValueError("range_m must be one-dimensional")
-    return xr.DataArray(arr, dims="range")
+        rng = range_m.astype(np.float64)
+    else:
+        arr = np.atleast_1d(np.asarray(range_m, dtype=np.float64))
+        if arr.ndim != 1:
+            raise ValueError("range_m must be one-dimensional")
+        rng = xr.DataArray(arr, dims="range")
+    if "range" not in rng.coords:
+        rng = rng.assign_coords(range=("range", rng.values, {"units": "m"}))
+    return rng
 
 
 def _as_elevation(elevation_deg):

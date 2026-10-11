@@ -340,8 +340,9 @@ def rain_shaft(
         times of a disdrometer). Not changed. A dask-backed input gives a lazy
         result.
     depth : float or array-like
-        Distance (m) below the top where the DSD is wanted: one value or an
-        ascending series (not negative), the ``depth`` dimension.
+        Distance (m) below the top where the DSD is wanted: one value (a
+        scalar ``depth`` coordinate) or an ascending series (not negative),
+        the ``depth`` dimension.
     collisions : {"low_list1982", "coalescence", "none"}, optional
         Outcome of a collision. ``"low_list1982"`` (default): coalescence
         efficiency and breakup of Low and List (1982). ``"coalescence"``:
@@ -376,7 +377,8 @@ def rain_shaft(
     Returns
     -------
     xarray.Dataset
-        On the dimensions of ``dsd`` with ``depth`` before ``diameter``:
+        On the dimensions of ``dsd`` with ``depth`` (if a series was given)
+        before ``diameter``:
         ``dsd`` (m-3 mm-1), ``number_concentration`` (m-3),
         ``liquid_water_content`` (g m-3) and ``rain_rate`` (mm h-1; it does
         not change with ``depth`` for any ``collisions``: the test of the mass
@@ -520,6 +522,8 @@ def rain_shaft(
     for name, attrs in _ATTRS.items():
         out[name].attrs = dict(attrs)
     out.attrs = {"collisions": collisions, "fall_speed_law": str(fall_speed)}
+    if np.ndim(depth) == 0:
+        out = out.isel(depth=0)  # a single depth: a scalar coordinate
     return out
 
 
