@@ -300,7 +300,7 @@ from .._compat import renamed_arguments
 from .._dtypes import fields_as_float32
 from .._provenance import provenance
 from .._registry import accessor_method
-from .._sweepwise import Gates, Output, apply_gates_many
+from .._sweepwise import Gates, Output, apply_gates_many, dask_support
 
 try:
     from . import _dsd
@@ -937,6 +937,7 @@ def _kdp_for(ds, kdp, estimated):
     return None if name is None else ds[name]
 
 
+@dask_support("lazy")
 @renamed_arguments(dbzh="dbz", kdp_min="min_kdp")
 @provenance(
     "Gamma DSD retrieval after Zhang et al. (2001), Testud et al. (2001), own lookup tables"
@@ -1315,6 +1316,7 @@ def _diameters(diameter):
     )
 
 
+@dask_support("computes", "it works on small in-memory data.")
 @provenance("Gamma drop size distribution N(D) from its parameters")
 def dsd_spectrum(params, diameter=None):
     """
@@ -1371,6 +1373,7 @@ def _bin_widths(nd, dim):
     return xr.DataArray(width, dims=dim, coords={dim: nd[dim]})
 
 
+@dask_support("computes", "it works on small in-memory data.")
 @provenance("Gamma drop size distribution by the 2-4-6 method of moments")
 def fit_gamma_moments(nd, dim="diameter"):
     """
@@ -1444,6 +1447,7 @@ def fit_gamma_moments(nd, dim="diameter"):
     )
 
 
+@dask_support("computes", "it works on small in-memory data.")
 @provenance(
     "Polarimetric radar variables from drop size distributions by T-matrix tables"
 )

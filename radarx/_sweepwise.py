@@ -23,17 +23,29 @@ loading them, with one mechanism for all functions:
 * :func:`apply_sweeps_many` does so for the sweeps of a volume: plain sweeps
   go to the core together (one kernel call over all of them), the others one
   by one.
+* :class:`Gates` and :func:`apply_gates` do the same for functions that work
+  gate by gate on any dimensions (a sweep, a grid, a profile), and along one
+  dimension (the vertical of a column integral).
+
+Functions that cannot be lazy (they need a whole volume or all times, or
+return tables) say so with :func:`dask_support`, which adds the rule to
+their docstring and records it in :data:`DASK_SUPPORT`.
 
 The module does not import dask.
 """
 
 from __future__ import annotations
 
+import re
+import textwrap
+
 import numpy as np
 import xarray as xr
 
 __all__ = [
+    "DASK_SUPPORT",
     "Gates",
+    "dask_support",
     "apply_gates",
     "apply_gates_many",
     "Output",
@@ -182,6 +194,7 @@ class Sweep:
         self.ray = ray_dimension(self.reference)
         self.extra = extra_dims(self.reference)
         self.core_dims = (self.ray, RANGE)
+        self.dims = self.reference.dims
         for field in present[1:]:
             if set(field.dims) - set(self.reference.dims) or (
                 ray_dimension(field) != self.ray
@@ -195,6 +208,10 @@ class Sweep:
     def plain(self):
         """Whether all fields are 2-D NumPy arrays."""
         return all(is_plain(f) for f in self.fields if f is not None)
+
+    def input_core_dims(self, fields):
+        """Core dimensions of each of ``fields``."""
+        return [list(self.core_dims)] * len(fields)
 
     def arrays(self):
         """The fields of a plain sweep as ``(ray, range)`` NumPy arrays."""
@@ -219,21 +236,26 @@ class Gates:
         (aligned by their coordinates) and must not have other dimensions.
     context : object, optional
         Passed to the core.
+    core_dim : str, optional
+        A dimension the core works along (the vertical of a column
+        integral). The fields that have it are passed with it last; the
+        results do not have it. Default: none.
     """
 
     sliced = False
     ray = None
-    core_dims = ()
 
-    def __init__(self, fields, context=None):
+    def __init__(self, fields, context=None, core_dim=None):
         present = [f for f in fields if f is not None]
         if not present:
             raise ValueError("a gate-wise function needs at least one field")
-        self.reference = present[0]
-        dims = self.reference.dims
-        broadcast = iter(xr.broadcast(*present))
+        self.core_dim = core_dim
+        self.dims = tuple(d for d in present[0].dims if d != core_dim)
+        exclude = [] if core_dim is None else [core_dim]
+        broadcast = iter(xr.broadcast(*present, exclude=exclude))
         self.fields = [
-            None if f is None else next(broadcast).transpose(*dims) for f in fields
+            None if f is None else next(broadcast).transpose(*self.dims, ...)
+            for f in fields
         ]
         self.reference = next(f for f in self.fields if f is not None)
         self.context = context
@@ -246,6 +268,10 @@ class Gates:
     def arrays(self):
         """The broadcast fields as NumPy arrays."""
         return tuple(None if f is None else f.values for f in self.fields)
+
+    def input_core_dims(self, fields):
+        """Core dimensions of each of ``fields``."""
+        return [[self.core_dim] if self.core_dim in f.dims else [] for f in fields]
 
 
 def _as_dataarray(variable, sweep, name=None):
@@ -265,11 +291,11 @@ def _plain_results(sweep, results, outputs):
     for value, spec in zip(results, outputs):
         dims = spec.core_dims(sweep.ray)
         if spec.kind == "gate":
-            dims = sweep.reference.dims + dims
+            dims = sweep.dims + dims
         var = xr.Variable(dims, np.asarray(value, dtype=spec.dtype))
         da = _as_dataarray(var, sweep)
         if spec.kind in ("sweep", "gate"):
-            da = da.transpose(*sweep.reference.dims, *spec.new_dims)
+            da = da.transpose(*sweep.dims, *spec.new_dims)
         out.append(da)
     return out
 
@@ -283,6 +309,8 @@ def _block(core, context, outputs, present, n_fields, one_by_one):
     """The function that ``apply_ufunc`` applies to blocks of the fields."""
 
     def run(*blocks):
+        ndim = max(b.ndim for b in blocks)
+        blocks = [b.reshape((1,) * (ndim - b.ndim) + b.shape) for b in blocks]
         lead = np.broadcast_shapes(*(b.shape[:-2] for b in blocks))
         nray, ngate = blocks[0].shape[-2:]
         shapes = {
@@ -336,7 +364,7 @@ def _lazy_results(core, sweep, outputs, one_by_one):
     result = xr.apply_ufunc(
         func,
         *(sweep.fields[k].variable for k in present),
-        input_core_dims=[list(sweep.core_dims)] * len(present),
+        input_core_dims=sweep.input_core_dims([sweep.fields[k] for k in present]),
         output_core_dims=[list(o.core_dims(ray)) for o in outputs],
         dask="parallelized",
         output_dtypes=[o.dtype for o in outputs],
@@ -351,7 +379,7 @@ def _lazy_results(core, sweep, outputs, one_by_one):
     for var, spec in zip(variables, outputs):
         da = _as_dataarray(var, sweep)
         if spec.kind in ("sweep", "gate"):
-            order = [d for d in sweep.reference.dims if d in da.dims]
+            order = [d for d in sweep.dims if d in da.dims]
             da = da.transpose(*order, *spec.new_dims)
         out.append(da)
     return out
@@ -424,3 +452,113 @@ def apply_sweeps_many(core, sweeps, outputs, one_by_one=False):
 # a gate-wise core is run the same way
 apply_gates = apply_sweeps
 apply_gates_many = apply_sweeps_many
+
+
+# --------------------------------------------------------------------------
+# documentation of the behaviour on dask arrays
+# --------------------------------------------------------------------------
+
+#: Behaviour on dask input of the functions that declare it, by qualified name.
+DASK_SUPPORT = {}
+
+LAZY = "lazy"
+LAZY_ONLY = "lazy_only"
+COMPUTES = "computes"
+EAGER = "eager"
+
+_LAZY_NOTE = (
+    "Dask and extra dimensions. The fields may have extra leading dimensions "
+    "(for example ``time`` or ``volume``): each sweep is processed on its own "
+    "and the result has the same extra dimensions. Dask arrays stay lazy: the "
+    "result is a dask array and nothing is computed until it is (the sweep "
+    "dimensions are rechunked into one chunk)."
+)
+_LAZY_ONLY_NOTE = (
+    "Dask. Dask arrays stay lazy: the result is a dask array and nothing is "
+    "computed until it is."
+)
+_COMPUTES_NOTE = (
+    "Dask. This function computes the dask array: {why} The input is loaded "
+    "into memory and the result is held in memory."
+)
+_HEADER = re.compile(r"^( *)([A-Z][A-Za-z ]*)\n\1-{3,}$", re.MULTILINE)
+_PLACEHOLDER = re.compile(r"^ *\{\w+\} *$", re.MULTILINE)
+_BEFORE = ("References", "Examples", "See Also")
+
+
+def _add_note(doc, text):
+    """
+    ``doc`` with the paragraph ``text`` at the end of its Notes section.
+
+    A line that is only a placeholder (``{references}``), which a module
+    fills in later, ends the section as a header does.
+    """
+    headers = list(_HEADER.finditer(doc))
+    indent = headers[0].group(1) if headers else "    "
+    paragraph = textwrap.fill(
+        text, width=79, initial_indent=indent, subsequent_indent=indent
+    )
+    marks = [(h.start(), h.group(2)) for h in headers]
+    marks += [(m.start(), "{}") for m in _PLACEHOLDER.finditer(doc)]
+    marks.sort()
+    for k, (start, name) in enumerate(marks):
+        if name == "Notes":
+            end = marks[k + 1][0] if k + 1 < len(marks) else len(doc)
+            body = doc[:end].rstrip("\n ")
+            return body + "\n\n" + paragraph + "\n\n" + doc[end:].lstrip("\n")
+    section = f"{indent}Notes\n{indent}-----\n{paragraph}\n\n"
+    for start, name in marks:
+        if name in _BEFORE or name == "{}":
+            return doc[:start] + section + doc[start:]
+    return doc.rstrip("\n ") + "\n\n" + section.rstrip("\n") + "\n" + indent
+
+
+def dask_support(kind, why=""):
+    """
+    Decorator that states how a function treats dask arrays.
+
+    The rule goes into the Notes of the docstring and into
+    :data:`DASK_SUPPORT`, which the documentation and the tests read.
+
+    Parameters
+    ----------
+    kind : {"lazy", "lazy_only", "computes", "eager"}
+        ``"lazy"``: the result is a dask array for dask input and the
+        function takes extra leading dimensions. ``"lazy_only"``: the same,
+        without the statement about extra dimensions. ``"computes"``: the
+        function needs a whole volume or all times and computes dask input.
+        ``"eager"``: the result cannot be lazy (its size depends on the
+        data) and the function computes dask input.
+    why : str, optional
+        For ``"computes"``: why the function needs the data in memory, one
+        sentence. For the other kinds: a sentence on an exception that is
+        added to the paragraph.
+
+    Returns
+    -------
+    callable
+        A decorator that returns the function itself with the longer
+        docstring.
+    """
+    if kind not in (LAZY, LAZY_ONLY, COMPUTES, EAGER):
+        raise ValueError(
+            f"kind must be 'lazy', 'lazy_only', 'computes' or 'eager', not {kind!r}"
+        )
+    if kind in (COMPUTES, EAGER) and not why:
+        raise ValueError("a function that computes dask input needs a reason")
+
+    def decorate(func):
+        text = {
+            LAZY: _LAZY_NOTE,
+            LAZY_ONLY: _LAZY_ONLY_NOTE,
+            COMPUTES: _COMPUTES_NOTE.format(why=why),
+            EAGER: _COMPUTES_NOTE.format(why=why),
+        }[kind]
+        if kind in (LAZY, LAZY_ONLY) and why:
+            text = f"{text} {why}"
+        func.__doc__ = _add_note(func.__doc__ or "", text)
+        module = func.__module__.replace("radarx.", "")
+        DASK_SUPPORT[f"{module}.{func.__name__}"] = (kind, why)
+        return func
+
+    return decorate

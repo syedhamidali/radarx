@@ -68,6 +68,7 @@ from .._compat import renamed_arguments
 from .._dtypes import fields_as_float32
 from .._gridcf import aeqd_crs, georeference
 from .._provenance import provenance
+from .._sweepwise import dask_support
 
 _CARTESIAN_IDW_METHOD = "cartesian_idw"
 _POLAR_VERTICAL_INTERPOLATION_METHOD = "polar_vertical_interpolation"
@@ -1117,6 +1118,7 @@ def _create_cappi_height_window_composite(
     return ds_cappi
 
 
+@dask_support("computes", "it interpolates between the sweeps of the volume.")
 @renamed_arguments(radar="obj", fields="data_vars")
 @provenance(
     "CAPPI, radarx's own methods; inverse-distance weighting after Shepard (1968)"

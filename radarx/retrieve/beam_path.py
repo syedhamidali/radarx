@@ -65,6 +65,7 @@ import xarray as xr
 from .._fields import as_sweep, node_dataset
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 from ..fundamentals.constants import EARTH_RADIUS
 from ..fundamentals.refraction import k_e_from_rays, trace_rays
 from ..grid.cone import _sweep_names
@@ -240,6 +241,7 @@ def _sweep_products(ds, height, refractivity, options, radar_height):
     return out
 
 
+@dask_support("lazy_only")
 @provenance(
     "Ray tracing of the radar beam through a refractivity profile "
     "(Snell's law in a spherically stratified atmosphere), after Bean and "

@@ -63,6 +63,7 @@ from .._compat import renamed_arguments
 from .._fields import node_dataset
 from .._gridcf import aeqd_crs, crs_variable, georeference
 from .._provenance import provenance
+from .._sweepwise import dask_support
 
 try:
     from . import _cone
@@ -498,6 +499,7 @@ def _lonlat_axes(x, y, latitude, longitude):
     return np.asarray(lon), np.asarray(lat)
 
 
+@dask_support("computes", "the result is interpolated from the gates of all sweeps.")
 @renamed_arguments(dtree="obj")
 @provenance(
     "Cone gridding of radar volumes, radarx's own method",

@@ -232,6 +232,7 @@ from .._compat import renamed_arguments
 from .._dtypes import fields_as_float32
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 from .dsd import (
     _DBZH_NAMES,
     _OUT_ATTRS,
@@ -581,6 +582,7 @@ def _packaged(name):
     return out
 
 
+@dask_support("computes", "it works on small in-memory data.")
 @provenance("Prior of the Bayesian drop size distribution retrieval")
 def dsd_prior(source="generic", *, weights=None, defensive=0.01, bandwidth=None):
     """
@@ -1203,6 +1205,7 @@ def _mask_for(mask, name):
     return node[next(iter(node.data_vars))]
 
 
+@dask_support("computes", "the posterior is evaluated for all gates on a grid.")
 @renamed_arguments(dbzh="dbz")
 @provenance(
     "Bayesian DSD retrieval after Cao et al. (2010) with own state, error model and prior"

@@ -178,6 +178,7 @@ from .._sweepwise import (
     Output,
     Sweep,
     apply_sweeps,
+    dask_support,
     is_plain,
     ray_coordinate,
     ray_dimension,
@@ -216,6 +217,10 @@ _MAX_RAY_GAP = 10  # empty rays bridged between regions
 _GATE_PASSES = 2
 
 
+@dask_support(
+    "lazy",
+    "With ``sweep_continuity=True`` a volume of several sweeps is computed, because each sweep follows the one below it; pass ``sweep_continuity=False`` to keep the sweeps lazy.",
+)
 @renamed_arguments(radar="obj")
 @provenance(
     "Velocity dealiasing: region-based (radarx's combination of published "
@@ -1746,6 +1751,7 @@ def _confidence_options(window, min_neighbours, threshold, n_threads, compiled):
     }
 
 
+@dask_support("lazy")
 @renamed_arguments(radar="obj")
 @provenance(
     "Confidence of dealiased velocity from the neighbouring gates, a radarx definition"
@@ -2003,6 +2009,10 @@ def _positive(value, what, sweep):
     return value
 
 
+@dask_support(
+    "lazy",
+    "The attribute ``outliers_corrected`` is written for a sweep in memory only.",
+)
 @renamed_arguments(radar="obj")
 @provenance(
     "Dual-PRF velocity error correction by the local median (Holleman and Beekhuis 2003)"

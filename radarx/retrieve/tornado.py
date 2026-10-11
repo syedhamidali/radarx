@@ -127,6 +127,7 @@ from .._compat import renamed_arguments
 from .._polar import nearest_ray
 from .._provenance import provenance
 from .._registry import accessor_for
+from .._sweepwise import dask_support
 from . import _onnx_models
 from ._products import product_tree
 
@@ -312,6 +313,7 @@ def _tilt_fields(sweeps, angle, field, dealias, nyquist_velocity, kdp, tolerance
     return fields, folded, dop
 
 
+@dask_support("computes", "the result combines the gates of all sweeps of the volume.")
 @renamed_arguments(volume="obj", velocity="field")
 @provenance("Inputs of the TorNet CNN from a WSR-88D volume")
 def tornet_inputs(
@@ -531,6 +533,7 @@ def _sigmoid(x):
     return 1.0 / (1.0 + np.exp(-np.asarray(x, dtype=np.float64)))
 
 
+@dask_support("computes", "the result combines the gates of all sweeps of the volume.")
 @renamed_arguments(volume="obj")
 @provenance("TorNet CNN tornado probability (ONNX network)")
 def tornado_probability(
@@ -906,6 +909,7 @@ def _keep_continuous(nodes, min_tilts, link_distance, max_skip):
     return out
 
 
+@dask_support("eager", "the number of couplets depends on the data.")
 @renamed_arguments(min_reflectivity="min_dbz")
 @provenance(
     "Rotation couplets from LLSD azimuthal shear, radarx's own simple detection",

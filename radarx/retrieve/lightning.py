@@ -185,6 +185,7 @@ import xarray as xr
 from .._compat import renamed_arguments
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 
 try:
     from . import _lightning
@@ -726,6 +727,7 @@ def _with_flashes(ds, use_compiled, n_threads, distance=3000.0, time=0.15):
     return ds
 
 
+@dask_support("eager", "the flashes are found from all sources.")
 @renamed_arguments(ds="obj")
 @provenance(
     "Space-time clustering of LMA sources into flashes, after Fuchs et al. (2016)",
@@ -1003,6 +1005,7 @@ def _flash_ok(count, min_sources):
     )
 
 
+@dask_support("computes", "the densities are summed over all sources.")
 @renamed_arguments(ds="obj")
 @provenance("Gridded source, flash extent and flash initiation densities")
 def grid_lightning(
@@ -1204,6 +1207,7 @@ def grid_lightning(
     return out
 
 
+@dask_support("computes", "the distribution is built from all sources.")
 @renamed_arguments(ds="obj")
 @provenance("Height distribution of LMA sources and flash initiations")
 def vertical_source_distribution(
@@ -1335,6 +1339,7 @@ def _mask_frames(times, mtimes, max_offset):
     return frame, max_off
 
 
+@dask_support("eager", "the cells are tracked through all times.")
 @renamed_arguments(ds="obj")
 @provenance("Flash rates and source heights of tracked storm cells")
 def cell_flash_rate(

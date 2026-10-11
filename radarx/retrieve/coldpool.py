@@ -171,6 +171,7 @@ import xarray as xr
 from .._compat import renamed_arguments
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 from . import _coldpool_numpy
 
 try:
@@ -346,6 +347,7 @@ def _check_si(t, p):
         raise ValueError("pressure must be in Pa")
 
 
+@dask_support("computes", "it works on small in-memory data.")
 @renamed_arguments(ds="obj")
 @provenance(
     "Potential temperatures, equivalent potential temperature after Bolton (1980)"
@@ -471,6 +473,7 @@ def buoyancy(theta_v, reference, *, condensate=None):
     return b
 
 
+@dask_support("computes", "it works on small in-memory data.")
 @renamed_arguments(ds="obj")
 @provenance("Perturbations from a reference state and buoyancy")
 def cold_pool_perturbation(
@@ -584,6 +587,7 @@ def _with_thermo(ds, engine, n_threads):
 # --------------------------------------------------------------------------
 
 
+@dask_support("computes", "it integrates over the height of the cold pool.")
 @provenance("Cold-pool intensity C = sqrt(2 int -B dz) of Rotunno et al. (1988)")
 def cold_pool_intensity(
     buoyancy,
@@ -814,6 +818,7 @@ def rkw_ratio(intensity, shear):
 # --------------------------------------------------------------------------
 
 
+@dask_support("computes", "it works on small in-memory data.")
 @provenance("Baroclinic generation of horizontal vorticity")
 def baroclinic_generation(
     buoyancy,

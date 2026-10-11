@@ -191,7 +191,7 @@ from .._compat import renamed_arguments
 from .._fields import align_like
 from .._provenance import provenance
 from .._registry import accessor_method
-from .._sweepwise import Gates, Output, apply_gates_many
+from .._sweepwise import Gates, Output, apply_gates_many, dask_support
 
 try:
     from . import _hid
@@ -1280,6 +1280,10 @@ def _check_inputs(obj, temperature, mask, blockage, ml_gates):
     return lo, hi
 
 
+@dask_support(
+    "lazy",
+    "The winter scheme (``method='thompson'``) and a melting layer found from the gates need all gates, so they compute the dask arrays.",
+)
 @renamed_arguments(dbzh="dbz")
 @provenance(
     "Fuzzy-logic hydrometeor classification after Park et al. (2009), Dolan et al. (2013)"

@@ -46,6 +46,7 @@ from .._compat import renamed_arguments
 from .._gridcf import aeqd_crs, georeference
 from .._provenance import provenance
 from .._registry import accessor_method, method_signature
+from .._sweepwise import dask_support
 from . import cone
 
 try:
@@ -395,6 +396,7 @@ def _sweep_elevations(selected):
 # ---------------------------------------------------------------------------
 
 
+@dask_support("computes", "it grids and combines several radars.")
 @renamed_arguments(rhohv_min="min_rhohv")
 @provenance("Multi-radar gridding on a shared grid", extra_refs=("doviak-zrnic-1993",))
 def grid_radars(
@@ -1122,6 +1124,7 @@ def _no_echo_floor(no_echo, values, da):
     return np.full(values.shape[0], float(no_echo))
 
 
+@dask_support("computes", "it combines the grids of several radars.")
 @renamed_arguments(grid="obj")
 @provenance("Weighted merge of gridded radars, after Zhang et al. (2005)")
 def merge_radars(
@@ -1440,6 +1443,7 @@ def _network_solution(pairs, d, w, nr, ref):
     return bias, error, residual
 
 
+@dask_support("computes", "it compares the overlap of several radars.")
 @renamed_arguments(grid="obj", reflectivity="dbz")
 @provenance("Relative radar biases from overlaps, radarx's own after Seo et al. (2014)")
 def network_bias(

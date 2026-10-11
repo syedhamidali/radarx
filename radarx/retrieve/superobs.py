@@ -97,6 +97,7 @@ import xarray as xr
 from .._compat import renamed_arguments
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 from ..fundamentals.constants import EARTH_RADIUS, EFFECTIVE_RADIUS_4_3
 from ..grid.cone import _sweep_dataset, _sweep_names
 
@@ -642,6 +643,7 @@ def _lonwrap(lon):
     return (lon + 180.0) % 360.0 - 180.0
 
 
+@dask_support("eager", "the number of observations depends on the data.")
 @renamed_arguments(vel="field", rho="rhohv", rho_min="min_rhohv")
 @provenance(
     "Super-observations of radar gates in model columns and layers, after Alpert and Kumar (2007)",

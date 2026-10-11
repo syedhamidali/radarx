@@ -148,6 +148,7 @@ from .._sweepwise import (
     Output,
     Sweep,
     apply_sweeps_many,
+    dask_support,
     ray_coordinate,
     ray_dimension,
 )
@@ -889,6 +890,10 @@ def _fixed_angle(ds):
     return None  # pragma: no cover - xradar sweeps have one of the above
 
 
+@dask_support(
+    "lazy",
+    "With ``split_cuts=True`` a Doppler cut of a volume takes its classes from the polarimetric cut at the same elevation, so these two cuts are computed.",
+)
 @renamed_arguments(dbzh="dbz", vrad="field", snr_min="min_snr")
 @provenance(
     "Fuzzy-logic echo score in the manner of Gourley 2007 and Krause 2016, own memberships "
@@ -1369,6 +1374,7 @@ def _mask_fields(ds, mask, data_vars, floors):
     return out
 
 
+@dask_support("lazy")
 @renamed_arguments(fields="data_vars")
 @provenance("Masking of non-meteorological gates with the radarx echo classification")
 def apply_mask(obj, mask=None, data_vars=None, *, nodata="auto", **kwargs):

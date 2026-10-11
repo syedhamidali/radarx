@@ -270,6 +270,7 @@ from scipy.special import gammaln
 
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 from . import _raindrop_fall
 
 try:
@@ -775,6 +776,7 @@ def _env_for_node(environment, name):
     return environment
 
 
+@dask_support("computes", "it works on small in-memory data.")
 @provenance(
     "Rain evaporation and cooling rates of a gamma DSD, after Kumjian and Ryzhkov (2010)",
     extra_refs=("rogers-yau-1989",),
@@ -941,6 +943,7 @@ def evaporation(
     return _wrap(res, dims, shape, coords, attrs)
 
 
+@dask_support("computes", "it integrates down the sequence of spectra.")
 @provenance(
     "Air temperature and humidity under evaporating rain, after Kumjian and Ryzhkov (2010)",
     extra_refs=("rogers-yau-1989",),

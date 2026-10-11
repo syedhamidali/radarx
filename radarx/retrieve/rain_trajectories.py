@@ -281,6 +281,7 @@ import xarray as xr
 
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 from . import _ice_fall, _raindrop_fall
 from . import _rain_trajectories_numpy as _ref
 
@@ -1025,6 +1026,7 @@ def _check_threads(n_threads):
         raise ValueError("n_threads must be non-negative")
 
 
+@dask_support("computes", "it needs the fields of every time.")
 @provenance("Raindrop trajectories with evaporation, after Dawson et al. (2015)")
 def rain_trajectories(
     source,
@@ -1404,6 +1406,7 @@ def _sample_source_dsd(field, ds, motion=(0.0, 0.0)):
     return xr.DataArray(vals.reshape(shape), dims=dims, coords=ds["source_x"].coords)
 
 
+@dask_support("eager", "it needs the fields of every time.")
 @provenance(
     "Backward raindrop trajectories, radarx's own scheme after Dawson et al. (2015)"
 )
@@ -1702,6 +1705,7 @@ def _edges(centers):
     return np.concatenate([[c[0] - (mid[0] - c[0])], mid, [c[-1] + (c[-1] - mid[-1])]])
 
 
+@dask_support("computes", "it works on small in-memory data.")
 @provenance(
     "Surface drop size distribution from landed drops, radarx's own accumulation"
 )
@@ -1924,6 +1928,7 @@ def surface_dsd(
     )
 
 
+@dask_support("eager", "it needs the fields of every time.")
 @provenance(
     "Trajectory-matched drop arrival times, radarx's own after Dawson et al. (2015)"
 )

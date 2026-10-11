@@ -585,6 +585,7 @@ import xarray as xr
 
 from .._compat import renamed_arguments
 from .._provenance import provenance
+from .._sweepwise import dask_support
 from . import _lagrangian_numpy as _nk
 from . import lagrangian as _traj
 
@@ -885,6 +886,7 @@ def _closure_output(ref, qr, nr, qg, ng, attrs):
     )
 
 
+@dask_support("computes", "it needs the gates along the trajectories.")
 @renamed_arguments(radar="obj", dbzh="dbz")
 @provenance(
     "Rain and graupel from polarimetric data, radarx's own closure after Ziegler (2013a)"
@@ -1220,6 +1222,7 @@ def ziegler2013_profiles(name="cm1_squall_line"):
     )
 
 
+@dask_support("computes", "it needs the gates along the trajectories.")
 @renamed_arguments(radar="obj", dbzh="dbz")
 @provenance("Rain and graupel from reflectivity, closure of Ziegler (2013a)")
 def ziegler2013_precipitation(
@@ -1456,6 +1459,7 @@ def _switches(processes):
     return on, bits
 
 
+@dask_support("computes", "it works on small in-memory data.")
 @provenance("Microphysical rates of Lin et al. (1983) and the resulting DLA tendencies")
 def microphysical_rates(
     theta,
@@ -1920,6 +1924,7 @@ def _run_kernel(
     )
 
 
+@dask_support("computes", "it follows trajectories through all times.")
 @renamed_arguments(reflectivity="dbz")
 @provenance(
     "Diabatic Lagrangian analysis of Ziegler (2013a, b), radarx choices where silent"

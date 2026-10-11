@@ -35,6 +35,7 @@ import xarray as xr
 
 from .._compat import keyword_only_after, renamed_arguments
 from .._provenance import provenance
+from .._sweepwise import dask_support
 from ..utils import find_multidim_vars, get_geocoords  #  noqa
 
 
@@ -64,6 +65,7 @@ def _sweep_dataset(dtree, name):
         return dtree[name].to_dataset()
 
 
+@dask_support("computes", "it stacks the sweeps of the volume into one Dataset.")
 @renamed_arguments(dtree="obj")
 @provenance("Stacking of georeferenced gates into points (no published method)")
 def stack_data(obj, data_vars=None, geo=False):
@@ -239,6 +241,7 @@ def _lonlat_transformer(ds):
     return Transformer.from_crs(src_crs, trg_crs, always_xy=True), trg_crs
 
 
+@dask_support("computes", "the result is interpolated from the gates of all sweeps.")
 @renamed_arguments(dtree="obj")
 @keyword_only_after("n_threads", "fill_depth", "fill_velocity", "k_e")
 @provenance("Radar volume gridding by cone interpolation or Barnes analysis")

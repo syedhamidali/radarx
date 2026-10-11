@@ -55,7 +55,7 @@ def assert_same_attrs(result, reference, ignore=()):
             assert np.array_equal(keep[key], want[key]), (name, key)
 
 
-def check_stack(func, make, n=3, chunks=None, ignore_attrs=(), **kwargs):
+def check_stack(func, make, n=3, chunks=None, ignore_attrs=(), dim="time", **kwargs):
     """
     The result for a stack and for dask arrays equals that of the sweeps.
 
@@ -72,11 +72,13 @@ def check_stack(func, make, n=3, chunks=None, ignore_attrs=(), **kwargs):
         azimuth in pieces, so that the sweep dimensions must be rechunked.
     ignore_attrs : sequence of str
         Attributes that only the result for a sweep in memory has.
+    dim : str
+        Name of the dimension of the stack.
     """
     members = [make(k) for k in range(n)]
     single = [func(m, **kwargs) for m in members]
-    expected = stacked(single)
-    stack = stacked(members)
+    expected = stacked(single, dim)
+    stack = stacked(members, dim)
     before = stack.copy(deep=True)
 
     out = func(stack, **kwargs)

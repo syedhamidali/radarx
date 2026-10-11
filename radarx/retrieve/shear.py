@@ -92,7 +92,7 @@ from .._compat import renamed_arguments
 from .._fields import VELOCITY, as_sweep, find_field
 from .._provenance import provenance
 from .._registry import accessor_for
-from .._sweepwise import Output, Sweep, apply_sweeps_many, ray_dimension
+from .._sweepwise import Output, Sweep, apply_sweeps_many, dask_support, ray_dimension
 from ._products import product_tree
 
 try:
@@ -428,6 +428,7 @@ def _llsd_sweeps(
     return results
 
 
+@dask_support("lazy", "The sweeps of a stack must have the same azimuths.")
 @provenance(
     "Azimuthal shear and radial divergence by LLSD (Smith and Elmore 2004)",
     extra_refs=("smith-elmore-2004",),
@@ -590,6 +591,7 @@ def llsd(
 llsd.__doc__ = llsd.__doc__.replace("{references}", _REFERENCES)
 
 
+@dask_support("lazy", "The sweeps of a stack must have the same azimuths.")
 @provenance(
     "Azimuthal shear by LLSD (Smith and Elmore 2004)", extra_refs=("smith-elmore-2004",)
 )
@@ -618,6 +620,7 @@ def azimuthal_shear(obj, field=None, window=(750.0, 2500.0), **kwargs):
     return _select(llsd(obj, field, window, **kwargs), "azimuthal_shear")
 
 
+@dask_support("lazy", "The sweeps of a stack must have the same azimuths.")
 @provenance(
     "Radial divergence by LLSD (Smith and Elmore 2004)",
     extra_refs=("smith-elmore-2004",),
@@ -858,6 +861,7 @@ def _storm_mask(ds, sweeps, dbz_name, angle, threshold, distance, n_threads, com
     return out
 
 
+@dask_support("computes", "it takes the maximum over the tilts of the volume.")
 @renamed_arguments(reflectivity="dbz", min_reflectivity="min_dbz")
 @provenance(
     "Layer-maximum azimuthal shear over the tilts of a volume (MRMS-style)",

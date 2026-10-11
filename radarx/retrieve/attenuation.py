@@ -210,6 +210,7 @@ from .._compat import renamed_arguments
 from .._dtypes import fields_as_float32
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 from ..fundamentals.geometry import beam_center_height
 from ._fieldtools import detach
 from ._products import product_tree
@@ -673,6 +674,7 @@ def _band_of(band, objs):
     return _infer_band(objs)
 
 
+@dask_support("lazy")
 @renamed_arguments(dbzh="dbz", dbz_min="min_dbz", rhohv_min="min_rhohv")
 @provenance(
     "Rain attenuation and differential attenuation correction from PhiDP "

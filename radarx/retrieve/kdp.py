@@ -208,6 +208,7 @@ from .._sweepwise import (
     Output,
     Sweep,
     apply_sweeps_many,
+    dask_support,
     ray_dimension,
 )
 from ._products import product_tree
@@ -1139,6 +1140,10 @@ def _run(datasets, fields, params, n_threads, use_compiled, model=None):
     return results
 
 
+@dask_support(
+    "lazy",
+    "For dask or stacked input ``phidp_sign='auto'`` is decided for each sweep, and the attributes of the filter (``phase_noise``, ``filter_window``, ``kdp_reference``) are not written.",
+)
 @renamed_arguments(dbzh="dbz", rhohv_min="min_rhohv")
 @provenance(
     "Differential phase and KDP processing, radarx's own after published concepts",

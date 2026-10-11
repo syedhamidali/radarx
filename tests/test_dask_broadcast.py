@@ -13,21 +13,45 @@ sweeps of a volume with dask arrays.
 """
 
 import importlib
+from collections.abc import Callable
+from typing import NamedTuple
 
 import numpy as np
 import pytest
 import xarray as xr
 
 import radarx  # noqa: F401
+from radarx._sweepwise import DASK_SUPPORT
 from radarx.retrieve import (
+    apply_mask,
+    azimuthal_shear,
+    correct_attenuation,
     correct_dual_prf,
+    correct_rhohv_noise,
+    correct_zdr_noise,
     dealias_confidence,
     dealias_velocity,
     dsd,
     echo_mask,
+    echo_top,
     estimate_kdp,
     hid,
+    liquid_water_content,
     llsd,
+    noise_level,
+    phidp_offset,
+    qvp,
+    radial_divergence,
+    rain_rate,
+    rain_rate_a,
+    rain_rate_kdp,
+    rain_rate_z,
+    rain_rate_z_zdr,
+    snr,
+    vil,
+    vil_density,
+    z_offset,
+    zdr_offset,
 )
 from radarx.retrieve import dealias as dealias_mod
 from radarx.retrieve import kdp as kdp_mod
@@ -40,13 +64,20 @@ from . import (
     test_hid,
     test_kdp,
     test_qc,
+    test_qvp,
     test_shear,
 )
-from .sweepwise_helpers import check_stack, check_volume
+from .sweepwise_helpers import CHUNKS, check_stack, check_volume
 
 dask = pytest.importorskip("dask")
 dsd_mod = importlib.import_module("radarx.retrieve.dsd")
 hid_mod = importlib.import_module("radarx.retrieve.hid")
+vil_mod = importlib.import_module("radarx.retrieve.vil")
+noise_mod = importlib.import_module("radarx.retrieve.noise")
+attenuation_mod = importlib.import_module("radarx.retrieve.attenuation")
+calibration_mod = importlib.import_module("radarx.retrieve.calibration")
+qpe_mod = importlib.import_module("radarx.retrieve.qpe")
+qvp_mod = importlib.import_module("radarx.retrieve.vertical_profiles")
 
 
 def qc_sweep(k):
@@ -72,6 +103,16 @@ def small_alias_sweep(k):
     return test_dealias.synthetic_sweep(seed=k, nray=36, ngate=40)[0]
 
 
+def polar_sweep(k):
+    """A sweep with the fields of the polarimetric products."""
+    ds = test_qc._sweep(seed=k, nray=24, ng=400)[0]
+    rnd = np.random.default_rng(k)
+    dims = ds.DBZH.dims
+    ds["KDP"] = (dims, rnd.uniform(0.0, 2.0, ds.DBZH.shape), {"units": "degree km-1"})
+    ds["AH"] = (dims, rnd.uniform(0.0, 0.05, ds.DBZH.shape), {"units": "dB km-1"})
+    return ds
+
+
 def rain_sweep(k):
     rnd = np.random.default_rng(k)
     shape = (16, 50)
@@ -94,6 +135,28 @@ def rain_sweep(k):
     )
 
 
+GRID_CHUNKS = {"time": 1, "z": 5, "y": 2}
+
+
+def qvp_sweep(k):
+    return test_qvp._sweep(nray=60, seed=k, time=f"2026-01-01T0{k}:00")[0]
+
+
+def column_grid(k):
+    rnd = np.random.default_rng(k)
+    shape = (12, 5, 4)
+    dbz = np.where(rnd.random(shape) < 0.1, np.nan, rnd.uniform(-10, 60, shape))
+    return xr.Dataset(
+        {"DBZH": (("z", "y", "x"), dbz, {"units": "dBZ"})},
+        coords={
+            "z": 500.0 + 1000.0 * np.arange(12),
+            "y": np.arange(5) * 1000.0,
+            "x": np.arange(4) * 1000.0,
+            "altitude": ((), 100.0),
+        },
+    )
+
+
 def hid_sweep(k):
     return test_hid._random_volume(seed=k, n=1, nray=24, ng=60)[0]
 
@@ -102,12 +165,32 @@ def dual_prf_sweep(k):
     return test_dealias_extras.dual_prf_sweep(seed=k, nray=90, ngate=60)[0]
 
 
-def case(name, func, kernel, make, ignore=(), **kwargs):
-    return name, func, kernel, make, kwargs, ignore
+class Case(NamedTuple):
+    name: str
+    func: Callable
+    kernel: bool  # whether the compiled kernel is built
+    make: Callable  # make(k) is the sweep Dataset number k
+    kwargs: dict
+    ignore: tuple  # attributes that only a sweep in memory has
+    chunks: dict  # chunks of the dask stack
+    dim: str  # name of the dimension of the stack
+    volume: bool  # whether a volume of sweeps is a valid input
 
 
-# (id, function, whether the compiled kernel is built, make(k), keyword
-# arguments, attributes that only a sweep in memory has)
+def case(
+    name,
+    func,
+    kernel,
+    make,
+    ignore=(),
+    chunks=None,
+    volume=True,
+    dim="time",
+    **kwargs,
+):
+    return Case(name, func, kernel, make, kwargs, ignore, chunks or CHUNKS, dim, volume)
+
+
 CASES = [
     case("echo_mask", echo_mask, qc_mod.HAS_COMPILED_KERNEL, qc_sweep),
     case(
@@ -133,6 +216,76 @@ CASES = [
         method="vulpiani",
         phidp_sign=1,
     ),
+    case("apply_mask", apply_mask, qc_mod.HAS_COMPILED_KERNEL, qc_sweep),
+    case(
+        "azimuthal_shear",
+        azimuthal_shear,
+        shear_mod.HAS_COMPILED_KERNEL,
+        shear_sweep,
+        field="VRADH",
+    ),
+    case(
+        "radial_divergence",
+        radial_divergence,
+        shear_mod.HAS_COMPILED_KERNEL,
+        shear_sweep,
+        field="VRADH",
+    ),
+    case("liquid_water_content", liquid_water_content, False, polar_sweep),
+    case(
+        "snr",
+        snr,
+        noise_mod.HAS_COMPILED_KERNEL,
+        polar_sweep,
+        ("noise_level",),
+    ),
+    case("noise_level", noise_level, noise_mod.HAS_COMPILED_KERNEL, polar_sweep),
+    case(
+        "correct_rhohv_noise",
+        correct_rhohv_noise,
+        noise_mod.HAS_COMPILED_KERNEL,
+        polar_sweep,
+        ("noise_level",),
+    ),
+    case(
+        "correct_zdr_noise",
+        correct_zdr_noise,
+        noise_mod.HAS_COMPILED_KERNEL,
+        polar_sweep,
+        ("noise_level",),
+    ),
+    case(
+        "correct_attenuation",
+        correct_attenuation,
+        attenuation_mod.HAS_COMPILED_KERNEL,
+        polar_sweep,
+    ),
+    case(
+        "zdr_offset",
+        zdr_offset,
+        calibration_mod.HAS_COMPILED_KERNEL,
+        polar_sweep,
+        volume=False,
+    ),
+    case(
+        "z_offset",
+        z_offset,
+        calibration_mod.HAS_COMPILED_KERNEL,
+        polar_sweep,
+        volume=False,
+    ),
+    case(
+        "phidp_offset",
+        phidp_offset,
+        calibration_mod.HAS_COMPILED_KERNEL,
+        polar_sweep,
+        volume=False,
+    ),
+    case("rain_rate_z", rain_rate_z, qpe_mod.HAS_COMPILED_KERNEL, polar_sweep),
+    case("rain_rate_kdp", rain_rate_kdp, qpe_mod.HAS_COMPILED_KERNEL, polar_sweep),
+    case("rain_rate_z_zdr", rain_rate_z_zdr, qpe_mod.HAS_COMPILED_KERNEL, polar_sweep),
+    case("rain_rate_a", rain_rate_a, qpe_mod.HAS_COMPILED_KERNEL, polar_sweep),
+    case("rain_rate", rain_rate, qpe_mod.HAS_COMPILED_KERNEL, polar_sweep),
     case("llsd", llsd, shear_mod.HAS_COMPILED_KERNEL, shear_sweep, field="VRADH"),
     case(
         "dealias",
@@ -170,6 +323,62 @@ CASES = [
         alias_sweep,
         field="VRADH",
     ),
+    case(
+        "vil",
+        vil,
+        vil_mod.HAS_COMPILED_KERNEL,
+        column_grid,
+        chunks=GRID_CHUNKS,
+        volume=False,
+        missing="clear",
+    ),
+    case(
+        "vil-melting",
+        vil,
+        vil_mod.HAS_COMPILED_KERNEL,
+        column_grid,
+        chunks=GRID_CHUNKS,
+        volume=False,
+        melting=4000.0,
+        fill_below=True,
+    ),
+    case(
+        "echo_top",
+        echo_top,
+        vil_mod.HAS_COMPILED_KERNEL,
+        column_grid,
+        chunks=GRID_CHUNKS,
+        volume=False,
+    ),
+    case(
+        "vil_density",
+        vil_density,
+        vil_mod.HAS_COMPILED_KERNEL,
+        column_grid,
+        chunks=GRID_CHUNKS,
+        volume=False,
+    ),
+    case(
+        "qvp",
+        qvp,
+        qvp_mod.HAS_COMPILED_KERNEL,
+        qvp_sweep,
+        chunks={"volume": 1, "azimuth": 17},
+        volume=False,
+        dim="volume",
+        counts=True,
+    ),
+    case(
+        "qvp-phase",
+        qvp,
+        qvp_mod.HAS_COMPILED_KERNEL,
+        qvp_sweep,
+        chunks={"volume": 1, "azimuth": 17},
+        volume=False,
+        dim="volume",
+        data_vars=["DBZH", "ZDR", "PHIDP"],
+        elevation_correction=True,
+    ),
     case("dsd", dsd, dsd_mod.HAS_COMPILED_KERNEL, rain_sweep, band="S"),
     case(
         "dsd-kdp-mask",
@@ -205,28 +414,35 @@ CASES = [
 ]
 
 
-def case_params():
-    for name, func, kernel, make, kwargs, ignore in CASES:
+def case_params(volume=False):
+    for c in CASES:
+        if volume and not c.volume:
+            continue
         for engine in ("numpy", "compiled"):
             skip = pytest.mark.skipif(
-                engine == "compiled" and not kernel,
+                engine == "compiled" and not c.kernel,
                 reason="compiled kernel not built",
             )
             yield pytest.param(
-                func,
-                make,
-                {**kwargs, "engine": engine},
-                ignore,
-                id=f"{name}-{engine}",
-                marks=skip,
+                c, {**c.kwargs, "engine": engine}, id=f"{c.name}-{engine}", marks=skip
             )
 
 
-@pytest.mark.parametrize("func, make, kwargs, ignore", case_params())
-def test_stack_and_dask(func, make, kwargs, ignore):
-    check_stack(func, make, ignore_attrs=ignore, **kwargs)
+@pytest.mark.parametrize("c, kwargs", case_params())
+def test_stack_and_dask(c, kwargs):
+    check_stack(
+        c.func, c.make, chunks=c.chunks, ignore_attrs=c.ignore, dim=c.dim, **kwargs
+    )
 
 
-@pytest.mark.parametrize("func, make, kwargs, ignore", case_params())
-def test_volume_with_dask_sweeps(func, make, kwargs, ignore):
-    check_volume(func, make, **kwargs)
+@pytest.mark.parametrize("c, kwargs", case_params(volume=True))
+def test_volume_with_dask_sweeps(c, kwargs):
+    check_volume(c.func, c.make, **kwargs)
+
+
+def test_every_lazy_function_has_a_case():
+    declared = {k for k, (kind, _) in DASK_SUPPORT.items() if kind == "lazy"}
+    tabled = {
+        f"{c.func.__module__.replace('radarx.', '')}.{c.func.__name__}" for c in CASES
+    }
+    assert declared <= tabled, sorted(declared - tabled)

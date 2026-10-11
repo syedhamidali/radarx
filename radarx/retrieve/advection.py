@@ -62,6 +62,7 @@ import numpy as np
 import xarray as xr
 
 from .._provenance import provenance
+from .._sweepwise import dask_support
 
 try:
     from . import _advection
@@ -468,6 +469,7 @@ def _to_grid(values, centres, ny, nx):
     return np.array([_interp_extrapolate(rows, centres[0], c) for c in along_x.T]).T
 
 
+@dask_support("computes", "it correlates the whole fields of two times.")
 @provenance(
     "FFT cross-correlation storm motion, radarx's own after Rinehart and Garvey (1978)"
 )
@@ -938,6 +940,7 @@ def _set_time(obj, time):
     return obj.assign(time=new)
 
 
+@dask_support("computes", "it moves the whole fields of a grid.")
 @provenance("Semi-Lagrangian advection to a common time, after Gal-Chen (1982)")
 def advect(
     obj,
@@ -1089,6 +1092,7 @@ def advect(
 # ---------------------------------------------------------------------------
 
 
+@dask_support("computes", "it moves the whole fields of two times.")
 @provenance(
     "Advection-corrected time interpolation, radarx's own blend after Gal-Chen (1982)"
 )
