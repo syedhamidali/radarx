@@ -403,6 +403,92 @@ def test_missing_levels_order_and_bad_columns(engine):
     assert np.isnan(out.cape[1:]).all() and np.isnan(out.lcl_height[1:]).all()
 
 
+@pytest.mark.parametrize("engine", ENGINES)
+def test_levels_without_a_dewpoint_or_in_the_wrong_order_are_skipped(engine):
+    z, p, t, td = analytic_sounding(dz=250.0)
+    base = parcel_diagnostics(profile(z, p, t, td), engine=engine)
+    # a level without a dew point and one with a non-positive dew point
+    td_bad = td.copy()
+    td_bad[7] = np.nan
+    td_bad[9] = -1.0
+    skipped = parcel_diagnostics(profile(z, p, t, td_bad), engine=engine)
+    assert float(skipped.cape) == pytest.approx(float(base.cape), rel=0.02)
+    assert float(skipped.lcl_pressure) == pytest.approx(float(base.lcl_pressure))
+    # a repeated level (the pressure does not fall) and a level out of order
+    dup = np.insert(np.arange(z.size), 6, 5)
+    again = parcel_diagnostics(profile(z[dup], p[dup], t[dup], td[dup]), engine=engine)
+    xr.testing.assert_allclose(again.drop_vars("height", errors="ignore"), base)
+    swapped = np.arange(z.size)
+    swapped[[10, 11]] = swapped[[11, 10]]
+    out = parcel_diagnostics(
+        profile(z[swapped], p[swapped], t[swapped], td[swapped]), engine=engine
+    )
+    assert float(out.cape) == pytest.approx(float(base.cape), rel=0.03)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_lcl_above_the_top_of_the_profile(engine):
+    z, p, t, td = analytic_sounding(dz=250.0)
+    keep = z <= 3000.0
+    dry = np.minimum(td, t - 60.0)  # the LCL is far above 3 km
+    out = parcel_diagnostics(
+        profile(z[keep], p[keep], t[keep], dry[keep]), engine=engine
+    )
+    assert float(out.cape) == 0.0
+    for name in ("lcl_pressure", "lcl_height", "lfc_height", "el_height", "cin"):
+        assert np.isnan(float(out[name])), name
+    assert float(out.parcel_pressure) == p[0]
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_a_cap_between_two_buoyant_layers_is_not_counted(engine):
+    z, p, t, td = analytic_sounding(dz=100.0)
+    free = parcel_diagnostics(profile(z, p, t, td), engine=engine)
+    # a warm layer at 6 to 8 km makes the parcel negatively buoyant for a while
+    warm = t + 9.0 * np.exp(-(((z - 7000.0) / 700.0) ** 2))
+    capped = parcel_diagnostics(
+        profile(z, p, warm, np.minimum(td, warm)), engine=engine
+    )
+    truth = reference_parcel_diagnostics(z, p, warm, np.minimum(td, warm))
+    assert float(capped.cape) == pytest.approx(truth["cape"], rel=0.02)
+    assert float(capped.cape) < 0.95 * float(free.cape)
+    assert float(capped.el_height) == pytest.approx(truth["el_z"], abs=150.0)
+
+
+def test_parcel_helpers_of_the_numpy_reference():
+    p = [100000.0, 90000.0, 80000.0]
+    f = [1.0, 2.0, 4.0]
+    # linear in ln p between the levels that bracket the pressure
+    assert ref._interp_lnp(p, f, 95000.0) == pytest.approx(
+        1.0 + np.log(0.95) / np.log(0.9)
+    )
+    mid = np.sqrt(90000.0 * 80000.0)
+    assert ref._interp_lnp(p, f, mid) == pytest.approx(3.0)
+    assert np.isnan(ref._interp_lnp(p, f, 50000.0))  # above the top
+    assert np.isnan(ref._interp_lnp(p, f, 110000.0))  # below the first level
+    # a mixed layer of no depth is the lowest level
+    z, pp, t, td = analytic_sounding(dz=250.0)
+    assert ref._parcel_start(1, 0.0, z, pp, t, td) == (pp[0], t[0], td[0], 0)
+
+
+def test_a_level_at_the_lcl_pressure_is_the_lcl():
+    z, p, t, td = analytic_sounding(dz=250.0)
+    pl = ref._Parcel(p[0], t[0], td[0]).pl
+    k = int(np.searchsorted(-p, -pl))  # the first level above the LCL
+    w = np.log(pl / p[k - 1]) / np.log(p[k] / p[k - 1])
+    insert = [z[k - 1] + w * (z[k] - z[k - 1])] + [
+        a[k - 1] + w * (a[k] - a[k - 1]) for a in (t, td)
+    ]
+    z2, p2, t2, td2 = (
+        np.insert(a, k, v) for a, v in zip((z, p, t, td), (insert[0], pl, *insert[1:]))
+    )
+    base = parcel_diagnostics(profile(z, p, t, td), engine="numpy")
+    out = parcel_diagnostics(profile(z2, p2, t2, td2), engine="numpy")
+    assert float(out.lcl_pressure) == pl
+    assert float(out.lcl_height) == pytest.approx(insert[0], abs=1e-6)
+    assert float(out.cape) == pytest.approx(float(base.cape), rel=0.01)
+
+
 def test_humidity_variants_and_units():
     z, p, t, td = analytic_sounding()
     base = parcel_diagnostics(profile(z, p, t, td))
@@ -431,6 +517,9 @@ def test_humidity_variants_and_units():
     nocoord = profile(z, p, t, td).drop_vars("height")
     with pytest.raises(ValueError, match="height"):
         parcel_diagnostics(nocoord)
+    # the vertical dimension must be a dimension of the fields
+    with pytest.raises(ValueError, match="dimension 'alt' not found"):
+        parcel_diagnostics(profile(z, p, t, td).assign_coords(alt=0.0), dim="alt")
     assert (
         float(parcel_diagnostics(nocoord.assign(zz=("height", z)), height="zz").cape)
         > 0
