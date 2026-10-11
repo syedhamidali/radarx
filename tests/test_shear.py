@@ -220,7 +220,7 @@ def test_errors():
         llsd(ds["VRADH"])
     with pytest.raises(ValueError, match="range must increase"):
         llsd(ds.isel(range=slice(None, None, -1)), engine="numpy")
-    with pytest.raises(ValueError, match="2-D"):
+    with pytest.raises(ValueError, match="dimensions"):
         llsd(ds.isel(range=0, drop=False).expand_dims("time"), engine="numpy")
     with pytest.raises(ValueError, match="one azimuth per ray"):
         bad = xr.Dataset(

@@ -253,7 +253,7 @@ def test_input_checks(monkeypatch):
         estimate_kdp(ds, rhohv="RHOHV_X")
     with pytest.raises(ValueError, match="two range gates"):
         estimate_kdp(ds.isel(range=slice(0, 1)))
-    with pytest.raises(ValueError, match="2-D"):
+    with pytest.raises(ValueError, match="dimensions"):
         estimate_kdp(ds.assign(PHIDP=ds.PHIDP.isel(azimuth=0)))
     monkeypatch.setattr(kdpmod, "HAS_COMPILED_KERNEL", False)
     with pytest.raises(ImportError, match="compiled KDP kernel"):
