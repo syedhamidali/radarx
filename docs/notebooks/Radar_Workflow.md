@@ -52,7 +52,7 @@ The [second part](Radar_Workflow_Advanced) of this notebook shows the rest of
 radarx on small open or synthetic data: the radar equation and unit helpers,
 disdrometers, raindrop trajectories, surface stations and cold pools, lightning,
 tornado detection, single-Doppler winds, the diabatic Lagrangian analysis,
-the machine-learning interface and beam blockage from a digital elevation model. The *Function index* at the end of this page
+the machine-learning interface, beam blockage from a digital elevation model and tropical-cyclone winds from one radar. The *Function index* at the end of this page
 lists every function of radarx with the section where it is used.
 
 All heavy steps run in compiled, multithreaded kernels; the runtimes in the
@@ -2044,6 +2044,11 @@ notebooks or from this index.
 | `llsd` | `radarx.retrieve.shear` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `radial_divergence` | `radarx.retrieve.shear` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `single_doppler_winds` | `radarx.retrieve.single_doppler` | [part 2](Radar_Workflow_Advanced): 8. Wind from a single Doppler radar |
+| `gbvtd` | `radarx.retrieve.tc_winds` | [part 2](Radar_Workflow_Advanced): 13. Tropical-cyclone winds from one radar |
+| `synthetic_vortex` | `radarx.retrieve.tc_winds` | [part 2](Radar_Workflow_Advanced): 13. Tropical-cyclone winds from one radar |
+| `tc_center` | `radarx.retrieve.tc_winds` | [part 2](Radar_Workflow_Advanced): 13. Tropical-cyclone winds from one radar |
+| `tc_decompose` | `radarx.retrieve.tc_winds` | [part 2](Radar_Workflow_Advanced): 13. Tropical-cyclone winds from one radar |
+| `vortex_profile` | `radarx.retrieve.tc_winds` | [part 2](Radar_Workflow_Advanced): 13. Tropical-cyclone winds from one radar |
 | `superobs` | `radarx.retrieve.superobs` | [core](Radar_Workflow): 16. Super-observations for data assimilation |
 | `rotation_couplets` | `radarx.retrieve.tornado` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
 | `tornado_probability` | `radarx.retrieve.tornado` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
@@ -2105,6 +2110,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.echo_top` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.estimate_motion` | [core](Radar_Workflow): 11. Storm motion, common analysis time and time interpolation |
 | `.radarx.evaporation` | [core](Radar_Workflow): 13. Evaporation |
+| `.radarx.gbvtd` | [part 2](Radar_Workflow_Advanced): 13. Tropical-cyclone winds from one radar |
 | `.radarx.grid_lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `.radarx.grid_radars` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `.radarx.hail_kinetic_energy` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
@@ -2155,6 +2161,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.to_odim` | [part 2](Radar_Workflow_Advanced): 12. Export to files |
 | `.radarx.to_uxarray` | [core](Radar_Workflow): 10. Cone gridding, Max-CAPPI, interactive view and UGRID |
 | `.radarx.to_zarr` | [part 2](Radar_Workflow_Advanced): 12. Export to files |
+| `.radarx.tc_center` | [part 2](Radar_Workflow_Advanced): 13. Tropical-cyclone winds from one radar |
 | `.radarx.tornado_probability` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
 | `.radarx.trajectories` | [part 2](Radar_Workflow_Advanced): 9. Diabatic Lagrangian analysis |
 | `.radarx.vad_profile` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
