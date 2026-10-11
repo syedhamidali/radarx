@@ -764,7 +764,7 @@ def test_against_csu_radartools(csapr2):
     ds = csapr2
     out = hid(ds, "sounding_temperature", band="C", mask="met", **CSAPR2_FIELDS)
     ref = csu_fhc.csu_fhc_summer(
-        dz=ds[CSAPR2_FIELDS["dbzh"]].values,
+        dz=ds[CSAPR2_FIELDS["dbz"]].values,
         zdr=ds[CSAPR2_FIELDS["zdr"]].values,
         rho=ds[CSAPR2_FIELDS["rhohv"]].values,
         kdp=ds[CSAPR2_FIELDS["kdp"]].values,
