@@ -35,6 +35,12 @@
 // runs in three further passes with scratch fields (only when Cv > 0).
 //
 // Threads take blocks of grid rows (z, y) from an atomic counter.
+//
+// The analytic dual-Doppler solver (horizontal_wind, integrate_mass and
+// obrien_adjust, at the end of this file) solves the 2 x 2 normal equations of
+// every cell and integrates the anelastic continuity equation of every column.
+// The O'Brien (1970, J. Appl. Meteor. 9, 197-203) adjustment follows the
+// description of the ARPS ADAS routine adjuvw (see the Python docstring).
 
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
@@ -42,7 +48,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -362,6 +370,169 @@ py::tuple cost_gradient(const DArray& state, const DArray& coef, const DArray& t
     return py::make_tuple(out, grad);
 }
 
+// ---------------------------------------------------------------------------
+// Analytic dual-Doppler: horizontal wind from the radial velocities of every
+// cell by weighted least squares, and the vertical velocity from the
+// anelastic continuity equation.
+// ---------------------------------------------------------------------------
+
+// Horizontal wind (u, v) of every cell from  a_k u + b_k v = y_k - c_k w  with the
+// precision weights wo_k (1 / variance of the radial velocity). The normal
+// matrix N = sum_k wo_k [a b]^T [a b] gives the Gauss-Markov covariance N^-1:
+// var(u) = N22 / det, var(v) = N11 / det, cov(u, v) = -N12 / det. Cells with
+// fewer than two observing radars or a singular matrix are NaN. Returns
+// (5, nz, ny, nx): u, v, var(u), var(v), cov(u, v).
+py::array_t<double> horizontal_wind(const DArray& coef, const DArray& target,
+                                    const DArray& weight, const DArray& wfield, double min_det,
+                                    int n_threads) {
+    if (target.ndim() != 4) throw std::invalid_argument("target must be (nradar, nz, ny, nx)");
+    const int64_t nr = target.shape(0), nz = target.shape(1), ny = target.shape(2),
+                  nx = target.shape(3);
+    const int64_t n = nz * ny * nx;
+    check(coef, 3 * nr * n, "coef");
+    check(weight, nr * n, "weight");
+    check(wfield, n, "w");
+    const double* C = coef.data();
+    const double* Y = target.data();
+    const double* WO = weight.data();
+    const double* W = wfield.data();
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    py::array_t<double> out({int64_t(5), nz, ny, nx});
+    double* O = out.mutable_data();
+    {
+        py::gil_scoped_release release;
+        parallel_rows(nz * ny, n_threads, [&](int, int64_t row) {
+            for (int64_t ix = 0; ix < nx; ++ix) {
+                const int64_t i = row * nx + ix;
+                double n11 = 0, n12 = 0, n22 = 0, r1 = 0, r2 = 0;
+                int count = 0;
+                for (int64_t k = 0; k < nr; ++k) {
+                    const double wk = WO[k * n + i];
+                    if (!(wk > 0.0)) continue;
+                    const double a = C[(3 * k) * n + i], b = C[(3 * k + 1) * n + i],
+                                 c = C[(3 * k + 2) * n + i];
+                    const double y = Y[k * n + i] - c * W[i];
+                    n11 += wk * a * a;
+                    n12 += wk * a * b;
+                    n22 += wk * b * b;
+                    r1 += wk * a * y;
+                    r2 += wk * b * y;
+                    ++count;
+                }
+                const double det = n11 * n22 - n12 * n12;
+                if (count < 2 || !(det > min_det * n11 * n22)) {
+                    for (int q = 0; q < 5; ++q) O[q * n + i] = nan;
+                    continue;
+                }
+                O[i] = (n22 * r1 - n12 * r2) / det;
+                O[n + i] = (n11 * r2 - n12 * r1) / det;
+                O[2 * n + i] = n22 / det;
+                O[3 * n + i] = n11 / det;
+                O[4 * n + i] = -n12 / det;
+            }
+        });
+    }
+    return out;
+}
+
+namespace {
+
+// Shape of the O'Brien correction: s(z) = ((z - z0) / (ztop - z0))^p, 0 at the
+// lowest level and 1 at the top (p = 2: the divergence error grows linearly
+// with height, p = 1: it is constant).
+inline double obrien_shape(double z, double z0, double ztop, double p) {
+    const double t = (z - z0) / (ztop - z0);
+    return p == 2.0 ? t * t : (p == 1.0 ? t : std::pow(t, p));
+}
+
+}  // namespace
+
+// Vertical velocity from the anelastic continuity equation by integration of
+// the horizontal mass flux divergence F = d(rho u)/dx + d(rho v)/dy (trapezoid
+// rule): d(rho w)/dz = -F.
+//   mode 0: upward from w = w_bottom at the lowest level
+//   mode 1: downward from w = 0 at the highest level
+//   mode 2: upward, then the O'Brien adjustment so that w = 0 at the top
+// A level with NaN divergence makes the integral NaN beyond it (mode 2: the
+// whole column).
+py::array_t<double> integrate_mass(const DArray& flux_div, const DArray& rho, const DArray& zc,
+                                   const DArray& w_bottom, int mode, double power,
+                                   int n_threads) {
+    if (flux_div.ndim() != 3) throw std::invalid_argument("flux_div must be (nz, ny, nx)");
+    const int64_t nz = flux_div.shape(0), ny = flux_div.shape(1), nx = flux_div.shape(2);
+    if (nz < 2) throw std::invalid_argument("need at least two levels");
+    const int64_t m = ny * nx, n = nz * m;
+    check(rho, n, "rho");
+    check(zc, nz, "z");
+    check(w_bottom, m, "w_bottom");
+    if (mode < 0 || mode > 2) throw std::invalid_argument("mode must be 0, 1 or 2");
+    const double* F = flux_div.data();
+    const double* R = rho.data();
+    const double* Z = zc.data();
+    const double* WB = w_bottom.data();
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    py::array_t<double> out({nz, ny, nx});
+    double* W = out.mutable_data();
+    {
+        py::gil_scoped_release release;
+        parallel_rows(m, n_threads, [&](int, int64_t col) {
+            std::vector<double> M(static_cast<size_t>(nz));
+            if (mode == 1) {
+                M[nz - 1] = 0.0;
+                for (int64_t k = nz - 2; k >= 0; --k)
+                    M[k] = M[k + 1] +
+                           0.5 * (F[k * m + col] + F[(k + 1) * m + col]) * (Z[k + 1] - Z[k]);
+            } else {
+                M[0] = R[col] * WB[col];
+                for (int64_t k = 0; k + 1 < nz; ++k)
+                    M[k + 1] = M[k] -
+                               0.5 * (F[k * m + col] + F[(k + 1) * m + col]) * (Z[k + 1] - Z[k]);
+                if (mode == 2) {
+                    const double top = M[nz - 1];
+                    for (int64_t k = 0; k < nz; ++k)
+                        M[k] = std::isfinite(top)
+                                   ? M[k] - top * obrien_shape(Z[k], Z[0], Z[nz - 1], power)
+                                   : nan;
+                }
+            }
+            for (int64_t k = 0; k < nz; ++k) W[k * m + col] = M[k] / R[k * m + col];
+        });
+    }
+    return out;
+}
+
+// O'Brien adjustment of an existing vertical velocity: the mass flux
+// rho w is reduced by the fraction s(z) of its value at the top, so that
+// w = 0 at the highest level. Columns with a NaN at the top stay unchanged.
+py::array_t<double> obrien_adjust(const DArray& w, const DArray& rho, const DArray& zc,
+                                  double power, int n_threads) {
+    if (w.ndim() != 3) throw std::invalid_argument("w must be (nz, ny, nx)");
+    const int64_t nz = w.shape(0), ny = w.shape(1), nx = w.shape(2);
+    if (nz < 2) throw std::invalid_argument("need at least two levels");
+    const int64_t m = ny * nx, n = nz * m;
+    check(rho, n, "rho");
+    check(zc, nz, "z");
+    const double* Win = w.data();
+    const double* R = rho.data();
+    const double* Z = zc.data();
+    py::array_t<double> out({nz, ny, nx});
+    double* W = out.mutable_data();
+    {
+        py::gil_scoped_release release;
+        parallel_rows(m, n_threads, [&](int, int64_t col) {
+            const double top = R[(nz - 1) * m + col] * Win[(nz - 1) * m + col];
+            for (int64_t k = 0; k < nz; ++k) {
+                const int64_t i = k * m + col;
+                W[i] = std::isfinite(top)
+                           ? (R[i] * Win[i] - top * obrien_shape(Z[k], Z[0], Z[nz - 1], power)) /
+                                 R[i]
+                           : Win[i];
+            }
+        });
+    }
+    return out;
+}
+
 PYBIND11_MODULE(_multidoppler, m) {
     m.doc() = "Compiled multi-Doppler cost function and gradient for radarx.";
     m.def("cost_gradient", &cost_gradient, py::arg("state"), py::arg("coef"),
@@ -370,4 +541,10 @@ PYBIND11_MODULE(_multidoppler, m) {
           py::arg("dz"), py::arg("cm"), py::arg("csx"), py::arg("csy"), py::arg("csz"),
           py::arg("cv"), py::arg("ut"), py::arg("vt"), py::arg("coriolis"), py::arg("h"),
           py::arg("vort_scale"), py::arg("n_threads") = 0);
+    m.def("horizontal_wind", &horizontal_wind, py::arg("coef"), py::arg("target"),
+          py::arg("weight"), py::arg("w"), py::arg("min_det"), py::arg("n_threads") = 0);
+    m.def("integrate_mass", &integrate_mass, py::arg("flux_div"), py::arg("rho"), py::arg("z"),
+          py::arg("w_bottom"), py::arg("mode"), py::arg("power") = 2.0, py::arg("n_threads") = 0);
+    m.def("obrien_adjust", &obrien_adjust, py::arg("w"), py::arg("rho"), py::arg("z"),
+          py::arg("power") = 2.0, py::arg("n_threads") = 0);
 }

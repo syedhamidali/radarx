@@ -162,6 +162,7 @@ NOT_COVERED = {
     "multi.grid_radars": "needs several radar volumes",
     "multi.merge_radars": "needs a multi-radar grid",
     "multi.network_bias": "needs a multi-radar grid",
+    "multidoppler.dual_doppler_analytic": "needs gridded volumes of several radars",
     "multidoppler.multi_doppler": "needs gridded volumes of several radars",
     "multidoppler.multi_doppler_input": "needs several radar volumes",
     "multidoppler.radar_geometry": "needs a grid with radar positions",

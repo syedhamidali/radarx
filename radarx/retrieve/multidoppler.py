@@ -30,7 +30,16 @@ the smoothness operator in a cosine basis; with it, by L-BFGS-B. Both run
 first on coarser grids. The vertical velocity at the lowest grid level (and
 optionally at the top of the grid or above the echo top) is held at zero by
 leaving it out of the control vector; see the Notes of :func:`multi_doppler`
-for what this assumes about the height of the lowest level.
+for what this assumes about the height of the lowest level. Options of
+:func:`multi_doppler` weight the observations by their error and by the
+crossing angle of the beams, return the standard deviation of the retrieval
+error of ``u``, ``v`` and ``w`` from the covariance of the cost function, and
+adjust ``w`` so that it is zero at the top (O'Brien 1970).
+:func:`dual_doppler_analytic` is the classical non-variational solution: the
+horizontal wind of every cell from the 2 x 2 (or least-squares) system of the
+radial velocities, and ``w`` from the upward, downward or O'Brien-adjusted
+integration of the continuity equation, for quick checks and for validating
+the variational solution.
 
 Provenance. The overall formulation, a weak-constraint variational analysis of
 the radial velocities of two or more radars with anelastic mass continuity and
@@ -58,7 +67,13 @@ every radar at every grid cell.
 
 from __future__ import annotations
 
-__all__ = ["fall_speed", "multi_doppler", "multi_doppler_input", "radar_geometry"]
+__all__ = [
+    "dual_doppler_analytic",
+    "fall_speed",
+    "multi_doppler",
+    "multi_doppler_input",
+    "radar_geometry",
+]
 
 __doc__ = __doc__.format("\n   ".join(__all__))
 
@@ -97,6 +112,21 @@ W_BOTTOM_WARN_HEIGHT = 200.0
 # Share of the observation weight in the preconditioner (radarx choice that
 # only affects the speed of convergence, not the minimiser).
 _PRECONDITIONER_LAMBDA = 0.05
+# Smallest factor sin^2(crossing angle) of the crossing-angle weight, so that a
+# beam pair along the same line does not drop an observation (radarx choice).
+_CROSSING_FLOOR = 1e-3
+# Smallest det(N) / (N11 N22) of the 2 x 2 normal matrix of the analytic solver
+# for which the horizontal wind is returned (radarx choice; it corresponds to a
+# crossing angle of about 0.006 degrees for two radars).
+_MIN_DET = 1e-8
+# Relative preconditioned-gradient tolerance of the conjugate-gradient draws of
+# the error estimate (radarx choice: 3e-3 changes the standard deviations by
+# 1 to 2 % against 3e-4 at half the cost).
+_ERROR_TOLERANCE = 1e-3
+# Exponent p of the O'Brien correction ((z - z0) / (z_top - z0))**p of the mass
+# flux: the error of the divergence grows linearly with height (p = 2) or is
+# constant (p = 1).
+OBRIEN_POWER = {"linear": 2.0, "constant": 1.0}
 
 
 def _advection_compiled(engine):
@@ -273,6 +303,131 @@ def _cost_gradient(problem, state, use_compiled, n_threads):
         terms, grad = _multidoppler.cost_gradient(*args)
         return np.asarray(terms), np.asarray(grad)
     return _cost_gradient_numpy(*args)
+
+
+# ---------------------------------------------------------------------------
+# analytic dual-Doppler: horizontal wind, vertical integration, O'Brien
+# ---------------------------------------------------------------------------
+
+
+def _obrien_power(kind):
+    if kind not in OBRIEN_POWER:
+        raise ValueError(f"obrien_error must be 'linear' or 'constant', not {kind!r}")
+    return OBRIEN_POWER[kind]
+
+
+def _horizontal_wind(problem, w, use_compiled, n_threads):
+    """
+    ``(u, v, var_u, var_v, cov_uv)`` of the 2 x 2 weighted least squares.
+
+    Solves ``a u + b v = target - c w`` of every radar in every cell with the
+    precision weights of ``problem`` (NumPy reference of
+    ``_multidoppler.horizontal_wind``).
+    """
+    p = problem
+    if use_compiled:
+        return np.asarray(
+            _multidoppler.horizontal_wind(
+                p["coef"],
+                p["target"],
+                p["weight"],
+                np.ascontiguousarray(w),
+                _MIN_DET,
+                int(n_threads or 0),
+            )
+        )
+    nr = p["target"].shape[0]
+    coef = p["coef"].reshape((nr, 3) + p["shape"])
+    wt = p["weight"]
+    a, b, c = coef[:, 0], coef[:, 1], coef[:, 2]
+    y = p["target"] - c * w[None]
+    n11 = np.sum(wt * a * a, axis=0)
+    n12 = np.sum(wt * a * b, axis=0)
+    n22 = np.sum(wt * b * b, axis=0)
+    r1 = np.sum(wt * a * y, axis=0)
+    r2 = np.sum(wt * b * y, axis=0)
+    det = n11 * n22 - n12 * n12
+    ok = ((wt > 0).sum(axis=0) >= 2) & (det > _MIN_DET * n11 * n22)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        out = np.stack(
+            [
+                (n22 * r1 - n12 * r2) / det,
+                (n11 * r2 - n12 * r1) / det,
+                n22 / det,
+                n11 / det,
+                -n12 / det,
+            ]
+        )
+    return np.where(ok[None], out, np.nan)
+
+
+def _integrate_mass(flux_div, rho, z, w_bottom, mode, power, use_compiled, n_threads):
+    """
+    Vertical velocity from ``d(rho w)/dz = -F`` by the trapezoid rule.
+
+    ``mode`` 0: upward from ``w_bottom`` at ``z[0]``; 1: downward from
+    ``w = 0`` at ``z[-1]``; 2: upward, then the O'Brien adjustment of power
+    ``power``. NaN divergence gives NaN beyond it (NumPy reference of
+    ``_multidoppler.integrate_mass``).
+    """
+    if use_compiled:
+        return np.asarray(
+            _multidoppler.integrate_mass(
+                np.ascontiguousarray(flux_div),
+                np.ascontiguousarray(rho),
+                np.ascontiguousarray(z, dtype=np.float64),
+                np.ascontiguousarray(w_bottom),
+                int(mode),
+                float(power),
+                int(n_threads or 0),
+            )
+        )
+    z = np.asarray(z, dtype=np.float64)
+    trap = 0.5 * (flux_div[:-1] + flux_div[1:]) * np.diff(z)[:, None, None]
+    mass = np.empty_like(flux_div)
+    if mode == 1:
+        mass[-1] = 0.0
+        mass[:-1] = np.cumsum(trap[::-1], axis=0)[::-1]
+    else:
+        mass[0] = rho[0] * w_bottom
+        mass[1:] = mass[0][None] - np.cumsum(trap, axis=0)
+        if mode == 2:
+            mass = _obrien_mass(mass, z, power, nan_columns=True)
+    return mass / rho
+
+
+def _obrien_mass(mass, z, power, nan_columns):
+    """Remove the fraction ``s(z)`` of the top mass flux (O'Brien adjustment)."""
+    shape = ((z - z[0]) / (z[-1] - z[0])) ** power
+    top = mass[-1]
+    adjusted = mass - top[None] * shape[:, None, None]
+    keep = np.nan if nan_columns else mass
+    return np.where(np.isfinite(top)[None], adjusted, keep)
+
+
+def _obrien_adjust(w, rho, z, kind, use_compiled, n_threads):
+    """
+    Adjust ``w`` so that it is zero at the highest level (O'Brien 1970).
+
+    The mass flux ``rho w`` is reduced by the fraction
+    ``((z - z[0]) / (z[-1] - z[0]))**p`` of its value at the top, ``p = 2``
+    for ``kind="linear"`` and 1 for ``"constant"`` (see
+    :func:`dual_doppler_analytic`). Columns with NaN at the top are not
+    changed. NumPy reference of ``_multidoppler.obrien_adjust``.
+    """
+    power = _obrien_power(kind)
+    if use_compiled:
+        return np.asarray(
+            _multidoppler.obrien_adjust(
+                np.ascontiguousarray(w),
+                np.ascontiguousarray(rho),
+                np.ascontiguousarray(z, dtype=np.float64),
+                power,
+                int(n_threads or 0),
+            )
+        )
+    z = np.asarray(z, dtype=np.float64)
+    return _obrien_mass(rho * w, z, power, nan_columns=False) / rho
 
 
 # ---------------------------------------------------------------------------
@@ -734,7 +889,9 @@ def _w_free(ds, w_boundary, valid_any):
     level above the highest level with an echo (or valid velocity) in each
     column. These conditions are radarx's implementation of ``w = 0``
     boundary conditions of the cited analyses; the one-level margin of
-    ``"echo_top"`` is a radarx choice.
+    ``"echo_top"`` is a radarx choice. ``"obrien"`` removes no cell from the
+    control vector: it adjusts the solution afterwards (see
+    :func:`multi_doppler`).
     """
     nz, ny, nx = ds.sizes["z"], ds.sizes["y"], ds.sizes["x"]
     free = np.ones((nz, ny, nx), dtype=bool)
@@ -742,9 +899,10 @@ def _w_free(ds, w_boundary, valid_any):
         w_boundary = (w_boundary,)
     w_boundary = tuple(w_boundary or ())
     for item in w_boundary:
-        if item not in ("bottom", "top", "echo_top"):
+        if item not in ("bottom", "top", "echo_top", "obrien"):
             raise ValueError(
-                f"w_boundary items must be bottom, top or echo_top, not {item!r}"
+                "w_boundary items must be bottom, top, echo_top or obrien, "
+                f"not {item!r}"
             )
     if "bottom" in w_boundary:
         free[0] = False
@@ -893,6 +1051,39 @@ def _shift_observations(
     return ds, vr_out, coef_out
 
 
+def _observation_precision(obs_error, nr, shape3):
+    """
+    ``1 / obs_error**2`` on ``(radar, z, y, x)``, or None without ``obs_error``.
+
+    ``obs_error`` is a number, one number per radar, or an array (or
+    DataArray) that broadcasts to ``(radar, z, y, x)``. A NaN error removes
+    the observation (precision 0).
+    """
+    if obs_error is None:
+        return None
+    shape4 = (nr,) + tuple(shape3)
+    if isinstance(obs_error, xr.DataArray):
+        dims4 = ("radar", "z", "y", "x")
+        missing = [d for d in dims4 if d not in obs_error.dims]
+        arr = obs_error.expand_dims(missing).transpose(*dims4).values
+    else:
+        arr = np.asarray(obs_error, dtype=np.float64)
+        if arr.ndim == 1 and arr.size == nr:
+            arr = arr.reshape(nr, 1, 1, 1)
+    try:
+        arr = np.broadcast_to(np.asarray(arr, dtype=np.float64), shape4)
+    except ValueError:
+        raise ValueError(
+            "obs_error must be a number, one number per radar, or an array "
+            "that broadcasts to (radar, z, y, x)"
+        ) from None
+    finite = np.isfinite(arr)
+    if (arr[finite] <= 0).any():
+        raise ValueError("obs_error must be positive")
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.where(finite, 1.0 / arr**2, 0.0)
+
+
 def _prepare(
     ds,
     background,
@@ -910,6 +1101,8 @@ def _prepare(
     analysis_time=None,
     use_compiled=False,
     n_threads=None,
+    obs_error=None,
+    crossing_angle_weight=False,
 ):
     """NumPy arrays of the variational problem on the grid of ``ds``."""
     nr = ds.sizes["radar"]
@@ -979,7 +1172,20 @@ def _prepare(
             )
     target = vr + coef[:, 2] * vt  # a u + b v + c w = vr + c Vt
     valid = np.isfinite(vr) & np.isfinite(coef).all(axis=1)
+    precision = _observation_precision(obs_error, nr, shape3)
+    if precision is not None:
+        valid &= precision > 0
     weight = np.where(valid, weights["observation"], 0.0)
+    if precision is not None:
+        weight = weight * precision
+    if crossing_angle_weight and nr >= 2:
+        beta = _crossing_angle(ds, valid)
+        factor = np.where(
+            np.isfinite(beta),
+            np.maximum(np.sin(np.radians(beta)) ** 2, _CROSSING_FLOOR),
+            1.0,
+        )
+        weight = weight * factor[None]
     target = np.where(valid, target, 0.0)
     coef = np.where(valid[:, None], coef, 0.0)
 
@@ -1035,6 +1241,10 @@ def _prepare(
         lat = float(np.mean(ds["lat"].values))
     coriolis = 2.0 * OMEGA * np.sin(np.radians(lat)) if lat is not None else 0.0
     ut, vt_storm = storm_motion
+    co = float(weights["observation"])
+    if obs_error is not None or (crossing_angle_weight and nr >= 2):
+        # the preconditioner takes the typical weight of an observation
+        co = float(weight[valid].mean()) if valid.any() else co
     problem = dict(
         coef=np.ascontiguousarray(coef.reshape((nr * 3,) + shape3)),
         target=np.ascontiguousarray(target),
@@ -1046,7 +1256,7 @@ def _prepare(
         dx=dx,
         dy=dy,
         dz=dz,
-        co=float(weights["observation"]),
+        co=co,
         cb=float(weights["background"]),
         cm=float(weights["mass_continuity"]),
         csx=float(weights["smoothness"]),
@@ -1314,6 +1524,85 @@ def _solve_cg(
     return x, res
 
 
+def _perturbation_rhs(problem, rng):
+    """
+    One draw of ``2 B^T xi`` for the Gauss-Markov covariance of the cost.
+
+    The cost is a sum of squares, ``J = sum_j |B_j x - y_j|^2`` with the weights
+    inside ``B_j``, so its Hessian is ``H = 2 B^T B``. For ``xi`` with
+    independent standard normal elements ``b = 2 B^T xi`` has the covariance
+    ``2 H``; ``x = H^-1 b`` then has the covariance ``2 H^-1 = (B^T B)^-1``,
+    the covariance of the minimiser when ``J`` is read as a chi-square
+    (``-2 ln p``) of the observations and of the other terms.
+    """
+    p = problem
+    nr = p["target"].shape[0]
+    shape = p["shape"]
+    coef = p["coef"].reshape((nr, 3) + shape)
+    b = np.zeros((3,) + shape)
+    t = 2.0 * np.sqrt(p["weight"]) * rng.standard_normal((nr,) + shape)
+    for q in range(3):
+        b[q] += np.sum(t * coef[:, q], axis=0)
+    b += 2.0 * np.sqrt(p["bg_weight"]) * rng.standard_normal((3,) + shape)
+    for q in range(3):
+        for axis, c in ((2, p["csx"]), (1, p["csy"]), (0, p["csz"])):
+            b[q] += 2.0 * np.sqrt(c) * _d2T(rng.standard_normal(shape), axis)
+    rho = p["rho"]
+    a = 2.0 * np.sqrt(p["cm"]) * p["h"] * rng.standard_normal(shape) / rho
+    b[0] += rho * _d1T(a, 2, p["dx"])
+    b[1] += rho * _d1T(a, 1, p["dy"])
+    b[2] += rho * _d1T(a, 0, p["dz"])
+    return b
+
+
+def _posterior_error(
+    problem, use_compiled, n_threads, n_samples, seed, max_iterations, tolerance
+):
+    """
+    Standard deviation of ``(u, v, w)`` from the covariance ``(H / 2)^-1``.
+
+    ``H`` is the Hessian of the (quadratic) cost, which does not depend on the
+    solution. The diagonal of its inverse is estimated from ``n_samples``
+    draws of ``x = H^-1 b`` (:func:`_perturbation_rhs`) by preconditioned
+    conjugate gradients, ``var = mean(x**2)``; its relative uncertainty is
+    ``1 / sqrt(2 n_samples)`` (12 % for 32 draws). The cells where ``w`` is
+    held fixed have no error.
+    """
+    free = problem["free"]
+    mask = np.ones((3,) + free.shape)
+    mask[2][~free] = 0.0
+    homogeneous = dict(
+        problem,
+        target=np.zeros_like(problem["target"]),
+        bg=np.zeros_like(problem["bg"]),
+    )
+    precondition = _spectral_preconditioner(problem)
+    rng = np.random.default_rng(seed)
+    total = np.zeros((3,) + free.shape)
+    for _ in range(int(n_samples)):
+        b = _perturbation_rhs(problem, rng) * mask
+        x = np.zeros_like(b)
+        r = b.copy()
+        z = precondition(r) * mask
+        rz = rz0 = float(np.vdot(r, z))
+        p = z.copy()
+        for _it in range(int(max_iterations)):
+            if rz <= tolerance**2 * rz0:
+                break
+            _, ap = _cost_gradient(homogeneous, p, use_compiled, n_threads)
+            ap *= mask
+            alpha = rz / float(np.vdot(p, ap))
+            x += alpha * p
+            r -= alpha * ap
+            z = precondition(r) * mask
+            rz_new = float(np.vdot(r, z))
+            p *= rz_new / rz
+            p += z
+            rz = rz_new
+        total += x * x
+    return np.sqrt(total / int(n_samples))
+
+
 # Default dimensionless weights of the cost terms. These are radarx choices
 # (tuned on synthetic and real cases), not values from Gao et al. (1999),
 # Shapiro et al. (2009) or Potvin et al. (2012), whose terms are scaled
@@ -1354,6 +1643,12 @@ def multi_doppler(
     solver="auto",
     engine="auto",
     n_threads=None,
+    obs_error=None,
+    crossing_angle_weight=False,
+    obrien_error="linear",
+    error=False,
+    error_samples=32,
+    error_seed=0,
 ):
     """
     Retrieve the three-dimensional wind from two or more Doppler radars.
@@ -1453,8 +1748,10 @@ def multi_doppler(
         from the rain to the snow relation (:func:`fall_speed`). Default 500.
     w_boundary : str or sequence of str, optional
         Where ``w = 0``: any of ``"bottom"`` (lowest level, default),
-        ``"top"`` (highest level) and ``"echo_top"`` (from one level above
-        the highest echo in each column). ``None`` for no boundary condition.
+        ``"top"`` (highest level), ``"echo_top"`` (from one level above
+        the highest echo in each column) and ``"obrien"`` (the O'Brien
+        adjustment of the solution so that ``w = 0`` at the highest level,
+        see ``obrien_error`` and the Notes). ``None`` for no boundary condition.
         ``"bottom"`` sets ``w`` to ``w_bottom`` at the lowest grid level
         ``z[0]`` whatever its height; a ``RuntimeWarning`` is issued when
         ``z[0]`` is more than ``W_BOTTOM_WARN_HEIGHT`` (200 m) above the
@@ -1503,6 +1800,42 @@ def multi_doppler(
         Cost function implementation. ``"auto"`` prefers the compiled kernel.
     n_threads : int, optional
         Threads for the compiled kernel. Default: all cores.
+    obs_error : float, sequence of float, xarray.DataArray or array, optional
+        Standard deviation (m s-1) of the error of the radial velocity: one
+        number, one number per radar, or an array or DataArray that
+        broadcasts to ``(radar, z, y, x)`` (for example from the signal to
+        noise ratio or the reflectivity of the gate; radarx has no formula for
+        it, see the Notes). The weight of an observation in :math:`J_o` is
+        multiplied by :math:`1 / \\sigma^2` (m-2 s2), so a radar with twice the
+        error counts a quarter as much. A NaN error removes the observation.
+        Default None: every observation has the weight ``weights['observation']``
+        alone, as if :math:`\\sigma = 1` m s-1 (the earlier behaviour).
+    crossing_angle_weight : bool, optional
+        Multiply the weight of every observation by :math:`\\sin^2\\beta`,
+        where :math:`\\beta` is ``beam_crossing_angle`` (at least
+        ``1e-3``; cells seen by one radar keep the factor 1). The error of the
+        horizontal wind of two radars grows as :math:`1/\\sin\\beta` (Notes),
+        and this factor lowers the trust in observations where the geometry
+        makes any error in them, noise or not, count most. The normal equations
+        of :math:`J_o` already contain the geometry, so this is an extra
+        down-weighting beyond the noise model, a radarx choice that is not
+        from a paper. Default False.
+    obrien_error : {"linear", "constant"}, optional
+        Shape of the O'Brien adjustment for ``w_boundary="obrien"``: the
+        error of the divergence grows linearly with height (``"linear"``,
+        default; the mass flux correction is quadratic in height) or is
+        constant (``"constant"``; linear correction).
+    error : bool, optional
+        Return ``u_error``, ``v_error`` and ``w_error``, the standard
+        deviation of the retrieval error from the covariance of the cost
+        function (see the Notes). Needs the quadratic cost
+        (``weights['vorticity'] = 0``). Costs about ``error_samples`` times the
+        conjugate-gradient solution on the finest grid. Default False.
+    error_samples : int, optional
+        Number of random draws of the error estimate; the relative uncertainty
+        of the standard deviation is ``1 / sqrt(2 * error_samples)``. Default 32.
+    error_seed : int, optional
+        Seed of the random draws. Default 0.
 
     Returns
     -------
@@ -1510,7 +1843,8 @@ def multi_doppler(
         On ``(z, y, x)``: ``u``, ``v`` (along the grid axes), ``w``,
         ``fall_speed``, ``mass_residual`` (anelastic mass divergence, s-1),
         ``n_radars`` (radars observing each cell) and, with two or more
-        radars, ``beam_crossing_angle``; ``vr_residual`` (model minus
+        radars, ``beam_crossing_angle``; with ``error=True`` also ``u_error``,
+        ``v_error`` and ``w_error`` (m s-1); ``vr_residual`` (model minus
         observed radial velocity) on ``(radar, z, y, x)``; ``cost`` on
         ``term`` (final value of every term) and ``cost_history`` on
         ``(iteration, term)``. ``attrs`` record the weights, iterations,
@@ -1583,7 +1917,59 @@ def multi_doppler(
     the condition belongs at the ground is the standard one for
     dual-Doppler analyses; it is not checked against the text of Gao et
     al. (1999) or Potvin et al. (2012). There is no terrain following
-    option.
+    option: a lower boundary that follows a digital elevation model needs the
+    cost function in terrain-following coordinates (the impermeability
+    condition at the surface is :math:`w = u\\, \\partial h/\\partial x + v\\,
+    \\partial h/\\partial y`), which radarx does not implement; pass the
+    ``w`` at ``z[0]`` as ``w_bottom`` instead.
+
+    Observation weights. With ``obs_error`` the weight of the observation of
+    radar :math:`k` in :math:`J_o` is :math:`C_o / \\sigma_k^2`; radarx has no
+    model of :math:`\\sigma_k` from the signal to noise ratio or the
+    reflectivity, since the formula for the variance of the pulse-pair
+    velocity estimate (Zrnic 1977; Doviak and Zrnic 1993) could not be read
+    here; give the error from the radar's own noise model. The error of the
+    horizontal wind from two radars depends on the crossing angle of the beams
+    (derived in :func:`dual_doppler_analytic`): the minimiser of :math:`J_o`
+    already weights the observations through this geometry, and
+    ``crossing_angle_weight`` is an optional extra.
+
+    Error estimate. With all weights read as inverse variances, so that
+    :math:`J` is a chi-square (:math:`-2 \\ln p` of independent Gaussian
+    errors), the covariance of the minimiser is the inverse of one half of the
+    Hessian of :math:`J` (the Gauss-Markov covariance), which does not depend
+    on the solution because :math:`J` is quadratic. radarx draws
+    ``error_samples`` perturbations ``b = 2 B^T xi`` of all terms (observations,
+    mass continuity, smoothness, background; the cost is :math:`\\sum_j |B_j x -
+    y_j|^2`), solves :math:`H x = b` by preconditioned conjugate gradients and
+    takes the mean of :math:`x^2` as the variance, the randomised
+    solution of a linear-Gaussian posterior (not taken from a paper). It is
+    the standard deviation of the error if the radial velocity errors have
+    the standard deviation ``obs_error`` and the weak constraints (mass
+    continuity, smoothness, background) are as accurate as their weights
+    say. The weights of those terms are radarx choices, not error
+    statistics, so ``u_error``, ``v_error`` and ``w_error`` describe the
+    analysis system with these weights; they do not include errors of the
+    fall speed, the gridding, the advection, or a wrong lower boundary
+    condition. On the synthetic flow of the tests (Beltrami flow, two radars,
+    0.5 m s-1 noise) they are 0.9 to 1.5 times the root-mean-square error of
+    the retrieval where the beams cross at more than 30 degrees; see the
+    tests and the notebook. The Hessian of the vorticity term is not
+    constant, so ``error=True`` needs ``weights['vorticity'] = 0``.
+
+    O'Brien adjustment. ``w_boundary="obrien"`` (usually with ``"bottom"``)
+    applies the adjustment of O'Brien (1970) [9]_ to the retrieved ``w``
+    after the minimisation, as described in :func:`dual_doppler_analytic`:
+    the mass flux :math:`\\rho w` is reduced by the fraction
+    :math:`((z - z_0)/(z_{top} - z_0))^2` of its value at the highest grid
+    level (``obrien_error="constant"``: the first power), so that ``w = 0``
+    there. The result is no longer the minimiser of :math:`J` (the cost terms
+    of the output are those of the adjusted state), and the one-dimensional
+    adjustment does not change ``u`` and ``v``. Use it when the true ``w`` is
+    zero at the top of the grid and the retrieved ``w`` is not (``"top"``
+    fixes ``w = 0`` inside the minimisation instead). The paper was not
+    read; see :func:`dual_doppler_analytic` for what the implementation
+    follows.
 
     References
     ----------
@@ -1615,6 +2001,9 @@ def multi_doppler(
        L-BFGS-B: Fortran subroutines for large-scale bound-constrained
        optimization. *ACM Trans. Math. Softw.*, **23**, 550-560,
        https://doi.org/10.1145/279232.279236
+    .. [9] O'Brien, J. J., 1970: Alternative solutions to the classical
+       vertical velocity problem. *J. Appl. Meteor.*, **9**, 197-203,
+       https://doi.org/10.1175/1520-0450(1970)009<0197:ASTTCV>2.0.CO;2
 
     Examples
     --------
@@ -1625,6 +2014,9 @@ def multi_doppler(
     use_compiled = _use_compiled(engine)
     if solver not in ("auto", "cg", "lbfgsb"):
         raise ValueError(f"solver must be 'auto', 'cg' or 'lbfgsb', not {solver!r}")
+    _obrien_power(obrien_error)
+    if error and int(error_samples) < 2:
+        raise ValueError("error_samples must be at least 2")
     w_ = dict(DEFAULT_WEIGHTS)
     if weights:
         unknown = set(weights) - set(w_)
@@ -1637,6 +2029,10 @@ def multi_doppler(
         solver = "lbfgsb" if w_["vorticity"] != 0.0 else "cg"
     if solver == "cg" and w_["vorticity"] != 0.0:
         raise ValueError("the vorticity term is not quadratic: use solver='lbfgsb'")
+    if error and w_["vorticity"] != 0.0:
+        raise ValueError(
+            "error=True needs the quadratic cost: the vorticity term is not quadratic"
+        )
     solve = _solve_cg if solver == "cg" else _solve
     if tolerance is None:
         tolerance = 3e-4 if solver == "cg" else 1e-7
@@ -1666,6 +2062,8 @@ def multi_doppler(
         analysis_time=analysis_time,
         use_compiled=_advection_compiled(engine),
         n_threads=n_threads,
+        obs_error=obs_error,
+        crossing_angle_weight=crossing_angle_weight,
     )
     state0 = problem["first_guess"]
     if first_guess is not None:
@@ -1697,9 +2095,394 @@ def multi_doppler(
         )
         level_of += [level] * (len(history) - n0)
         results.append(res)
+    if "obrien" in _as_tuple(w_boundary):
+        state[2] = _obrien_adjust(
+            state[2],
+            problem["rho"],
+            ds["z"].values,
+            obrien_error,
+            use_compiled,
+            n_threads,
+        )
+    stderr = None
+    if error:
+        stderr = _posterior_error(
+            problem,
+            use_compiled,
+            n_threads,
+            error_samples,
+            error_seed,
+            max_iterations,
+            _ERROR_TOLERANCE,
+        )
     elapsed = _time.perf_counter() - t_start
     final, _ = _cost_gradient(problem, state, use_compiled, n_threads)
-    return _output(ds, problem, state, final, history, level_of, results, w_, elapsed)
+    out = _output(ds, problem, state, final, history, level_of, results, w_, elapsed)
+    if stderr is not None:
+        out = _add_error(out, stderr, int(error_samples))
+    if "obrien" in _as_tuple(w_boundary):
+        out.attrs["obrien_error"] = obrien_error
+    return out
+
+
+def _add_error(out, stderr, n_samples):
+    """Add the standard deviation of the retrieval error to the result."""
+    dims = ("z", "y", "x")
+    for q, name in enumerate("uvw"):
+        out[f"{name}_error"] = (
+            dims,
+            stderr[q].astype(np.float32),
+            {
+                "long_name": f"standard deviation of the retrieval error of {name}",
+                "units": "m s-1",
+            },
+        )
+    out.attrs["error_method"] = (
+        "Gauss-Markov covariance of the cost function, diagonal from "
+        f"{n_samples} conjugate-gradient draws"
+    )
+    return out
+
+
+_BOUNDARY_MODES = {"upward": 0, "downward": 1, "obrien": 2}
+
+
+@provenance(
+    "Analytic dual-Doppler winds: weighted least squares and continuity integration"
+)
+def dual_doppler_analytic(
+    grids,
+    background=None,
+    *,
+    velocity="VRADH",
+    reflectivity="DBZH",
+    obs_error=None,
+    min_crossing_angle=30.0,
+    fall_speed_correction=True,
+    freezing_level="auto",
+    melting_depth=500.0,
+    boundary="upward",
+    w_bottom=0.0,
+    obrien_error="linear",
+    iterations=3,
+    engine="auto",
+    n_threads=None,
+):
+    """
+    Dual-Doppler winds by the classical analytic solution, for quick checks.
+
+    At every grid cell the radial velocity of radar :math:`k` is
+
+    .. math::
+
+       v_{r,k} = u\\, a_k + v\\, b_k + (w - V_t)\\, c_k, \\quad
+       a_k = \\cos\\phi_k \\sin\\alpha_k, \\;
+       b_k = \\cos\\phi_k \\cos\\alpha_k, \\;
+       c_k = \\sin\\phi_k ,
+
+    with the beam azimuth :math:`\\alpha_k` and elevation :math:`\\phi_k`
+    (:func:`radar_geometry`) and the fall speed :math:`V_t`
+    (:func:`fall_speed`). With :math:`w` known, the two unknowns ``u`` and
+    ``v`` follow from the weighted least-squares solution of
+    :math:`N (u, v)^T = r`,
+
+    .. math::
+
+       N = \\sum_k \\sigma_k^{-2}
+           \\begin{pmatrix} a_k^2 & a_k b_k \\\\ a_k b_k & b_k^2 \\end{pmatrix},
+       \\qquad
+       r = \\sum_k \\sigma_k^{-2} (a_k, b_k)^T (v_{r,k} + c_k V_t - c_k w) ,
+
+    which for two radars is the 2 x 2 system of the classical dual-Doppler
+    analysis and for more radars the least-squares solution. Then
+    ``w`` follows from the anelastic continuity equation,
+    :math:`\\partial(\\rho w)/\\partial z = -\\partial(\\rho u)/\\partial x
+    - \\partial(\\rho v)/\\partial y`, integrated with the trapezoid rule
+    from the lower boundary (``boundary="upward"``), from the top
+    (``"downward"``) or upward with the O'Brien adjustment so that
+    :math:`w = 0` at the top (``"obrien"``). The two steps are repeated
+    ``iterations`` times, starting with :math:`w = 0` in the first one. The
+    horizontal wind uses finite differences as in :func:`multi_doppler`
+    (centred, one-sided at the edges).
+
+    The solution is the textbook counterpart of the variational
+    :func:`multi_doppler`: it follows the data exactly where two beams cross
+    well, has no smoothness or mass constraint on ``u`` and ``v``, no
+    interpolation across gaps, and gives NaN where it cannot be computed.
+    Use it to check a variational retrieval and to see where the geometry
+    allows a dual-Doppler analysis at all.
+
+    Parameters
+    ----------
+    grids : xarray.Dataset or sequence of xarray.Dataset
+        As for :func:`multi_doppler`.
+    background : xarray.Dataset, optional
+        Only the ``air_density`` and the freezing level (``freezing_level``
+        or ``temperature``) are used, as in :func:`multi_doppler`.
+    velocity, reflectivity : str, optional
+        Field names. Default ``"VRADH"`` and ``"DBZH"``.
+    obs_error : float, sequence of float, xarray.DataArray or array, optional
+        Standard deviation (m s-1) of the radial velocity error, as for
+        :func:`multi_doppler`. Without it every observation has the weight 1
+        and the errors returned are in units of the (unknown, equal) radial
+        velocity error.
+    min_crossing_angle : float, optional
+        Cells where the largest horizontal angle between two beams is smaller
+        than this (degrees) are not solved. Default 30, the lower limit that
+        is commonly used for dual-Doppler analyses (a radarx choice). Cells
+        seen by fewer than two radars are never solved.
+    fall_speed_correction : bool, optional
+        Correct for the precipitation fall speed. Default True.
+    freezing_level, melting_depth : optional
+        As for :func:`multi_doppler`.
+    boundary : {"upward", "downward", "obrien"}, optional
+        Integration of the continuity equation: upward from ``w_bottom`` at
+        ``z[0]``, downward from ``w = 0`` at ``z[-1]``, or upward with the
+        O'Brien adjustment (see the Notes). Default ``"upward"``.
+    w_bottom : float or xarray.DataArray, optional
+        ``w`` (m s-1, or on ``(y, x)``) at ``z[0]`` for ``"upward"`` and
+        ``"obrien"``. Default 0.
+    obrien_error : {"linear", "constant"}, optional
+        Shape of the adjustment for ``boundary="obrien"``, as in
+        :func:`multi_doppler`.
+    iterations : int, optional
+        Number of horizontal-wind and integration passes. Default 3.
+    engine : {"auto", "compiled", "numpy"}, optional
+        Implementation of the cell and column kernels.
+    n_threads : int, optional
+        Threads for the compiled kernels. Default: all cores.
+
+    Returns
+    -------
+    xarray.Dataset
+        On ``(z, y, x)``: ``u``, ``v``, ``w``, ``u_error`` and ``v_error``
+        (standard deviation of the error of the horizontal wind from the
+        errors of the radial velocities, m s-1), ``fall_speed``,
+        ``n_radars`` and ``beam_crossing_angle``. NaN where no wind is solved
+        and in ``w`` beyond the first level with a NaN divergence. ``attrs``
+        give the boundary condition, the number of passes and the rms change
+        of ``w`` in the last one.
+
+    Notes
+    -----
+    Horizontal wind error. The covariance of the least-squares solution is
+    :math:`N^{-1}` (the Gauss-Markov covariance of independent radial
+    velocity errors :math:`\\sigma_k`, for known :math:`w` and :math:`V_t`),
+    so :math:`\\sigma_u^2 = N_{22}/\\det N`, :math:`\\sigma_v^2 = N_{11}/\\det
+    N`. For two radars with equal errors :math:`\\sigma` and beam
+    elevations :math:`\\phi_1,\\phi_2`, :math:`\\det N = \\sigma^{-4}
+    \\cos^2\\phi_1\\cos^2\\phi_2 \\sin^2\\beta` with the crossing angle
+    :math:`\\beta` and
+
+    .. math::
+
+       \\sigma_u^2 + \\sigma_v^2 = \\sigma^2
+       \\frac{\\cos^2\\phi_1 + \\cos^2\\phi_2}
+            {\\cos^2\\phi_1 \\cos^2\\phi_2 \\sin^2\\beta}
+       \\;\\to\\; \\frac{2 \\sigma^2}{\\sin^2\\beta}
+       \\quad (\\phi_1 = \\phi_2 = 0),
+
+    the geometric dilution of precision of the dual-Doppler wind: the error is
+    smallest, :math:`\\sqrt{2}\\sigma`, at :math:`\\beta = 90` degrees and grows without
+    limit as the beams become parallel. This is derived here from the linear
+    system and is not taken from a paper. It covers the noise of the radial
+    velocities only, not errors of the fall speed, of ``w`` (the term
+    :math:`c_k w`), of the gridding or of the time difference between the
+    radars.
+
+    Vertical velocity. No error is given for ``w``: it is an integral of the
+    divergence, and the errors of the divergence of neighbouring cells and
+    levels are strongly correlated (all come from the same beams), which the
+    cell-wise errors do not describe. :func:`multi_doppler` with
+    ``error=True`` returns a ``w_error``.
+
+    O'Brien adjustment. Upward integration of the continuity equation makes
+    the error of the divergence accumulate in ``w`` with height. O'Brien
+    (1970) [1]_ adjusts the divergence profile so that the vertical velocity is
+    zero at the top. radarx implements the form of the ARPS ADAS routine
+    ``adjuvw`` (open source, Center for Analysis and Prediction of Storms,
+    University of Oklahoma) and of the description of the O'Brien correction
+    in the GEMPAK documentation of ``GDOMEG`` (pressure coordinates): the
+    adjusted divergence minimises the squared difference to the observed one
+    subject to the continuity equation with :math:`w = 0` at the top, and the
+    error of the divergence is assumed to grow linearly with height. In
+    the anelastic form the mass flux :math:`\\rho w` is reduced by the fraction
+    :math:`s(z) = ((z - z_0)/(z_{top} - z_0))^2` of its value at the top,
+
+    .. math::
+
+       (\\rho w)_{adj}(z) = \\rho w(z) - s(z)\\, (\\rho w)(z_{top}) ,
+
+    which leaves :math:`z_0` unchanged and gives :math:`w = 0` at
+    :math:`z_{top}`; the correction of the mass-weighted divergence,
+    :math:`\\rho\\, \\delta D = -\\partial_z (s\\, (\\rho w)_{top})`, then grows
+    linearly from :math:`z_0`. ``obrien_error="constant"`` takes the
+    mass-weighted divergence error constant instead, :math:`s = (z - z_0)/
+    (z_{top} - z_0)` (the exponent 1), the minimiser of the integral of
+    :math:`(\\rho\\,\\delta D)^2` with :math:`w = 0` at the top, derived here
+    from first principles. The paper itself could not be read (the publisher
+    refuses anonymous access and no open copy was found), so its equations,
+    its weighting and the choice of the default are not checked against it;
+    the implementation follows the open code and the description cited above.
+    The adjustment uses the highest grid level as the top and needs a full
+    column, so in ``dual_doppler_analytic`` a column with a gap in the
+    divergence is NaN.
+
+    The integration uses the trapezoid rule on the grid levels. Errors of
+    the quadrature are of second order in the vertical spacing.
+
+    References
+    ----------
+    .. [1] O'Brien, J. J., 1970: Alternative solutions to the classical
+       vertical velocity problem. *J. Appl. Meteor.*, **9**, 197-203,
+       https://doi.org/10.1175/1520-0450(1970)009<0197:ASTTCV>2.0.CO;2
+
+    Examples
+    --------
+    >>> wind = radarx.retrieve.dual_doppler_analytic(grids, boundary="obrien")  # doctest: +SKIP
+    """
+    if boundary not in _BOUNDARY_MODES:
+        raise ValueError(
+            f"boundary must be 'upward', 'downward' or 'obrien', not {boundary!r}"
+        )
+    power = _obrien_power(obrien_error)
+    if int(iterations) < 1:
+        raise ValueError("iterations must be at least 1")
+    use_compiled = _use_compiled(engine)
+    ds = _as_multi_radar(grids, velocity)
+    weights = dict(DEFAULT_WEIGHTS, smoothness_vertical=DEFAULT_WEIGHTS["smoothness"])
+    p = _prepare(
+        ds,
+        background,
+        velocity=velocity,
+        reflectivity=reflectivity,
+        use_fall_speed=fall_speed_correction,
+        weights=weights,
+        storm_motion=(0.0, 0.0),
+        w_boundary=None,
+        freezing_level=freezing_level,
+        melting_depth=melting_depth,
+        obs_error=obs_error,
+    )
+    shape = p["shape"]
+    valid = p["weight"] > 0
+    beta = _crossing_angle(ds, valid) if ds.sizes["radar"] >= 2 else None
+    if beta is not None:
+        poor = np.isfinite(beta) & (beta < min_crossing_angle)
+        p["weight"] = np.ascontiguousarray(np.where(poor[None], 0.0, p["weight"]))
+    wb = (
+        w_bottom.transpose("y", "x").values
+        if isinstance(w_bottom, xr.DataArray)
+        else w_bottom
+    )
+    wb = np.asarray(wb, dtype=np.float64)
+    if wb.ndim not in (0, 2) or (wb.ndim == 2 and wb.shape != shape[1:]):
+        raise ValueError("w_bottom must be a number or an array on (y, x)")
+    if not np.isfinite(wb).all():
+        raise ValueError("w_bottom must be finite")
+    wb = np.ascontiguousarray(np.broadcast_to(wb, shape[1:]))
+    z = ds["z"].values.astype(np.float64)
+    w = np.zeros(shape)
+    change = np.nan
+    for _ in range(int(iterations)):
+        uv = _horizontal_wind(p, np.nan_to_num(w), use_compiled, n_threads)
+        u, v = uv[0], uv[1]
+        flux = _d1(p["rho"] * u, 2, p["dx"]) + _d1(p["rho"] * v, 1, p["dy"])
+        w_new = _integrate_mass(
+            flux,
+            p["rho"],
+            z,
+            wb,
+            _BOUNDARY_MODES[boundary],
+            power,
+            use_compiled,
+            n_threads,
+        )
+        diff = (w_new - w)[np.isfinite(w_new) & np.isfinite(w)]
+        change = float(np.sqrt(np.mean(diff**2))) if diff.size else np.nan
+        w = w_new
+    dims = ("z", "y", "x")
+    coords = {c: ds.coords[c] for c in ds.coords if set(ds.coords[c].dims) <= set(dims)}
+    wind_attrs = {"units": "m s-1"}
+    out = xr.Dataset(
+        {
+            "u": (
+                dims,
+                u.astype(np.float32),
+                {"standard_name": "x_wind", "long_name": "dual-Doppler wind along x"}
+                | wind_attrs,
+            ),
+            "v": (
+                dims,
+                v.astype(np.float32),
+                {"standard_name": "y_wind", "long_name": "dual-Doppler wind along y"}
+                | wind_attrs,
+            ),
+            "w": (
+                dims,
+                w.astype(np.float32),
+                {
+                    "standard_name": "upward_air_velocity",
+                    "long_name": f"vertical velocity, {boundary} integration",
+                }
+                | wind_attrs,
+            ),
+            "u_error": (
+                dims,
+                np.sqrt(uv[2]).astype(np.float32),
+                {
+                    "long_name": "standard deviation of the error of u from the "
+                    "radial velocity errors (Gauss-Markov)"
+                }
+                | wind_attrs,
+            ),
+            "v_error": (
+                dims,
+                np.sqrt(uv[3]).astype(np.float32),
+                {
+                    "long_name": "standard deviation of the error of v from the "
+                    "radial velocity errors (Gauss-Markov)"
+                }
+                | wind_attrs,
+            ),
+            "fall_speed": (
+                dims,
+                np.where(valid.any(0), p["vfall"][0], np.nan).astype(np.float32),
+                {
+                    "long_name": "terminal fall speed of precipitation (positive downward)",
+                    "units": "m s-1",
+                },
+            ),
+            "n_radars": (
+                dims,
+                (p["weight"] > 0).sum(axis=0).astype(np.int8),
+                {
+                    "long_name": "number of radars used in the grid cell",
+                    "units": "1",
+                },
+            ),
+        },
+        coords=coords,
+    )
+    if beta is not None:
+        out["beam_crossing_angle"] = (
+            dims,
+            beta.astype(np.float32),
+            {
+                "long_name": "largest horizontal angle between two observing beams",
+                "units": "degree",
+            },
+        )
+    out.attrs = {
+        "method": "analytic dual-Doppler analysis",
+        "boundary": boundary,
+        "iterations": int(iterations),
+        "w_change_last_iteration_rms": change,
+        "min_crossing_angle": float(min_crossing_angle),
+    }
+    if boundary == "obrien":
+        out.attrs["obrien_error"] = obrien_error
+    return out
 
 
 def _coarsen_first_guess(state, factor=2):
