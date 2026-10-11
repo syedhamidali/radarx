@@ -52,12 +52,19 @@ EXCEPTIONS = {
 }
 
 # Accessor methods that do not wrap a function of radarx.retrieve or
-# radarx.grid: they merge, read soundings (radarx.io) or draw figures.
+# radarx.grid: they merge, read soundings (radarx.io), write files
+# (radarx.io.export, which keep the attributes and return the path) or draw
+# figures.
 ACCESSOR_EXCEPTIONS = {
     "assign": "merges products into a sweep or volume",
     "background": "radarx.io.sounding",
     "interpolate_profile": "radarx.io.sounding",
     "sounding": "radarx.io.sounding",
+    "to_cfradial1": "radarx.io.export, writes a file",
+    "to_cfradial2": "radarx.io.export, writes a file",
+    "to_netcdf_cf": "radarx.io.export, writes a file",
+    "to_odim": "radarx.io.export, writes a file",
+    "to_zarr": "radarx.io.export, writes a file",
     "plot_cappi": "returns a figure",
     "plot_max_cappi": "returns a figure",
     "plot_ppi": "returns a figure",
