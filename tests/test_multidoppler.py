@@ -578,6 +578,104 @@ def test_freezing_level_from_background_temperature():
     assert (cold == -np.inf).all() and (warm == np.inf).all()
 
 
+def test_freezing_level_given_and_from_temperature_are_merged():
+    ds, bg, _ = synthetic_case(dbz=30.0)
+    t = 288.15 - 6.5e-3 * bg.z  # 0 degC at 2307.7 m
+    shape = (bg.sizes["y"], bg.sizes["x"])
+    given = np.full(shape, 4000.0)
+    given[:, 0] = np.nan  # no value in the first column
+    bg = bg.assign(
+        temperature=t.broadcast_like(bg.u).transpose("z", "y", "x"),
+        freezing_level=(("y", "x"), given),
+    )
+    level = md._background_freezing_level(bg)
+    assert level.dims == ("y", "x")
+    np.testing.assert_allclose(level.values[:, 1:], 4000.0)  # the given value stays
+    np.testing.assert_allclose(level.values[:, 0], 15.0 / 6.5e-3, rtol=1e-3)
+    # no gaps in the given level: it is used as it is, the temperature is ignored
+    full = bg.assign(freezing_level=(("y", "x"), np.full(shape, 3500.0)))
+    np.testing.assert_allclose(md._background_freezing_level(full), 3500.0)
+    # a temperature without a vertical dimension cannot give a level
+    flat = xr.Dataset({"temperature": (("y", "x"), np.full(shape, 280.0))})
+    assert md._background_freezing_level(flat) is None
+
+
+def test_freezing_level_choices():
+    ds, bg, _ = synthetic_case(dbz=30.0)
+    with pytest.raises(ValueError, match="freezing_level must be 'auto', 'rain'"):
+        multi_doppler(ds, bg, freezing_level="snow", max_iterations=2)
+    # None takes the level of the background, like 'auto'
+    t = 288.15 - 6.5e-3 * bg.z
+    bg = bg.assign(temperature=t.broadcast_like(bg.u).transpose("z", "y", "x"))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        by_none = multi_doppler(ds, bg, freezing_level=None, max_iterations=2)
+    by_auto = multi_doppler(ds, bg, freezing_level="auto", max_iterations=2)
+    np.testing.assert_allclose(by_none.fall_speed, by_auto.fall_speed)
+    assert md._freezing_level_choice(None, None) is None
+    assert md._freezing_level_choice(3000.0, 1000.0) == 3000.0
+
+
+def test_no_volumes_and_bad_bottom_velocity():
+    with pytest.raises(ValueError, match="no radar volumes"):
+        multi_doppler_input([], [0.0], [0.0], [0.0])
+    ds, bg, _ = synthetic_case(dbz=30.0)
+    with pytest.raises(ValueError, match="w_bottom must be finite"):
+        multi_doppler(ds, bg, w_bottom=np.nan, fall_speed_correction=False)
+
+
+def test_shift_winds_needs_an_observation_time_for_every_radar():
+    ds, bg, _, t_a = _translating_case()
+    times = ds.time.values.copy()
+    times[1] = np.datetime64("NaT")
+    with pytest.raises(ValueError, match="a radar has no observation time"):
+        multi_doppler(
+            ds.assign_coords(time=("radar", times)),
+            bg,
+            shift_winds=True,
+            analysis_time=t_a,
+            storm_motion=(10.0, 0.0),
+        )
+
+
+def test_shift_winds_moves_the_reflectivity_with_the_storm():
+    ds, _, _, t_a = _translating_case()
+    c = (20.0, 10.0)
+    x = ds.x.values
+    # a field linear in x and y: the semi-Lagrangian step is exact inside the grid
+    field = 0.001 * x[None, None, :] + 0.002 * ds.y.values[None, :, None]
+    dbz = np.broadcast_to(field, (2, ds.sizes["z"], ds.sizes["y"], ds.sizes["x"]))
+    ds = ds.assign(DBZH=(("radar", "z", "y", "x"), dbz.copy()))
+    vr = ds.VRADH.values.copy()
+    coef = np.zeros((2, 3) + vr.shape[1:])
+    out, vr_out, coef_out = md._shift_observations(
+        ds,
+        vr,
+        coef,
+        reflectivity="DBZH",
+        storm_motion=c,
+        analysis_time=t_a,
+        use_compiled=False,
+        n_threads=None,
+    )
+    # the radars saw the pattern 180 s before and after the analysis time: the
+    # values at the analysis time are those at x - c (t_a - t_k)
+    for k, dt in enumerate((180.0, -180.0)):
+        want = 0.001 * (x[None, None, :] - c[0] * dt) + 0.002 * (
+            ds.y.values[None, :, None] - c[1] * dt
+        )
+        inner = slice(4, -4)
+        np.testing.assert_allclose(
+            out.DBZH.values[k][:, inner, inner],
+            np.broadcast_to(want, out.DBZH.values[k].shape)[:, inner, inner],
+            atol=1e-9,
+        )
+    assert vr_out.shape == vr.shape
+    assert coef_out.shape == coef.shape
+    # the input dataset keeps its reflectivity
+    np.testing.assert_array_equal(ds.DBZH.values, dbz)
+
+
 def _anelastic_case(z0, step=3000.0, dz=500.0, nz=21, a=2e-4, scale=1e4):
     """Two radars and the analytic anelastic flow of issue 171."""
     x = np.arange(-30e3, 30e3 + 1, step)
