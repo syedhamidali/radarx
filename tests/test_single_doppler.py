@@ -303,3 +303,234 @@ def test_registry_name_without_registry(case):
     ds, bg, _ = case
     with pytest.raises((ImportError, KeyError, ValueError, FileNotFoundError)):
         single_doppler_winds(ds, bg, model="no-such-model-name")
+
+
+# --------------------------------------------------------------------------
+# fall speed on the network path
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def uniform_case():
+    """A uniform wind (8, 4, 0) m/s in heavy rain (45 dBZ) seen by one radar."""
+    from radarx.retrieve import fall_speed, radar_geometry
+
+    ds, bg, _ = synthetic_case(step=2000.0, nz=11, dbz=45.0)
+    ds = ds.isel(radar=[0]).copy()
+    geo = radar_geometry(ds)
+    el = np.radians(geo.elevation.values[0])
+    az = np.radians(geo.azimuth.values[0])
+    rho = bg.air_density.values
+    vt = fall_speed(
+        xr.DataArray(
+            np.full(rho.shape, 45.0), dims=("z", "y", "x"), coords={"z": ds.z.values}
+        ),
+        xr.DataArray(rho, dims=("z", "y", "x")),
+    ).values
+    vr = np.cos(el) * (np.sin(az) * 8.0 + np.cos(az) * 4.0) - np.sin(el) * vt
+    vr = np.where(np.isfinite(ds.VRADH.values[0]), vr, np.nan)
+    ds["VRADH"] = (("radar", "z", "y", "x"), vr[None].astype(np.float32))
+    return ds, bg, np.isfinite(vr)
+
+
+def _wind_error(out, seen):
+    return {
+        c: float(np.sqrt(np.mean((out[c].values - t)[seen] ** 2)))
+        for c, t in zip("uvw", (8.0, 4.0, 0.0))
+    }
+
+
+def test_fall_speed_in_the_refinement(uniform_case):
+    """The refinement corrects the radial velocity; the raw network does not."""
+    ds, bg, seen = uniform_case
+    model = BackgroundModel((0.0, 0.0, 0.0))  # the true wind, here the background
+    on = single_doppler_winds(ds, bg, model=model)
+    assert max(_wind_error(on, seen).values()) < 1e-3
+    assert "variational refinement" in on.attrs["fall_speed_correction"]
+    off = single_doppler_winds(ds, bg, model=model, fall_speed_correction=False)
+    err = _wind_error(off, seen)
+    # the fall speed of 9 to 13 m/s on beams up to 90 degrees changes the wind
+    assert err["u"] > 1.0 and err["v"] > 1.0 and err["w"] > 0.5
+    assert off.attrs["fall_speed_correction"].startswith("not applied (fall")
+    # the variational retrieval alone does the same
+    var = single_doppler_winds(ds, bg)
+    assert "applied in the cost function" in var.attrs["fall_speed_correction"]
+    no = single_doppler_winds(ds, bg, fall_speed_correction=False)
+    assert no.attrs["fall_speed_correction"].startswith("not applied (fall")
+    assert np.abs(var.w.values - no.w.values)[seen].max() > 1.0
+
+
+def test_fall_speed_without_refinement(uniform_case):
+    """Without refinement the argument has no effect, and the result says so."""
+    ds, bg, seen = uniform_case
+    model = BackgroundModel((0.0, 0.0, 0.0))
+    a = single_doppler_winds(ds, bg, model=model, refine=False)
+    assert "not applied explicitly" in a.attrs["fall_speed_correction"]
+    with pytest.warns(UserWarning, match="no effect on a network prediction"):
+        b = single_doppler_winds(
+            ds, bg, model=model, refine=False, fall_speed_correction=False
+        )
+    np.testing.assert_array_equal(a.w.values, b.w.values)
+
+
+# --------------------------------------------------------------------------
+# uncertainty
+# --------------------------------------------------------------------------
+
+
+def test_smooth_field_statistics():
+    rng = np.random.default_rng(0)
+    f = sd._smooth_field((40, 120, 120), (1.0, 6.0, 6.0), rng)
+    assert abs(f.std() - 1.0) < 0.08
+    # correlated over several cells: neighbours agree far more than random ones
+    assert np.corrcoef(f[:, :, :-1].ravel(), f[:, :, 1:].ravel())[0, 1] > 0.9
+    flat = sd._smooth_field((20, 30, 30), (0.0, 0.0, 0.0), rng)
+    assert abs(flat.std() - 1.0) < 0.1  # no smoothing: white noise
+
+
+def test_background_error_is_mass_continuous(case):
+    ds, bg, _ = case
+    ds = ds.isel(radar=0)
+    rng = np.random.default_rng(3)
+    du, dv = sd._background_error(ds, bg, 3.0, (8000.0, 2000.0), rng)
+    assert np.isclose(np.sqrt(0.5 * np.mean(du**2 + dv**2)), 3.0)
+    rho = bg.air_density.values
+    div = np.gradient(rho * du, 2000.0, axis=2) + np.gradient(rho * dv, 2000.0, axis=1)
+    assert np.abs(div[:, 2:-2, 2:-2]).max() < 1e-6 * np.abs(rho * du).max()
+    # no density in the background: the standard atmosphere
+    du2, _ = sd._background_error(ds, bg.drop_vars("air_density"), 1.0, (8e3, 2e3), rng)
+    assert du2.shape == du.shape
+    zero = sd._background_error(ds, bg, 0.0, (8000.0, 2000.0), rng)
+    assert not np.any(zero[0])
+
+
+@pytest.fixture(scope="module")
+def uncertain(case):
+    ds, bg, _ = case
+    return single_doppler_winds(
+        ds, bg, uncertainty=True, members=6, vr_error=1.0, background_error=3.0
+    )
+
+
+def test_uncertainty_output(case, uncertain):
+    ds, bg, _ = case
+    plain = single_doppler_winds(ds, bg)
+    for c in "uvw":
+        # the retrieval itself is the unperturbed one
+        np.testing.assert_array_equal(uncertain[c].values, plain[c].values)
+        sig = uncertain[f"{c}_uncertainty"]
+        assert sig.dims == ("z", "y", "x") and sig.attrs["units"] == "m s-1"
+        assert "standard_name" not in sig.attrs
+        assert np.isfinite(sig.values).all() and (sig.values >= 0).all()
+        assert sig.values.max() > 0
+    assert "radarx's own definition" in uncertain.attrs["uncertainty_method"]
+    assert "6 retrievals" in uncertain.attrs["uncertainty_method"]
+    assert "u_uncertainty" not in plain
+
+
+def test_uncertainty_is_reproducible_and_leaves_inputs_alone(case):
+    ds, bg, _ = case
+    ds0, bg0 = ds.copy(deep=True), bg.copy(deep=True)
+    kw = dict(uncertainty=True, members=3, vr_error=1.0, background_error=2.0)
+    a = single_doppler_winds(ds, bg, seed=4, **kw)
+    b = single_doppler_winds(ds, bg, seed=4, **kw)
+    c = single_doppler_winds(ds, bg, seed=5, **kw)
+    np.testing.assert_array_equal(a.u_uncertainty.values, b.u_uncertainty.values)
+    assert not np.array_equal(a.u_uncertainty.values, c.u_uncertainty.values)
+    xr.testing.assert_identical(ds, ds0)
+    xr.testing.assert_identical(bg, bg0)
+
+
+def test_uncertainty_follows_the_input_errors(case):
+    ds, bg, _ = case
+    kw = dict(uncertainty=True, members=4, seed=2)
+    none = single_doppler_winds(ds, bg, vr_error=0.0, background_error=0.0, **kw)
+    for c in "uvw":
+        assert float(none[f"{c}_uncertainty"].max()) == 0.0
+    small = single_doppler_winds(ds, bg, vr_error=0.2, background_error=0.0, **kw)
+    big = single_doppler_winds(ds, bg, vr_error=2.0, background_error=0.0, **kw)
+    assert float(big.w_uncertainty.mean()) > 3 * float(small.w_uncertainty.mean())
+    bgd = single_doppler_winds(ds, bg, vr_error=0.0, background_error=4.0, **kw)
+    assert float(bgd.u_uncertainty.mean()) > 0
+
+
+def test_uncertainty_without_background_and_with_a_network(case):
+    ds, bg, _ = case
+    with pytest.warns(UserWarning, match="no background"):
+        out = single_doppler_winds(ds, uncertainty=True, members=2, vr_error=1.0)
+    assert float(out.w_uncertainty.max()) > 0
+    net = single_doppler_winds(
+        ds, bg, model=BackgroundModel(), uncertainty=True, members=3
+    )
+    assert float(net.u_uncertainty.max()) > 0
+    assert "u_network" in net
+
+
+def test_uncertainty_errors(case):
+    ds, bg, _ = case
+    with pytest.raises(ValueError, match="at least 2"):
+        single_doppler_winds(ds, bg, uncertainty=True, members=1)
+    with pytest.raises(ValueError, match="negative"):
+        single_doppler_winds(ds, bg, uncertainty=True, vr_error=-1.0)
+    with pytest.raises(ValueError, match="correlation"):
+        single_doppler_winds(ds, bg, uncertainty=True, correlation=(1000.0,))
+    with pytest.raises(ValueError, match="correlation"):
+        single_doppler_winds(ds, bg, uncertainty=True, correlation=(0.0, 100.0))
+
+
+def _random_case(seed, sigma_b=3.0, sigma_v=1.0):
+    """Truth = background plus a mass-continuous random wind, noisy velocities."""
+    from radarx.retrieve import fall_speed, radar_geometry
+
+    ds, bg, _ = synthetic_case(step=2000.0, nz=11, dbz=30.0)
+    ds = ds.isel(radar=[0]).copy()
+    rng = np.random.default_rng(seed)
+    rho = bg.air_density.values
+    shape = rho.shape
+    psi = sd._smooth_field(shape, (1.0, 12.5, 12.5), rng)
+    pu = -np.gradient(psi, 2000.0, axis=1) / rho
+    pv = np.gradient(psi, 2000.0, axis=2) / rho
+    scale = sigma_b / np.sqrt(0.5 * np.mean(pu**2 + pv**2))
+    u, v = 8.0 + scale * pu, 4.0 + scale * pv
+    geo = radar_geometry(ds)
+    el = np.radians(geo.elevation.values[0])
+    az = np.radians(geo.azimuth.values[0])
+    vt = fall_speed(
+        xr.DataArray(
+            np.full(shape, 30.0), dims=("z", "y", "x"), coords={"z": ds.z.values}
+        ),
+        xr.DataArray(rho, dims=("z", "y", "x")),
+    ).values
+    vr = np.cos(el) * (np.sin(az) * u + np.cos(az) * v) - np.sin(el) * vt
+    vr = vr + sigma_v * rng.normal(size=shape)
+    vr = np.where(np.isfinite(ds.VRADH.values[0]), vr, np.nan)
+    ds["VRADH"] = (("radar", "z", "y", "x"), vr[None].astype(np.float32))
+    return ds, bg, (u, v, np.zeros(shape)), np.isfinite(vr)
+
+
+def test_uncertainty_matches_the_error_on_synthetic_fields():
+    """
+    With weights that agree with the stated errors (background weight
+    (vr_error / background_error)**2 of the observation weight), the spread
+    and the actual error are of the same size on synthetic fields whose
+    background error is the stated one.
+    """
+    sigma_b, sigma_v = 3.0, 1.0
+    ratios = []
+    for seed in (5, 6):
+        ds, bg, truth, seen = _random_case(seed, sigma_b, sigma_v)
+        out = single_doppler_winds(
+            ds,
+            bg,
+            uncertainty=True,
+            members=10,
+            vr_error=sigma_v,
+            background_error=sigma_b,
+            weights={"background": (sigma_v / sigma_b) ** 2},
+        )
+        for c, t in zip("uvw", truth):
+            actual = np.sqrt(np.mean((out[c].values - t)[seen] ** 2))
+            spread = np.sqrt(np.mean(out[f"{c}_uncertainty"].values[seen] ** 2))
+            ratios.append(actual / spread)
+    assert 0.6 < np.mean(ratios) < 1.6, ratios
+    assert all(0.4 < r < 2.5 for r in ratios), ratios

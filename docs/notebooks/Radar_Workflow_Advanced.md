@@ -1416,6 +1416,24 @@ for comp in "uvw":
     print(f"{comp}: RMS error {err:.2f} m/s (background {err_bg:.2f} m/s)")
 ```
 
+With `uncertainty=True` the retrieval is repeated on inputs with random errors
+(`vr_error` for the radial velocity, `background_error` for the background wind)
+and `u_uncertainty`, `v_uncertainty` and `w_uncertainty` are the standard
+deviations of the members. The weights below agree with the stated errors, and
+the result records how the fall speed was handled:
+
+```{code-cell} ipython3
+wind_u = single_doppler_winds(
+    rad, background, fall_speed_correction=False, uncertainty=True, members=6,
+    vr_error=1.0, background_error=3.0, weights={"background": (1.0 / 3.0) ** 2},
+)
+for comp in "uvw":
+    actual = float(np.sqrt(((wind_u[comp] - truth[comp]) ** 2).where(seen).mean()))
+    spread = float(np.sqrt((wind_u[f"{comp}_uncertainty"] ** 2).where(seen).mean()))
+    print(f"{comp}: actual RMS error {actual:.2f} m/s, RMS uncertainty {spread:.2f} m/s")
+print(wind_u.attrs["fall_speed_correction"])
+```
+
 ```{code-cell} ipython3
 def km(da):
     return da.assign_coords(x=da.x / 1e3, y=da.y / 1e3)
