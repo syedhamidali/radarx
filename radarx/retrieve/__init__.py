@@ -40,6 +40,7 @@ _SECTIONS = {
         "qpe",
         "disdrometer",
         "evaporation",
+        "rain_collisions",
     ],
     "Thermodynamics and cold pools": [
         "lagrangian",
