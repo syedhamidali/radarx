@@ -38,6 +38,8 @@ from radarx.retrieve import (
     wrf_state,
 )
 
+_trapezoid = getattr(np, "trapezoid", None) or np.trapz
+
 fo = importlib.import_module("radarx.retrieve.forward_operator")
 dsdmod = importlib.import_module("radarx.retrieve.dsd")
 
@@ -485,10 +487,10 @@ def test_orientation_moments():
     sigma = np.deg2rad(23.0)
     a = np.linspace(-8 * sigma, 8 * sigma, 20001)
     pdf = np.exp(-0.5 * (a / sigma) ** 2)
-    pdf /= np.trapezoid(pdf, a)
+    pdf /= _trapezoid(pdf, a)
     got = fo._orientation_moments(23.0)
     want = [
-        np.trapezoid(pdf * f, a)
+        _trapezoid(pdf * f, a)
         for f in (
             np.cos(a) ** 2,
             np.sin(a) ** 2,
