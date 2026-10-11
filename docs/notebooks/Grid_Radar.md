@@ -19,6 +19,7 @@ kernelspec:
 
 ```{code-cell} ipython3
 import fsspec
+import numpy as np
 import radarx as rx
 import xradar as xd
 import cmweather  # noqa
@@ -108,6 +109,88 @@ ds2 = dtree.radarx.to_grid(
 ds2.radarx.plot_max_cappi("DBZH", cmap="ChaseSpectral", add_slogan=True);
 ```
 
-```{code-cell} ipython3
+## Georeferencing of the grid
 
+The grid is georeferenced as CF: the azimuthal equidistant projection centred
+on the radar is the scalar `crs_wkt`, every field has `grid_mapping`, and the
+2-D `lat(y, x)` and `lon(y, x)` are computed from the projection (a latitude
+that depends on `y` only is wrong away from the radar: by 0.6 km in the corner
+of a 120 km wide grid and by 9 km in the corner of a 460 km wide one). cf_xarray and rioxarray find
+the projection.
+
+```{code-cell} ipython3
+print(ds2["DBZH"].attrs["grid_mapping"], ds2["crs_wkt"].attrs["grid_mapping_name"])
+print(ds2["lat"].dims, ds2["x"].attrs["standard_name"], ds2["z"].attrs["positive"])
 ```
+
+## Radius of influence gridding
+
+`grid_cones` has no smoothing length. `dtree.radarx.grid_gates()` is the other
+family: every output point is the weighted mean of the gates within a radius of
+influence in metres, with the weights of Cressman (1959),
+$(R^2-d^2)/(R^2+d^2)$, or Barnes (1964), $\exp(-4d^2/R^2)$, or the nearest gate.
+With `beam_width` the radius grows with the distance from the radar like the
+beam, so that the weights reach the gates of the neighbouring beams at any range;
+`roi_range_factor` and `roi_height_factor` give other growth rates, the
+parameters of the radius functions of Py-ART. Points without a gate in reach
+stay empty. A gate is a point in space, so the same call grids a sector scan or
+a volume with repeated tilts.
+
+```{code-cell} ipython3
+%%time
+xg = yg = np.arange(-150e3, 150e3 + 1, 1000.0)
+zg = np.arange(500.0, 10e3 + 1, 500.0)
+cone_grid = rx.grid.grid_cones(dtree, "DBZH", xg, yg, zg)
+cressman = dtree.radarx.grid_gates(["DBZH"], xg, yg, zg, weighting="cressman", roi=1000.0, beam_width=1.0)
+barnes = dtree.radarx.grid_gates(["DBZH"], xg, yg, zg, weighting="barnes", roi=1000.0, beam_width=1.0)
+```
+
+```{code-cell} ipython3
+fig, axes = plt.subplots(1, 3, figsize=(16, 4.6), layout="constrained")
+for ax, grid, title in zip(axes, (cone_grid, cressman, barnes), ("cone", "Cressman", "Barnes")):
+    grid["DBZH"].sel(z=2000.0).plot(ax=ax, x="x", y="y", cmap="ChaseSpectral", vmin=-10, vmax=70)
+    ax.set(title=f"{title}, z = 2 km", aspect="equal")
+```
+
+The cone interpolation leaves cells that no two sweeps enclose empty; the
+radius of influence also fills cells up to the radius beyond the lowest and
+highest sweep, so more of the grid has a value, at the price of the smoothing:
+
+```{code-cell} ipython3
+both = cone_grid["DBZH"].notnull() & cressman["DBZH"].notnull()
+rms = float(np.sqrt(((cone_grid["DBZH"] - cressman["DBZH"]).where(both) ** 2).mean()))
+print(
+    f"cells with a value: cone {float(cone_grid['DBZH'].notnull().mean()):.2f}, "
+    f"Cressman {float(cressman['DBZH'].notnull().mean()):.2f}; rms difference {rms:.1f} dB"
+)
+```
+
+## Vertical section
+
+`grid_rhi` grids onto a vertical plane through the radar at an azimuth, from the
+gates of an RHI or from the sweeps of a volume:
+
+```{code-cell} ipython3
+section = dtree.radarx.grid_rhi(
+    ["DBZH"],
+    azimuth=250.0,
+    distance=np.arange(2e3, 200e3, 1000.0),
+    z=np.arange(250.0, 12e3, 250.0),
+    roi=1000.0,
+    beam_width=1.0,
+)
+fig, ax = plt.subplots(figsize=(9, 3.5))
+(section["DBZH"] ).plot(ax=ax, x="distance", y="z", cmap="ChaseSpectral", vmin=-10, vmax=70)
+ax.set(title="azimuth 250°");
+```
+
+## Repeated tilts and split cuts
+
+A volume can scan an elevation more than once: the split cuts of NEXRAD
+(a surveillance and a Doppler cut at the same angle), and the extra low tilts of
+SAILS and MESO-SAILS minutes apart. `grid_cones` keeps the cut that reaches
+farthest (`repeats="farthest"`, the default). `repeats="mean"` averages the
+repeats that have a value at a cell, `"latest"` takes the latest and `"nearest"`
+the one closest to the analysis time `time`. With a storm motion `motion=(u, v)`
+every repeat is first moved to the analysis time, so that the mean is of the
+echo at one place and not of an echo that moved.

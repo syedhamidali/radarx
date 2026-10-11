@@ -133,6 +133,14 @@ grid = rx.grid.grid_radars(
 grid
 ```
 
+The grid is georeferenced as CF, like the grid of a single radar: the
+azimuthal equidistant projection of the origin as `crs_wkt`, `grid_mapping` on
+the fields and 2-D `lat` and `lon` computed from the projection.
+
+```{code-cell} ipython3
+print(grid.DBZH.attrs["grid_mapping"], grid.lat.dims, grid.x.attrs["standard_name"])
+```
+
 Every radar keeps its own fields on `(radar, z, y, x)`. `azimuth`, `elevation`
 and `range` give the direction of the beam at every cell (in the grid frame) and
 the slant range from each radar, `radar_x`, `radar_y`, `radar_z` the radar
