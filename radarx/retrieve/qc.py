@@ -127,7 +127,7 @@ __all__ = ["echo_mask", "apply_mask"]
 import numpy as np
 import xarray as xr
 
-from .._fields import align_like, as_sweep
+from .._fields import VELOCITY, align_like, as_sweep
 from .._provenance import provenance
 from .dealias import _ray_links, _sweep_mapping
 from .kdp import _DBZH_NAMES, _PHIDP_NAMES, _RHOHV_NAMES, _find, _gate_spacing
@@ -149,6 +149,9 @@ _SNR_NAMES = ("SNRH", "SNR", "signal_to_noise_ratio")
 
 #: Echo classes of ``ECHO_CLASS``.
 CLASSES = {0: "no_echo", 1: "meteorological", 2: "non_meteorological", 3: "speckle"}
+
+#: Values of the ``method`` option of :func:`echo_mask`.
+METHODS = ("radarx", "krause2016")
 
 #: Features in the order of the kernel.
 FEATURES = (
@@ -213,6 +216,9 @@ _NEXRAD_FIELD_NODATA = {
 }
 
 _ROLES = ("dbzh", "zdr", "rhohv", "phidp")
+#: The no-data code of the radial velocity of NEXRAD Level II data (method
+#: ``"krause2016"`` only).
+_NEXRAD_VEL_FLOOR = -63.9
 
 
 # --------------------------------------------------------------------------
@@ -463,6 +469,134 @@ def _classify_compiled(sweeps, p, n_threads):
 
 
 # --------------------------------------------------------------------------
+# MetSignal of Krause (2016), NumPy reference (same steps as classify_krause)
+# --------------------------------------------------------------------------
+
+#: Membership corners ``(a, b, c, d)`` of the MetSignal algorithm, read from
+#: Fig. 2 of Krause (2016) (p. 1877). The velocity membership is 1 minus the
+#: inverted trapezoid (p. 1876).
+KRAUSE_LIMITS = {
+    "dbzh": (10.0, 30.0, _INF, _INF),
+    "rhohv": (0.75, 0.90, _INF, _INF),
+    "vrad": (-1.5, -1.0, 1.0, 1.5),
+    "phidp_sd": (-_INF, -_INF, 10.0, 20.0),
+    "zdr_sd": (-_INF, -_INF, 1.0, 2.0),
+    "rhohv_sd": (-_INF, -_INF, 0.03, 0.04),
+}
+#: Weights of the MetSignal algorithm, Table 1 of Krause (2016) (p. 1876).
+KRAUSE_WEIGHTS = {
+    "dbzh": 1.0,
+    "rhohv": 1.0,
+    "vrad": 1.0,
+    "phidp_sd": 2.0,
+    "zdr_sd": 2.0,
+    "rhohv_sd": 1.0,
+}
+#: Post-processing of Krause (2016) (pp. 1875-1876): gates with abs(ZDR) above
+#: ``zdr_max`` (dB) or rhohv below ``rhohv_min`` are non-meteorological, gates
+#: whose reflectivity at 3 km (previous volume) is at least ``override_dbz``
+#: are meteorological.
+KRAUSE_RULES = {"zdr_max": 4.5, "rhohv_min": 0.65, "override_dbz": 11.0}
+#: Thresholds of the aggregation value (p. 1876): warm and cold season.
+KRAUSE_THRESHOLDS = {"warm": 0.8, "cold": 0.7}
+#: Half length of the window of the standard deviations: nine range bins
+#: centred on the gate (p. 1876).
+KRAUSE_HALF_WINDOW = 4
+
+
+def _krause_numpy(sweep, p):
+    """Aggregation value and class of one sweep (NumPy reference)."""
+    z = sweep["dbzh"]
+    nray, ng = z.shape
+    floors = p["floors"]
+    with np.errstate(invalid="ignore"):
+        echo = np.isfinite(z) & (z > floors[0])
+        if sweep["snr"] is not None:
+            echo &= sweep["snr"] >= p["snr_min"]
+    g = np.arange(ng)
+    lo = np.broadcast_to(np.maximum(g - KRAUSE_HALF_WINDOW, 0), (nray, ng))
+    hi = np.broadcast_to(np.minimum(g + KRAUSE_HALF_WINDOW, ng - 1) + 1, (nray, ng))
+    num = np.zeros((nray, ng))
+    den = np.zeros((nray, ng))
+
+    def add(name, value, defined):
+        w = KRAUSE_WEIGHTS[name]
+        m = _trapezoid(np.where(defined, value, 0.0), KRAUSE_LIMITS[name])
+        num[:] = num + np.where(defined, w * m, 0.0)
+        den[:] = den + np.where(defined, w, 0.0)
+
+    add("dbzh", z, echo)
+    rho, zdr, phi, vel = sweep["rhohv"], sweep["zdr"], sweep["phidp"], sweep["vrad"]
+    ok_rho = _valid(rho, floors[2], echo)
+    ok_zdr = _valid(zdr, floors[1], echo)
+    ok_phi = _valid(phi, floors[3], echo)
+    ok_vel = _valid(vel, floors[4], echo)
+    if ok_rho is not None:
+        add("rhohv", rho, ok_rho)
+    if ok_vel is not None:
+        m = 1.0 - _trapezoid(np.where(ok_vel, vel, 0.0), KRAUSE_LIMITS["vrad"])
+        num[:] = num + np.where(ok_vel, KRAUSE_WEIGHTS["vrad"] * m, 0.0)
+        den[:] = den + np.where(ok_vel, KRAUSE_WEIGHTS["vrad"], 0.0)
+    if ok_phi is not None:
+        rad = np.deg2rad(np.where(ok_phi, phi, 0.0))
+        n = _span(_prefix(ok_phi.astype(np.float64)), lo, hi)
+        c = _span(_prefix(np.where(ok_phi, np.cos(rad), 0.0)), lo, hi)
+        s = _span(_prefix(np.where(ok_phi, np.sin(rad), 0.0)), lo, hi)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            r2 = np.clip((c * c + s * s) / (n * n), 1e-300, 1.0)
+            sd = np.sqrt(-np.log(r2)) * (180.0 / np.pi)
+        add("phidp_sd", sd, n >= 3)
+    for name, x, ok in (("zdr_sd", zdr, ok_zdr), ("rhohv_sd", rho, ok_rho)):
+        if ok is None:
+            continue
+        v = np.where(ok, x, 0.0)
+        n = _span(_prefix(ok.astype(np.float64)), lo, hi)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            mean = _span(_prefix(v), lo, hi) / n
+            var = _span(_prefix(v * v), lo, hi) / n - mean * mean
+        add(name, np.sqrt(np.maximum(var, 0.0)), n >= 3)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        agg = (num / den).astype(np.float32)
+    agg = np.where(echo, agg, np.float32(np.nan))
+    meteo = agg >= np.float32(p["threshold"])
+    if ok_zdr is not None:
+        meteo &= ~(
+            ok_zdr & (np.abs(np.where(ok_zdr, zdr, 0.0)) > KRAUSE_RULES["zdr_max"])
+        )
+    if ok_rho is not None:
+        meteo &= ~(ok_rho & (np.where(ok_rho, rho, 1.0) < KRAUSE_RULES["rhohv_min"]))
+    if sweep["zh3"] is not None:
+        with np.errstate(invalid="ignore"):
+            meteo |= np.isfinite(sweep["zh3"]) & (
+                sweep["zh3"] >= KRAUSE_RULES["override_dbz"]
+            )
+    cls = np.where(echo, np.where(meteo, 1, 2), 0).astype(np.int8)
+    if p["min_size"] > 1:
+        size = _components(cls == 1, sweep["links"])
+        cls[(cls == 1) & (size < p["min_size"])] = 3
+    return agg, cls
+
+
+def _krause_compiled(sweeps, p, n_threads):
+    """Run the C++ kernel of the MetSignal algorithm on all sweeps at once."""
+    return _qc.classify_krause(
+        [sw["dbzh"] for sw in sweeps],
+        [sw["zdr"] for sw in sweeps],
+        [sw["rhohv"] for sw in sweeps],
+        [sw["phidp"] for sw in sweeps],
+        [sw["vrad"] for sw in sweeps],
+        [sw["zh3"] for sw in sweeps],
+        [sw["snr"] for sw in sweeps],
+        [sw["links"] for sw in sweeps],
+        np.asarray(p["floors"], dtype=np.float64),
+        float(p["snr_min"]),
+        float(p["threshold"]),
+        int(p["min_size"]),
+        int(n_threads or 0),
+    )
+
+
+# --------------------------------------------------------------------------
 # xarray layer
 # --------------------------------------------------------------------------
 
@@ -486,26 +620,28 @@ def _is_nexrad(ds, root_attrs=None):
     return isinstance(scan, str) and scan.upper().startswith("VCP")
 
 
-def _floors(nodata, nexrad):
-    """No-data floors of (dbzh, zdr, rhohv, phidp)."""
+def _floors(nodata, nexrad, roles=_ROLES):
+    """No-data floors of ``roles`` ((dbzh, zdr, rhohv, phidp), plus vrad)."""
     if isinstance(nodata, str):
         if nodata not in ("auto", "nexrad"):
             raise ValueError(
                 f"nodata must be 'auto', 'nexrad', None or a dict, not {nodata!r}"
             )
         table = NEXRAD_NODATA if (nodata == "nexrad" or nexrad) else {}
+        if table:
+            table = {**table, "vrad": _NEXRAD_VEL_FLOOR}
     elif nodata is None:
         table = {}
     elif isinstance(nodata, dict):
-        unknown = set(nodata) - set(_ROLES)
+        unknown = set(nodata) - set(roles)
         if unknown:
-            raise ValueError(f"unknown nodata keys {sorted(unknown)}; use {_ROLES}")
+            raise ValueError(f"unknown nodata keys {sorted(unknown)}; use {roles}")
         table = nodata
     else:
         raise ValueError(
             f"nodata must be 'auto', 'nexrad', None or a dict, not {nodata!r}"
         )
-    return [float(table.get(role, -_INF)) for role in _ROLES]
+    return [float(table.get(role, -_INF)) for role in roles]
 
 
 def _options(limits, weights):
@@ -531,7 +667,7 @@ def _options(limits, weights):
 
 def _prepare_sweep(ds, fields, window):
     """Field names and contiguous (ray, range) float64 arrays of one sweep."""
-    dbzh, zdr, rhohv, phidp, snr = fields
+    dbzh, zdr, rhohv, phidp, snr = fields[:5]
     names = {
         "dbzh": _find(ds, dbzh, _DBZH_NAMES, True),
         "zdr": _find(ds, zdr, _ZDR_NAMES, zdr is not None),
@@ -539,6 +675,10 @@ def _prepare_sweep(ds, fields, window):
         "phidp": _find(ds, phidp, _PHIDP_NAMES, phidp is not None),
         "snr": _find(ds, snr, _SNR_NAMES, snr is not None),
     }
+    if len(fields) > 5:  # method "krause2016": radial velocity, Zh at 3 km
+        vrad, zh3 = fields[5:]
+        names["vrad"] = _find(ds, vrad, VELOCITY, vrad is not None)
+        names["zh3"] = _find(ds, zh3, (), zh3 is not None)
     da = ds[names["dbzh"]]
     if "range" not in da.dims or da.ndim != 2:
         raise ValueError(f"{names['dbzh']!r} must be 2-D with a 'range' dimension")
@@ -557,6 +697,8 @@ def _prepare_sweep(ds, fields, window):
         links = np.ones(da.sizes[ray_dim], dtype=np.uint8)
         links[-1] = 0  # RHI or unknown geometry: no wrap
     sweep = {role: arr(name) for role, name in names.items()}
+    sweep.setdefault("vrad", None)
+    sweep.setdefault("zh3", None)
     sweep.update(
         {
             "ds": ds,
@@ -569,7 +711,7 @@ def _prepare_sweep(ds, fields, window):
     return sweep
 
 
-def _wrap_sweep(sweep, score, cls, threshold, comment=None):
+def _wrap_sweep(sweep, score, cls, threshold, comment=None, method="radarx"):
     """Score, class and mask on the input sweep coordinates."""
     da = sweep["ds"][sweep["names"]["dbzh"]]
     dims = da.dims
@@ -595,8 +737,14 @@ def _wrap_sweep(sweep, score, cls, threshold, comment=None):
                 {
                     "long_name": "Meteorological echo score",
                     "units": "1",
-                    "comment": "weighted mean fuzzy membership, 3 x 3 average; "
-                    f"meteorological at >= {threshold}",
+                    "comment": (
+                        "weighted mean fuzzy membership, 3 x 3 average; "
+                        f"meteorological at >= {threshold}"
+                        if method == "radarx"
+                        else "aggregation value A of Krause (2016), the weighted "
+                        "mean of the memberships; meteorological at "
+                        f"A >= {threshold} after the post-processing rules"
+                    ),
                 },
             ),
             "METEO_MASK": (
@@ -620,6 +768,11 @@ def _wrap_sweep(sweep, score, cls, threshold, comment=None):
 
 
 def _run(sweeps, params, n_threads, use_compiled):
+    if params.get("method") == "krause2016":
+        if use_compiled:
+            scores, classes = _krause_compiled(sweeps, params, n_threads)
+            return list(zip(scores, classes))
+        return [_krause_numpy(sw, params) for sw in sweeps]
     if use_compiled:
         scores, classes = _classify_compiled(sweeps, params, n_threads)
         return list(zip(scores, classes))
@@ -692,12 +845,15 @@ def echo_mask(
     phidp=None,
     snr=None,
     *,
-    window=1.5,
-    threshold=0.6,
+    method="radarx",
+    vrad=None,
+    zh_3km=None,
+    window=None,
+    threshold=None,
     limits=None,
     weights=None,
     spin_threshold=2.0,
-    min_size=10,
+    min_size=None,
     snr_min=3.0,
     phidp_texture="circular",
     nodata="auto",
@@ -933,6 +1089,26 @@ def echo_mask(
     >>> qc = radarx.retrieve.echo_mask(dtree)  # doctest: +SKIP
     >>> clean = dtree.radarx.apply_mask(qc)  # doctest: +SKIP
     """
+    if method not in METHODS:
+        raise ValueError(f"method must be one of {METHODS}, not {method!r}")
+    krause = method == "krause2016"
+    if krause:
+        taken = {"limits": limits, "weights": weights, "window": window}
+        given = [k for k, v in taken.items() if v is not None]
+        if given:
+            raise ValueError(
+                f"method='krause2016' uses the membership functions, weights and "
+                f"nine-gate window of the paper; {given} are options of "
+                "method='radarx'"
+            )
+    elif vrad is not None or zh_3km is not None:
+        raise ValueError("vrad and zh_3km are used by method='krause2016' only")
+    if threshold is None:
+        threshold = KRAUSE_THRESHOLDS["warm"] if krause else 0.6
+    if min_size is None:
+        min_size = 1 if krause else 10
+    if window is None:
+        window = 1.5
     if not window > 0:
         raise ValueError("window must be positive")
     if phidp_texture not in ("circular", "detrended"):
@@ -942,10 +1118,21 @@ def echo_mask(
     lim, wts = _options(limits, weights)
     use_compiled = _use_compiled(engine)
     fields = (dbzh, zdr, rhohv, phidp, snr)
+    if krause:
+        fields += (vrad, zh_3km)
     obj = as_sweep(obj)
 
     def params(nexrad):
+        if krause:
+            return {
+                "method": method,
+                "floors": _floors(nodata, nexrad, _ROLES + ("vrad",)),
+                "snr_min": float(snr_min),
+                "threshold": float(threshold),
+                "min_size": int(min_size),
+            }
         return {
+            "method": method,
             "floors": _floors(nodata, nexrad),
             "snr_min": float(snr_min),
             "limits": lim,
@@ -960,7 +1147,7 @@ def echo_mask(
         sweep = _prepare_sweep(obj, fields, window)
         p = params(_is_nexrad(obj))
         score, cls = _run([sweep], p, n_threads, use_compiled)[0]
-        return _wrap_sweep(sweep, score, cls, threshold)
+        return _wrap_sweep(sweep, score, cls, threshold, method=method)
 
     from ..grid.cone import _sweep_names
 
@@ -984,7 +1171,9 @@ def echo_mask(
         results, comments = _borrow_split_cuts(sweeps, results)
     nodes = {"/": obj.root.to_dataset(inherit=False)}
     for sweep, (score, cls), comment in zip(sweeps, results, comments):
-        nodes[sweep["name"]] = _wrap_sweep(sweep, score, cls, threshold, comment)
+        nodes[sweep["name"]] = _wrap_sweep(
+            sweep, score, cls, threshold, comment, method
+        )
     return xr.DataTree.from_dict(nodes)
 
 
