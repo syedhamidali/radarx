@@ -436,23 +436,13 @@ Table sum_block(int64_t r0, int64_t r1, const double* az, const double* el, cons
     return sorted_table(blk);
 }
 
-}  // namespace
-
-// Returns (bins, stats): the table of the sweep sorted by bin, bins (n,) int64 and
-// stats (n, N_STATS) float64. An empty array for dbz, vr or rho means that the sweep has no
-// such field.
-py::tuple bin_sweep_py(const DArray& azimuth, const DArray& elevation, const DArray& range,
-                       const DArray& dbz, const DArray& vr, const DArray& rho, double lat0,
-                       double lon0, double alt0, double reff, double rearth, double max_range,
-                       double min_ground, const DArray& edges, bool clear, double vmax,
-                       double rho_min, int mode, double box, int64_t half, int64_t cells,
-                       int64_t nbx_blocks, double lat_ref, double lon_ref,
-                       const GridIndex* index, int n_threads) {
+void check_sweep(const DArray& azimuth, const DArray& elevation, const DArray& range,
+                 const DArray& dbz, const DArray& vr, const DArray& rho, const DArray& edges,
+                 int mode, double box, int64_t cells, const GridIndex* index) {
     const int64_t nray = azimuth.shape(0);
-    const int64_t ngate = range.shape(0);
     if (elevation.ndim() != 1 || elevation.shape(0) != nray)
         throw std::invalid_argument("elevation must have one value per ray");
-    const int64_t expected = nray * ngate;
+    const int64_t expected = nray * range.shape(0);
     for (const DArray* f : {&dbz, &vr, &rho})
         if (f->size() != 0 && f->size() != expected)
             throw std::invalid_argument("a field must have the shape (rays, gates)");
@@ -462,60 +452,72 @@ py::tuple bin_sweep_py(const DArray& azimuth, const DArray& elevation, const DAr
     if (mode == 1 && (index == nullptr || cells < 1))
         throw std::invalid_argument("grid mode needs a grid index and cells >= 1");
     if (mode == 0 && !(box > 0.0)) throw std::invalid_argument("box must be positive");
+}
 
-    const int64_t nblocks = (nray + kBlockRays - 1) / kBlockRays;
-    std::vector<Table> tables(nblocks);
-    Fields fields;
-    fields.rng = range.data();
-    fields.ngate = ngate;
-    fields.dbz = dbz.size() ? dbz.data() : nullptr;
-    fields.vr = vr.size() ? vr.data() : nullptr;
-    fields.rho = rho.size() ? rho.data() : nullptr;
-    Setup setup;
-    setup.lon0 = lon0 * kDeg;
-    setup.alt0 = alt0;
-    setup.reff = reff;
-    setup.rearth = rearth;
-    setup.max_range = max_range;
-    setup.min_ground = min_ground;
-    setup.slat0 = std::sin(lat0 * kDeg);
-    setup.clat0 = std::cos(lat0 * kDeg);
-    setup.edges = edges.data();
-    setup.nedge = edges.shape(0);
-    setup.nlev = edges.shape(0) - 1;
-    setup.clear = clear;
-    setup.vmax = vmax;
-    setup.rho_min = rho_min;
-    setup.mode = mode;
-    setup.box = box;
-    setup.half = half;
-    setup.width = 2 * half + 1;
-    setup.cells = cells;
-    setup.nbx_blocks = nbx_blocks;
-    setup.lon_ref = lon_ref * kDeg;
-    setup.cos_ref = std::cos(lat_ref * kDeg);
-    setup.sin_ref = std::sin(lat_ref * kDeg);
-    setup.index = index;
-    {
-        py::gil_scoped_release release;
-        parallel_blocks(nblocks, n_threads, [&](int64_t b) {
-            const int64_t r0 = b * kBlockRays;
-            const int64_t r1 = std::min(nray, r0 + kBlockRays);
-            tables[b] = sum_block(r0, r1, azimuth.data(), elevation.data(), fields, setup);
-        });
-    }
-    // add the tables of the blocks, in block order, into one table sorted by bin
-    struct Ref {
-        int64_t bin;
-        int32_t table;
-        int32_t row;
-    };
+Fields make_fields(const DArray& range, const DArray& dbz, const DArray& vr, const DArray& rho) {
+    Fields f;
+    f.rng = range.data();
+    f.ngate = range.shape(0);
+    f.dbz = dbz.size() ? dbz.data() : nullptr;
+    f.vr = vr.size() ? vr.data() : nullptr;
+    f.rho = rho.size() ? rho.data() : nullptr;
+    return f;
+}
+
+// Angles come in degrees and are kept in radians.
+Setup make_setup(double lat0, double lon0, double alt0, double reff, double rearth,
+                 double max_range, double min_ground, const DArray& edges, bool clear,
+                 double vmax, double rho_min, int mode, double box, int64_t half, int64_t cells,
+                 int64_t nbx_blocks, double lat_ref, double lon_ref, const GridIndex* index) {
+    Setup su;
+    su.lon0 = lon0 * kDeg;
+    su.alt0 = alt0;
+    su.reff = reff;
+    su.rearth = rearth;
+    su.max_range = max_range;
+    su.min_ground = min_ground;
+    su.slat0 = std::sin(lat0 * kDeg);
+    su.clat0 = std::cos(lat0 * kDeg);
+    su.edges = edges.data();
+    su.nedge = edges.shape(0);
+    su.nlev = edges.shape(0) - 1;
+    su.clear = clear;
+    su.vmax = vmax;
+    su.rho_min = rho_min;
+    su.mode = mode;
+    su.box = box;
+    su.half = half;
+    su.width = 2 * half + 1;
+    su.cells = cells;
+    su.nbx_blocks = nbx_blocks;
+    su.lon_ref = lon_ref * kDeg;
+    su.cos_ref = std::cos(lat_ref * kDeg);
+    su.sin_ref = std::sin(lat_ref * kDeg);
+    su.index = index;
+    return su;
+}
+
+// A row of a table of a block.
+struct Ref {
+    int64_t bin;
+    int32_t table;
+    int32_t row;
+};
+
+// The rows of all tables, ordered by bin and, within a bin, by block.
+std::vector<Ref> sorted_refs(const std::vector<Table>& tables) {
     std::vector<Ref> refs;
     for (size_t b = 0; b < tables.size(); ++b)
         for (size_t i = 0; i < tables[b].bins.size(); ++i)
             refs.push_back({tables[b].bins[i], static_cast<int32_t>(b), static_cast<int32_t>(i)});
     std::stable_sort(refs.begin(), refs.end(),
                      [](const Ref& p, const Ref& q) { return p.bin < q.bin; });
+    return refs;
+}
+
+// Adds the tables of the blocks, in block order, into one table sorted by bin.
+py::tuple merge_tables(const std::vector<Table>& tables) {
+    const std::vector<Ref> refs = sorted_refs(tables);
     int64_t total = 0;
     for (size_t i = 0; i < refs.size(); ++i)
         if (i == 0 || refs[i].bin != refs[i - 1].bin) ++total;
@@ -534,6 +536,37 @@ py::tuple bin_sweep_py(const DArray& azimuth, const DArray& elevation, const DAr
         for (int c = 0; c < N_STATS; ++c) so[at * N_STATS + c] += src[c];
     }
     return py::make_tuple(bins, stats);
+}
+
+}  // namespace
+
+// Returns (bins, stats): the table of the sweep sorted by bin, bins (n,) int64 and
+// stats (n, N_STATS) float64. An empty array for dbz, vr or rho means that the sweep has no
+// such field.
+py::tuple bin_sweep_py(const DArray& azimuth, const DArray& elevation, const DArray& range,
+                       const DArray& dbz, const DArray& vr, const DArray& rho, double lat0,
+                       double lon0, double alt0, double reff, double rearth, double max_range,
+                       double min_ground, const DArray& edges, bool clear, double vmax,
+                       double rho_min, int mode, double box, int64_t half, int64_t cells,
+                       int64_t nbx_blocks, double lat_ref, double lon_ref,
+                       const GridIndex* index, int n_threads) {
+    check_sweep(azimuth, elevation, range, dbz, vr, rho, edges, mode, box, cells, index);
+    const int64_t nray = azimuth.shape(0);
+    const Fields fields = make_fields(range, dbz, vr, rho);
+    const Setup setup = make_setup(lat0, lon0, alt0, reff, rearth, max_range, min_ground, edges,
+                                   clear, vmax, rho_min, mode, box, half, cells, nbx_blocks,
+                                   lat_ref, lon_ref, index);
+    const int64_t nblocks = (nray + kBlockRays - 1) / kBlockRays;
+    std::vector<Table> tables(nblocks);
+    {
+        py::gil_scoped_release release;
+        parallel_blocks(nblocks, n_threads, [&](int64_t b) {
+            const int64_t r0 = b * kBlockRays;
+            const int64_t r1 = std::min(nray, r0 + kBlockRays);
+            tables[b] = sum_block(r0, r1, azimuth.data(), elevation.data(), fields, setup);
+        });
+    }
+    return merge_tables(tables);
 }
 
 PYBIND11_MODULE(_superobs, m) {
