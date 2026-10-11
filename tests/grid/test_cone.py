@@ -362,3 +362,46 @@ def test_motion_must_be_a_pair():
     dtree, _, _ = _moving_blob_volume(0.0, 0.0)
     with pytest.raises(ValueError, match="motion"):
         cone.grid_cones(dtree, "DBZH", **GRID, motion=5.0)
+
+
+def test_negative_fill_depth_is_rejected():
+    with pytest.raises(ValueError, match="fill_depth must not be negative"):
+        cone.grid_cones(_volume(), "DBZH", **GRID, fill_depth=-1.0)
+    assert cone._fill_depth(None) == np.inf
+    assert cone._fill_depth(0) == 0.0
+
+
+def _timed_sweep(offsets_s, t0="2026-01-01T00:00:00"):
+    """A sweep dataset whose rays are ``offsets_s`` seconds after ``t0``."""
+    t = np.datetime64(t0, "ns") + np.array(offsets_s) * np.timedelta64(1, "s")
+    return xr.Dataset({"time": ("azimuth", t)}, coords={"azimuth": np.arange(t.size)})
+
+
+def test_mean_time_of_a_sweep():
+    t0 = np.datetime64("2026-01-01T00:00:00", "ns")
+    sec = np.timedelta64(1, "s")
+    assert cone._mean_time(_timed_sweep([0, 30, 60, 90])) == t0 + 45 * sec
+    nat = np.datetime64("NaT", "ns")
+    # NaT rays are left out
+    holey = _timed_sweep([0, 60, 0])
+    holey["time"][2] = nat
+    assert cone._mean_time(holey) == t0 + 30 * sec
+    # no time, or only NaT: the mean is NaT
+    assert np.isnat(cone._mean_time(xr.Dataset({"x": ("azimuth", [1.0, 2.0])})))
+    only_nat = _timed_sweep([0, 0])
+    only_nat["time"][:] = nat
+    assert np.isnat(cone._mean_time(only_nat))
+
+
+def test_mean_time_of_a_volume():
+    t0 = np.datetime64("2026-01-01T00:00:00", "ns")
+    sec = np.timedelta64(1, "s")
+    a, b = _timed_sweep([0, 20]), _timed_sweep([40, 100])
+    assert cone._volume_time([a, b]) == t0 + 40 * sec
+    # sweeps without a time are ignored; none at all, or only NaT, gives NaT
+    bare = xr.Dataset({"x": ("azimuth", [1.0])})
+    assert cone._volume_time([bare, a]) == t0 + 10 * sec
+    assert np.isnat(cone._volume_time([bare]))
+    only_nat = _timed_sweep([0, 0])
+    only_nat["time"][:] = np.datetime64("NaT", "ns")
+    assert np.isnat(cone._volume_time([only_nat, bare]))
