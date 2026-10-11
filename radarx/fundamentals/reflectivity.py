@@ -162,6 +162,17 @@ def _hitschfeld_bordan_numpy(dbz, dr_km, a, b, max_pia):
     return np.where(missing, np.nan, pia)
 
 
+def _use_compiled(engine):
+    """Whether to run the compiled kernel for the requested ``engine``."""
+    if engine not in ("auto", "compiled", "numpy"):
+        raise ValueError(
+            f"engine must be 'auto', 'compiled' or 'numpy', not {engine!r}"
+        )
+    if engine == "compiled" and not HAS_COMPILED_KERNEL:
+        raise ImportError("the compiled Hitschfeld-Bordan kernel is not available")
+    return HAS_COMPILED_KERNEL and engine != "numpy"
+
+
 def _pia_last_axis(dbz, dr_km, a, b, max_pia, use_compiled, n_threads):
     """The PIA of an array whose last axis is the range."""
     dbz = np.asarray(dbz, dtype=np.float64)
@@ -184,13 +195,14 @@ def hitschfeld_bordan_correction(
     range_dim="range",
     axis=-1,
     return_pia=False,
-    use_compiled=True,
-    n_threads=0,
+    n_threads=None,
+    engine="auto",
+    use_compiled=None,
 ):
     """
     Correct reflectivity for attenuation along the ray (Hitschfeld-Bordan).
 
-    The specific attenuation is the power law ``k = a Z**b`` [dB/km] of the
+    The specific attenuation is the power law ``k = a Z**b`` [dB km-1] of the
     unattenuated reflectivity ``Z`` [mm^6 m^-3]. The measured reflectivity
     is ``Zm = Z 10**(-0.2 A)`` with ``A`` the one-way integral of ``k`` along
     the ray (a two-way attenuation of ``2 A`` dB). Hitschfeld and Bordan [1]_
@@ -221,7 +233,7 @@ def hitschfeld_bordan_correction(
     local value of the reflectivity.
 
     The calculation runs in a compiled multithreaded kernel with a NumPy
-    fallback of the same results (``use_compiled=False`` selects it).
+    fallback of the same results (``engine="numpy"`` selects it).
 
     Parameters
     ----------
@@ -244,10 +256,13 @@ def hitschfeld_bordan_correction(
         Range axis of an array.
     return_pia : bool, optional
         Also return the correction ``PIA`` [dB] (two-way).
-    use_compiled : bool, optional
-        Use the compiled kernel if it was built.
     n_threads : int, optional
-        Threads of the compiled kernel, 0 for all cores.
+        Threads of the compiled kernel. Default: all cores.
+    engine : {"auto", "compiled", "numpy"}, optional
+        Kernel implementation. ``"auto"`` uses the compiled kernel if it was
+        built.
+    use_compiled : bool, optional
+        Deprecated. ``False`` is ``engine="numpy"``.
 
     Returns
     -------
@@ -263,6 +278,16 @@ def hitschfeld_bordan_correction(
            **11** (1), 58-67,
            https://doi.org/10.1175/1520-0469(1954)011<0058:EIITRM>2.0.CO;2
     """
+    if use_compiled is not None:
+        warnings.warn(
+            "hitschfeld_bordan_correction(): the argument 'use_compiled' is "
+            "deprecated and will be removed in a future release; use "
+            "engine='numpy' for False",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        engine = "auto" if use_compiled else "numpy"
+    compiled = _use_compiled(engine)
     a, b, cap = float(a), float(b), float(max_correction_db)
     if not (np.isfinite(a) and a >= 0.0):
         raise ValueError(f"a must be finite and not negative, got {a}")
@@ -293,7 +318,7 @@ def hitschfeld_bordan_correction(
         a=a,
         b=b,
         max_pia=cap,
-        use_compiled=use_compiled,
+        use_compiled=compiled,
         n_threads=n_threads,
     )
 

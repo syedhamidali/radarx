@@ -87,9 +87,10 @@ import warnings
 import numpy as np
 import xarray as xr
 
+from .._compat import renamed_arguments
 from .._fields import VELOCITY, as_sweep, find_field
 from .._provenance import provenance
-from .._registry import accessor_method
+from .._registry import accessor_for
 from ._products import product_tree
 
 try:
@@ -815,7 +816,7 @@ def _storm_mask(ds, sweeps, dbz_name, angle, threshold, distance, n_threads, com
     src = _reflectivity_sweep(ds, sweeps, dbz_name, angle)
     if src is None:
         raise ValueError(
-            f"min_reflectivity needs {dbz_name!r} in the sweep or in a sweep "
+            f"min_dbz needs {dbz_name!r} in the sweep or in a sweep "
             "within 0.2 degrees of its elevation angle"
         )
     da = src[dbz_name]
@@ -839,6 +840,7 @@ def _storm_mask(ds, sweeps, dbz_name, angle, threshold, distance, n_threads, com
     return out
 
 
+@renamed_arguments(reflectivity="dbz", min_reflectivity="min_dbz")
 @provenance(
     "Layer-maximum azimuthal shear over the tilts of a volume (MRMS-style)",
     extra_refs=("smith-elmore-2004",),
@@ -857,8 +859,8 @@ def azimuthal_shear_layer_max(
     mask=None,
     exclude=None,
     nodata="auto",
-    reflectivity=None,
-    min_reflectivity=None,
+    dbz=None,
+    min_dbz=None,
     reflectivity_distance=5000.0,
     rotation="cyclonic",
     n_threads=None,
@@ -900,10 +902,10 @@ def azimuthal_shear_layer_max(
         shear is computed here with :func:`llsd`.
     window, weights, min_valid_fraction, median_filter, mask, exclude, nodata
         Options of :func:`llsd` for the shear computed here.
-    reflectivity : str, optional
-        Reflectivity field for ``min_reflectivity``. Default: the first of
+    dbz : str, optional
+        Reflectivity field for ``min_dbz``. Default: the first of
         ``DBZH``, ``DBZ`` and ``reflectivity`` in the volume.
-    min_reflectivity : float, optional
+    min_dbz : float, optional
         If given (MRMS: 20 dBZ), the shear of a tilt is left out at gates with
         no reflectivity of at least this value within
         ``reflectivity_distance``, before the maximum is taken
@@ -1001,8 +1003,8 @@ def azimuthal_shear_layer_max(
     name = shear if shear is not None else find_field(obj, VELOCITY, field)
     sweeps = _volume_sweeps(obj)
     dbz_name = None
-    if min_reflectivity is not None:
-        dbz_name = find_field(obj, _REFLECTIVITY, reflectivity)
+    if min_dbz is not None:
+        dbz_name = find_field(obj, _REFLECTIVITY, dbz)
     holders = [(n, ds) for n, ds in sweeps if name in ds.data_vars]
     if not holders:
         raise ValueError(f"No sweep contains {name!r}.")
@@ -1047,13 +1049,13 @@ def azimuthal_shear_layer_max(
             values = np.ascontiguousarray(
                 da.transpose(ray_dim, "range").values, dtype=np.float64
             )
-            if min_reflectivity is not None:
+            if min_dbz is not None:
                 near = _storm_mask(
                     ds,
                     sweeps,
                     dbz_name,
                     angles[n],
-                    min_reflectivity,
+                    min_dbz,
                     reflectivity_distance,
                     n_threads,
                     compiled,
@@ -1111,8 +1113,8 @@ def azimuthal_shear_layer_max(
         "tilts_used": len(arrays),
         "source_field": name,
     }
-    if min_reflectivity is not None:
-        attrs["min_reflectivity_dbz"] = float(min_reflectivity)
+    if min_dbz is not None:
+        attrs["min_reflectivity_dbz"] = float(min_dbz)
         attrs["reflectivity_distance_m"] = float(reflectivity_distance)
     if shear is None:
         attrs["window_range_m"] = float(window[0])
@@ -1137,17 +1139,10 @@ def azimuthal_shear_layer_max(
         coords=template.coords,
         attrs={
             "long_name": "elevation angle of the tilt that gave the layer maximum",
-            "units": "degrees",
+            "units": "degree",
         },
     ).transpose(*da_ref.dims)
     return out
 
 
-@accessor_method("datatree", name="azimuthal_shear_layer_max")
-def _azimuthal_shear_layer_max_accessor(
-    self, field=None, layer=(0.0, 2000.0), **kwargs
-):
-    return azimuthal_shear_layer_max(self.xarray_obj, field, layer, **kwargs)
-
-
-_azimuthal_shear_layer_max_accessor.__doc__ = azimuthal_shear_layer_max.__doc__
+accessor_for(azimuthal_shear_layer_max, "datatree")

@@ -532,8 +532,8 @@ def _flux_ratio(zs, ss, z_out):
     return np.interp(z_out, zs, ss)
 
 
-@accessor_method("dataarray", name="rain_shaft")
-def _rain_shaft_accessor(self, **kwargs):
+@accessor_method("dataarray", name="rain_shaft", wraps=rain_shaft)
+def _rain_shaft_accessor(self):
     """
     Drop size distribution below the top of a rain shaft, with collisions.
 
@@ -546,4 +546,3 @@ def _rain_shaft_accessor(self, **kwargs):
         ``dsd``, ``number_concentration``, ``liquid_water_content`` and
         ``rain_rate`` at the requested depths.
     """
-    return rain_shaft(self.xarray_obj, **kwargs)

@@ -988,8 +988,10 @@ def correct_zdr_noise(
 # --------------------------------------------------------------------------
 
 
-@accessor_method("dataarray", "dataset", "datatree", name="noise_level")
-def _noise_level_accessor(self, **kwargs):
+@accessor_method(
+    "dataarray", "dataset", "datatree", name="noise_level", wraps=noise_level
+)
+def _noise_level_accessor(self):
     """
     Noise level of a sweep or volume as the reflectivity of the noise at 1 km.
 
@@ -1000,11 +1002,10 @@ def _noise_level_accessor(self, **kwargs):
     xarray.Dataset or xarray.DataTree
         ``NOISE_LEVEL`` (dBZ) and ``NOISE_SAMPLES``.
     """
-    return noise_level(self.xarray_obj, **kwargs)
 
 
-@accessor_method("dataarray", "dataset", "datatree", name="snr")
-def _snr_accessor(self, **kwargs):
+@accessor_method("dataarray", "dataset", "datatree", name="snr", wraps=snr)
+def _snr_accessor(self):
     """
     Signal-to-noise ratio of every gate.
 
@@ -1015,11 +1016,16 @@ def _snr_accessor(self, **kwargs):
     xarray.DataArray or xarray.DataTree
         ``SNR`` (dB).
     """
-    return snr(self.xarray_obj, **kwargs)
 
 
-@accessor_method("dataarray", "dataset", "datatree", name="correct_rhohv_noise")
-def _correct_rhohv_noise_accessor(self, **kwargs):
+@accessor_method(
+    "dataarray",
+    "dataset",
+    "datatree",
+    name="correct_rhohv_noise",
+    wraps=correct_rhohv_noise,
+)
+def _correct_rhohv_noise_accessor(self):
     """
     Copolar correlation coefficient corrected for noise.
 
@@ -1030,11 +1036,16 @@ def _correct_rhohv_noise_accessor(self, **kwargs):
     xarray.DataArray or xarray.DataTree
         The corrected ``RHOHV``.
     """
-    return correct_rhohv_noise(self.xarray_obj, **kwargs)
 
 
-@accessor_method("dataarray", "dataset", "datatree", name="correct_zdr_noise")
-def _correct_zdr_noise_accessor(self, **kwargs):
+@accessor_method(
+    "dataarray",
+    "dataset",
+    "datatree",
+    name="correct_zdr_noise",
+    wraps=correct_zdr_noise,
+)
+def _correct_zdr_noise_accessor(self):
     """
     Differential reflectivity corrected for noise.
 
@@ -1045,4 +1056,3 @@ def _correct_zdr_noise_accessor(self, **kwargs):
     xarray.DataArray or xarray.DataTree
         The corrected ``ZDR`` (dB).
     """
-    return correct_zdr_noise(self.xarray_obj, **kwargs)

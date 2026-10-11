@@ -583,6 +583,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
+from .._compat import renamed_arguments
 from .._provenance import provenance
 from . import _lagrangian_numpy as _nk
 from . import lagrangian as _traj
@@ -840,15 +841,15 @@ def _scale_graupel(qg, ng, rho, rhog, scale):
     return np.where(ok, qg2, qg), np.where(ok, ng2, ng)
 
 
-def _dbz_name(ds, dbzh):
-    if dbzh not in (None, "auto"):
-        if dbzh not in ds:
-            raise ValueError(f"reflectivity {dbzh!r} not found")
-        return dbzh
+def _dbz_name(ds, dbz):
+    if dbz not in (None, "auto"):
+        if dbz not in ds:
+            raise ValueError(f"reflectivity {dbz!r} not found")
+        return dbz
     for name in _traj._REFLECTIVITY:
         if name in ds:
             return name
-    raise ValueError("no reflectivity variable found; pass dbzh=")
+    raise ValueError("no reflectivity variable found; pass dbz=")
 
 
 def _like(ds, name):
@@ -884,14 +885,15 @@ def _closure_output(ref, qr, nr, qg, ng, attrs):
     )
 
 
+@renamed_arguments(radar="obj", dbzh="dbz")
 @provenance(
     "Rain and graupel from polarimetric data, radarx's own closure after Ziegler (2013a)"
 )
 def polarimetric_precipitation(
-    radar,
+    obj,
     base,
     *,
-    dbzh="auto",
+    dbz="auto",
     zdr=None,
     kdp=None,
     hid="auto",
@@ -905,8 +907,8 @@ def polarimetric_precipitation(
     graupel_density=(690.0, 630.0),
     melting_layer=None,
     melting_depth=1000.0,
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Rain and graupel from polarimetric radar data (default DLA closure).
@@ -946,17 +948,17 @@ def polarimetric_precipitation(
 
     Parameters
     ----------
-    radar : xarray.Dataset
+    obj : xarray.Dataset
         Reflectivity (dBZ), differential reflectivity (dB) and optionally
         :math:`K_{DP}` and an HID on the analysis grid ``(time, z, y, x)``.
     base : xarray.Dataset
         Base state on ``z`` with ``rho`` and the attributes
         ``ground_height`` and ``melting_level`` (m above the ground), as
         passed by :func:`diabatic_lagrangian`.
-    dbzh, zdr : str, optional
+    dbz, zdr : str, optional
         Variable names (default: found automatically).
     kdp : str, optional
-        :math:`K_{DP}` variable (degrees/km). Default: not used.
+        :math:`K_{DP}` variable (degree km-1). Default: not used.
     hid : str or None, optional
         Hydrometeor classification (``flag_meanings`` attribute as written by
         :func:`radarx.retrieve.hid`); classes whose names contain "graupel" or
@@ -1012,10 +1014,10 @@ def polarimetric_precipitation(
     """
     from .dsd import dsd
 
-    zname = _dbz_name(radar, dbzh)
-    ref = _like(radar, zname)
+    zname = _dbz_name(obj, dbz)
+    ref = _like(obj, zname)
     zh = np.asarray(ref.values, float)
-    zz = np.asarray(radar["z"].values, float)
+    zz = np.asarray(obj["z"].values, float)
     zax = ref.dims.index("z")
     shape = [1] * ref.ndim
     shape[zax] = zz.size
@@ -1046,7 +1048,7 @@ def polarimetric_precipitation(
                     "differential_reflectivity",
                     "corrected_differential_reflectivity",
                 )
-                if n in radar
+                if n in obj
             ),
             None,
         )
@@ -1055,10 +1057,10 @@ def polarimetric_precipitation(
     zr = np.zeros(zh.shape)
     dsd_ok = np.zeros(zh.shape, bool)
     if dname is not None:
-        sub = radar[[zname, dname] + ([kdp] if kdp else [])]
+        sub = obj[[zname, dname] + ([kdp] if kdp else [])]
         d = dsd(
             sub,
-            dbzh=zname,
+            dbz=zname,
             zdr=dname,
             kdp=kdp,
             band=band,
@@ -1090,10 +1092,10 @@ def polarimetric_precipitation(
         warnings.warn(
             "no ZDR: rain from reflectivity with a fixed intercept", stacklevel=3
         )
-    hname = ("HID" if "HID" in radar else None) if hid == "auto" else hid
+    hname = ("HID" if "HID" in obj else None) if hid == "auto" else hid
     hid_g = np.zeros(zh.shape, bool)
     if hname is not None:
-        h = _like(radar, hname)
+        h = _like(obj, hname)
         names = str(h.attrs.get("flag_meanings", "")).split()
         codes = np.asarray(h.attrs.get("flag_values", np.arange(1, len(names) + 1)))
         gcodes = [int(c) for c, n in zip(codes, names) if "graupel" in n or "hail" in n]
@@ -1218,14 +1220,15 @@ def ziegler2013_profiles(name="cm1_squall_line"):
     )
 
 
+@renamed_arguments(radar="obj", dbzh="dbz")
 @provenance("Rain and graupel from reflectivity, closure of Ziegler (2013a)")
 def ziegler2013_precipitation(
-    radar,
+    obj,
     base,
     *,
     profiles=None,
     w="w",
-    dbzh="auto",
+    dbz="auto",
     constants=None,
     freezing_height=None,
     graupel_scale=1.0,
@@ -1266,7 +1269,7 @@ def ziegler2013_precipitation(
 
     Parameters
     ----------
-    radar : xarray.Dataset
+    obj : xarray.Dataset
         Reflectivity (dBZ) and vertical velocity on ``(time, z, y, x)``.
     base : xarray.Dataset
         Base state as passed by :func:`diabatic_lagrangian`.
@@ -1281,7 +1284,7 @@ def ziegler2013_precipitation(
         a warning. Values beyond the profile take the nearest end.
     w : str, optional
         Vertical velocity variable. Default ``"w"``.
-    dbzh : str, optional
+    dbz : str, optional
         Reflectivity variable. Default: found automatically.
     constants : dict, optional
         Overrides of :data:`ZIEGLER_CONSTANTS` (Z13a Table 2: ``eps_r``,
@@ -1335,11 +1338,11 @@ def ziegler2013_precipitation(
         if unknown:
             raise ValueError(f"unknown constants: {sorted(unknown)}")
         c.update(constants)
-    zname = _dbz_name(radar, dbzh)
-    ref = _like(radar, zname)
+    zname = _dbz_name(obj, dbz)
+    ref = _like(obj, zname)
     zh = np.asarray(ref.values, float)
-    ww = np.asarray(_like(radar, w).values, float)
-    zz = np.asarray(radar["z"].values, float)
+    ww = np.asarray(_like(obj, w).values, float)
+    zz = np.asarray(obj["z"].values, float)
     zax = ref.dims.index("z")
     shape = [1] * ref.ndim
     shape[zax] = zz.size
@@ -1468,8 +1471,8 @@ def microphysical_rates(
     rho0=1.2,
     dt=20.0,
     processes=None,
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     LFO83 microphysical rates and the resulting DLA tendencies.
@@ -1917,6 +1920,7 @@ def _run_kernel(
     )
 
 
+@renamed_arguments(reflectivity="dbz")
 @provenance(
     "Diabatic Lagrangian analysis of Ziegler (2013a, b), radarx choices where silent"
 )
@@ -1947,14 +1951,14 @@ def diabatic_lagrangian(
     u="u",
     v="v",
     w="w",
-    reflectivity="auto",
+    dbz="auto",
     termination=True,
     boundary="environment",
     valid=None,
     environment_mask=None,
     min_valid_fraction=None,
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Diabatic Lagrangian analysis (DLA) of Ziegler (2013a, b) [1, 2].
@@ -2050,7 +2054,7 @@ def diabatic_lagrangian(
         Passes of the nine-point low-pass filter. Default 1; 0 for none (Z13a
         sect. 2a applies one light smoothing; the number of passes and the
         weights are radarx choices).
-    u, v, w, reflectivity : str, optional
+    u, v, w, dbz : str, optional
         Variable names, see :func:`radarx.retrieve.trajectories`.
     termination : {True, "ziegler2013", "precipitation"}, optional
         Environment test of the trajectories, see
@@ -2068,10 +2072,10 @@ def diabatic_lagrangian(
         Grid points whose trajectory spent a smaller fraction of its points in
         valid winds are set missing (flag 64) before hole filling. Default:
         not applied (``valid_fraction`` is still returned).
-    engine : {"auto", "compiled", "numpy"}, optional
-        Implementation. ``"auto"`` (default) prefers the compiled kernel.
     n_threads : int, optional
         Threads of the compiled kernel. Default: all cores.
+    engine : {"auto", "compiled", "numpy"}, optional
+        Implementation. ``"auto"`` (default) prefers the compiled kernel.
 
     Returns
     -------
@@ -2123,7 +2127,7 @@ def diabatic_lagrangian(
         u=u,
         v=v,
         w=w,
-        reflectivity=reflectivity,
+        reflectivity=dbz,
         storm_motion=storm_motion,
         extend=extend,
         surface_downdraft_on=on["surface_downdraft"],
@@ -2362,8 +2366,8 @@ def diabatic_lagrangian(
 from .._registry import accessor_method  # noqa: E402
 
 
-@accessor_method("dataset", name="diabatic_lagrangian")
-def _diabatic_lagrangian_dataset_accessor(self, sounding, time=None, **kwargs):
+@accessor_method("dataset", name="diabatic_lagrangian", wraps=diabatic_lagrangian)
+def _diabatic_lagrangian_dataset_accessor(self):
     """
     Diabatic Lagrangian analysis of the winds and radar data in this dataset.
 
@@ -2375,4 +2379,3 @@ def _diabatic_lagrangian_dataset_accessor(self, sounding, time=None, **kwargs):
         Potential temperature, humidity, cloud water and virtual buoyancy at
         the analysis time.
     """
-    return diabatic_lagrangian(self.xarray_obj, sounding, time, **kwargs)

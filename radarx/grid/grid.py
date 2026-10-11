@@ -33,6 +33,7 @@ __doc__ = __doc__.format("\n   ".join(__all__))
 import numpy as np
 import xarray as xr
 
+from .._compat import keyword_only_after, renamed_arguments
 from .._provenance import provenance
 from ..utils import find_multidim_vars, get_geocoords  #  noqa
 
@@ -63,14 +64,15 @@ def _sweep_dataset(dtree, name):
         return dtree[name].to_dataset()
 
 
+@renamed_arguments(dtree="obj")
 @provenance("Stacking of georeferenced gates into points (no published method)")
-def stack_data(dtree, data_vars=None, geo=False):
+def stack_data(obj, data_vars=None, geo=False):
     """
     Stack data from a radar DataTree into a single xarray Dataset.
 
     Parameters
     ----------
-    dtree : xradar.DataTree
+    obj : xradar.DataTree
         The input DataTree containing radar data.
     data_vars : list of str or None, optional
         A list of variables to stack. If None, all variables with more
@@ -89,9 +91,9 @@ def stack_data(dtree, data_vars=None, geo=False):
     xradar (4/3 effective Earth radius model) and stacked into one point
     dimension.
     """
-    dtree = dtree.xradar.georeference()
+    obj = obj.xradar.georeference()
     if geo:
-        dtree = dtree.xradar.map_over_sweeps(get_geocoords)
+        obj = obj.xradar.map_over_sweeps(get_geocoords)
         x, y, z = "lon", "lat", "alt"
     else:
         x, y, z = "x", "y", "z"
@@ -100,8 +102,8 @@ def stack_data(dtree, data_vars=None, geo=False):
     data_vars_dict = {}
 
     # Loop through sweeps
-    for swp in dtree.match("sweep_*"):
-        ds = _sweep_dataset(dtree, swp)
+    for swp in obj.match("sweep_*"):
+        ds = _sweep_dataset(obj, swp)
 
         # Find variables to include if data_vars is None
         if data_vars is None:  # pragma
@@ -141,8 +143,9 @@ def stack_data(dtree, data_vars=None, geo=False):
     return dataset
 
 
+@renamed_arguments(ds="obj")
 def make_3d_grid(
-    ds,
+    obj,
     x_lim=(-200e3, 200e3),
     y_lim=(-200e3, 200e3),
     x_step=1000,
@@ -156,7 +159,7 @@ def make_3d_grid(
 
     Parameters
     ----------
-    ds : xarray.Dataset
+    obj : xarray.Dataset
         Radar dataset with Cartesian coordinates.
     x_lim : tuple of float, optional
         The range of x-coords (m) in Cartesian space. Default is (-200e3, 200e3).
@@ -211,7 +214,7 @@ def make_3d_grid(
     y = np.arange(y_lim[0], y_lim[1] + y_step, y_step)
     z = np.arange(z_lim[0], z_lim[1] + z_step, z_step)
 
-    transformer, trg_crs = _lonlat_transformer(ds)
+    transformer, trg_crs = _lonlat_transformer(obj)
     # Longitude along y = 0 and latitude along x = 0: x and y are axes of the
     # grid, not paired points, so they may differ in length.
     lon, _ = transformer.transform(x, np.zeros_like(x))
@@ -236,9 +239,11 @@ def _lonlat_transformer(ds):
     return Transformer.from_crs(src_crs, trg_crs, always_xy=True), trg_crs
 
 
+@renamed_arguments(dtree="obj")
+@keyword_only_after("n_threads", "fill_depth", "fill_velocity", "k_e")
 @provenance("Radar volume gridding by cone interpolation or Barnes analysis")
 def grid_radar(
-    dtree,
+    obj,
     data_vars=None,
     pseudo_cappi=True,
     x_lim=(-100e3, 100e3),
@@ -251,10 +256,11 @@ def grid_radar(
     y_smth=0.2,
     z_smth=1,
     method="cone",
-    n_threads=None,
+    *,
     fill_depth=500.0,
     fill_velocity=False,
     k_e=4.0 / 3.0,
+    n_threads=None,
 ):
     """
     Interpolate radar data to a 3D grid and optionally create a pseudo-CAPPI.
@@ -268,7 +274,7 @@ def grid_radar(
 
     Parameters
     ----------
-    dtree : xradar.DataTree
+    obj : xradar.DataTree
         Input radar DataTree containing radar sweeps.
     data_vars : list of str, optional
         List of variables to interpolate. If None, all variables in the dataset
@@ -307,8 +313,6 @@ def grid_radar(
         too; they are not taken from Zürcher (2023).
     method : {"cone", "barnes"}, optional
         Interpolation method. Default ``"cone"``.
-    n_threads : int, optional
-        Threads for ``method="cone"``. Default: all cores.
     fill_depth : float, optional
         With ``method="cone"`` and ``pseudo_cappi=True``, the lowest sweep
         fills at most this many metres below itself and never below the radar
@@ -325,6 +329,8 @@ def grid_radar(
         1993, Eq. 2.28). Default 4/3. See
         :func:`radarx.fundamentals.geometry.k_e_from_refractivity`. Used by
         ``method="cone"``; the Barnes path georeferences with xradar's 4/3.
+    n_threads : int, optional
+        Threads for ``method="cone"``. Default: all cores.
 
     Returns
     -------
@@ -382,7 +388,7 @@ def grid_radar(
         y = np.arange(y_lim[0], y_lim[1] + y_step, y_step)
         z = np.arange(z_lim[0], z_lim[1] + z_step, z_step)
         return grid_cones(
-            dtree,
+            obj,
             data_vars,
             x,
             y,
@@ -406,8 +412,8 @@ def grid_radar(
             "package (Python < 3.13 only): 'pip install fast-barnes-py'. "
             "The default method='cone' has no extra dependencies."
         ) from err
-    ds = stack_data(dtree, data_vars=data_vars, geo=False)
-    sweep0 = _sweep_dataset(dtree, "sweep_0")
+    ds = stack_data(obj, data_vars=data_vars, geo=False)
+    sweep0 = _sweep_dataset(obj, "sweep_0")
     _, _, x, y, z, _ = make_3d_grid(
         sweep0,
         x_lim=x_lim,
@@ -499,6 +505,6 @@ def grid_radar(
         lat=(("y", "x"), np.asarray(lat), {"units": "degrees_north"}),
         lon=(("y", "x"), np.asarray(lon), {"units": "degrees_east"}),
     )
-    ds_out_fast.attrs = dict(dtree.attrs)
+    ds_out_fast.attrs = dict(obj.attrs)
     ds_out_fast.attrs["radar_name"] = ds_out_fast.attrs.get("instrument_name", "")
     return ds_out_fast

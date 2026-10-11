@@ -13,7 +13,7 @@ differential phase :math:`K_{DP} = \\frac{1}{2}\\, d\\Phi_{DP}/dr`.
 Every ray is processed independently along range:
 
 1. **Masking.** Gates count as meteorological where :math:`\\Psi_{DP}` is
-   finite, :math:`\\rho_{hv}` reaches ``rhohv_min`` (default 0.85, the level
+   finite, :math:`\\rho_{hv}` reaches ``min_rhohv`` (default 0.85, the level
    below which Park et al. 2009 [3] consider the data contaminated by
    non-meteorological scatterers, p. 736) and the texture of
    :math:`\\Psi_{DP}` (its circular standard deviation over
@@ -198,6 +198,8 @@ __all__ = ["estimate_kdp"]
 import numpy as np
 import xarray as xr
 
+from .._compat import renamed_arguments
+from .._dtypes import fields_as_float32
 from .._fields import as_sweep
 from .._provenance import provenance
 from ._products import product_tree
@@ -255,12 +257,12 @@ def _wrap180(d):
     return d - 360.0 * np.floor(d / 360.0 + 0.5)
 
 
-def _valid_mask(phi, rho, rhohv_min, htex, tex_limit, mode=0, tex_max=20.0):
+def _valid_mask(phi, rho, min_rhohv, htex, tex_limit, mode=0, tex_max=20.0):
     """Meteorological gates: finite phase, rhohv and phase texture tests."""
     base = np.isfinite(phi)
     if rho is not None:
         with np.errstate(invalid="ignore"):
-            base &= rho >= rhohv_min
+            base &= rho >= min_rhohv
     rad = np.where(base, np.deg2rad(np.where(base, phi, 0.0)), 0.0)
     c = np.where(base, np.cos(rad), 0.0)
     s = np.where(base, np.sin(rad), 0.0)
@@ -481,7 +483,7 @@ def _adaptive_hf(sigma, kdp_ref, cap, hk_short, dr, fraction):
 
 def _kdp_noise_factor(hpre, hk, dr, n_pass=0):
     """
-    Standard deviation of KDP (degrees/km) per degree of white phase noise:
+    Standard deviation of KDP (degree km-1) per degree of white phase noise:
     half the least-squares slope over 2*hk+1 gates of a phase filtered with
     ``_smooth(., hpre)`` (hpre 0: not filtered). ``n_pass``: the slope of the
     phase rebuilt by integrating KDP (Vulpiani) applied that many more times;
@@ -688,7 +690,7 @@ def _ml_features(phi, rho, z, dr, params, sign, mask=None):
     filled = np.where(good[:, None], _fill(psi, valid), 0.0)
     nr, ng = phi.shape
     feats = np.zeros((nr, len(ML_FEATURES), ng), dtype=np.float32)
-    # half the range derivative (degrees/km), scaled by 0.1
+    # half the range derivative (degree km-1), scaled by 0.1
     feats[:, 0] = 0.05 * np.gradient(filled, dr, axis=1)
     feats[:, 1] = valid
     if rho is not None:
@@ -802,7 +804,7 @@ def _run_ml(datasets, fields, params, model):
             _transpose_like(np.where(keep, delta, np.nan), sw, dims),
             {
                 "long_name": "Backscatter differential phase",
-                "units": "degrees",
+                "units": "degree",
                 "comment": "backscatter phase delta estimated by the network",
             },
         )
@@ -811,7 +813,7 @@ def _run_ml(datasets, fields, params, model):
             _transpose_like(np.where(keep, std, np.nan), sw, dims),
             {
                 "long_name": "Standard deviation of the specific differential phase",
-                "units": "degrees/km",
+                "units": "degree km-1",
                 "comment": "predicted by the network",
             },
         )
@@ -822,7 +824,7 @@ def _run_ml(datasets, fields, params, model):
             "range integral of the network KDP, fitted to the measured phase "
             "minus the backscatter phase (method='ml')"
         )
-        results.append(out)
+        results.append(fields_as_float32(out))
     return results
 
 
@@ -956,7 +958,7 @@ def _wrap_sweep(sweep, out, kdp, offset, method, sign, extra=None):
     phi_attrs = {
         "standard_name": "radar_differential_phase_hv",
         "long_name": "Processed differential phase HV",
-        "units": "degrees",
+        "units": "degree",
         "comment": (
             f"{phidp}{flipped} with the system offset removed, unfolded and "
             f"range filtered (method={method!r})"
@@ -967,12 +969,12 @@ def _wrap_sweep(sweep, out, kdp, offset, method, sign, extra=None):
     kdp_attrs = {
         "standard_name": "radar_specific_differential_phase_hv",
         "long_name": "Specific differential phase HV",
-        "units": "degrees/km",
+        "units": "degree km-1",
         "comment": "half the range derivative of the processed PHIDP",
     }
     off_attrs = {
         "long_name": "System differential phase offset",
-        "units": "degrees",
+        "units": "degree",
         "comment": f"in the convention of {phidp}",
     }
     out_ds = xr.Dataset(
@@ -991,7 +993,7 @@ def _wrap_sweep(sweep, out, kdp, offset, method, sign, extra=None):
                 delta,
                 {
                     "long_name": "Backscatter differential phase",
-                    "units": "degrees",
+                    "units": "degree",
                     "comment": (
                         "measured phase (unfolded, offset removed) minus the "
                         "processed phase at the valid gates: the part of the "
@@ -1006,7 +1008,7 @@ def _wrap_sweep(sweep, out, kdp, offset, method, sign, extra=None):
             unc,
             {
                 "long_name": "Standard deviation of the specific differential phase",
-                "units": "degrees/km",
+                "units": "degree km-1",
                 "comment": (
                     "phase noise of the ray (median absolute second difference) "
                     "propagated as white noise through the filter and the "
@@ -1024,7 +1026,7 @@ def _wrap_sweep(sweep, out, kdp, offset, method, sign, extra=None):
     for name in ("PHIDP_processed", "KDP", "PHIDP_BACKSCATTER", "KDP_UNCERTAINTY"):
         if name in out_ds:
             out_ds[name] = out_ds[name].transpose(*da.dims)
-    return out_ds
+    return fields_as_float32(out_ds)
 
 
 def _run(datasets, fields, params, n_threads, use_compiled):
@@ -1057,6 +1059,7 @@ def _run(datasets, fields, params, n_threads, use_compiled):
     ]
 
 
+@renamed_arguments(dbzh="dbz", rhohv_min="min_rhohv")
 @provenance(
     "Differential phase and KDP processing, radarx's own after published concepts",
     extra_refs=("maesaka-2012",),
@@ -1065,10 +1068,10 @@ def estimate_kdp(
     obj,
     phidp=None,
     rhohv=None,
-    dbzh=None,
+    dbz=None,
     *,
     method="hubbert",
-    rhohv_min=0.85,
+    min_rhohv=0.85,
     texture_window=2.0,
     texture_max=None,
     texture_method="circular",
@@ -1099,7 +1102,7 @@ def estimate_kdp(
         sweep node (``dtree["sweep_0"]``), or a volume with ``sweep_*`` groups,
         e.g. from xradar. Range gates must be uniformly spaced; ``range`` is
         in metres.
-    phidp, rhohv, dbzh : str, optional
+    phidp, rhohv, dbz : str, optional
         Names of the measured (raw) differential phase (degrees), the
         copolar correlation coefficient and the reflectivity (dBZ). By
         default the first name found is used: ``UPHIDP``, ``PHIDP``,
@@ -1115,7 +1118,7 @@ def estimate_kdp(
         Range filtering method, see :mod:`radarx.retrieve.kdp`.
         Default ``"hubbert"``. ``"ml"`` runs a neural network and needs
         ``pip install radarx[ml]`` and a registered model (see ``model``).
-    rhohv_min : float, optional
+    min_rhohv : float, optional
         Minimum :math:`\\rho_{hv}` of meteorological gates. Default 0.85, the
         level below which Park et al. (2009) [3] consider the data
         contaminated by non-meteorological scatterers (p. 736).
@@ -1189,7 +1192,7 @@ def estimate_kdp(
         as in Park et al. (2009) [3], p. 732 (they use ``Z > 40``, radarx
         ``Z >= 40``).
     kdp_bounds : (float, float), optional
-        ``"vulpiani"``: KDP values (degrees/km) outside these bounds are set
+        ``"vulpiani"``: KDP values (degree km-1) outside these bounds are set
         to zero in each iteration. Default ``(-2, 20)`` at S band (radarx
         choice); see ``band``.
     min_valid_fraction : float, optional
@@ -1222,7 +1225,7 @@ def estimate_kdp(
         For a sweep, a Dataset with the processed differential phase
         ``PHIDP_processed`` (degrees, increasing with range in rain; masked gates are
         bridged and gates beyond the first and last valid gate hold the end
-        values), ``KDP`` (degrees/km; NaN at non-meteorological gates), the
+        values), ``KDP`` (degree km-1; NaN at non-meteorological gates), the
         system offset ``PHIDP_OFFSET`` per ray (in the convention of the
         input phase) and the standard deviation ``KDP_UNCERTAINTY`` of KDP,
         on the input coordinates. ``method="hubbert"`` adds the backscatter
@@ -1349,7 +1352,7 @@ def estimate_kdp(
     params = {
         "method": METHODS.get(method, -1),
         "method_name": method,
-        "rhohv_min": float(rhohv_min),
+        "rhohv_min": float(min_rhohv),
         "texture_window": texture_window,
         "texture_max": float(texture_max),
         "texture_method": texture_method,
@@ -1367,7 +1370,7 @@ def estimate_kdp(
         "min_valid_fraction": float(min_valid_fraction),
         "phidp_sign": sign_value,
     }
-    fields = (phidp, rhohv, dbzh)
+    fields = (phidp, rhohv, dbz)
     if method == "ml":
 
         def run(datasets):

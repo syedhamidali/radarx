@@ -38,7 +38,7 @@ Single-drop scattering of raindrops, read by `radarx.retrieve.dsd`
   be applied to QVPs or sweeps above about 5 degrees without a correction.
 * Columns: `sigma_h`, `sigma_v` (backscatter cross sections, mm2),
   `copol_re`, `copol_im` (copolar correlation terms, mm2), `kdp`
-  (degrees/km per drop per m3), `ah`, `av` (dB/km per drop per m3).
+  (degree km-1 per drop per m3), `ah`, `av` (dB km-1 per drop per m3).
 
 ## `dsd_prior_perils2022.csv`
 

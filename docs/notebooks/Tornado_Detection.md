@@ -119,7 +119,7 @@ the velocity difference across each couplet.
 sweep = ktlx["sweep_1"].to_dataset(inherit="all_coords")
 sweep["VRADH"] = dealias_velocity(sweep.assign(VRADH=sweep.VRADH.where(sweep.VRADH > -63.9)))
 sweep = sweep.xradar.georeference()
-couplets = rotation_couplets(sweep, min_reflectivity=20.0)
+couplets = rotation_couplets(sweep, min_dbz=20.0)
 couplets.isel(couplet=slice(0, 5)).to_dataframe()[["azimuth", "range", "azimuthal_shear", "delta_v", "area"]]
 ```
 
@@ -163,7 +163,7 @@ tor = tornado_probability(inputs)
 sweep = kgwx["sweep_1"].to_dataset(inherit="all_coords")
 sweep["VRADH"] = dealias_velocity(sweep.assign(VRADH=sweep.VRADH.where(sweep.VRADH > -63.9)))
 sweep = sweep.xradar.georeference()
-couplets = rotation_couplets(sweep, min_reflectivity=20.0)
+couplets = rotation_couplets(sweep, min_dbz=20.0)
 show(inputs, sweep, tor, couplets, (-150, 150, -150, 150), "KGWX 2022-03-30 23:46 UTC")
 ```
 

@@ -1133,8 +1133,8 @@ _document(hail_kinetic_energy, warning=False, levels=False)
 # --------------------------------------------------------------------------
 
 
-@accessor_method("dataset", "datatree", name="hail_products")
-def _hail_products_accessor(self, **kwargs):
+@accessor_method("dataset", "datatree", name="hail_products", wraps=hail_products)
+def _hail_products_accessor(self):
     """
     SHI, MESH, POSH and hail kinetic energy flux of a volume, grid or profile.
 
@@ -1146,11 +1146,10 @@ def _hail_products_accessor(self, **kwargs):
         ``SHI``, ``MESH``, ``POSH``, ``SHI_WARNING_THRESHOLD``, ``HKE`` and
         ``SHI_TOP_TRUNCATED``.
     """
-    return hail_products(self.xarray_obj, **kwargs)
 
 
-@accessor_method("dataset", "datatree", name="shi")
-def _shi_accessor(self, **kwargs):
+@accessor_method("dataset", "datatree", name="shi", wraps=shi)
+def _shi_accessor(self):
     """
     Severe hail index of a volume, grid or profile.
 
@@ -1161,11 +1160,10 @@ def _shi_accessor(self, **kwargs):
     xarray.DataArray
         ``SHI`` (J m-1 s-1).
     """
-    return shi(self.xarray_obj, **kwargs)
 
 
-@accessor_method("dataset", "datatree", name="mesh")
-def _mesh_accessor(self, **kwargs):
+@accessor_method("dataset", "datatree", name="mesh", wraps=mesh)
+def _mesh_accessor(self):
     """
     Maximum expected size of hail of a volume, grid or profile.
 
@@ -1176,11 +1174,10 @@ def _mesh_accessor(self, **kwargs):
     xarray.DataArray
         ``MESH`` (mm).
     """
-    return mesh(self.xarray_obj, **kwargs)
 
 
-@accessor_method("dataset", "datatree", name="posh")
-def _posh_accessor(self, **kwargs):
+@accessor_method("dataset", "datatree", name="posh", wraps=posh)
+def _posh_accessor(self):
     """
     Probability of severe hail of a volume, grid or profile.
 
@@ -1191,11 +1188,12 @@ def _posh_accessor(self, **kwargs):
     xarray.DataArray
         ``POSH`` (%).
     """
-    return posh(self.xarray_obj, **kwargs)
 
 
-@accessor_method("dataset", "datatree", name="hail_kinetic_energy")
-def _hail_kinetic_energy_accessor(self, **kwargs):
+@accessor_method(
+    "dataset", "datatree", name="hail_kinetic_energy", wraps=hail_kinetic_energy
+)
+def _hail_kinetic_energy_accessor(self):
     """
     Hail kinetic energy flux of a volume, grid or profile.
 
@@ -1206,4 +1204,3 @@ def _hail_kinetic_energy_accessor(self, **kwargs):
     xarray.DataArray
         ``HKE`` (J m-2 s-1).
     """
-    return hail_kinetic_energy(self.xarray_obj, **kwargs)

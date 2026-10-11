@@ -639,7 +639,7 @@ def test_rotation_couplets_rankine():
         assert float(d.min()) > 400.0
     # reflectivity floor removes everything
     weak = ds.assign(DBZH=ds.DBZH * 0)
-    assert rotation_couplets(weak, min_reflectivity=20).sizes["couplet"] == 0
+    assert rotation_couplets(weak, min_dbz=20).sizes["couplet"] == 0
 
 
 def test_rotation_couplets_tree_and_errors():

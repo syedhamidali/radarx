@@ -185,6 +185,7 @@ __all__ = ["hid", "hid_classes"]
 import numpy as np
 import xarray as xr
 
+from .._compat import renamed_arguments
 from .._fields import align_like
 from .._provenance import provenance
 from .._registry import accessor_method
@@ -1207,6 +1208,7 @@ def _check_inputs(obj, temperature, mask, blockage, ml_gates):
     return lo, hi
 
 
+@renamed_arguments(dbzh="dbz")
 @provenance(
     "Fuzzy-logic hydrometeor classification after Park et al. (2009), Dolan et al. (2013)"
 )
@@ -1216,7 +1218,7 @@ def hid(
     *,
     band=None,
     method="auto",
-    dbzh=None,
+    dbz=None,
     zdr=None,
     kdp=None,
     rhohv=None,
@@ -1264,7 +1266,7 @@ def hid(
         Dolan et al. (2013)** and not the additive weighted sum of the 2009
         paper (see :mod:`radarx.retrieve.hid`). ``"thompson"`` is the winter
         classification of Thompson et al. (2014) [4].
-    dbzh, zdr, kdp, rhohv, phidp : str, optional
+    dbz, zdr, kdp, rhohv, phidp : str, optional
         Field names of the reflectivity (dBZ), differential reflectivity
         (dB), specific differential phase (°/km), copolar correlation
         coefficient and the processed (unfolded, offset-free) differential
@@ -1402,7 +1404,7 @@ def hid(
         "temperature": temperature,
         "mask": mask,
         "blockage": blockage,
-        "dbzh": dbzh,
+        "dbzh": dbz,
         "n_threads": n_threads,
         "need_height": table["mode"] == _WINTER,
         "sin_half_beam": float(np.sin(np.deg2rad(0.5 * float(beamwidth)))),
@@ -1416,7 +1418,7 @@ def hid(
         "want_scores": bool(scores),
     }
     table = dict(table, quality=table["quality"] and bool(quality))
-    fields = (dbzh, zdr, kdp, rhohv, phidp)
+    fields = (dbz, zdr, kdp, rhohv, phidp)
 
     if isinstance(obj, xr.Dataset):
         datasets = [_with_kdp(obj, fields, use_compiled, n_threads)]
@@ -1426,7 +1428,7 @@ def hid(
             name
             for name in obj.children
             if name.startswith("sweep")
-            and _find(obj[name].to_dataset(), dbzh, "dbzh") is not None
+            and _find(obj[name].to_dataset(), dbz, "dbzh") is not None
             and _find(obj[name].to_dataset(), zdr, "zdr") is not None
         ]
         if not names:
@@ -1455,7 +1457,7 @@ def _has_phase(ds):
 
 def _kdp_options(fields):
     dbzh, _, _, rhohv, _ = fields
-    return {"dbzh": dbzh, "rhohv": rhohv}
+    return {"dbz": dbzh, "rhohv": rhohv}
 
 
 def _with_kdp(ds, fields, use_compiled, n_threads):
@@ -1509,8 +1511,8 @@ def _with_kdp_tree(dtree, names, fields, use_compiled, n_threads):
     return datasets
 
 
-@accessor_method("dataset", name="hid")
-def _hid_dataset_accessor(self, temperature=None, *, band=None, **kwargs):
+@accessor_method("dataset", name="hid", wraps=hid)
+def _hid_dataset_accessor(self):
     """
     Classify hydrometeors with fuzzy logic for this sweep or grid.
 
@@ -1521,9 +1523,6 @@ def _hid_dataset_accessor(self, temperature=None, *, band=None, **kwargs):
         a temperature field or its name. Default: none.
     band : {"S", "C", "X"}, optional
         Radar band. Default None: from the radar frequency in the data.
-    **kwargs
-        Options of :func:`radarx.retrieve.hid`, e.g. ``method``, ``mask``
-        or the field names.
 
     Returns
     -------
@@ -1534,11 +1533,10 @@ def _hid_dataset_accessor(self, temperature=None, *, band=None, **kwargs):
     --------
     radarx.retrieve.hid
     """
-    return hid(self.xarray_obj, temperature, band=band, **kwargs)
 
 
-@accessor_method("datatree", name="hid")
-def _hid_datatree_accessor(self, temperature=None, *, band=None, **kwargs):
+@accessor_method("datatree", name="hid", wraps=hid)
+def _hid_datatree_accessor(self):
     """
     Classify hydrometeors with fuzzy logic for every sweep.
 
@@ -1553,9 +1551,6 @@ def _hid_datatree_accessor(self, temperature=None, *, band=None, **kwargs):
         or the name of a temperature field in each sweep. Default: none.
     band : {"S", "C", "X"}, optional
         Radar band. Default None: from the radar frequency in the data.
-    **kwargs
-        Options of :func:`radarx.retrieve.hid`, e.g. ``method``, ``mask``
-        or the field names.
 
     Returns
     -------
@@ -1567,4 +1562,3 @@ def _hid_datatree_accessor(self, temperature=None, *, band=None, **kwargs):
     --------
     radarx.retrieve.hid
     """
-    return hid(self.xarray_obj, temperature, band=band, **kwargs)

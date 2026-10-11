@@ -1051,8 +1051,8 @@ def rain_trajectories(
     scheme="rk4",
     evaporated_diameter=0.12,
     store_path=0,
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Trajectories of raindrops from source points to the ground.
@@ -1145,10 +1145,10 @@ def rain_trajectories(
         Keep the path every ``store_path`` steps as ``path_x``, ``path_y``,
         ``path_z``, ``path_diameter`` and ``path_time`` on a ``step`` axis.
         Default 0 (no path).
-    engine : {"auto", "compiled", "numpy"}, optional
-        Implementation. The NumPy reference gives the same results.
     n_threads : int, optional
         Threads of the compiled kernel. Default: all cores.
+    engine : {"auto", "compiled", "numpy"}, optional
+        Implementation. The NumPy reference gives the same results.
 
     Returns
     -------
@@ -1433,8 +1433,8 @@ def rain_source_points(
     scheme="rk4",
     evaporated_diameter=0.12,
     store_path=0,
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Source points and times aloft of drops arriving at the surface.
@@ -1949,8 +1949,8 @@ def trajectory_matched_times(
     evaporated_diameter=0.12,
     tolerance=1e-3,
     max_iterations=12,
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Times at which drops from a moving echo pattern reach a surface site.
@@ -2134,8 +2134,10 @@ def trajectory_matched_times(
     return ds.drop_vars(["landing_time"])
 
 
-@accessor_method("dataset", "datatree", name="rain_trajectories")
-def _rain_trajectories_accessor(self, diameter, **kwargs):
+@accessor_method(
+    "dataset", "datatree", name="rain_trajectories", wraps=rain_trajectories
+)
+def _rain_trajectories_accessor(self):
     """
     Trajectories of raindrops from the points of this object to the ground.
 
@@ -2149,4 +2151,3 @@ def _rain_trajectories_accessor(self, diameter, **kwargs):
         Landing positions and times, diameters, evaporated mass fractions and
         concentration ratios per source point and size.
     """
-    return rain_trajectories(self.xarray_obj, diameter, **kwargs)

@@ -58,7 +58,7 @@ def _radar(band, n0, mu, lam, temperature=20.0):
         {
             "DBZH": ("gate", 10 * np.log10(zh), {"units": "dBZ"}),
             "ZDR": ("gate", 10 * np.log10(zh / zv), {"units": "dB"}),
-            "KDP": ("gate", kdp, {"units": "degrees/km"}),
+            "KDP": ("gate", kdp, {"units": "degree km-1"}),
         },
         coords={"gate": np.arange(zh.size)},
     )
@@ -170,7 +170,7 @@ def test_kdp_intercept_is_immune_to_z_bias(method, engine):
     ref = dsd(ds, method, band="S", engine=engine)
     biased = ds.assign(DBZH=ds.DBZH + 3.0)
     off = dsd(biased, method, band="S", engine=engine)
-    on = dsd(biased, method, band="S", kdp="KDP", kdp_min=0.5, engine=engine)
+    on = dsd(biased, method, band="S", kdp="KDP", min_kdp=0.5, engine=engine)
     strong = ds.KDP.values >= 0.5
     assert strong.sum() > 20 and (~strong).sum() > 20
     np.testing.assert_allclose(on.NW.values[strong], ref.NW.values[strong], rtol=1e-3)
@@ -388,7 +388,7 @@ def test_options_and_errors(monkeypatch):
     with pytest.raises(ValueError, match="larger than -1"):
         dsd(ds, "normalized", band="S", mu=-1.0)
     with pytest.raises(KeyError, match="'Z'"):
-        dsd(ds, band="S", dbzh="Z")
+        dsd(ds, band="S", dbz="Z")
     with pytest.raises(KeyError, match="none of"):
         dsd(ds.drop_vars("ZDR"), band="S")
     with pytest.raises(KeyError, match="'K'"):
@@ -601,14 +601,14 @@ def test_kdp_intercept_blends_smoothly(engine):
     ks = np.array([0.95, 0.999, 1.001, 1.05])
     gates = xr.concat([biased.assign(KDP=biased.KDP * 0 + k) for k in ks], "gate")
     gates = gates.assign_coords(gate=np.arange(ks.size))
-    abrupt = dsd(gates, band="S", kdp="KDP", kdp_min=1.0, nw_range=None, engine=engine)
+    abrupt = dsd(gates, band="S", kdp="KDP", min_kdp=1.0, nw_range=None, engine=engine)
     jump = abs(np.log10(abrupt.NW.values[2] / abrupt.NW.values[1]))
     assert jump > 0.05
     smooth = dsd(
         gates,
         band="S",
         kdp="KDP",
-        kdp_min=1.0,
+        min_kdp=1.0,
         kdp_blend=1.0,
         nw_range=None,
         engine=engine,
@@ -624,7 +624,7 @@ def test_kdp_intercept_blends_smoothly(engine):
 def test_dsd_blend_and_offset_engines_agree():
     n0, mu, lam = _constrained_truth()
     ds = _radar("C", n0, mu, lam)
-    kw = dict(band="C", kdp="KDP", kdp_min=0.5, kdp_blend=2.0, zdr_offset=0.2)
+    kw = dict(band="C", kdp="KDP", min_kdp=0.5, kdp_blend=2.0, zdr_offset=0.2)
     a = dsd(ds, engine="numpy", **kw)
     b = dsd(ds, engine="compiled", **kw)
     for name in ("N0", "NW", "DM", "RAIN_RATE", "ZDR_CLIPPED"):

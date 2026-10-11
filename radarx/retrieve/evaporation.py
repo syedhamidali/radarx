@@ -1131,8 +1131,8 @@ def integrate_evaporation(
 # --------------------------------------------------------------------------
 
 
-@accessor_method("dataset", "datatree", name="evaporation")
-def _evaporation_accessor(self, environment=None, **kwargs):
+@accessor_method("dataset", "datatree", name="evaporation", wraps=evaporation)
+def _evaporation_accessor(self):
     """
     Evaporation and evaporative cooling rates of rain from a gamma DSD.
 
@@ -1145,11 +1145,10 @@ def _evaporation_accessor(self, environment=None, **kwargs):
     xarray.Dataset or xarray.DataTree
         Evaporation rate, cooling rates and reflectivity tendency.
     """
-    return evaporation(self.xarray_obj, environment, **kwargs)
 
 
-@accessor_method("dataset", name="integrate_evaporation")
-def _integrate_evaporation_accessor(self, environment=None, **kwargs):
+@accessor_method("dataset", name="integrate_evaporation", wraps=integrate_evaporation)
+def _integrate_evaporation_accessor(self):
     """
     Temperature and humidity of the air under a time series of DSDs.
 
@@ -1160,4 +1159,3 @@ def _integrate_evaporation_accessor(self, environment=None, **kwargs):
     xarray.Dataset
         Temperature, humidity, accumulated cooling and rates per time.
     """
-    return integrate_evaporation(self.xarray_obj, environment, **kwargs)

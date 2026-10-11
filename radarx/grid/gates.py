@@ -33,9 +33,9 @@ and :math:`d < R`, are
 
 The radius is :math:`R = \\max(R_0,\\; a\\,s + b\\,(z - z_0))` with the distance
 :math:`s` of the output point from the radar and its height above the radar
-:math:`z - z_0`. With ``roi_range_factor = tan(beam_width)`` the radius follows
+:math:`z - z_0`. With ``roi_range_factor = tan(beamwidth)`` the radius follows
 the width of the beam. The three parameters are those of the ``dist`` function
-of Py-ART (``min_radius``, ``xy_factor``, ``z_factor``) and ``beam_width`` is its
+of Py-ART (``min_radius``, ``xy_factor``, ``z_factor``) and ``beamwidth`` is its
 ``dist_beam`` term for the beam, so that the settings carry over from there.
 
 The work is done by a compiled C++ kernel (multithreaded, gates sorted into
@@ -58,6 +58,7 @@ __doc__ = __doc__.format("\n   ".join(__all__))
 import numpy as np
 import xarray as xr
 
+from .._compat import renamed_arguments
 from .._provenance import provenance
 from .._registry import accessor_method
 from . import cone
@@ -83,7 +84,7 @@ def _weighting(weighting):
         ) from None
 
 
-def _radius_parameters(roi, roi_range_factor, roi_height_factor, beam_width, min_gates):
+def _radius_parameters(roi, roi_range_factor, roi_height_factor, beamwidth, min_gates):
     """Validated ``(roi, range factor, height factor, min_gates)``."""
     roi = float(roi)
     if not np.isfinite(roi) or roi <= 0:
@@ -92,11 +93,11 @@ def _radius_parameters(roi, roi_range_factor, roi_height_factor, beam_width, min
     height_factor = float(roi_height_factor)
     if range_factor < 0 or height_factor < 0:
         raise ValueError("roi_range_factor and roi_height_factor must not be negative")
-    if beam_width is not None:
-        beam_width = float(beam_width)
-        if not 0.0 < beam_width < 90.0:
-            raise ValueError("beam_width must be between 0 and 90 degrees")
-        range_factor += float(np.tan(np.radians(beam_width)))
+    if beamwidth is not None:
+        beamwidth = float(beamwidth)
+        if not 0.0 < beamwidth < 90.0:
+            raise ValueError("beamwidth must be between 0 and 90 degrees")
+        range_factor += float(np.tan(np.radians(beamwidth)))
     min_gates = int(min_gates)
     if min_gates < 1:
         raise ValueError("min_gates must be at least 1")
@@ -261,7 +262,7 @@ def _map_fields(
     roi,
     roi_range_factor,
     roi_height_factor,
-    beam_width,
+    beamwidth,
     min_gates,
     k_e,
     motion,
@@ -273,7 +274,7 @@ def _map_fields(
     _weighting(weighting)
     use_compiled = _use_compiled(engine)
     roi, range_factor, height_factor, min_gates = _radius_parameters(
-        roi, roi_range_factor, roi_height_factor, beam_width, min_gates
+        roi, roi_range_factor, roi_height_factor, beamwidth, min_gates
     )
     k_e = cone._check_k_e(k_e)
     sweeps, site, site_coords = cone._load_volume(dtree)
@@ -343,13 +344,14 @@ def _describe(out, info, weighting, motion, time):
     return out
 
 
+@renamed_arguments(dtree="obj", beam_width="beamwidth")
 @provenance(
     "Radius-of-influence gridding of radar gates with Cressman and Barnes weights, "
     "radarx implementation; radius functions as in Py-ART",
     extra_refs=("doviak-zrnic-1993",),
 )
 def grid_gates(
-    dtree,
+    obj,
     data_vars=None,
     x=None,
     y=None,
@@ -359,7 +361,7 @@ def grid_gates(
     roi=1000.0,
     roi_range_factor=0.0,
     roi_height_factor=0.0,
-    beam_width=None,
+    beamwidth=None,
     min_gates=1,
     k_e=K_E,
     motion=None,
@@ -377,7 +379,7 @@ def grid_gates(
 
     Parameters
     ----------
-    dtree : xarray.DataTree
+    obj : xarray.DataTree
         Radar volume with ``sweep_*`` groups and the radar site ``latitude``,
         ``longitude`` and ``altitude``, e.g. from xradar.
     data_vars : str or list of str, optional
@@ -399,8 +401,8 @@ def grid_gates(
         output point from the radar, and per metre of height above the radar
         (Py-ART's ``xy_factor`` and ``z_factor``). Default 0: a constant
         radius.
-    beam_width : float, optional
-        Half-power beamwidth in degrees. When given, ``tan(beam_width)`` is
+    beamwidth : float, optional
+        Half-power beamwidth in degrees. When given, ``tan(beamwidth)`` is
         added to ``roi_range_factor``: the radius is the width of the beam at
         the distance of the output point (the ``dist_beam`` term of Py-ART), so
         that the weights reach as far as the gates of the beam do, at any range.
@@ -448,7 +450,7 @@ def grid_gates(
     radius :math:`R` as the cut-off. The Gaussian is
     :math:`\\exp(-d^2/\\kappa)` with :math:`\\kappa = R^2/4`, so the weight is
     0.018 at the radius. A radius that grows with the range and height is the
-    ``dist`` function of Py-ART [3]_, and ``beam_width`` its ``dist_beam`` term;
+    ``dist`` function of Py-ART [3]_, and ``beamwidth`` its ``dist_beam`` term;
     the formulas were read from the Py-ART source and are implemented here, not
     copied. The distance is Euclidean between the gate and the output point in
     metres, in the frame of the radar (beam height with the effective Earth
@@ -483,7 +485,7 @@ def grid_gates(
     >>> x = y = np.arange(-100e3, 100e3 + 1, 1000.0)  # doctest: +SKIP
     >>> z = np.arange(500.0, 10e3 + 1, 500.0)  # doctest: +SKIP
     >>> grid = radarx.grid.grid_gates(  # doctest: +SKIP
-    ...     dtree, "DBZH", x, y, z, weighting="barnes", roi=1500.0, beam_width=1.0
+    ...     dtree, "DBZH", x, y, z, weighting="barnes", roi=1500.0, beamwidth=1.0
     ... )
     """
     if x is None or y is None or z is None:
@@ -492,7 +494,7 @@ def grid_gates(
     _finite(x, y, z)
     cx, cy = (np.ascontiguousarray(a.ravel()) for a in np.meshgrid(x, y))
     fields, info = _map_fields(
-        dtree,
+        obj,
         data_vars,
         cx,
         cy,
@@ -501,7 +503,7 @@ def grid_gates(
         roi=roi,
         roi_range_factor=roi_range_factor,
         roi_height_factor=roi_height_factor,
-        beam_width=beam_width,
+        beamwidth=beamwidth,
         min_gates=min_gates,
         k_e=k_e,
         motion=motion,
@@ -513,7 +515,7 @@ def grid_gates(
         name: (("z", "y", "x"), field.reshape(z.size, y.size, x.size), attrs)
         for name, (field, attrs) in fields.items()
     }
-    out = cone._to_dataset(gridded, x, y, z, info["sweeps"], info["site"], dtree.attrs)
+    out = cone._to_dataset(gridded, x, y, z, info["sweeps"], info["site"], obj.attrs)
     out = _describe(out, info, weighting, motion, time)
     return cone._georeferenced(out, info["site_coords"], info["site"])
 
@@ -530,13 +532,14 @@ def _plane_azimuth(dtree, azimuth):
     return float(mean % 360.0)
 
 
+@renamed_arguments(dtree="obj", beam_width="beamwidth")
 @provenance(
     "Radius-of-influence gridding of radar gates with Cressman and Barnes weights, "
     "radarx implementation; radius functions as in Py-ART",
     extra_refs=("doviak-zrnic-1993",),
 )
 def grid_rhi(
-    dtree,
+    obj,
     data_vars=None,
     azimuth=None,
     distance=None,
@@ -546,7 +549,7 @@ def grid_rhi(
     roi=500.0,
     roi_range_factor=0.0,
     roi_height_factor=0.0,
-    beam_width=None,
+    beamwidth=None,
     min_gates=1,
     k_e=K_E,
     motion=None,
@@ -568,7 +571,7 @@ def grid_rhi(
 
     Parameters
     ----------
-    dtree : xarray.DataTree
+    obj : xarray.DataTree
         Radar volume with ``sweep_*`` groups and the radar site.
     data_vars : str or list of str, optional
         Fields to grid. By default every field present in the lowest sweep.
@@ -629,13 +632,13 @@ def grid_rhi(
         raise ValueError("distance and z target coordinates are required.")
     distance, z = (np.asarray(a, dtype=np.float64) for a in (distance, z))
     _finite(distance, z)
-    phi = _plane_azimuth(dtree, azimuth)
+    phi = _plane_azimuth(obj, azimuth)
     cx = np.ascontiguousarray(distance * np.sin(np.radians(phi)))
     cy = np.ascontiguousarray(distance * np.cos(np.radians(phi)))
     # the radius grows with the distance of the point from the radar, the plane
     # distance in this frame
     fields, info = _map_fields(
-        dtree,
+        obj,
         data_vars,
         cx,
         cy,
@@ -644,7 +647,7 @@ def grid_rhi(
         roi=roi,
         roi_range_factor=roi_range_factor,
         roi_height_factor=roi_height_factor,
-        beam_width=beam_width,
+        beamwidth=beamwidth,
         min_gates=min_gates,
         k_e=k_e,
         motion=motion,
@@ -667,7 +670,7 @@ def grid_rhi(
             "azimuth": (
                 (),
                 phi,
-                {"units": "degrees", "long_name": "azimuth of the section"},
+                {"units": "degree", "long_name": "azimuth of the section"},
             ),
         },
     )
@@ -676,14 +679,14 @@ def grid_rhi(
         out = out.assign_coords(
             time=xr.DataArray(np.concatenate(times).astype("datetime64[ns]")).mean()
         )
-    out.attrs = dict(dtree.attrs)
+    out.attrs = dict(obj.attrs)
     out.attrs["radar_name"] = out.attrs.get("instrument_name", "")
     out = _describe(out, info, weighting, motion, time)
     return out.assign_coords(info["site_coords"])
 
 
-@accessor_method("datatree", name="grid_gates")
-def _grid_gates_accessor(self, data_vars=None, x=None, y=None, z=None, **kwargs):
+@accessor_method("datatree", name="grid_gates", wraps=grid_gates)
+def _grid_gates_accessor(self):
     """
     Grid the radar gates with a radius of influence.
 
@@ -700,13 +703,10 @@ def _grid_gates_accessor(self, data_vars=None, x=None, y=None, z=None, **kwargs)
     --------
     radarx.grid.grid_gates
     """
-    return grid_gates(self.xarray_obj, data_vars, x, y, z, **kwargs)
 
 
-@accessor_method("datatree", name="grid_rhi")
-def _grid_rhi_accessor(
-    self, data_vars=None, azimuth=None, distance=None, z=None, **kwargs
-):
+@accessor_method("datatree", name="grid_rhi", wraps=grid_rhi)
+def _grid_rhi_accessor(self):
     """
     Grid the radar gates onto a vertical section through the radar.
 
@@ -723,4 +723,3 @@ def _grid_rhi_accessor(
     --------
     radarx.grid.grid_rhi
     """
-    return grid_rhi(self.xarray_obj, data_vars, azimuth, distance, z, **kwargs)

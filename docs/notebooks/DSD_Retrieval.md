@@ -158,7 +158,7 @@ a hydrometeor classification would.
 ## Normalized gamma with $K_{DP}$
 
 With `kdp="estimate"`, $K_{DP}$ is computed by
-`radarx.retrieve.estimate_kdp`; where it reaches `kdp_min` (1 °/km by
+`radarx.retrieve.estimate_kdp`; where it reaches `min_kdp` (1 °/km by
 default), $N_w$ comes from $K_{DP}$ and $Z_{DR}$ instead of $Z_H$.
 
 ```{code-cell} ipython3

@@ -163,7 +163,7 @@ _ATTRS = {
     "relative_humidity": {
         "standard_name": "relative_humidity",
         "long_name": "Relative humidity",
-        "units": "percent",
+        "units": "%",
     },
     "air_pressure": {
         "standard_name": "air_pressure",

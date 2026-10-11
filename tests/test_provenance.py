@@ -484,6 +484,8 @@ def called_decorated(func, seen=None):
     if func in seen:
         return False
     seen.add(func)
+    if hasattr(func, "__radarx_target__"):  # a method that forwards to a function
+        return hasattr(func.__radarx_target__, "__radarx_provenance__")
     tree = ast.parse(textwrap.dedent(inspect.getsource(func)))
     local = local_imports(tree, func)
     for node in ast.walk(tree):

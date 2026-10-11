@@ -328,7 +328,7 @@ PRODUCTS = {
         min_tilts=2,
     ),
     "azimuthal_shear_layer_max": lambda: R.azimuthal_shear_layer_max(
-        column_volume(elevations=(0.5, 1.5, 3.0), n_az=90), min_reflectivity=20.0
+        column_volume(elevations=(0.5, 1.5, 3.0), n_az=90), min_dbz=20.0
     ),
     "correct_dual_prf": lambda: R.correct_dual_prf(
         dual_prf_sweep(nray=60, ngate=40)[0], nyquist_high=VH, nyquist_low=VL

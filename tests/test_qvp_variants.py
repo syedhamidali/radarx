@@ -67,7 +67,7 @@ def make_sweep(
                 rng[None, :] * np.ones_like(h),
                 el[:, None] * np.ones_like(h),
             )
-        units = {"DBZH": "dBZ", "ZDR": "dB", "RHOHV": "1", "KDP": "degrees/km"}.get(
+        units = {"DBZH": "dBZ", "ZDR": "dB", "RHOHV": "1", "KDP": "degree km-1"}.get(
             name, "1"
         )
         data[name] = (("azimuth", "range"), values.astype(np.float32), {"units": units})
@@ -845,7 +845,7 @@ def test_cap_removes_rain_products_above_the_bottom():
     )
     assert np.isfinite(higher.RAIN_RATE.values[height.values <= 2500.0]).all()
     # the lower edge of a wide beam is lower: gates just above the cap are kept
-    wide = mask_above_melting_layer(sweep, 2000.0, beam_width=2.0)
+    wide = mask_above_melting_layer(sweep, 2000.0, beamwidth=2.0)
     assert (
         np.isfinite(wide.RAIN_RATE.values).sum()
         > np.isfinite(out.RAIN_RATE.values).sum()

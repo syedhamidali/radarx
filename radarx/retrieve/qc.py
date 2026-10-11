@@ -84,7 +84,7 @@ across north in full sweeps) smaller than ``min_size`` gates are removed as
 speckle, as are gates with fewer than half of the window holding echo.
 
 Gates without signal are not classified: missing values, a signal-to-noise
-ratio below ``snr_min`` (if an SNR field is given), and the no-data codes
+ratio below ``min_snr`` (if an SNR field is given), and the no-data codes
 of NEXRAD Level II data as decoded by xradar (reflectivity
 :math:`\\leq` -32 dBZ, :math:`Z_{DR} \\leq` -12.9 dB,
 :math:`\\rho_{hv} \\leq` 0.21, :math:`\\Phi_{DP} < 0`; ``nodata``).
@@ -139,6 +139,7 @@ __all__ = ["echo_mask", "apply_mask"]
 import numpy as np
 import xarray as xr
 
+from .._compat import renamed_arguments
 from .._fields import VELOCITY, align_like, as_sweep
 from .._provenance import provenance
 from .dealias import _ray_links, _sweep_mapping
@@ -846,20 +847,21 @@ def _fixed_angle(ds):
     return None  # pragma: no cover - xradar sweeps have one of the above
 
 
+@renamed_arguments(dbzh="dbz", vrad="field", snr_min="min_snr")
 @provenance(
     "Fuzzy-logic echo score in the manner of Gourley 2007 and Krause 2016, own memberships "
     "and weights (method='krause2016': the MetSignal algorithm of Krause 2016)"
 )
 def echo_mask(
     obj,
-    dbzh=None,
+    dbz=None,
     zdr=None,
     rhohv=None,
     phidp=None,
     snr=None,
     *,
     method="radarx",
-    vrad=None,
+    field=None,
     zh_3km=None,
     window=None,
     threshold=None,
@@ -867,7 +869,7 @@ def echo_mask(
     weights=None,
     spin_threshold=2.0,
     min_size=None,
-    snr_min=3.0,
+    min_snr=3.0,
     phidp_texture="circular",
     nodata="auto",
     split_cuts=True,
@@ -884,7 +886,7 @@ def echo_mask(
         sweep node (``dtree["sweep_0"]``), or a volume with ``sweep_*`` groups,
         e.g. from xradar. Range gates must be uniformly spaced; ``range`` is
         in metres.
-    dbzh, zdr, rhohv, phidp, snr : str, optional
+    dbz, zdr, rhohv, phidp, snr : str, optional
         Field names of the reflectivity (dBZ, required), differential
         reflectivity (dB), copolar correlation coefficient, differential
         phase (degrees) and signal-to-noise ratio (dB). By default the first
@@ -905,7 +907,7 @@ def echo_mask(
         ``window`` are not accepted, ``spin_threshold`` and
         ``phidp_texture`` are not used, and the score ``METEO_SCORE`` is the
         aggregation value A of the paper, not averaged over 3 x 3 gates.
-    vrad : str, optional
+    field : str, optional
         Radial velocity field (m/s) of ``method="krause2016"``. By default the
         first of ``VRADH``, ``VRAD``, ``VRADV``, ``VEL``, ``VELOCITY``,
         ``velocity``, ``radial_velocity`` that a sweep holds. Where it is
@@ -960,7 +962,7 @@ def echo_mask(
         :func:`radarx.retrieve.estimate_kdp`. On synthetic rain with KDP 5 to
         30 degrees/km both classify all gates as meteorological. Both rules
         are radarx choices.
-    snr_min : float, optional
+    min_snr : float, optional
         Gates with an SNR below this (dB) have no echo, if an SNR field is
         used. Default 3 (radarx choice).
     nodata : {"auto", "nexrad"}, dict or None, optional
@@ -1065,7 +1067,7 @@ def echo_mask(
     The only corner shared with a paper is the full membership of SD(ZDR)
     up to 1 dB (Krause 2016 [2]). All other corners, all weights, the
     threshold, the 1.5 km window (Krause: nine range bins), the
-    3 x 3 averaging of the score, the ``min_size`` speckle filter, ``snr_min``
+    3 x 3 averaging of the score, the ``min_size`` speckle filter, ``min_snr``
     (3 dB), ``spin_threshold`` (2 dB), the NEXRAD no-data floors and the
     reflection of rhohv above 1 are radarx's own choices and are not taken
     from these papers. They have not been tuned against the published
@@ -1203,7 +1205,7 @@ def echo_mask(
                 f"nine-gate window of the paper; {given} are options of "
                 "method='radarx'"
             )
-    elif vrad is not None or zh_3km is not None:
+    elif field is not None or zh_3km is not None:
         raise ValueError("vrad and zh_3km are used by method='krause2016' only")
     if threshold is None:
         threshold = KRAUSE_THRESHOLDS["warm"] if krause else 0.6
@@ -1219,9 +1221,9 @@ def echo_mask(
         )
     lim, wts = _options(limits, weights)
     use_compiled = _use_compiled(engine)
-    fields = (dbzh, zdr, rhohv, phidp, snr)
+    fields = (dbz, zdr, rhohv, phidp, snr)
     if krause:
-        fields += (vrad, zh_3km)
+        fields += (field, zh_3km)
     obj = as_sweep(obj)
 
     def params(nexrad):
@@ -1229,14 +1231,14 @@ def echo_mask(
             return {
                 "method": method,
                 "floors": _floors(nodata, nexrad, _ROLES + ("vrad",)),
-                "snr_min": float(snr_min),
+                "snr_min": float(min_snr),
                 "threshold": float(threshold),
                 "min_size": int(min_size),
             }
         return {
             "method": method,
             "floors": _floors(nodata, nexrad),
-            "snr_min": float(snr_min),
+            "snr_min": float(min_snr),
             "limits": lim,
             "weights": wts,
             "spin_threshold": float(spin_threshold),
@@ -1256,7 +1258,7 @@ def echo_mask(
     names = [
         name
         for name in _sweep_names(obj)
-        if _find(obj[name].to_dataset(), dbzh, _DBZH_NAMES, False) is not None
+        if _find(obj[name].to_dataset(), dbz, _DBZH_NAMES, False) is not None
     ]
     if not names:
         raise KeyError("no sweep contains a reflectivity field")
@@ -1296,11 +1298,11 @@ def _keep_array(mask, da, name):
     return keep.values.astype(bool)
 
 
-def _mask_fields(ds, mask, fields, floors):
-    """Masked copies of ``fields`` of a sweep, as a dict of DataArrays."""
+def _mask_fields(ds, mask, data_vars, floors):
+    """Masked copies of ``data_vars`` of a sweep, as a dict of DataArrays."""
     ray_dims = [d for d in ("azimuth", "elevation") if d in ds.dims]
-    if fields is None:
-        fields = [
+    if data_vars is None:
+        data_vars = [
             name
             for name, da in ds.data_vars.items()
             if da.ndim == 2
@@ -1309,10 +1311,10 @@ def _mask_fields(ds, mask, fields, floors):
             and np.issubdtype(da.dtype, np.floating)
             and name not in ("METEO_SCORE",)
         ]
-    elif isinstance(fields, str):
-        fields = [fields]
+    elif isinstance(data_vars, str):
+        data_vars = [data_vars]
     out = {}
-    for name in fields:
+    for name in data_vars:
         if name not in ds:
             raise KeyError(f"{name!r} is not in the dataset")
         da = ds[name]
@@ -1325,8 +1327,9 @@ def _mask_fields(ds, mask, fields, floors):
     return out
 
 
+@renamed_arguments(fields="data_vars")
 @provenance("Masking of non-meteorological gates with the radarx echo classification")
-def apply_mask(obj, mask=None, fields=None, *, nodata="auto", **kwargs):
+def apply_mask(obj, mask=None, data_vars=None, *, nodata="auto", **kwargs):
     """
     Set non-meteorological gates to NaN.
 
@@ -1339,7 +1342,7 @@ def apply_mask(obj, mask=None, fields=None, *, nodata="auto", **kwargs):
         The output of :func:`echo_mask` for ``obj`` (or its boolean
         ``METEO_MASK``, True for gates to keep). By default it is computed
         with :func:`echo_mask` and ``**kwargs``.
-    fields : str or list of str, optional
+    data_vars : str or list of str, optional
         Fields to mask. Default: all floating point fields on
         ``(azimuth, range)`` (or ``(elevation, range)``). In a volume,
         sweeps without a field or without a mask are left unchanged.
@@ -1368,7 +1371,7 @@ def apply_mask(obj, mask=None, fields=None, *, nodata="auto", **kwargs):
 
     Examples
     --------
-    >>> clean = radarx.retrieve.apply_mask(dtree, fields=["DBZH", "ZDR"])  # doctest: +SKIP
+    >>> clean = radarx.retrieve.apply_mask(dtree, data_vars=["DBZH", "ZDR"])  # doctest: +SKIP
     >>> clean = dtree.radarx.apply_mask()  # doctest: +SKIP
     """
     if nodata not in ("auto", "nexrad", None):
@@ -1389,7 +1392,7 @@ def apply_mask(obj, mask=None, fields=None, *, nodata="auto", **kwargs):
     if isinstance(obj, xr.Dataset):
         if isinstance(mask, xr.DataTree):
             raise TypeError("a Dataset needs a Dataset or DataArray mask")
-        return obj.assign(_mask_fields(obj, mask, fields, floors(obj)))
+        return obj.assign(_mask_fields(obj, mask, data_vars, floors(obj)))
 
     if not isinstance(mask, xr.DataTree):
         raise TypeError("a DataTree needs the DataTree output of echo_mask")
@@ -1398,9 +1401,9 @@ def apply_mask(obj, mask=None, fields=None, *, nodata="auto", **kwargs):
         if name not in obj.children:
             continue
         ds = obj[name].to_dataset(inherit=False)
-        wanted = fields
-        if fields is not None:
-            wanted = [fields] if isinstance(fields, str) else fields
+        wanted = data_vars
+        if data_vars is not None:
+            wanted = [data_vars] if isinstance(data_vars, str) else data_vars
             wanted = [f for f in wanted if f in ds]
         masked = _mask_fields(
             ds, mask[name].to_dataset(), wanted, floors(ds, obj.root.attrs)
@@ -1410,6 +1413,8 @@ def apply_mask(obj, mask=None, fields=None, *, nodata="auto", **kwargs):
     return out
 
 
-def _fields_for(ds, fields):
+def _fields_for(ds, data_vars):
     """Optional fields that a sweep of a volume lacks are left out."""
-    return (fields[0],) + tuple(f if f is None or f in ds else None for f in fields[1:])
+    return (data_vars[0],) + tuple(
+        f if f is None or f in ds else None for f in data_vars[1:]
+    )

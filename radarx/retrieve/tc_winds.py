@@ -211,6 +211,7 @@ __doc__ = __doc__.replace("{}", "\n   ".join(__all__))
 import numpy as np
 import xarray as xr
 
+from .._compat import renamed_arguments
 from .._fields import VELOCITY, as_sweep, find_field, node_dataset
 from .._provenance import provenance
 from .._registry import accessor_method
@@ -555,14 +556,14 @@ def _elevation_of(ds, ray_dim, n):
 class _Sweep:
     """Gates of one sweep: horizontal positions, projection factors and weights."""
 
-    def __init__(self, obj, velocity, k_e):
+    def __init__(self, obj, field, k_e):
         if isinstance(obj, xr.DataArray):
             name = obj.name or "field"
             ds = obj.to_dataset(name=name)
             vel = ds[name]
         else:
             ds = obj
-            vel = ds[find_field(ds, VELOCITY, velocity)]
+            vel = ds[find_field(ds, VELOCITY, field)]
         self.ray_dim = ray_dimension(vel)
         if vel.ndim != 2:
             raise ValueError(
@@ -1129,6 +1130,7 @@ def _per_sweep(obj, func):
     return func(obj, None)
 
 
+@renamed_arguments(velocity="field")
 @provenance(
     "Tropical-cyclone centre and radius of maximum wind from the GBVTD-simplex "
     "consensus of Bell and Lee (2012), single volume",
@@ -1137,7 +1139,7 @@ def _per_sweep(obj, func):
 def tc_center(
     obj,
     *,
-    velocity=None,
+    field=None,
     first_guess=None,
     first_guess_latlon=None,
     radii=None,
@@ -1177,7 +1179,7 @@ def tc_center(
         itself. For a volume every sweep is processed. Dask-backed input gives
         a lazy result. The velocity must be dealiased
         (:func:`radarx.retrieve.dealias_velocity`).
-    velocity : str, optional
+    field : str, optional
         Name of the velocity field. Default: the first of ``VRADH``, ``VRAD``
         and the like.
     first_guess : tuple of float, optional
@@ -1290,7 +1292,7 @@ def tc_center(
         raise ValueError(f"k_e must be positive, not {k_e!r}")
 
     def one(ds, _name):
-        sweep = _Sweep(ds, velocity, k_e)
+        sweep = _Sweep(ds, field, k_e)
         opts = {
             "first_guess": _guess_of(first_guess, first_guess_latlon, sweep),
             "guess_grid": int(guess_grid),
@@ -1429,6 +1431,7 @@ def _center_of(center, center_latlon, sweep, name):
     return x, y
 
 
+@renamed_arguments(velocity="field")
 @provenance(
     "Ground-based velocity track display (GBVTD) of a tropical cyclone, with the "
     "closure of Lee et al. (1999)",
@@ -1439,7 +1442,7 @@ def gbvtd(
     center=None,
     *,
     center_latlon=None,
-    velocity=None,
+    field=None,
     radii=None,
     min_radius=1000.0,
     max_radius=80000.0,
@@ -1472,7 +1475,7 @@ def gbvtd(
         ``tc_center`` result is computed.
     center_latlon : tuple of float, optional
         ``(latitude, longitude)`` of the centre instead of ``center``.
-    velocity : str, optional
+    field : str, optional
         Name of the velocity field. Default: ``VRADH``, ``VRAD`` and the like.
     radii : array-like, optional
         Ring radii (m). Default ``min_radius`` to ``max_radius`` in steps of
@@ -1565,7 +1568,7 @@ def gbvtd(
         raise ValueError(f"k_e must be positive, not {k_e!r}")
 
     def one(ds, name):
-        sweep = _Sweep(ds, velocity, k_e)
+        sweep = _Sweep(ds, field, k_e)
         cx, cy = _center_of(center, center_latlon, sweep, name)
 
         def block(vh, x, y, w):
@@ -1847,8 +1850,8 @@ def _decompose_one(ds, azimuth):
 # --------------------------------------------------------------------------
 
 
-@accessor_method("dataarray", "dataset", "datatree", name="tc_center")
-def _tc_center_accessor(self, **kwargs):
+@accessor_method("dataarray", "dataset", "datatree", name="tc_center", wraps=tc_center)
+def _tc_center_accessor(self):
     """
     Circulation centre and radius of maximum wind of a tropical cyclone.
 
@@ -1859,11 +1862,10 @@ def _tc_center_accessor(self, **kwargs):
     xarray.Dataset or xarray.DataTree
         The centre, the radius of maximum wind and the profiles of the search.
     """
-    return tc_center(self.xarray_obj, **kwargs)
 
 
-@accessor_method("dataarray", "dataset", "datatree", name="gbvtd")
-def _gbvtd_accessor(self, center=None, **kwargs):
+@accessor_method("dataarray", "dataset", "datatree", name="gbvtd", wraps=gbvtd)
+def _gbvtd_accessor(self):
     """
     Axisymmetric and wavenumber-1 and 2 winds of a vortex from one radar (GBVTD).
 
@@ -1874,4 +1876,3 @@ def _gbvtd_accessor(self, center=None, **kwargs):
     xarray.Dataset or xarray.DataTree
         The ring winds, the radius of maximum wind and the fit diagnostics.
     """
-    return gbvtd(self.xarray_obj, center, **kwargs)

@@ -127,7 +127,7 @@ grid = rx.grid.grid_radars(
     z,
     data_vars=["DBZH", "ZDR", "VRADH"],
     motion=motion,
-    rhohv_min=0.9,
+    min_rhohv=0.9,
     max_range=230e3,
 )
 grid

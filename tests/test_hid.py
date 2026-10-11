@@ -590,7 +590,7 @@ def test_errors(monkeypatch):
     with pytest.raises(ValueError, match="ml_gates"):
         hid(ds, method="thompson", ml_gates=(100, 10))
     with pytest.raises(KeyError):
-        hid(ds, dbzh="nope")
+        hid(ds, dbz="nope")
     with pytest.raises(KeyError):
         hid(ds.drop_vars("DBZH"))
     with pytest.raises(KeyError, match="temperature"):
@@ -732,7 +732,7 @@ def csapr2():
 
 
 CSAPR2_FIELDS = dict(
-    dbzh="attenuation_corrected_reflectivity_h",
+    dbz="attenuation_corrected_reflectivity_h",
     zdr="attenuation_corrected_differential_reflectivity",
     rhohv="copol_correlation_coeff",
     kdp="specific_differential_phase",

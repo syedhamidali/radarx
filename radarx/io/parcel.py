@@ -211,8 +211,8 @@ def parcel_diagnostics(
     pressure="pressure",
     temperature="temperature",
     dewpoint="dewpoint",
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     CAPE, CIN, lifted index, LCL, LFC and EL of a lifted parcel.
@@ -240,10 +240,10 @@ def parcel_diagnostics(
         Heights (m) if not the ``dim`` coordinate.
     pressure, temperature, dewpoint : str, optional
         Variable names.
-    engine : {"auto", "compiled", "numpy"}, optional
-        Kernel implementation.
     n_threads : int, optional
         Threads for the compiled kernel. Default: all cores.
+    engine : {"auto", "compiled", "numpy"}, optional
+        Kernel implementation.
 
     Returns
     -------
@@ -342,8 +342,8 @@ def parcel_diagnostics(
     return out
 
 
-@accessor_method("dataset", name="parcel_diagnostics")
-def _parcel_accessor(self, parcel="surface-based", **kwargs):
+@accessor_method("dataset", name="parcel_diagnostics", wraps=parcel_diagnostics)
+def _parcel_accessor(self):
     """
     CAPE, CIN, lifted index, LCL, LFC and EL of a profile or ERA5 columns.
 
@@ -351,12 +351,9 @@ def _parcel_accessor(self, parcel="surface-based", **kwargs):
     ----------
     parcel : {"surface-based", "mixed-layer", "most-unstable"}, optional
         The parcel to lift.
-    **kwargs
-        Options of :func:`radarx.io.parcel.parcel_diagnostics`.
 
     Returns
     -------
     xarray.Dataset
         See :func:`radarx.io.parcel.parcel_diagnostics`.
     """
-    return parcel_diagnostics(self.xarray_obj, parcel, **kwargs)

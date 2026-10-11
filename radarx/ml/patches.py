@@ -339,8 +339,8 @@ def polar_patches(
     variables=None,
     dims=("azimuth", "range"),
     fill_value=np.nan,
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Cut sweeps into fixed-size polar patches for a machine-learning model.
@@ -372,10 +372,10 @@ def polar_patches(
     fill_value : float, default NaN
         Value of patch pixels outside the sweep (only when a patch is larger
         than the sweep, or along azimuth without wrapping).
-    engine : {"auto", "compiled", "numpy"}, default "auto"
-        Use the compiled kernel when available, or force one implementation.
     n_threads : int, optional
         Threads of the compiled kernel (default: all cores).
+    engine : {"auto", "compiled", "numpy"}, default "auto"
+        Use the compiled kernel when available, or force one implementation.
 
     Returns
     -------
@@ -470,8 +470,8 @@ def reassemble(
     *,
     name=None,
     attrs=None,
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Put patches (or model outputs on them) back together into sweeps.
@@ -499,10 +499,10 @@ def reassemble(
     attrs : dict, optional
         Attributes for the result variables (for example
         :attr:`radarx.ml.Model.attrs`).
-    engine : {"auto", "compiled", "numpy"}, default "auto"
-        Use the compiled kernel when available, or force one implementation.
     n_threads : int, optional
         Threads of the compiled kernel (default: all cores).
+    engine : {"auto", "compiled", "numpy"}, default "auto"
+        Use the compiled kernel when available, or force one implementation.
 
     Returns
     -------

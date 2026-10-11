@@ -270,7 +270,7 @@ def test_correlation_coefficient_removes_gates(engine):
     ds = sweep(rho=True)
     kw = dict(engine=engine, min_gates=1, min_valid=1, missing="gap")
     plain = superobs(ds, 5.0, **kw)
-    cut = superobs(ds, 5.0, rho_min=0.85, **kw)
+    cut = superobs(ds, 5.0, min_rhohv=0.85, **kw)
     assert cut.gate_count.sum() < plain.gate_count.sum()
     manual = ds.copy(deep=True)
     bad = (manual.RHOHV < 0.85).values
@@ -526,7 +526,7 @@ def test_error_model(engine):
 def test_kernel_and_numpy_agree(mode, missing):
     tree = volume(rho=True)
     target = 6.0 if mode == "box" else model_grid(n=70, dx=3000.0)
-    kw = dict(missing=missing, rho_min=0.8, min_gates=3, min_valid=2)
+    kw = dict(missing=missing, min_rhohv=0.8, min_gates=3, min_valid=2)
     a = superobs(tree, target, engine="compiled", **kw)
     b = superobs(tree, target, engine="numpy", **kw)
     assert a.sizes["obs"] > 50
@@ -610,12 +610,12 @@ def test_input_is_not_changed_and_dask_stays_lazy():
     ds = sweep(rho=True)
     lazy = ds.chunk({"azimuth": 30})
     before = lazy.copy(deep=True).compute()
-    so = superobs(lazy, 5.0, rho_min=0.8)
+    so = superobs(lazy, 5.0, min_rhohv=0.8)
     assert so.sizes["obs"] > 0
     assert lazy.DBZH.chunks is not None  # still dask-backed
     assert lazy.VRADH.chunks is not None
     xr.testing.assert_identical(lazy.compute(), before)
-    eager = superobs(ds, 5.0, rho_min=0.8)
+    eager = superobs(ds, 5.0, min_rhohv=0.8)
     xr.testing.assert_identical(so, eager)
     tree = volume()
     keep = tree.copy(deep=True)
@@ -874,7 +874,7 @@ def test_real_nexrad_volume():
         pytest.skip(f"test data not available: {err}")
     tree = xd.io.open_nexradlevel2_datatree(path)
     lat, lon = model_grid(n=80, dx=2000.0, lat0=33.65, lon0=-101.81)
-    so = superobs(tree, (lat, lon), cells=3, rho_min=0.85, max_range=100e3)
+    so = superobs(tree, (lat, lon), cells=3, min_rhohv=0.85, max_range=100e3)
     assert so.sizes["obs"] > 100
     assert np.abs(so.velocity).max() <= 40.0
     assert (so.height >= 0).all() and (so.height < 12000).all()
@@ -882,7 +882,7 @@ def test_real_nexrad_volume():
     assert (so.gate_count >= 6).all()
     if mod.HAS_COMPILED_KERNEL:
         ref = superobs(
-            tree, (lat, lon), cells=3, rho_min=0.85, max_range=100e3, engine="numpy"
+            tree, (lat, lon), cells=3, min_rhohv=0.85, max_range=100e3, engine="numpy"
         )
         np.testing.assert_allclose(
             so.reflectivity, ref.reflectivity, rtol=1e-11, equal_nan=True
@@ -896,20 +896,20 @@ def test_named_fields_apply_to_the_sweeps_that_have_them():
     tree = volume(elevations=(0.5, 1.5))
     first = tree["sweep_0"].to_dataset().rename(VRADH="VEL_FIXED")
     tree["sweep_0"] = xr.DataTree(first)
-    so = superobs(tree, 8.0, vel="VEL_FIXED", missing="gap", min_gates=1, min_valid=1)
+    so = superobs(tree, 8.0, field="VEL_FIXED", missing="gap", min_gates=1, min_valid=1)
     only = superobs(
         tree["sweep_0"].to_dataset(),
         8.0,
-        vel="VEL_FIXED",
+        field="VEL_FIXED",
         missing="gap",
         min_gates=1,
         min_valid=1,
     )
     assert so.velocity_count.sum() == only.velocity_count.sum()
     with pytest.raises(KeyError, match="NOPE"):
-        superobs(tree, 8.0, vel="NOPE")
+        superobs(tree, 8.0, field="NOPE")
     with pytest.raises(KeyError, match="NOPE"):
-        superobs(tree, 8.0, rho_min=0.8, rho="NOPE")
+        superobs(tree, 8.0, min_rhohv=0.8, rhohv="NOPE")
 
 
 # --------------------------------------------------------------------------

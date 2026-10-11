@@ -71,7 +71,7 @@ sweep = dtree["sweep_0"].to_dataset()
 fields = {
     "phidp": "uncorrected_differential_phase",
     "rhohv": "uncorrected_copol_correlation_coeff",
-    "dbzh": "uncorrected_reflectivity_h",
+    "dbz": "uncorrected_reflectivity_h",
 }
 ```
 
@@ -118,7 +118,7 @@ res = out.isel(azimuth=iray)
 r_km = sweep.range.values / 1000.0
 
 fig, axes = plt.subplots(3, 1, figsize=(9, 8), sharex=True)
-axes[0].plot(r_km, ray[fields["dbzh"]], color="k", lw=0.8)
+axes[0].plot(r_km, ray[fields["dbz"]], color="k", lw=0.8)
 axes[0].set_ylabel("$Z_H$ (dBZ)")
 axes[1].plot(r_km, ray[fields["phidp"]], ".", ms=2, color="0.6", label="raw $\\Psi_{DP}$")
 axes[1].plot(r_km, res.PHIDP_processed, color="C0", label="processed $\\Phi_{DP}$")
@@ -145,7 +145,7 @@ only.
 x = sweep.x / 1000.0
 y = sweep.y / 1000.0
 panels = [
-    (sweep[fields["dbzh"]], "$Z_H$ (dBZ)", "ChaseSpectral", -10, 65),
+    (sweep[fields["dbz"]], "$Z_H$ (dBZ)", "ChaseSpectral", -10, 65),
     (sweep[fields["phidp"]], "raw $\\Psi_{DP}$ (°)", "twilight", -180, 180),
     (out.PHIDP_processed.where(out.KDP.notnull()), "processed $\\Phi_{DP}$ (°)", "viridis", 0, 250),
     (out.KDP, "$K_{DP}$ (°/km)", "turbo", -1, 6),
@@ -177,7 +177,7 @@ The file also holds the KDP computed by the radar processor
 ref = sweep.specific_differential_phase.values
 k = out.KDP.values
 sel = (
-    (sweep[fields["dbzh"]].values > 30)
+    (sweep[fields["dbz"]].values > 30)
     & (sweep[fields["rhohv"]].values > 0.95)
     & np.isfinite(k)
     & np.isfinite(ref)

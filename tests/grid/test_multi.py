@@ -411,7 +411,7 @@ def test_missing_fields_qc_and_range(network):
     (la1, lo1), (la2, lo2), _ = _sites()
     no_zdr = _volume(la2, lo2, name="BBB", fields=("DBZH", "RHOHV"))
     out = multi.grid_radars(
-        [network[0], no_zdr], **GRID, origin=ORIGIN, rhohv_min=0.8, max_range=40e3
+        [network[0], no_zdr], **GRID, origin=ORIGIN, min_rhohv=0.8, max_range=40e3
     )
     assert set(out.data_vars) >= {"DBZH", "ZDR", "VRADH", "RHOHV"}
     assert np.isnan(out.ZDR.isel(radar=1).values).all()

@@ -168,9 +168,10 @@ from itertools import pairwise
 import numpy as np
 import xarray as xr
 
+from .._compat import renamed_arguments
 from .._fields import VELOCITY, as_sweep, find_field
 from .._provenance import provenance
-from .._registry import accessor_method
+from .._registry import accessor_for
 from ..fundamentals.geometry import beam_center_height
 from ._products import product_tree
 
@@ -205,12 +206,13 @@ _MAX_RAY_GAP = 10  # empty rays bridged between regions
 _GATE_PASSES = 2
 
 
+@renamed_arguments(radar="obj")
 @provenance(
     "Velocity dealiasing: region-based (radarx's combination of published "
     "concepts) or UNRAVEL (Louf et al. 2020)"
 )
 def dealias_velocity(
-    radar,
+    obj,
     field=None,
     nyquist_velocity=None,
     *,
@@ -233,7 +235,7 @@ def dealias_velocity(
 
     Parameters
     ----------
-    radar : xarray.Dataset or xarray.DataTree
+    obj : xarray.Dataset or xarray.DataTree
         A PPI sweep on ``(azimuth, range)`` with ``azimuth`` and
         ``elevation`` coordinates, a single sweep node of a volume
         (``dtree["sweep_0"]``), or a volume with ``sweep_*`` groups, e.g. from
@@ -375,8 +377,8 @@ def dealias_velocity(
     >>> products = dtree.radarx.dealias("VRADH")  # doctest: +SKIP
     >>> dtree = dtree.radarx.assign(products)  # doctest: +SKIP
     """
-    radar = as_sweep(radar)
-    field = find_field(radar, VELOCITY, field)
+    obj = as_sweep(obj)
+    field = find_field(obj, VELOCITY, field)
     if method not in ("region", "unravel"):
         raise ValueError(f"method must be 'region' or 'unravel', not {method!r}")
     if method == "unravel":
@@ -417,10 +419,10 @@ def dealias_velocity(
             raise ImportError("the compiled UNRAVEL kernel is not available")
         options["compiled"] = HAS_UNRAVEL_KERNEL and engine != "numpy"
         options["alpha"] = float(alpha)
-    if isinstance(radar, xr.Dataset):
-        sweep = _Sweep(radar, field, _nyquist(radar, field, nyquist_velocity))
+    if isinstance(obj, xr.Dataset):
+        sweep = _Sweep(obj, field, _nyquist(obj, field, nyquist_velocity))
         if method == "unravel":
-            (folds,) = _unravel_folds([radar], [sweep], False, options)
+            (folds,) = _unravel_folds([obj], [sweep], False, options)
             result = sweep.wrap(folds, "unravel", "unravel").rename(name)
             return _with_confidence(result, sweep, options) if confidence else result
         ref = None
@@ -428,7 +430,7 @@ def dealias_velocity(
             ref = reference.broadcast_like(sweep.da).transpose(sweep.ray, "range")
             ref = ref.values.astype(np.float64)
         if wind_profile is not None:
-            ref = _fill(ref, _wind_reference(radar, sweep, wind_profile))
+            ref = _fill(ref, _wind_reference(obj, sweep, wind_profile))
         (solved,) = _region_folds([sweep], **options)
         (folds,) = _absolute_folds([sweep], [solved], [ref], **options)
         source = "reference" if reference is not None else "wind_profile"
@@ -440,7 +442,7 @@ def dealias_velocity(
     if reference is not None:
         raise ValueError("reference is only supported for a single sweep.")
     return _dealias_tree(
-        radar,
+        obj,
         field,
         nyquist_velocity,
         wind_profile=wind_profile,
@@ -1557,11 +1559,12 @@ def _confidence_options(window, min_neighbours, threshold, n_threads, compiled):
     }
 
 
+@renamed_arguments(radar="obj")
 @provenance(
     "Confidence of dealiased velocity from the neighbouring gates, a radarx definition"
 )
 def dealias_confidence(
-    radar,
+    obj,
     field=None,
     nyquist_velocity=None,
     *,
@@ -1607,7 +1610,7 @@ def dealias_confidence(
 
     Parameters
     ----------
-    radar : xarray.Dataset or xarray.DataTree
+    obj : xarray.Dataset or xarray.DataTree
         A sweep or a volume with the dealiased velocity and the ``azimuth``
         and ``range`` coordinates.
     field : str, optional
@@ -1651,19 +1654,19 @@ def dealias_confidence(
     options = _confidence_options(
         window, min_neighbours, threshold, n_threads, _use_compiled(engine)
     )
-    radar = as_sweep(radar)
-    field = find_field(radar, _DEALIASED, field)
-    if isinstance(radar, xr.Dataset):
-        return _confidence_sweep(radar, field, nyquist_velocity, None, name, options)
+    obj = as_sweep(obj)
+    field = find_field(obj, _DEALIASED, field)
+    if isinstance(obj, xr.Dataset):
+        return _confidence_sweep(obj, field, nyquist_velocity, None, name, options)
     nodes = {}
-    for sweep in _sweep_names_with(radar, field):
-        ds = _sweep_dataset_of(radar, sweep)
+    for sweep in _sweep_names_with(obj, field):
+        ds = _sweep_dataset_of(obj, sweep)
         nodes[sweep] = _confidence_sweep(
             ds, field, nyquist_velocity, sweep, name, options
         ).to_dataset()
     if not nodes:
         raise ValueError(f"No sweep contains {field!r}.")
-    return product_tree(radar, nodes)
+    return product_tree(obj, nodes)
 
 
 def _sweep_names_with(dtree, field):
@@ -1793,11 +1796,12 @@ def _positive(value, what, sweep):
     return value
 
 
+@renamed_arguments(radar="obj")
 @provenance(
     "Dual-PRF velocity error correction by the local median (Holleman and Beekhuis 2003)"
 )
 def correct_dual_prf(
-    radar,
+    obj,
     field=None,
     *,
     nyquist_high,
@@ -1825,7 +1829,7 @@ def correct_dual_prf(
 
     Parameters
     ----------
-    radar : xarray.Dataset or xarray.DataTree
+    obj : xarray.Dataset or xarray.DataTree
         A sweep, or a volume whose sweeps holding ``field`` are processed one
         by one. The velocity is the output of the radar processor, already
         unfolded to the extended interval.
@@ -1927,8 +1931,8 @@ def correct_dual_prf(
     if int(max_window) != max_window or max_window < 3 or max_window % 2 == 0:
         raise ValueError("max_window must be an odd number of at least 3")
     compiled = _use_compiled(engine)
-    radar = as_sweep(radar)
-    field = find_field(radar, VELOCITY, field)
+    obj = as_sweep(obj)
+    field = find_field(obj, VELOCITY, field)
     name = name or f"{field}_dualprf"
     options = (min_points, max_window, int(passes), name, n_threads, compiled)
 
@@ -1939,29 +1943,19 @@ def correct_dual_prf(
             raise ValueError("nyquist_high must be larger than nyquist_low")
         return vh, vl
 
-    if isinstance(radar, xr.Dataset):
+    if isinstance(obj, xr.Dataset):
         vh, vl = limits(None)
-        return _dual_prf_sweep(radar, field, vh, vl, prf, first_ray, *options)
+        return _dual_prf_sweep(obj, field, vh, vl, prf, first_ray, *options)
     nodes = {}
-    for sweep in _sweep_names_with(radar, field):
+    for sweep in _sweep_names_with(obj, field):
         vh, vl = limits(sweep)
         nodes[sweep] = _dual_prf_sweep(
-            _sweep_dataset_of(radar, sweep), field, vh, vl, prf, first_ray, *options
+            _sweep_dataset_of(obj, sweep), field, vh, vl, prf, first_ray, *options
         )
     if not nodes:
         raise ValueError(f"No sweep contains {field!r}.")
-    return product_tree(radar, nodes)
+    return product_tree(obj, nodes)
 
 
-@accessor_method("dataset", "datatree", name="correct_dual_prf")
-def _correct_dual_prf_accessor(self, field=None, **kwargs):
-    return correct_dual_prf(self.xarray_obj, field, **kwargs)
-
-
-@accessor_method("dataset", "datatree", name="dealias_confidence")
-def _dealias_confidence_accessor(self, field=None, nyquist_velocity=None, **kwargs):
-    return dealias_confidence(self.xarray_obj, field, nyquist_velocity, **kwargs)
-
-
-_correct_dual_prf_accessor.__doc__ = correct_dual_prf.__doc__
-_dealias_confidence_accessor.__doc__ = dealias_confidence.__doc__
+accessor_for(correct_dual_prf, "dataset", "datatree")
+accessor_for(dealias_confidence, "dataset", "datatree")

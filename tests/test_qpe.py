@@ -64,8 +64,8 @@ def sweep(n_az=24, n_rng=40, seed=0):
         {
             "DBZH": field(5, 62, units="dBZ"),
             "ZDR": field(-0.8, 3.5, units="dB"),
-            "KDP": field(-0.4, 4.0, units="degrees/km"),
-            "AH": field(0.0, 0.06, units="dB/km"),
+            "KDP": field(-0.4, 4.0, units="degree km-1"),
+            "AH": field(0.0, 0.06, units="dB km-1"),
         },
         coords={
             "azimuth": ("azimuth", np.linspace(0.5, 359.5, n_az)),
@@ -178,7 +178,7 @@ def test_zdr_min_and_missing_values(engine):
         }
     )
     plain = rain_rate_z_zdr(ds, engine=engine).values
-    limited = rain_rate_z_zdr(ds, zdr_min=0.0, engine=engine).values
+    limited = rain_rate_z_zdr(ds, min_zdr=0.0, engine=engine).values
     assert plain[0] > plain[1]
     assert limited[0] == pytest.approx(limited[1])
     assert np.isnan(plain[2]) and np.isnan(plain[3])
@@ -308,7 +308,7 @@ def holes(ds, seed=3):
         (rain_rate_z, {"z_cap": None}),
         (rain_rate_kdp, {}),
         (rain_rate_kdp, {"negative": "zero", "band": "X"}),
-        (rain_rate_z_zdr, {"zdr_min": -0.2}),
+        (rain_rate_z_zdr, {"min_zdr": -0.2}),
         (rain_rate_a, {"temperature": 12.5}),
         (rain_rate_a, {"temperature": 25.0, "band": "C", "polarization": "v"}),
         (rain_rate_a, {"negative": "zero", "band": "X"}),
@@ -990,14 +990,14 @@ def test_real_c_band_blend():
         sw,
         phidp="uncorrected_differential_phase",
         rhohv="uncorrected_copol_correlation_coeff",
-        dbzh="uncorrected_reflectivity_h",
+        dbz="uncorrected_reflectivity_h",
     )
     sw = sw.assign(KDP=kdp.KDP, met=sw.gate_id.isin([1, 2, 4]))
     classes_c = sw.radarx.hid(
         "sounding_temperature",
         band="C",
         mask="met",
-        dbzh="attenuation_corrected_reflectivity_h",
+        dbz="attenuation_corrected_reflectivity_h",
         zdr="attenuation_corrected_differential_reflectivity",
         kdp="KDP",
         rhohv="copol_correlation_coeff",

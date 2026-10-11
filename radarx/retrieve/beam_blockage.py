@@ -829,8 +829,10 @@ def _as_dataset(obj):
 # --------------------------------------------------------------------------
 
 
-@accessor_method("dataarray", "dataset", "datatree", name="beam_blockage")
-def _beam_blockage_accessor(self, dem, **kwargs):
+@accessor_method(
+    "dataarray", "dataset", "datatree", name="beam_blockage", wraps=beam_blockage
+)
+def _beam_blockage_accessor(self):
     """
     Partial and cumulative beam blockage and terrain clutter from a DEM.
 
@@ -841,4 +843,3 @@ def _beam_blockage_accessor(self, dem, **kwargs):
     xarray.Dataset or xarray.DataTree
         ``PBB``, ``CBB``, ``TERRAIN_HEIGHT`` and ``TERRAIN_CLUTTER``.
     """
-    return beam_blockage(self.xarray_obj, dem, **kwargs)

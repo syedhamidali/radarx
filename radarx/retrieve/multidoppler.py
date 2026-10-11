@@ -83,6 +83,7 @@ import warnings
 import numpy as np
 import xarray as xr
 
+from .._compat import renamed_arguments
 from .._provenance import provenance
 
 try:
@@ -435,12 +436,13 @@ def _obrien_adjust(w, rho, z, kind, use_compiled, n_threads):
 # ---------------------------------------------------------------------------
 
 
+@renamed_arguments(reflectivity="dbz")
 @provenance(
     "Terminal fall speed of precipitation from reflectivity",
     extra_refs=("doviak-zrnic-1993",),
 )
 def fall_speed(
-    reflectivity,
+    dbz,
     air_density=None,
     freezing_level=None,
     *,
@@ -473,10 +475,10 @@ def fall_speed(
 
     Parameters
     ----------
-    reflectivity : xarray.DataArray
+    dbz : xarray.DataArray
         Reflectivity factor in dBZ on ``(..., z, y, x)``.
     air_density : xarray.DataArray, optional
-        Air density in kg m-3, broadcastable to ``reflectivity``. Without it
+        Air density in kg m-3, broadcastable to ``dbz``. Without it
         no density correction is made.
     freezing_level : float or xarray.DataArray, optional
         Height of the 0 degC level (m above sea level), e.g. ``(y, x)``.
@@ -511,7 +513,6 @@ def fall_speed(
        Observations*, 2nd ed. Academic Press, ISBN 0-12-221422-6 (book, no
        DOI).
     """
-    dbz = reflectivity
     z_lin = 10.0 ** (dbz.clip(max=70.0) / 10.0)
     vt = rain[0] * z_lin ** rain[1]
     if freezing_level is not None:
@@ -556,11 +557,12 @@ def _beam_angles(dx, dy, z, radar_altitude, earth_radius=EARTH_RADIUS):
     return azimuth, elevation
 
 
+@renamed_arguments(grid="obj")
 @provenance(
     "Beam azimuth and elevation on a grid, 4/3 effective Earth radius model",
     extra_refs=("doviak-zrnic-1993",),
 )
-def radar_geometry(grid, *, earth_radius=EARTH_RADIUS):
+def radar_geometry(obj, *, earth_radius=EARTH_RADIUS):
     """
     Beam azimuth and elevation of every radar at every grid cell.
 
@@ -580,7 +582,7 @@ def radar_geometry(grid, *, earth_radius=EARTH_RADIUS):
 
     Parameters
     ----------
-    grid : xarray.Dataset
+    obj : xarray.Dataset
         Grid with ``z`` (m above sea level), ``y``, ``x`` (m) and the radar
         positions ``radar_x``, ``radar_y`` (m, in the grid's coordinates) and
         ``radar_altitude`` (m above sea level) on the ``radar`` dimension.
@@ -590,7 +592,7 @@ def radar_geometry(grid, *, earth_radius=EARTH_RADIUS):
     Returns
     -------
     xarray.Dataset
-        ``grid`` with ``azimuth`` and ``elevation`` on ``(radar, z, y, x)``
+        ``obj`` with ``azimuth`` and ``elevation`` on ``(radar, z, y, x)``
         (degrees; azimuth clockwise from the grid ``y`` axis).
 
     References
@@ -600,15 +602,15 @@ def radar_geometry(grid, *, earth_radius=EARTH_RADIUS):
        DOI). Eqs. 2.28b-d, pp. 21-22.
     """
     for name in ("radar_x", "radar_y", "radar_altitude"):
-        if name not in grid:
+        if name not in obj:
             raise ValueError(f"grid needs {name!r} on the 'radar' dimension")
-    x = grid["x"].values[None, None, None, :]
-    y = grid["y"].values[None, None, :, None]
-    z = grid["z"].values[None, :, None, None]
-    rx_ = grid["radar_x"].values[:, None, None, None]
-    ry_ = grid["radar_y"].values[:, None, None, None]
-    rz_ = grid["radar_altitude"].values[:, None, None, None]
-    shape = (grid.sizes["radar"], grid.sizes["z"], grid.sizes["y"], grid.sizes["x"])
+    x = obj["x"].values[None, None, None, :]
+    y = obj["y"].values[None, None, :, None]
+    z = obj["z"].values[None, :, None, None]
+    rx_ = obj["radar_x"].values[:, None, None, None]
+    ry_ = obj["radar_y"].values[:, None, None, None]
+    rz_ = obj["radar_altitude"].values[:, None, None, None]
+    shape = (obj.sizes["radar"], obj.sizes["z"], obj.sizes["y"], obj.sizes["x"])
     az, el = _beam_angles(
         np.broadcast_to(x - rx_, shape),
         np.broadcast_to(y - ry_, shape),
@@ -617,7 +619,7 @@ def radar_geometry(grid, *, earth_radius=EARTH_RADIUS):
         earth_radius,
     )
     dims = ("radar", "z", "y", "x")
-    return grid.assign(
+    return obj.assign(
         azimuth=(
             dims,
             az.astype(np.float32),
@@ -652,6 +654,7 @@ def _site(dtree):
     return site
 
 
+@renamed_arguments(velocity="field", reflectivity="dbz")
 @provenance("Gridding of radar volumes for multi-Doppler retrieval")
 def multi_doppler_input(
     volumes,
@@ -660,8 +663,8 @@ def multi_doppler_input(
     z,
     *,
     origin=None,
-    velocity="VRADH",
-    reflectivity="DBZH",
+    field="VRADH",
+    dbz="DBZH",
     time=None,
     motion=None,
     fill_below=False,
@@ -697,7 +700,7 @@ def multi_doppler_input(
     origin : tuple of float, optional
         ``(latitude, longitude)`` of the grid centre. Default: the first
         radar.
-    velocity, reflectivity : str, optional
+    field, dbz : str, optional
         Field names. Default ``"VRADH"`` and ``"DBZH"``. A missing
         reflectivity field is skipped.
     time : datetime-like, optional
@@ -715,7 +718,7 @@ def multi_doppler_input(
     Returns
     -------
     xarray.Dataset
-        ``velocity`` and ``reflectivity`` on ``(radar, z, y, x)``, ``azimuth``
+        ``field`` and ``dbz`` on ``(radar, z, y, x)``, ``azimuth``
         and ``elevation`` (see :func:`radar_geometry`), and on ``radar``:
         ``radar_x``, ``radar_y``, ``radar_altitude``, ``radar_latitude``,
         ``radar_longitude``, ``radar_name`` and ``time`` (the time of each
@@ -749,11 +752,11 @@ def multi_doppler_input(
         raise ValueError("give both time and motion, or neither")
     if not len(volumes):
         raise ValueError("no radar volumes")
-    fields = [velocity]
+    fields = [field]
     for dtree in volumes:
         sweeps = [n for n in dtree.children if n.startswith("sweep")]
-        if any(reflectivity in dtree[n].data_vars for n in sweeps):
-            fields.append(reflectivity)
+        if any(dbz in dtree[n].data_vars for n in sweeps):
+            fields.append(dbz)
             break
     # every radar places the grid by the geodesic distance and azimuth from
     # its own site (grid_radars), so the beam azimuth and elevation include
@@ -785,7 +788,7 @@ def multi_doppler_input(
     ):
         g = g.reset_coords(name)
     g = g.assign(
-        azimuth=g["azimuth"].broadcast_like(g[velocity]).transpose(*dims),
+        azimuth=g["azimuth"].broadcast_like(g[field]).transpose(*dims),
         elevation=g["elevation"].transpose(*dims),
     )
     when = g["time"].values.astype("datetime64[ns]")
@@ -813,7 +816,7 @@ def multi_doppler_input(
     return g
 
 
-def _as_multi_radar(grids, velocity):
+def _as_multi_radar(grids, field):
     """Dataset with a ``radar`` dimension (and beam geometry) from the input."""
     if isinstance(grids, xr.Dataset):
         ds = grids
@@ -821,8 +824,8 @@ def _as_multi_radar(grids, velocity):
         ds = xr.concat(list(grids), dim="radar", combine_attrs="drop_conflicts")
     if "radar" not in ds.dims:
         raise ValueError("the grids need a 'radar' dimension (one entry per radar)")
-    if velocity not in ds:
-        raise ValueError(f"no {velocity!r} in the grids")
+    if field not in ds:
+        raise ValueError(f"no {field!r} in the grids")
     if "azimuth" not in ds or "elevation" not in ds:
         ds = radar_geometry(ds)
     for name in ("x", "y", "z"):
@@ -1088,8 +1091,8 @@ def _prepare(
     ds,
     background,
     *,
-    velocity,
-    reflectivity,
+    field,
+    dbz,
     use_fall_speed,
     weights,
     storm_motion,
@@ -1107,7 +1110,7 @@ def _prepare(
     """NumPy arrays of the variational problem on the grid of ``ds``."""
     nr = ds.sizes["radar"]
     dims = ("radar", "z", "y", "x")
-    vr = ds[velocity].transpose(*dims).values.astype(np.float64)
+    vr = ds[field].transpose(*dims).values.astype(np.float64)
     el = np.radians(ds["elevation"].transpose(*dims).values.astype(np.float64))
     az = np.radians(ds["azimuth"].transpose(*dims).values.astype(np.float64))
     coef = np.stack(
@@ -1119,7 +1122,7 @@ def _prepare(
             ds,
             vr,
             coef,
-            reflectivity=reflectivity,
+            reflectivity=dbz,
             storm_motion=storm_motion,
             analysis_time=analysis_time,
             use_compiled=use_compiled,
@@ -1152,8 +1155,8 @@ def _prepare(
     vt = np.zeros((nr,) + shape3)
     if use_fall_speed:
         freezing = _freezing_level_choice(freezing_level, freezing)
-        if reflectivity in ds:
-            dbz_mean = ds[reflectivity]
+        if dbz in ds:
+            dbz_mean = ds[dbz]
             if "radar" in dbz_mean.dims:
                 # reflectivity per cell: mean (in dBZ) over the radars that see it
                 dbz_mean = dbz_mean.mean("radar", skipna=True)
@@ -1167,7 +1170,7 @@ def _prepare(
             vt = np.broadcast_to(np.nan_to_num(vt_da.values), (nr,) + shape3)
         else:
             warnings.warn(
-                f"no {reflectivity!r} in the grids: no fall speed correction",
+                f"no {dbz!r} in the grids: no fall speed correction",
                 stacklevel=3,
             )
     target = vr + coef[:, 2] * vt  # a u + b v + c w = vr + c Vt
@@ -1199,8 +1202,8 @@ def _prepare(
 
     n_obs = valid.sum(axis=0)
     valid_any = n_obs > 0
-    if reflectivity in ds:
-        echo = np.isfinite(ds[reflectivity].transpose(..., "z", "y", "x").values)
+    if dbz in ds:
+        echo = np.isfinite(ds[dbz].transpose(..., "z", "y", "x").values)
         valid_any = valid_any | (echo.any(0) if echo.ndim == 4 else echo)
     free = _w_free(ds, w_boundary, valid_any)
     w_fixed = np.zeros(shape3)
@@ -1618,6 +1621,7 @@ DEFAULT_WEIGHTS = {
 }
 
 
+@renamed_arguments(velocity="field", reflectivity="dbz")
 @provenance(
     "Variational multi-Doppler winds, cost structure of Gao et al. (1999), own weights"
 )
@@ -1625,8 +1629,8 @@ def multi_doppler(
     grids,
     background=None,
     *,
-    velocity="VRADH",
-    reflectivity="DBZH",
+    field="VRADH",
+    dbz="DBZH",
     weights=None,
     fall_speed_correction=True,
     freezing_level="auto",
@@ -1641,8 +1645,8 @@ def multi_doppler(
     max_iterations=500,
     tolerance=None,
     solver="auto",
-    engine="auto",
     n_threads=None,
+    engine="auto",
     obs_error=None,
     crossing_angle_weight=False,
     obrien_error="linear",
@@ -1707,7 +1711,7 @@ def multi_doppler(
     grids : xarray.Dataset or sequence of xarray.Dataset
         Gridded, dealiased and advection-corrected radial velocities on a
         common grid with a ``radar`` dimension (see
-        :func:`multi_doppler_input`): ``velocity`` on ``(radar, z, y, x)``
+        :func:`multi_doppler_input`): ``field`` on ``(radar, z, y, x)``
         and either ``azimuth`` and ``elevation`` on ``(radar, z, y, x)`` or
         ``radar_x``, ``radar_y`` and ``radar_altitude`` on ``radar``. A
         sequence of per-radar Datasets is concatenated along ``radar``.
@@ -1718,7 +1722,7 @@ def multi_doppler(
         grid axes), optionally ``w``, ``air_density`` and
         ``freezing_level``. Without it there is no background term and a
         standard density profile is used.
-    velocity, reflectivity : str, optional
+    field, dbz : str, optional
         Field names. Default ``"VRADH"`` and ``"DBZH"``.
     weights : dict, optional
         Overrides of the dimensionless weights ``observation`` (:math:`C_o`,
@@ -1796,10 +1800,10 @@ def multi_doppler(
     solver : {"auto", "cg", "lbfgsb"}, optional
         Minimiser. ``"auto"`` (default) uses conjugate gradients when the
         vorticity term is off and L-BFGS-B otherwise.
-    engine : {"auto", "compiled", "numpy"}, optional
-        Cost function implementation. ``"auto"`` prefers the compiled kernel.
     n_threads : int, optional
         Threads for the compiled kernel. Default: all cores.
+    engine : {"auto", "compiled", "numpy"}, optional
+        Cost function implementation. ``"auto"`` prefers the compiled kernel.
     obs_error : float, sequence of float, xarray.DataArray or array, optional
         Standard deviation (m s-1) of the error of the radial velocity: one
         number, one number per radar, or an array or DataArray that
@@ -2051,7 +2055,7 @@ def multi_doppler(
         raise ValueError("levels must be at least 1")
     if background is None and w_["background"] != 0.0:
         w_["background"] = 0.0
-    ds = _as_multi_radar(grids, velocity)
+    ds = _as_multi_radar(grids, field)
     if background is not None:
         for name in ("z", "y", "x"):
             if name in background.dims and background.sizes[name] != ds.sizes[name]:
@@ -2060,8 +2064,8 @@ def multi_doppler(
     problem = _prepare(
         ds,
         background,
-        velocity=velocity,
-        reflectivity=reflectivity,
+        field=field,
+        dbz=dbz,
         use_fall_speed=fall_speed_correction,
         weights=w_,
         storm_motion=storm_motion,
@@ -2158,6 +2162,7 @@ def _add_error(out, stderr, n_samples):
 _BOUNDARY_MODES = {"upward": 0, "downward": 1, "obrien": 2}
 
 
+@renamed_arguments(velocity="field", reflectivity="dbz")
 @provenance(
     "Analytic dual-Doppler winds: weighted least squares and continuity integration"
 )
@@ -2165,8 +2170,8 @@ def dual_doppler_analytic(
     grids,
     background=None,
     *,
-    velocity="VRADH",
-    reflectivity="DBZH",
+    field="VRADH",
+    dbz="DBZH",
     obs_error=None,
     min_crossing_angle=30.0,
     fall_speed_correction=True,
@@ -2176,8 +2181,8 @@ def dual_doppler_analytic(
     w_bottom=0.0,
     obrien_error="linear",
     iterations=3,
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Dual-Doppler winds by the classical analytic solution, for quick checks.
@@ -2230,7 +2235,7 @@ def dual_doppler_analytic(
     background : xarray.Dataset, optional
         Only the ``air_density`` and the freezing level (``freezing_level``
         or ``temperature``) are used, as in :func:`multi_doppler`.
-    velocity, reflectivity : str, optional
+    field, dbz : str, optional
         Field names. Default ``"VRADH"`` and ``"DBZH"``.
     obs_error : float, sequence of float, xarray.DataArray or array, optional
         Standard deviation (m s-1) of the radial velocity error, as for
@@ -2258,10 +2263,10 @@ def dual_doppler_analytic(
         :func:`multi_doppler`.
     iterations : int, optional
         Number of horizontal-wind and integration passes. Default 3.
-    engine : {"auto", "compiled", "numpy"}, optional
-        Implementation of the cell and column kernels.
     n_threads : int, optional
         Threads for the compiled kernels. Default: all cores.
+    engine : {"auto", "compiled", "numpy"}, optional
+        Implementation of the cell and column kernels.
 
     Returns
     -------
@@ -2360,13 +2365,13 @@ def dual_doppler_analytic(
     if int(iterations) < 1:
         raise ValueError("iterations must be at least 1")
     use_compiled = _use_compiled(engine)
-    ds = _as_multi_radar(grids, velocity)
+    ds = _as_multi_radar(grids, field)
     weights = dict(DEFAULT_WEIGHTS, smoothness_vertical=DEFAULT_WEIGHTS["smoothness"])
     p = _prepare(
         ds,
         background,
-        velocity=velocity,
-        reflectivity=reflectivity,
+        field=field,
+        dbz=dbz,
         use_fall_speed=fall_speed_correction,
         weights=weights,
         storm_motion=(0.0, 0.0),

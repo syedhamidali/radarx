@@ -251,7 +251,7 @@ def test_layer_max_follows_the_vortex_profile(volume, engine, layer):
     shear = out["azimuthal_shear_layer_max"]
     src = out["layer_max_elevation"]
     assert shear.dtype == np.float32 and shear.dims == ("azimuth", "range")
-    assert shear.attrs["units"] == "s-1" and src.attrs["units"] == "degrees"
+    assert shear.attrs["units"] == "s-1" and src.attrs["units"] == "degree"
     assert shear.attrs["layer_bottom_m"] == layer[0]
     assert shear.attrs["reference_sweep"] == "sweep_0"
     # the gate of the reference tilt on top of the vortex centre
@@ -303,7 +303,7 @@ def test_layer_max_engines_agree(volume):
         {},
         {"layer": (3000.0, 6000.0), "rotation": "anticyclonic"},
         {"rotation": "both", "median_filter": 3},
-        {"min_reflectivity": 20.0, "weights": "gaussian"},
+        {"min_dbz": 20.0, "weights": "gaussian"},
     ):
         a = azimuthal_shear_layer_max(volume, engine="numpy", **kwargs)
         b = azimuthal_shear_layer_max(volume, engine="compiled", **kwargs)
@@ -375,7 +375,7 @@ def test_layer_max_reflectivity_screen(volume, engine):
     plain = azimuthal_shear_layer_max(volume, engine=engine)[
         "azimuthal_shear_layer_max"
     ]
-    screened = azimuthal_shear_layer_max(volume, min_reflectivity=20.0, engine=engine)[
+    screened = azimuthal_shear_layer_max(volume, min_dbz=20.0, engine=engine)[
         "azimuthal_shear_layer_max"
     ]
     # the screen removes gates; the maximum of what is left cannot be larger
@@ -394,7 +394,7 @@ def test_layer_max_reflectivity_screen(volume, engine):
     assert np.isfinite(screened.values[centre]).sum() > 0.5 * centre.sum()
     # a distance that is too short keeps less
     short = azimuthal_shear_layer_max(
-        volume, min_reflectivity=20.0, reflectivity_distance=500.0, engine=engine
+        volume, min_dbz=20.0, reflectivity_distance=500.0, engine=engine
     )["azimuthal_shear_layer_max"]
     assert np.isfinite(short.values).sum() < both.sum()
     assert short.attrs["reflectivity_distance_m"] == 500.0
@@ -419,11 +419,11 @@ def split_volume():
 def test_layer_max_reflectivity_from_the_split_cut(engine):
     vol = split_volume()
     vol_full = column_volume()
-    whole = azimuthal_shear_layer_max(vol_full, min_reflectivity=20.0, engine=engine)[
+    whole = azimuthal_shear_layer_max(vol_full, min_dbz=20.0, engine=engine)[
         "azimuthal_shear_layer_max"
     ]
     split = azimuthal_shear_layer_max(
-        vol, min_reflectivity=20.0, reference="sweep_1", engine=engine
+        vol, min_dbz=20.0, reference="sweep_1", engine=engine
     )["azimuthal_shear_layer_max"]
     assert split.shape == whole.shape
     both = np.isfinite(whole.values) & np.isfinite(split.values)
@@ -440,7 +440,7 @@ def test_layer_max_reflectivity_from_the_split_cut(engine):
     with pytest.raises(ValueError, match="within 0.2 degrees"):
         azimuthal_shear_layer_max(
             xr.DataTree.from_dict(nodes),
-            min_reflectivity=20.0,
+            min_dbz=20.0,
             reference="sweep_1",
             engine=engine,
         )
@@ -462,7 +462,7 @@ def test_layer_max_reference_sweep_and_grid(volume):
 
 def test_layer_max_does_not_change_its_input(volume):
     before = volume.copy(deep=True)
-    azimuthal_shear_layer_max(volume, min_reflectivity=20.0, median_filter=3)
+    azimuthal_shear_layer_max(volume, min_dbz=20.0, median_filter=3)
     xr.testing.assert_identical(volume.to_dataset(), before.to_dataset())
     for name in before.children:
         xr.testing.assert_identical(
@@ -517,13 +517,13 @@ def test_layer_max_errors(volume):
         azimuthal_shear_layer_max(volume, engine="fortran")
     with pytest.raises(ValueError, match="median_filter"):
         azimuthal_shear_layer_max(volume, median_filter=4)
-    with pytest.raises(ValueError, match="min_reflectivity needs"):
-        azimuthal_shear_layer_max(volume, min_reflectivity=20.0, reflectivity="ZZ")
+    with pytest.raises(ValueError, match="min_dbz needs"):
+        azimuthal_shear_layer_max(volume, min_dbz=20.0, dbz="ZZ")
     stripped = xr.DataTree.from_dict(
         {"/": xr.Dataset(), "sweep_0": volume["sweep_0"].to_dataset()[["VRADH"]]}
     )
     with pytest.raises(KeyError):
-        azimuthal_shear_layer_max(stripped, min_reflectivity=20.0)
+        azimuthal_shear_layer_max(stripped, min_dbz=20.0)
 
 
 def test_layer_max_without_a_fixed_angle_coordinate():

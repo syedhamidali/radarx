@@ -441,7 +441,7 @@ def test_errors(beltrami_case, monkeypatch):
     with pytest.raises(ValueError, match="radar"):
         multi_doppler(ds.isel(radar=0))
     with pytest.raises(ValueError, match="no 'VEL'"):
-        multi_doppler(ds, velocity="VEL")
+        multi_doppler(ds, field="VEL")
     with pytest.raises(ValueError, match="at least 3"):
         multi_doppler(ds.isel(x=slice(0, 2)))
     with pytest.raises(ValueError, match="evenly"):
@@ -847,7 +847,7 @@ def test_input_places_radars_by_geodesic_distance():
     y = np.arange(-40e3, 40e3 + 1, 4e3)
     z = np.arange(1000.0, 4000.1, 500.0)
     out = multi_doppler_input(
-        [east, west], x, y, z, origin=tm.ORIGIN, velocity="DBZH", reflectivity="RHOHV"
+        [east, west], x, y, z, origin=tm.ORIGIN, field="DBZH", dbz="RHOHV"
     )
     expected = tm.truth(x[None, None, :], y[None, :, None], z[:, None, None])
     for k in range(2):
@@ -1190,8 +1190,8 @@ def _prepared(ds, bg=None, **kw):
     weights = dict(md.DEFAULT_WEIGHTS)
     weights["smoothness_vertical"] = weights["smoothness"]
     args = dict(
-        velocity="VRADH",
-        reflectivity="DBZH",
+        field="VRADH",
+        dbz="DBZH",
         use_fall_speed=False,
         weights=weights,
         storm_motion=(0.0, 0.0),

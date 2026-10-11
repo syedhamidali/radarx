@@ -91,8 +91,8 @@ def test_ml_method_with_stand_in_model():
     assert out.KDP.attrs["ml_model"] == "derivative"
     assert out.KDP.attrs["ml_model_version"] == "0"
     assert out.KDP.attrs["ml_model_licence"] == "MIT"
-    assert out.KDP.attrs["units"] == "degrees/km"
-    assert out.PHIDP_BACKSCATTER.attrs["units"] == "degrees"
+    assert out.KDP.attrs["units"] == "degree km-1"
+    assert out.PHIDP_BACKSCATTER.attrs["units"] == "degree"
     # NaN outside echo, values inside
     assert np.isnan(out.KDP.values[:, ~inside]).all()
     assert np.isfinite(out.KDP.values[:, inside]).all()
@@ -109,7 +109,8 @@ def test_ml_method_with_stand_in_model():
     np.testing.assert_allclose(
         dphi[:, inside[1:]][:, :-1],
         (k[:, 1:] + k[:, :-1])[:, inside[1:]][:, :-1],
-        atol=1e-9,
+        atol=1e-4,
+        rtol=1e-6,
     )
     assert abs(np.nanmean(phi[:, :5])) < 5.0
     assert np.nanmax(phi) == pytest.approx(2 * kdp_true.sum() * DR / 1000.0, abs=10)

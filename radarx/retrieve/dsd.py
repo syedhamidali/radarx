@@ -65,7 +65,7 @@ polynomial fits of :math:`R`, :math:`W` and :math:`D_0` against
 
 With :math:`K_{DP}` (``kdp``), both methods take the intercept from
 :math:`K_{DP}` instead of :math:`Z_H` where :math:`K_{DP}` is at least
-``kdp_min``: for the DSD shape fixed by :math:`Z_{DR}`, :math:`K_{DP}` is
+``min_kdp``: for the DSD shape fixed by :math:`Z_{DR}`, :math:`K_{DP}` is
 proportional to the intercept, so the intercept (and the rain rate and water
 content) is then immune to the calibration of :math:`Z_H`, attenuation and
 partial beam blockage. Elsewhere it comes from :math:`Z_H`.
@@ -296,6 +296,8 @@ import numpy as np
 import xarray as xr
 from scipy.special import gamma as _gamma_fn
 
+from .._compat import renamed_arguments
+from .._dtypes import fields_as_float32
 from .._provenance import provenance
 from .._registry import accessor_method
 
@@ -330,7 +332,7 @@ _OUT_NAMES = ("N0", "NW", "D0", "DM", "MU", "LAMBDA", "RAIN_RATE", "LWC")
 _OUT_ATTRS = {
     "N0": {
         "long_name": "Intercept parameter of the gamma drop size distribution",
-        "units": "m-3 mm-(1+mu)",
+        "units": "m-3 mm-1",
     },
     "NW": {
         "long_name": "Normalized intercept parameter of the drop size distribution",
@@ -446,8 +448,8 @@ def scattering_table(band="S", temperature=20.0):
         On the equal-volume ``diameter`` (mm): the backscatter cross sections
         ``sigma_h`` and ``sigma_v`` (mm2), the copolar correlation terms
         ``copol_re`` and ``copol_im`` (mm2), and the per-drop contributions
-        (for one drop per m3) to ``kdp`` (degrees/km) and to the specific
-        attenuation ``ah`` and ``av`` (dB/km), with the drop ``axis_ratio``.
+        (for one drop per m3) to ``kdp`` (degree km-1) and to the specific
+        attenuation ``ah`` and ``av`` (dB km-1), with the drop ``axis_ratio``.
         The assumptions are listed in :mod:`radarx.retrieve.dsd`.
 
     Notes
@@ -501,7 +503,7 @@ def scattering_table(band="S", temperature=20.0):
     """
     band = _check_band(band)
     wl, diam, data = _single_drop(band, float(temperature))
-    units = ("mm2", "mm2", "mm2", "mm2", "degrees/km", "dB/km", "dB/km")
+    units = ("mm2", "mm2", "mm2", "mm2", "degree km-1", "dB km-1", "dB km-1")
     names = (
         "Horizontal backscatter cross section",
         "Vertical backscatter cross section",
@@ -672,7 +674,7 @@ def _moments_numpy(logn0, mu, lam):
 
 
 def _retrieve_numpy(
-    z, zdr, kdp, mask, tab, kdp_min, nw_range=(0.0, np.inf), kdp_blend=0.0
+    z, zdr, kdp, mask, tab, min_kdp, nw_range=(0.0, np.inf), kdp_blend=0.0
 ):
     """NumPy implementation of the compiled kernel (same results)."""
     out = np.full((len(_OUT_NAMES), z.size), np.nan)
@@ -686,10 +688,10 @@ def _retrieve_numpy(
     if kdp is not None:
         k = kdp[good]
         with np.errstate(invalid="ignore", divide="ignore"):
-            use = np.isfinite(k) & (k >= kdp_min) & (k > 0.0)
+            use = np.isfinite(k) & (k >= min_kdp) & (k > 0.0)
             from_kdp = np.log10(np.where(use, k, 1.0)) - e["logk"] + e["logn0"]
         if kdp_blend > 0.0:
-            w = np.clip((np.where(use, k, 0.0) - kdp_min) / kdp_blend, 0.0, 1.0)
+            w = np.clip((np.where(use, k, 0.0) - min_kdp) / kdp_blend, 0.0, 1.0)
             from_kdp = (1.0 - w) * logn0 + w * from_kdp
         logn0 = np.where(use, from_kdp, logn0)
     values = _moments_numpy(logn0, e["mu"], e["lam"])
@@ -699,14 +701,14 @@ def _retrieve_numpy(
     return out
 
 
-def _retrieve_compiled(arrays, tab, kdp_min, nw_range, n_threads, kdp_blend=0.0):
+def _retrieve_compiled(arrays, tab, min_kdp, nw_range, n_threads, kdp_blend=0.0):
     return _dsd.retrieve(
         [a[0] for a in arrays],
         [a[1] for a in arrays],
         [a[2] for a in arrays],
         [a[3] for a in arrays],
         *(tab[k] for k in _TABLE_KEYS),
-        float(kdp_min),
+        float(min_kdp),
         float(nw_range[0]),
         float(nw_range[1]),
         float(kdp_blend),
@@ -880,18 +882,21 @@ def _wrap(item, values, attrs, clipped=None):
     return out
 
 
-def _run(items, tab, kdp_min, nw_range, attrs, n_threads, use_compiled, kdp_blend=0.0):
+def _run(items, tab, min_kdp, nw_range, attrs, n_threads, use_compiled, kdp_blend=0.0):
     if use_compiled:
         arrays = [it["arrays"] for it in items]
         results = _retrieve_compiled(
-            arrays, tab, kdp_min, nw_range, n_threads, kdp_blend
+            arrays, tab, min_kdp, nw_range, n_threads, kdp_blend
         )
     else:
         results = [
-            _retrieve_numpy(*it["arrays"], tab, kdp_min, nw_range, kdp_blend)
+            _retrieve_numpy(*it["arrays"], tab, min_kdp, nw_range, kdp_blend)
             for it in items
         ]
-    return [_wrap(it, res, attrs, _clipped(it, tab)) for it, res in zip(items, results)]
+    return [
+        fields_as_float32(_wrap(it, res, attrs, _clipped(it, tab)))
+        for it, res in zip(items, results)
+    ]
 
 
 def _kdp_for(ds, kdp, estimated):
@@ -906,6 +911,7 @@ def _kdp_for(ds, kdp, estimated):
     return None if name is None else ds[name]
 
 
+@renamed_arguments(dbzh="dbz", kdp_min="min_kdp")
 @provenance(
     "Gamma DSD retrieval after Zhang et al. (2001), Testud et al. (2001), own lookup tables"
 )
@@ -913,7 +919,7 @@ def dsd(
     obj,
     method="constrained",
     *,
-    dbzh=None,
+    dbz=None,
     zdr=None,
     kdp=None,
     mask=None,
@@ -921,7 +927,7 @@ def dsd(
     temperature=20.0,
     mu_lambda="cao2008",
     mu=3.0,
-    kdp_min=1.0,
+    min_kdp=1.0,
     nw_range=(1.0e1, 1.0e6),
     zdr_offset=0.0,
     kdp_blend=0.0,
@@ -942,18 +948,18 @@ def dsd(
         and :math:`Z_{DR}` (Zhang et al. 2001; Cao et al. 2008).
         ``"normalized"``: normalized gamma DSD (Testud et al. 2001; Bringi
         et al. 2002) with the shape ``mu``. See :mod:`radarx.retrieve.dsd`.
-    dbzh, zdr : str, optional
+    dbz, zdr : str, optional
         Names of the reflectivity (dBZ) and differential reflectivity (dB).
         By default the first found of ``DBZH``, ``DBZ``, ``reflectivity``,
         ``corrected_reflectivity`` and of ``ZDR``,
         ``differential_reflectivity``, ``corrected_differential_reflectivity``.
         Both should be calibrated and corrected for attenuation.
     kdp : str, xarray.DataArray, xarray.DataTree or "estimate", optional
-        Specific differential phase (degrees/km): the name of a field
+        Specific differential phase (degree km-1): the name of a field
         (``KDP`` or ``specific_differential_phase``), a DataArray (a DataTree
         with a ``KDP`` per sweep for a volume), or ``"estimate"`` to compute
         it with :func:`radarx.retrieve.estimate_kdp`. Where it is at least
-        ``kdp_min``, the intercept is taken from :math:`K_{DP}` instead of
+        ``min_kdp``, the intercept is taken from :math:`K_{DP}` instead of
         :math:`Z_H`. Default: not used.
     mask : str, xarray.DataArray or xarray.DataTree, optional
         Rain gates (``True``), e.g. from a hydrometeor classification; the
@@ -975,8 +981,8 @@ def dsd(
         covers :math:`\\Lambda` up to 20 mm-1 where :math:`\\mu > -0.99`.
     mu : float, optional
         ``"normalized"``: shape parameter (> -1). Default 3.
-    kdp_min : float, optional
-        Minimum :math:`K_{DP}` (degrees/km) for taking the intercept from
+    min_kdp : float, optional
+        Minimum :math:`K_{DP}` (degree km-1) for taking the intercept from
         :math:`K_{DP}`; below it :math:`K_{DP}` is too noisy and
         :math:`Z_H` is used. Default 1.
     nw_range : (float, float) or None, optional
@@ -991,11 +997,11 @@ def dsd(
         Calibration offset of ZDR (dB), subtracted before the retrieval.
         Default 0. No attenuation correction is made here.
     kdp_blend : float, optional
-        Width (degrees/km) of a linear transition from the :math:`Z_H`
-        intercept to the :math:`K_{DP}` intercept above ``kdp_min``. Default
-        0: the intercept switches abruptly at ``kdp_min``, so :math:`N_w` can
+        Width (degree km-1) of a linear transition from the :math:`Z_H`
+        intercept to the :math:`K_{DP}` intercept above ``min_kdp``. Default
+        0: the intercept switches abruptly at ``min_kdp``, so :math:`N_w` can
         jump there. With a width, the weight of the :math:`K_{DP}` intercept
-        grows from 0 at ``kdp_min`` to 1 at ``kdp_min + kdp_blend`` (a radarx
+        grows from 0 at ``min_kdp`` to 1 at ``min_kdp + kdp_blend`` (a radarx
         choice).
     n_threads : int, optional
         Threads for the compiled kernel. Default: all cores.
@@ -1108,7 +1114,7 @@ def dsd(
         relation if method == "constrained" else None,
         float(mu) if method == "normalized" else None,
     )
-    kdp_min = float(kdp_min)
+    min_kdp = float(min_kdp)
     zdr_offset, kdp_blend = float(zdr_offset), float(kdp_blend)
     if kdp_blend < 0:
         raise ValueError("kdp_blend must not be negative")
@@ -1134,14 +1140,14 @@ def dsd(
     if zdr_offset:
         attrs["zdr_offset"] = zdr_offset
     if kdp is not None:
-        attrs["kdp_min"] = kdp_min
+        attrs["kdp_min"] = min_kdp
         if kdp_blend:
             attrs["kdp_blend"] = kdp_blend
         attrs["comment"] += (
-            f"; intercept from KDP where KDP >= {kdp_min:g} degrees/km, "
+            f"; intercept from KDP where KDP >= {min_kdp:g} degrees/km, "
             "otherwise from DBZH"
         )
-    fields = (dbzh, zdr)
+    fields = (dbz, zdr)
 
     if not is_tree:
         est = None
@@ -1154,14 +1160,14 @@ def dsd(
             raise KeyError(f"{kdp!r} is not in the dataset")
         item = _prepare(obj, fields, mask, kdp_da, zdr_offset)
         return _run(
-            [item], tab, kdp_min, nw_range, attrs, n_threads, use_compiled, kdp_blend
+            [item], tab, min_kdp, nw_range, attrs, n_threads, use_compiled, kdp_blend
         )[0]
 
     names = [
         name
         for name in obj.children
         if name.startswith("sweep")
-        and _find(obj[name].ds, dbzh, _DBZH_NAMES, False) is not None
+        and _find(obj[name].ds, dbz, _DBZH_NAMES, False) is not None
         and _find(obj[name].ds, zdr, _ZDR_NAMES, False) is not None
     ]
     if not names:
@@ -1196,7 +1202,7 @@ def dsd(
             k = kdp[name].ds["KDP"] if name in kdp.children else None
         items.append(_prepare(ds, fields, m, _kdp_for(ds, k, est), zdr_offset))
     results = _run(
-        items, tab, kdp_min, nw_range, attrs, n_threads, use_compiled, kdp_blend
+        items, tab, min_kdp, nw_range, attrs, n_threads, use_compiled, kdp_blend
     )
     nodes = {"/": obj.root.to_dataset(inherit=False)}
     nodes.update(zip(names, results))
@@ -1436,8 +1442,8 @@ def radar_from_dsd(nd, band="S", temperature=20.0, dim="diameter"):
     Returns
     -------
     xarray.Dataset
-        ``DBZH`` (dBZ), ``ZDR`` (dB), ``KDP`` (degrees/km), ``RHOHV``,
-        ``AH`` and ``ADP`` (dB/km), and the moment quantities ``DM`` (mm),
+        ``DBZH`` (dBZ), ``ZDR`` (dB), ``KDP`` (degree km-1), ``RHOHV``,
+        ``AH`` and ``ADP`` (dB km-1), and the moment quantities ``DM`` (mm),
         ``NW`` (m-3 mm-1), ``LWC`` (g/m3) and ``RAIN_RATE`` (mm/h, fall speed
         of Atlas et al. 1973) on the remaining dimensions, from the
         scattering tables of :func:`scattering_table`.
@@ -1531,15 +1537,15 @@ def radar_from_dsd(nd, band="S", temperature=20.0, dim="diameter"):
         "KDP": {
             "standard_name": "radar_specific_differential_phase_hv",
             "long_name": "Specific differential phase HV",
-            "units": "degrees/km",
+            "units": "degree km-1",
         },
         "RHOHV": {
             "standard_name": "radar_correlation_coefficient_hv",
             "long_name": "Correlation coefficient HV",
-            "units": "unitless",
+            "units": "1",
         },
-        "AH": {"long_name": "Specific attenuation H", "units": "dB/km"},
-        "ADP": {"long_name": "Specific differential attenuation", "units": "dB/km"},
+        "AH": {"long_name": "Specific attenuation H", "units": "dB km-1"},
+        "ADP": {"long_name": "Specific differential attenuation", "units": "dB km-1"},
         "DM": dict(_OUT_ATTRS["DM"]),
         "NW": dict(_OUT_ATTRS["NW"]),
         "LWC": dict(_OUT_ATTRS["LWC"]),
@@ -1551,8 +1557,8 @@ def radar_from_dsd(nd, band="S", temperature=20.0, dim="diameter"):
     return out
 
 
-@accessor_method("dataset", name="dsd")
-def _dsd_dataset_accessor(self, method="constrained", **kwargs):
+@accessor_method("dataset", name="dsd", wraps=dsd)
+def _dsd_dataset_accessor(self):
     """
     Retrieve gamma raindrop size distribution parameters.
 
@@ -1560,9 +1566,6 @@ def _dsd_dataset_accessor(self, method="constrained", **kwargs):
     ----------
     method : {"constrained", "normalized"}, optional
         Retrieval method. Default ``"constrained"``.
-    **kwargs
-        Options of :func:`radarx.retrieve.dsd`, e.g. ``mask``, ``kdp``,
-        ``band``.
 
     Returns
     -------
@@ -1574,11 +1577,10 @@ def _dsd_dataset_accessor(self, method="constrained", **kwargs):
     --------
     radarx.retrieve.dsd
     """
-    return dsd(self.xarray_obj, method, **kwargs)
 
 
-@accessor_method("datatree", name="dsd")
-def _dsd_datatree_accessor(self, method="constrained", **kwargs):
+@accessor_method("datatree", name="dsd", wraps=dsd)
+def _dsd_datatree_accessor(self):
     """
     Retrieve gamma raindrop size distribution parameters for every sweep.
 
@@ -1589,9 +1591,6 @@ def _dsd_datatree_accessor(self, method="constrained", **kwargs):
     ----------
     method : {"constrained", "normalized"}, optional
         Retrieval method. Default ``"constrained"``.
-    **kwargs
-        Options of :func:`radarx.retrieve.dsd`, e.g. ``mask``, ``kdp``,
-        ``band``.
 
     Returns
     -------
@@ -1604,4 +1603,3 @@ def _dsd_datatree_accessor(self, method="constrained", **kwargs):
     --------
     radarx.retrieve.dsd
     """
-    return dsd(self.xarray_obj, method, **kwargs)

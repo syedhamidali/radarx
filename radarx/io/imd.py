@@ -53,6 +53,8 @@ from xradar.model import (
     radar_parameters_subgroup,
 )
 
+from .._compat import renamed_arguments
+
 try:
     from xarray import DataTree
 except ImportError:  # pragma: no cover
@@ -857,14 +859,15 @@ def create_volume(dataset_list):
 
 
 # to_cfradial2 function implementation
+@renamed_arguments(ds="obj")
 @_deprecated
-def to_cfradial2(ds, **kwargs):
+def to_cfradial2(obj, **kwargs):
     """
     Convert a CfRadial1 Dataset to a CfRadial2 hierarchical structure using xarray's native DataTree.
 
     Parameters
     ----------
-    ds : xarray.Dataset
+    obj : xarray.Dataset
         The input dataset in CfRadial1 format to be converted.
     **kwargs : dict, optional
         Additional keyword arguments to customize the conversion process:
@@ -918,12 +921,12 @@ def to_cfradial2(ds, **kwargs):
 
     # Build the base dictionary for DataTree
     dtree: dict = {
-        "/": _get_required_root_dataset(ds, optional=optional),
-        "/radar_parameters": _get_subgroup(ds, radar_parameters_subgroup),
+        "/": _get_required_root_dataset(obj, optional=optional),
+        "/radar_parameters": _get_subgroup(obj, radar_parameters_subgroup),
         "/georeferencing_correction": _get_subgroup(
-            ds, georeferencing_correction_subgroup
+            obj, georeferencing_correction_subgroup
         ),
-        "/radar_calibration": _get_radar_calibration(ds),
+        "/radar_calibration": _get_radar_calibration(obj),
     }
 
     # Add sweep groups to the dictionary
@@ -934,7 +937,7 @@ def to_cfradial2(ds, **kwargs):
         else "site_coords"
     )
     sweep_groups = _get_sweep_groups(
-        ds,
+        obj,
         sweep=sweep,
         first_dim=first_dim,
         optional=optional,

@@ -48,8 +48,8 @@ def make_sweep():
         {
             "DBZH": field(15, 45, units="dBZ"),
             "ZDR": field(0.0, 2.5, units="dB"),
-            "KDP": field(0.0, 2.0, units="degrees/km"),
-            "AH": field(0.0, 0.05, units="dB/km"),
+            "KDP": field(0.0, 2.0, units="degree km-1"),
+            "AH": field(0.0, 0.05, units="dB km-1"),
             "PHIDP": (dims, np.cumsum(rng.uniform(0, 0.4, (NAZ, NRNG)), axis=1)),
             "RHOHV": field(0.95, 1.0, units="1"),
             "TEMP": field(5.0, 20.0, units="degC"),
@@ -94,7 +94,7 @@ CALLS = {
     ),
     "snr": lambda ds: snr(ds, noise=-30.0, dbz="DBZH"),
     "correct_attenuation": lambda ds: correct_attenuation(
-        ds, dbzh="DBZH", zdr="ZDR", phidp="PHIDP", rhohv="RHOHV", band="S"
+        ds, dbz="DBZH", zdr="ZDR", phidp="PHIDP", rhohv="RHOHV", band="S"
     ),
     "z_offset": lambda ds: z_offset(ds, dbz="DBZH", zdr="ZDR", kdp="KDP", band="S"),
     "tc_center": lambda ds: tc_center(

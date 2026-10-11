@@ -106,6 +106,8 @@ import warnings
 import numpy as np
 import xarray as xr
 
+from .._compat import renamed_arguments
+from .._dtypes import fields_as_float32
 from .._provenance import provenance
 from .._registry import accessor_method
 
@@ -603,7 +605,7 @@ def _geometry(ds):
 _ELEVATION_ATTRS = {
     "standard_name": "sensor_to_target_elevation_angle",
     "long_name": "median elevation angle of the sweep",
-    "units": "degrees",
+    "units": "degree",
 }
 
 _QVP_PARAMS = """
@@ -959,11 +961,11 @@ def _layer_edge(x, h, i0, step, depth, sign, fraction):
     return -1
 
 
-def _ml_anchor(z, r, d, h, lo, hi, hmin, hmax, rho_lo, rho_hi, zdr_min, dbz_min):
+def _ml_anchor(z, r, d, h, lo, hi, hmin, hmax, rho_lo, rho_hi, min_zdr, min_dbz):
     """Largest ZDR peak with a rhohv minimum and a Z maximum nearby."""
     best = best_rho = -1
     for j in range(h.size):
-        if not (hmin <= h[j] <= hmax) or np.isnan(d[j]) or d[j] < zdr_min:
+        if not (hmin <= h[j] <= hmax) or np.isnan(d[j]) or d[j] < min_zdr:
             continue
         if best >= 0 and d[j] <= d[best]:
             continue
@@ -972,7 +974,7 @@ def _ml_anchor(z, r, d, h, lo, hi, hmin, hmax, rho_lo, rho_hi, zdr_min, dbz_min)
             continue
         jr = lo[j] + int(np.nanargmin(rw))
         zmax = np.nanmax(zw) if not np.isnan(zw).all() else -np.inf
-        if not (rho_lo <= r[jr] <= rho_hi) or zmax < dbz_min:
+        if not (rho_lo <= r[jr] <= rho_hi) or zmax < min_dbz:
             continue
         best, best_rho = j, jr
     return best, best_rho
@@ -1223,6 +1225,7 @@ def _apply_time_consistency(top, bottom, peak, flag, template, other, **kwargs):
     return [np.moveaxis(a, -1, axis) for a in arrays]
 
 
+@renamed_arguments(zdr_min="min_zdr", dbz_min="min_dbz")
 @provenance(
     "Melting layer from QVPs, radarx's own, loosely after Giangrande et al. (2008)"
 )
@@ -1238,8 +1241,8 @@ def melting_layer(
     freezing_level=None,
     freezing_level_window=(-1000.0, 500.0),
     rhohv_range=(0.80, 0.97),
-    zdr_min=0.5,
-    dbz_min=20.0,
+    min_zdr=0.5,
+    min_dbz=20.0,
     window=500.0,
     depth=1000.0,
     rhohv_onset=None,
@@ -1355,11 +1358,11 @@ def melting_layer(
         melting and non-melting echo can fall below 0.90; this is a
         radarx choice, not tested against the paper. Pass
         ``(0.90, 0.97)`` for the paper's range.
-    zdr_min : float, optional
+    min_zdr : float, optional
         Minimum ZDR peak, default 0.5 dB (radarx choice; Giangrande et al.
         2008 [1] require a ZDR maximum between 0.8 and 2.5 dB, and there is no
         upper limit here).
-    dbz_min : float, optional
+    min_dbz : float, optional
         Minimum Z maximum near the ZDR peak, default 20 dBZ (radarx choice;
         Giangrande et al. 2008 [1] require a Z maximum between 30 and 47 dBZ,
         and there is no upper limit here).
@@ -1424,7 +1427,7 @@ def melting_layer(
       and looks for the ρhv minimum and the Z maximum within ``window`` metres
       on both sides of it;
     - ``rhohv_range`` is (0.80, 0.97), not (0.90, 0.97) (see that parameter);
-    - ``zdr_min=0.5`` dB and ``dbz_min=20`` dBZ replace 0.8 dB and 30 dBZ,
+    - ``min_zdr=0.5`` dB and ``min_dbz=20`` dBZ replace 0.8 dB and 30 dBZ,
       and there is no upper limit of 2.5 dB and 47 dBZ. The lower defaults
       are radarx's choice, made because azimuthal averaging in a QVP smooths
       and weakens the extremes (Z is averaged over the whole circle,
@@ -1523,7 +1526,7 @@ def melting_layer(
     )
     hmin, hmax = _search_range(search, height_range, freezing_level_window, len(zh))
     params = (
-        *(float(v) for v in (*rhohv_range, zdr_min, dbz_min, window, depth)),
+        *(float(v) for v in (*rhohv_range, min_zdr, min_dbz, window, depth)),
         float(edge_fraction),
         _BOUNDARIES[boundaries],
         np.inf if rhohv_onset is None else float(rhohv_onset),
@@ -1606,7 +1609,7 @@ def melting_layer(
                 "units": "m",
             },
         )
-    return out
+    return fields_as_float32(out)
 
 
 # ---------------------------------------------------------------------------
@@ -2267,7 +2270,7 @@ def cvp(
         "azimuth": (
             (),
             float(azimuth),
-            {"long_name": "azimuth of the CVP centre", "units": "degrees"},
+            {"long_name": "azimuth of the CVP centre", "units": "degree"},
         ),
         "ground_range": (
             (),
@@ -2472,7 +2475,7 @@ def rhi_qvp(
         extra["azimuth"] = (
             (),
             float(np.nanmedian(first["azimuth"].values)),
-            {"long_name": "median azimuth of the RHI", "units": "degrees"},
+            {"long_name": "median azimuth of the RHI", "units": "degree"},
         )
     out = _blended_dataset(
         names,
@@ -2780,7 +2783,7 @@ def melting_layer_ppi(
         "azimuth": (
             "azimuth",
             target,
-            {"long_name": "azimuth of the window centre", "units": "degrees"},
+            {"long_name": "azimuth of the window centre", "units": "degree"},
         )
     }
     method = (
@@ -2911,10 +2914,10 @@ RAIN_ONLY_PRODUCTS = (
 ABOVE_MELTING_LAYER_FLAG = 4
 
 
-def _gate_height(obj, height, beam_width):
+def _gate_height(obj, height, beamwidth):
     """
     Height (m above sea level) of the gates of a sweep, or the height of the
-    lower edge of the beam if ``beam_width`` (degrees) is given.
+    lower edge of the beam if ``beamwidth`` (degrees) is given.
     """
     if height is None:
         if "elevation" not in obj.coords or "range" not in obj.coords:
@@ -2934,10 +2937,10 @@ def _gate_height(obj, height, beam_width):
         else:
             raise ValueError("the elevation must be a scalar or one value per ray.")
         height = xr.DataArray(np.asarray(z), dims=dims)
-    if beam_width:
+    if beamwidth:
         rng = obj["range"].reset_coords(drop=True)
         el = np.deg2rad(obj["elevation"].reset_coords(drop=True))
-        half = 0.5 * np.deg2rad(float(beam_width)) * rng * np.cos(el)
+        half = 0.5 * np.deg2rad(float(beamwidth)) * rng * np.cos(el)
         height = height - half
     return height
 
@@ -2987,13 +2990,13 @@ def _capped_flag_attrs():
     }
 
 
-def _cap_sweep(obj, melting_layer, bottom, height, margin, beam_width, variables):
+def _cap_sweep(obj, melting_layer, bottom, height, margin, beamwidth, variables):
     cap = _align_azimuth(_cap_height(melting_layer, bottom, margin), obj)
-    edge = _gate_height(obj, height, beam_width)
+    edge = _gate_height(obj, height, beamwidth)
     above = edge > cap  # NaN where the layer or the height is unknown: kept
     text = (
         f"set to NaN where the beam is above the melting layer bottom + {margin:g} m"
-        + (f" (lower edge of a {beam_width:g} degree beam)" if beam_width else "")
+        + (f" (lower edge of a {beamwidth:g} degree beam)" if beamwidth else "")
     )
     if isinstance(obj, xr.DataArray):
         out = obj.where(~above)
@@ -3028,6 +3031,7 @@ def _cap_sweep(obj, melting_layer, bottom, height, margin, beam_width, variables
     return out
 
 
+@renamed_arguments(beam_width="beamwidth")
 @provenance(
     "Rain-only products set to NaN above the melting layer bottom, radarx's own"
 )
@@ -3038,7 +3042,7 @@ def mask_above_melting_layer(
     bottom="melting_layer_bottom",
     height=None,
     margin=0.0,
-    beam_width=None,
+    beamwidth=None,
     variables=None,
 ):
     """
@@ -3059,7 +3063,7 @@ def mask_above_melting_layer(
     layer plus ``margin``. The bottom is the end of snow melting (Ryzhkov
     and Krause 2022 [1]_, p. 533), so below it there are no wet snow and no
     ice: the rain-only relations apply from there downward. The ``margin``
-    (default 0 m) moves the cap, and ``beam_width`` makes it use the lower
+    (default 0 m) moves the cap, and ``beamwidth`` makes it use the lower
     edge of the beam instead of its centre, because a beam whose lower half
     is in rain and upper half in the layer is contaminated. Both are radarx's
     definition and are not taken from a paper. Gates are kept where the
@@ -3088,7 +3092,7 @@ def mask_above_melting_layer(
         ``altitude`` coordinates.
     margin : float, optional
         Added to the bottom (m); gates above the sum are removed. Default 0.
-    beam_width : float, optional
+    beamwidth : float, optional
         Two-way half-power beam width (degrees). With it the height compared
         with the cap is the lower edge of the beam, ``height - 0.5 * width *
         range * cos(elevation)``. Default None: the centre of the beam.
@@ -3134,14 +3138,14 @@ def mask_above_melting_layer(
         return map_sweeps(
             products,
             lambda ds, name: _cap_sweep(
-                ds, melting_layer, bottom, height, margin, beam_width, variables
+                ds, melting_layer, bottom, height, margin, beamwidth, variables
             ),
             "mask_above_melting_layer",
         )
     if not isinstance(products, (xr.DataArray, xr.Dataset)):
         raise TypeError("products must be an xarray DataArray, Dataset or DataTree.")
     return _cap_sweep(
-        products, melting_layer, bottom, height, margin, beam_width, variables
+        products, melting_layer, bottom, height, margin, beamwidth, variables
     )
 
 
@@ -3150,8 +3154,8 @@ def mask_above_melting_layer(
 # ---------------------------------------------------------------------------
 
 
-@accessor_method("dataset", "datatree", name="rd_qvp")
-def _rd_qvp_accessor(self, data_vars=None, **kwargs):
+@accessor_method("dataset", "datatree", name="rd_qvp", wraps=rd_qvp)
+def _rd_qvp_accessor(self):
     """
     Range-defined quasi-vertical profile of this volume.
 
@@ -3159,9 +3163,6 @@ def _rd_qvp_accessor(self, data_vars=None, **kwargs):
     ----------
     data_vars : str or list of str, optional
         Variables to profile.
-    **kwargs
-        Options of :func:`radarx.retrieve.rd_qvp` (``rmax``, ``power``,
-        ``dz``, ...).
 
     Returns
     -------
@@ -3172,11 +3173,10 @@ def _rd_qvp_accessor(self, data_vars=None, **kwargs):
     --------
     radarx.retrieve.rd_qvp
     """
-    return rd_qvp(self.xarray_obj, data_vars, **kwargs)
 
 
-@accessor_method("dataset", "datatree", name="cvp")
-def _cvp_accessor(self, data_vars=None, **kwargs):
+@accessor_method("dataset", "datatree", name="cvp", wraps=cvp)
+def _cvp_accessor(self):
     """
     Columnar vertical profile of this volume.
 
@@ -3184,9 +3184,6 @@ def _cvp_accessor(self, data_vars=None, **kwargs):
     ----------
     data_vars : str or list of str, optional
         Variables to profile.
-    **kwargs
-        Options of :func:`radarx.retrieve.cvp`; ``azimuth`` and
-        ``ground_range`` of the centre are required.
 
     Returns
     -------
@@ -3197,11 +3194,10 @@ def _cvp_accessor(self, data_vars=None, **kwargs):
     --------
     radarx.retrieve.cvp
     """
-    return cvp(self.xarray_obj, data_vars, **kwargs)
 
 
-@accessor_method("dataset", "datatree", name="rhi_qvp")
-def _rhi_qvp_accessor(self, data_vars=None, **kwargs):
+@accessor_method("dataset", "datatree", name="rhi_qvp", wraps=rhi_qvp)
+def _rhi_qvp_accessor(self):
     """
     Vertical profile of this RHI scan.
 
@@ -3209,9 +3205,6 @@ def _rhi_qvp_accessor(self, data_vars=None, **kwargs):
     ----------
     data_vars : str or list of str, optional
         Variables to profile.
-    **kwargs
-        Options of :func:`radarx.retrieve.rhi_qvp` (``rmin``, ``rmax``,
-        ``dz``, ...).
 
     Returns
     -------
@@ -3222,19 +3215,14 @@ def _rhi_qvp_accessor(self, data_vars=None, **kwargs):
     --------
     radarx.retrieve.rhi_qvp
     """
-    return rhi_qvp(self.xarray_obj, data_vars, **kwargs)
 
 
-@accessor_method("dataset", "datatree", name="melting_layer_ppi")
-def _melting_layer_ppi_accessor(self, **kwargs):
+@accessor_method(
+    "dataset", "datatree", name="melting_layer_ppi", wraps=melting_layer_ppi
+)
+def _melting_layer_ppi_accessor(self):
     """
     Melting-layer top and bottom from the PPIs of this volume.
-
-    Parameters
-    ----------
-    **kwargs
-        Options of :func:`radarx.retrieve.melting_layer_ppi`
-        (``elevation_range``, ``sector``, ``percentiles``, ...).
 
     Returns
     -------
@@ -3246,11 +3234,16 @@ def _melting_layer_ppi_accessor(self, **kwargs):
     --------
     radarx.retrieve.melting_layer_ppi
     """
-    return melting_layer_ppi(self.xarray_obj, **kwargs)
 
 
-@accessor_method("dataarray", "dataset", "datatree", name="mask_above_melting_layer")
-def _mask_above_melting_layer_accessor(self, melting_layer, **kwargs):
+@accessor_method(
+    "dataarray",
+    "dataset",
+    "datatree",
+    name="mask_above_melting_layer",
+    wraps=mask_above_melting_layer,
+)
+def _mask_above_melting_layer_accessor(self):
     """
     Remove rain-only products above the melting layer.
 
@@ -3259,9 +3252,6 @@ def _mask_above_melting_layer_accessor(self, melting_layer, **kwargs):
     melting_layer : xarray.Dataset, xarray.DataArray or float
         The bottom of the melting layer (m above sea level), for example the
         output of ``melting_layer_ppi``.
-    **kwargs
-        Options of :func:`radarx.retrieve.mask_above_melting_layer`
-        (``margin``, ``beam_width``, ...).
 
     Returns
     -------
@@ -3272,4 +3262,3 @@ def _mask_above_melting_layer_accessor(self, melting_layer, **kwargs):
     --------
     radarx.retrieve.mask_above_melting_layer
     """
-    return mask_above_melting_layer(self.xarray_obj, melting_layer, **kwargs)

@@ -1091,7 +1091,7 @@ def test_constant_field_and_outside_of_the_model(engine):
     assert ok[:, :4].all() and not ok[:, -3:].any()
     assert out.elevation.dims == ("azimuth",) and float(out.elevation[0]) == 1.0
     assert float(out.latitude) == SITE[0] and float(out.altitude) == SITE[2]
-    assert out.VRADH.attrs["units"] == "meters per second"
+    assert out.VRADH.attrs["units"] == "m s-1"
 
 
 @pytest.mark.parametrize("engine", ENGINES)

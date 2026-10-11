@@ -24,6 +24,7 @@ import os
 import numpy as np
 import xarray as xr
 
+from .._compat import renamed_arguments
 from ._lazy import LazyModule, register_radar_cmaps
 
 # matplotlib is imported on first use, which keeps ``import radarx`` fast
@@ -156,8 +157,9 @@ def _plot_plan_view(
     )
 
 
+@renamed_arguments(ds="obj")
 def plot_ppi(
-    ds,
+    obj,
     data_var,
     cmap=None,
     vmin=None,
@@ -176,15 +178,15 @@ def plot_ppi(
 
     Parameters
     ----------
-    ds : xarray.Dataset or xarray.DataArray
+    obj : xarray.Dataset or xarray.DataArray
         Sweep dataset containing 2D data on georeferenced ``x`` and ``y``
         coordinates.
     data_var : str
-        Variable name to plot when ``ds`` is a dataset.
+        Variable name to plot when ``obj`` is a dataset.
     """
     title = title or f"PPI {data_var}"
     return _plot_plan_view(
-        ds,
+        obj,
         data_var,
         title=title,
         cmap=cmap,
@@ -200,8 +202,9 @@ def plot_ppi(
     )
 
 
+@renamed_arguments(ds="obj")
 def plot_cappi(
-    ds,
+    obj,
     data_var,
     cmap=None,
     vmin=None,
@@ -220,21 +223,21 @@ def plot_cappi(
 
     Parameters
     ----------
-    ds : xarray.Dataset or xarray.DataArray
+    obj : xarray.Dataset or xarray.DataArray
         CAPPI dataset containing horizontal ``x`` and ``y`` coordinates.
     data_var : str
-        Variable name to plot when ``ds`` is a dataset.
+        Variable name to plot when ``obj`` is a dataset.
     """
     height = None
-    if "z" in ds:
-        height = float(np.asarray(ds["z"].values).reshape(-1)[0]) / 1000.0
+    if "z" in obj:
+        height = float(np.asarray(obj["z"].values).reshape(-1)[0]) / 1000.0
     title = title or (
         f"CAPPI {height:.1f} km {data_var}"
         if height is not None
         else f"CAPPI {data_var}"
     )
     return _plot_plan_view(
-        ds,
+        obj,
         data_var,
         title=title,
         cmap=cmap,
@@ -250,8 +253,9 @@ def plot_cappi(
     )
 
 
+@renamed_arguments(ds="obj")
 def plot_rhi(
-    ds,
+    obj,
     data_var,
     cmap=None,
     vmin=None,
@@ -270,13 +274,13 @@ def plot_rhi(
 
     Parameters
     ----------
-    ds : xarray.Dataset or xarray.DataArray
+    obj : xarray.Dataset or xarray.DataArray
         Sweep dataset containing georeferenced ``x``, ``y``, and ``z``
         coordinates.
     data_var : str
-        Variable name to plot when ``ds`` is a dataset.
+        Variable name to plot when ``obj`` is a dataset.
     """
-    da = _get_dataarray(ds, data_var)
+    da = _get_dataarray(obj, data_var)
     x = _get_coord(da, "x")
     y = _get_coord(da, "y")
     z = _get_coord(da, "z")
@@ -307,7 +311,7 @@ def plot_rhi(
     return _finalize_plot(
         fig,
         ax,
-        ds if isinstance(ds, xr.Dataset) else da.to_dataset(name=da.name or data_var),
+        obj if isinstance(obj, xr.Dataset) else da.to_dataset(name=da.name or data_var),
         title or f"RHI {data_var}",
         savedir=savedir,
         dpi=dpi,

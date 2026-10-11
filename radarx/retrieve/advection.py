@@ -488,8 +488,8 @@ def estimate_motion(
     observed=None,
     x="x",
     y="y",
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Storm motion between two gridded radar volumes.
@@ -599,10 +599,10 @@ def estimate_motion(
         rather than "no echo", e.g. for two different radars.
     x, y : str, optional
         Names of the horizontal coordinates. Default ``"x"`` and ``"y"``.
-    engine : {"auto", "compiled", "numpy"}, optional
-        Implementation of the interpolation used by the refinement passes.
     n_threads : int, optional
         Threads for the compiled kernel. Default: all cores.
+    engine : {"auto", "compiled", "numpy"}, optional
+        Implementation of the interpolation used by the refinement passes.
 
     Returns
     -------
@@ -950,8 +950,8 @@ def advect(
     min_weight=0.5,
     x="x",
     y="y",
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Move gridded fields along the storm motion by a time step.
@@ -1004,11 +1004,11 @@ def advect(
         be defined. Default 0.5.
     x, y : str, optional
         Names of the horizontal coordinates. Default ``"x"`` and ``"y"``.
+    n_threads : int, optional
+        Threads for the compiled kernel. Default: all cores.
     engine : {"auto", "compiled", "numpy"}, optional
         Implementation to use. ``"auto"`` (default) prefers the compiled
         kernel and falls back to NumPy.
-    n_threads : int, optional
-        Threads for the compiled kernel. Default: all cores.
 
     Returns
     -------
@@ -1103,8 +1103,8 @@ def interpolate_time(
     min_weight=0.5,
     x="x",
     y="y",
-    engine="auto",
     n_threads=None,
+    engine="auto",
     **motion_kwargs,
 ):
     """

@@ -221,7 +221,7 @@ plots only, so their numbers cannot be taken from it.
   scheme (`radarx.retrieve.qc.DEFAULT_LIMITS`, `DEFAULT_WEIGHTS`),
 - `threshold`, `window` (km), `min_size` (gates) and `spin_threshold` (dB),
 - `nodata` sets the no-data floors (NEXRAD codes are detected automatically),
-- `snr` / `snr_min` use a signal-to-noise ratio field where available,
+- `snr` / `min_snr` use a signal-to-noise ratio field where available,
 - `engine` and `n_threads` choose the implementation.
 
 ## References

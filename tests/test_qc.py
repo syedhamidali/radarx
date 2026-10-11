@@ -382,7 +382,7 @@ def test_apply_mask_volume_and_accessors():
         sweep_qc.ECHO_CLASS.values, qc["sweep_2"].ds.ECHO_CLASS.values
     )
     np.testing.assert_array_equal(
-        ds.radarx.apply_mask(fields="DBZH").DBZH.values,
+        ds.radarx.apply_mask(data_vars="DBZH").DBZH.values,
         out["sweep_2"].ds.DBZH.values,
     )
 
@@ -625,7 +625,7 @@ def test_krause_matches_an_independent_implementation(engine, seed):
         out = echo_mask(
             ds,
             method="krause2016",
-            vrad="VRADH",
+            field="VRADH",
             zh_3km=zh3,
             threshold=threshold,
             nodata=None,
@@ -654,7 +654,7 @@ def test_krause_weights_and_memberships_by_hand(engine):
     out = echo_mask(
         _krause_sweep(**f),
         method="krause2016",
-        vrad="VRADH",
+        field="VRADH",
         nodata=None,
         engine=engine,
     )
@@ -682,7 +682,7 @@ def test_krause_texture_of_phidp_and_zdr_counts_twice(engine):
         out = echo_mask(
             _krause_sweep(**f),
             method="krause2016",
-            vrad="VRADH",
+            field="VRADH",
             threshold=threshold,
             nodata=None,
             engine=engine,
@@ -698,7 +698,7 @@ def test_krause_post_processing_rules(engine):
     f["zdr"][:, 5] = 5.0  # rule 1
     f["zdr"][:, 15] = -4.4  # inside the limit
     f["rho"][:, 25] = 0.60  # rule 2
-    kw = dict(method="krause2016", vrad="VRADH", nodata=None, engine=engine)
+    kw = dict(method="krause2016", field="VRADH", nodata=None, engine=engine)
     out = echo_mask(_krause_sweep(**f), **kw)
     cls = out.ECHO_CLASS.values
     assert (cls[:, 5] == 2).all() and (cls[:, 25] == 2).all()
@@ -726,12 +726,12 @@ def test_krause_velocity_term_penalises_stationary_echo(engine):
     f = _ideal()
     kw = dict(method="krause2016", nodata=None, engine=engine)
     mid = (slice(None), slice(8, -8))
-    still = echo_mask(_krause_sweep(**f | {"vel": f["vel"] * 0}), vrad="VRADH", **kw)
-    moving = echo_mask(_krause_sweep(**f), vrad="VRADH", **kw)
+    still = echo_mask(_krause_sweep(**f | {"vel": f["vel"] * 0}), field="VRADH", **kw)
+    moving = echo_mask(_krause_sweep(**f), field="VRADH", **kw)
     np.testing.assert_allclose(still.METEO_SCORE.values[mid], 7 / 8, atol=1e-6)
     np.testing.assert_allclose(moving.METEO_SCORE.values[mid], 1.0, atol=1e-6)
     cut = echo_mask(
-        _krause_sweep(**f | {"vel": f["vel"] * 0}), vrad="VRADH", threshold=0.9, **kw
+        _krause_sweep(**f | {"vel": f["vel"] * 0}), field="VRADH", threshold=0.9, **kw
     )
     assert (cut.ECHO_CLASS.values[mid] == 2).all()
     # without a velocity field the term is dropped from the weighted mean
@@ -741,7 +741,7 @@ def test_krause_velocity_term_penalises_stationary_echo(engine):
 
 def test_krause_defaults_and_options():
     ds = _krause_sweep(**_ideal())
-    out = echo_mask(ds, method="krause2016", vrad="VRADH", nodata=None)
+    out = echo_mask(ds, method="krause2016", field="VRADH", nodata=None)
     assert ">= 0.8" in out.METEO_SCORE.attrs["comment"]
     assert "Krause" in out.METEO_SCORE.attrs["comment"]
     assert out.ECHO_CLASS.attrs["source_fields"] == "DBZH, ZDR, RHOHV, PHIDP, VRADH"
@@ -758,7 +758,7 @@ def test_krause_defaults_and_options():
     )
     assert speckle.ECHO_CLASS.values[3, 30] == 3
     # a velocity field of another name
-    out = echo_mask(ds.rename(VRADH="VEL"), method="krause2016", vrad="VEL")
+    out = echo_mask(ds.rename(VRADH="VEL"), method="krause2016", field="VEL")
     assert "VEL" in out.ECHO_CLASS.attrs["source_fields"]
     # the default scheme is the radarx one
     a = echo_mask(ds)
@@ -779,18 +779,18 @@ def test_krause_option_errors():
         with pytest.raises(ValueError, match="krause2016"):
             echo_mask(ds, method="krause2016", **bad)
     with pytest.raises(ValueError, match="krause2016"):
-        echo_mask(ds, vrad="VRADH")
+        echo_mask(ds, field="VRADH")
     with pytest.raises(ValueError, match="krause2016"):
         echo_mask(ds, zh_3km="ZH3KM")
     with pytest.raises(KeyError):
-        echo_mask(ds, method="krause2016", vrad="nope")
+        echo_mask(ds, method="krause2016", field="nope")
     with pytest.raises(KeyError):
         echo_mask(ds, method="krause2016", zh_3km="nope")
     with pytest.raises(ValueError, match="nodata"):
         echo_mask(ds, method="krause2016", nodata={"vel": 0})
     with pytest.raises(ValueError, match="nodata"):
         echo_mask(ds, nodata={"vrad": 0})  # a key of the Krause method only
-    echo_mask(ds, method="krause2016", vrad="VRADH", nodata={"vrad": -50.0})
+    echo_mask(ds, method="krause2016", field="VRADH", nodata={"vrad": -50.0})
 
 
 @pytest.mark.skipif(not qcmod.HAS_COMPILED_KERNEL, reason="kernel not built")
@@ -799,16 +799,16 @@ def test_krause_engines_identical(seed):
     ds = _random_krause_sweep(seed, nray=40, ng=120).isel(azimuth=slice(0, 33))
     for kwargs in (
         {},
-        {"vrad": "VRADH", "zh_3km": "ZH3KM", "threshold": 0.7},
-        {"vrad": "VRADH", "min_size": 12},
+        {"field": "VRADH", "zh_3km": "ZH3KM", "threshold": 0.7},
+        {"field": "VRADH", "min_size": 12},
     ):
         a = echo_mask(ds, method="krause2016", engine="numpy", **kwargs)
         b = echo_mask(ds, method="krause2016", engine="compiled", **kwargs)
         np.testing.assert_array_equal(a.ECHO_CLASS.values, b.ECHO_CLASS.values)
         np.testing.assert_array_equal(a.METEO_SCORE.values, b.METEO_SCORE.values)
-    one = echo_mask(ds, method="krause2016", n_threads=1, vrad="VRADH")
+    one = echo_mask(ds, method="krause2016", n_threads=1, field="VRADH")
     for n in (2, 5):
-        many = echo_mask(ds, method="krause2016", n_threads=n, vrad="VRADH")
+        many = echo_mask(ds, method="krause2016", n_threads=n, field="VRADH")
         np.testing.assert_array_equal(one.ECHO_CLASS.values, many.ECHO_CLASS.values)
 
 
@@ -818,7 +818,7 @@ def test_krause_does_not_modify_the_input():
         ds[name].attrs["units"] = "x"
     ds.range.attrs["units"] = "m"
     before = ds.copy(deep=True)
-    echo_mask(ds, method="krause2016", vrad="VRADH", zh_3km="ZH3KM", min_size=3)
+    echo_mask(ds, method="krause2016", field="VRADH", zh_3km="ZH3KM", min_size=3)
     xr.testing.assert_identical(ds, before)
     for name in ds.variables:
         assert ds[name].attrs == before[name].attrs
@@ -831,19 +831,21 @@ def test_krause_nexrad_codes_are_no_data(engine):
     f["vel"] = f["vel"] * 0 - 64.5
     ds = _krause_sweep(**f)
     ds.attrs["waveform_type"] = "contiguous_surveillance"
-    with_code = echo_mask(ds, method="krause2016", vrad="VRADH", engine=engine)
+    with_code = echo_mask(ds, method="krause2016", field="VRADH", engine=engine)
     without = echo_mask(ds.drop_vars("VRADH"), method="krause2016", engine=engine)
     np.testing.assert_array_equal(
         with_code.METEO_SCORE.values, without.METEO_SCORE.values
     )
-    plain = echo_mask(ds, method="krause2016", vrad="VRADH", nodata=None, engine=engine)
+    plain = echo_mask(
+        ds, method="krause2016", field="VRADH", nodata=None, engine=engine
+    )
     assert np.nanmean(plain.METEO_SCORE.values) == pytest.approx(1.0, abs=1e-6)
 
 
 @pytest.mark.parametrize("engine", ENGINES)
 def test_krause_volume_and_split_cuts(engine):
     dtree = _volume()
-    out = echo_mask(dtree, method="krause2016", vrad="VRADH", engine=engine)
+    out = echo_mask(dtree, method="krause2016", field="VRADH", engine=engine)
     surv = out["sweep_0"].ds.ECHO_CLASS.values
     dop = out["sweep_1"].ds.ECHO_CLASS.values
     # the Doppler cut (reflectivity and velocity only) takes the polarimetric class
@@ -852,7 +854,7 @@ def test_krause_volume_and_split_cuts(engine):
     np.testing.assert_array_equal(dop[both], surv[both])
     assert "sweep_3" not in out.children
     own = echo_mask(
-        dtree, method="krause2016", vrad="VRADH", split_cuts=False, engine=engine
+        dtree, method="krause2016", field="VRADH", split_cuts=False, engine=engine
     )
     assert own["sweep_1"].ds.METEO_SCORE.attrs["comment"].startswith("aggregation")
 
@@ -895,7 +897,7 @@ def test_krause_synthetic_echo_types(engine):
     vel[truth == 2] = rnd.normal(0, 0.3, (truth == 2).sum())
     vel[:, 180:260] = rnd.normal(0, 4, (ds.sizes["azimuth"], 80))  # insects drift
     ds["VRADH"] = (ds.DBZH.dims, vel)
-    out = echo_mask(ds, method="krause2016", vrad="VRADH", engine=engine)
+    out = echo_mask(ds, method="krause2016", field="VRADH", engine=engine)
     cls = out.ECHO_CLASS.values
     assert _share(cls, truth, 1, [1]) > 0.99
     assert _share(cls, truth, 2, [2]) > 0.99

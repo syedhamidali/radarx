@@ -13,7 +13,7 @@ reflectivity :math:`Z_{DR}`. The differential phase :math:`\\Phi_{DP}` is not
 affected, and rain also produces it, so it measures how much rain a beam has
 passed through. :func:`correct_attenuation` uses that.
 
-With the specific attenuation :math:`A_H` (one way, dB/km) and the specific
+With the specific attenuation :math:`A_H` (one way, dB km-1) and the specific
 differential attenuation :math:`A_{DP} = A_H - A_V`, the two-way path
 integrated attenuation and differential attenuation at range :math:`r` are
 
@@ -113,8 +113,8 @@ The papers leave these open; the defaults are radarx's.
 
 * **Gates of the rain path.** A gate belongs to the path of its ray where the
   reflectivity and the phase are finite, the reflectivity is at least
-  ``dbz_min`` (default 0 dBZ), :math:`\\rho_{hv}` (if given) is at least
-  ``rhohv_min`` (default 0.9, a little above the 0.85 of
+  ``min_dbz`` (default 0 dBZ), :math:`\\rho_{hv}` (if given) is at least
+  ``min_rhohv`` (default 0.9, a little above the 0.85 of
   :func:`radarx.retrieve.estimate_kdp`, which is a limit for the phase and
   not for the reflectivity), the user mask (``mask``) is true and the gate is
   below the melting level (``melting``). :math:`r_0` and :math:`r_1` are the
@@ -206,6 +206,8 @@ __all__ = ["correct_attenuation", "attenuation_coefficients"]
 import numpy as np
 import xarray as xr
 
+from .._compat import renamed_arguments
+from .._dtypes import fields_as_float32
 from .._provenance import provenance
 from .._registry import accessor_method
 from ..fundamentals.geometry import beam_center_height
@@ -507,11 +509,11 @@ def _mask_of(mask, ds):
     return ds[mask] if isinstance(mask, str) else mask
 
 
-def _rain_gates(dbz, phidp, rhohv, mask, melting, ds, dbz_min, rhohv_min):
+def _rain_gates(dbz, phidp, rhohv, mask, melting, ds, min_dbz, min_rhohv):
     """Boolean field of the gates that can belong to the rain path."""
-    valid = np.isfinite(dbz) & np.isfinite(phidp) & (dbz >= dbz_min)
+    valid = np.isfinite(dbz) & np.isfinite(phidp) & (dbz >= min_dbz)
     if rhohv is not None:
-        valid = valid & (rhohv >= rhohv_min)
+        valid = valid & (rhohv >= min_rhohv)
     if mask is not None:
         valid = valid & mask.astype(bool)
     if melting is not None:
@@ -537,8 +539,8 @@ def _correct_fields(
     b,
     min_dphi,
     max_pia,
-    dbz_min,
-    rhohv_min,
+    min_dbz,
+    min_rhohv,
     n_threads,
     compiled,
     summary,
@@ -548,7 +550,7 @@ def _correct_fields(
         raise ValueError(f"the reflectivity needs a {_RANGE!r} dimension")
     dr = _gate_spacing(dbz[_RANGE].values)
     phidp = phidp.broadcast_like(dbz) if phidp.dims != dbz.dims else phidp
-    valid = _rain_gates(dbz, phidp, rhohv, mask, melting, ds, dbz_min, rhohv_min)
+    valid = _rain_gates(dbz, phidp, rhohv, mask, melting, ds, min_dbz, min_rhohv)
 
     def run(z, p, v):
         return _block(
@@ -590,17 +592,17 @@ def _correct_fields(
         }
         out["ZDR_corrected"] = zc
     ah.attrs = _attrs(
-        "dB/km", "Specific attenuation H (one way), NaN outside the rain path"
+        "dB km-1", "Specific attenuation H (one way), NaN outside the rain path"
     )
     adp.attrs = _attrs(
-        "dB/km",
+        "dB km-1",
         "Specific differential attenuation (one way), NaN outside the rain path",
     )
     pia.attrs = _attrs("dB", "Two-way path-integrated attenuation H at the gate")
     pida.attrs = _attrs(
         "dB", "Two-way path-integrated differential attenuation at the gate"
     )
-    dphi.attrs = _attrs("degrees", "Differential phase span of the rain path")
+    dphi.attrs = _attrs("degree", "Differential phase span of the rain path")
     out.update({"AH": ah, "ADP": adp, "PIA": pia, "PIDA": pida, "DELTA_PHIDP": dphi})
     result = xr.Dataset(out)
     result.attrs = {
@@ -609,7 +611,7 @@ def _correct_fields(
         "attenuation_beta": beta,
         "attenuation_b": b,
     }
-    return result
+    return fields_as_float32(result)
 
 
 def _sweep_phidp(ds, phidp, dbz_name, rhohv_name, kdp_options):
@@ -625,7 +627,7 @@ def _sweep_phidp(ds, phidp, dbz_name, rhohv_name, kdp_options):
     raw = next((n for n in _PHIDP_NAMES if n in ds), None)
     if raw is None:
         return None
-    names = {"dbzh": dbz_name}
+    names = {"dbz": dbz_name}
     if rhohv_name is not None:
         names["rhohv"] = rhohv_name
     kdp = estimate_kdp(ds, phidp=raw, **{**names, **dict(kdp_options or {})})
@@ -671,6 +673,7 @@ def _band_of(band, objs):
     return _infer_band(objs)
 
 
+@renamed_arguments(dbzh="dbz", dbz_min="min_dbz", rhohv_min="min_rhohv")
 @provenance(
     "Rain attenuation and differential attenuation correction from PhiDP "
     "(constrained ZPHI after Testud et al., or the linear PhiDP relation of "
@@ -678,7 +681,7 @@ def _band_of(band, objs):
 )
 def correct_attenuation(
     obj,
-    dbzh=None,
+    dbz=None,
     zdr=None,
     phidp=None,
     rhohv=None,
@@ -691,8 +694,8 @@ def correct_attenuation(
     b=None,
     min_dphi=3.0,
     max_pia=None,
-    dbz_min=0.0,
-    rhohv_min=0.9,
+    min_dbz=0.0,
+    min_rhohv=0.9,
     melting=None,
     mask=None,
     kdp_options=None,
@@ -716,7 +719,7 @@ def correct_attenuation(
         (then give ``phidp``, and ``zdr`` for the differential reflectivity,
         as DataArrays). The reflectivity may be a dask array; the result stays
         lazy.
-    dbzh, zdr, phidp, rhohv : str or xarray.DataArray, optional
+    dbz, zdr, phidp, rhohv : str or xarray.DataArray, optional
         The reflectivity (dBZ), the differential reflectivity (dB), the
         **processed** differential phase (degrees, increasing with range in
         rain, offset removed, see below) and the copolar correlation
@@ -753,9 +756,9 @@ def correct_attenuation(
         Default 3.
     max_pia : float, optional
         Upper limit (dB) of the path attenuation. Default: none.
-    dbz_min : float, optional
+    min_dbz : float, optional
         Gates with a lower reflectivity (dBZ) are not rain. Default 0.
-    rhohv_min : float, optional
+    min_rhohv : float, optional
         Gates with a lower correlation coefficient are not rain. Default 0.9.
     melting : float or xarray.DataArray, optional
         Height of the melting level (m above sea level, a number or an
@@ -783,7 +786,7 @@ def correct_attenuation(
         On the coordinates of the input: ``DBZH_corrected`` (dBZ),
         ``ZDR_corrected`` (dB, if the differential reflectivity is given),
         the specific attenuation ``AH`` and differential attenuation ``ADP``
-        (dB/km, one way; NaN outside the rain path), the two-way path
+        (dB km-1, one way; NaN outside the rain path), the two-way path
         attenuation ``PIA`` and differential attenuation ``PIDA`` (dB) at each
         gate, and ``DELTA_PHIDP``, the phase span of the rain path of each ray
         (degrees). The coefficients used are in the attributes
@@ -870,8 +873,8 @@ def correct_attenuation(
             bb,
             float(min_dphi),
             max_pia,
-            float(dbz_min),
-            float(rhohv_min),
+            float(min_dbz),
+            float(min_rhohv),
             n_threads,
             compiled,
             text,
@@ -888,7 +891,7 @@ def correct_attenuation(
                 continue
             ds = obj[name].to_dataset(inherit=True)
             fields = _resolve_sweep(
-                ds, dbzh, zdr, phidp, rhohv, mask, kdp_options, False
+                ds, dbz, zdr, phidp, rhohv, mask, kdp_options, False
             )
             if fields is not None:
                 resolved[name] = (ds, fields)
@@ -918,7 +921,7 @@ def correct_attenuation(
 
     if not isinstance(obj, xr.Dataset):
         raise TypeError("obj must be an xarray.DataArray, Dataset or DataTree")
-    fields = _resolve_sweep(obj, dbzh, zdr, phidp, rhohv, mask, kdp_options, True)
+    fields = _resolve_sweep(obj, dbz, zdr, phidp, rhohv, mask, kdp_options, True)
     band_key = None if given else _band_of(band, [obj])
     return correct(*fields[:4], fields[4], obj, band_key)
 
@@ -928,8 +931,14 @@ def correct_attenuation(
 # --------------------------------------------------------------------------
 
 
-@accessor_method("dataarray", "dataset", "datatree", name="correct_attenuation")
-def _correct_attenuation_accessor(self, *args, **kwargs):
+@accessor_method(
+    "dataarray",
+    "dataset",
+    "datatree",
+    name="correct_attenuation",
+    wraps=correct_attenuation,
+)
+def _correct_attenuation_accessor(self):
     """
     Correct the reflectivity and differential reflectivity for rain attenuation.
 
@@ -943,4 +952,3 @@ def _correct_attenuation_accessor(self, *args, **kwargs):
         ``DBZH_corrected``, ``ZDR_corrected``, ``AH``, ``ADP``, ``PIA``,
         ``PIDA`` and ``DELTA_PHIDP``.
     """
-    return correct_attenuation(self.xarray_obj, *args, **kwargs)

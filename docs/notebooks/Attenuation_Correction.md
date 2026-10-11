@@ -217,7 +217,7 @@ def zphi(phase_scale):
         },
         coords={"azimuth": [0.0], "range": ("range", r * 1000.0)},
     )
-    return correct_attenuation(ds, alpha=0.08, beta=0.02, b=b, dbz_min=-50.0)
+    return correct_attenuation(ds, alpha=0.08, beta=0.02, b=b, min_dbz=-50.0)
 
 
 fig, axes = plt.subplots(1, 2, figsize=(12, 4), layout="constrained")
@@ -265,19 +265,19 @@ sweep = dtree["sweep_0"].to_dataset()
 fields = {
     "phidp": "uncorrected_differential_phase",
     "rhohv": "uncorrected_copol_correlation_coeff",
-    "dbzh": "uncorrected_reflectivity_h",
+    "dbz": "uncorrected_reflectivity_h",
 }
 kdp = estimate_kdp(sweep, **fields)
 sweep = sweep.assign(PHIDP_processed=kdp.PHIDP_processed, KDP=kdp.KDP)
 att = {
     "zphi, Bringi et al.": correct_attenuation(
-        sweep, dbzh=fields["dbzh"], zdr="uncorrected_differential_reflectivity",
+        sweep, dbz=fields["dbz"], zdr="uncorrected_differential_reflectivity",
         rhohv=fields["rhohv"], band="C"),
     "zphi, T-matrix": correct_attenuation(
-        sweep, dbzh=fields["dbzh"], zdr="uncorrected_differential_reflectivity",
+        sweep, dbz=fields["dbz"], zdr="uncorrected_differential_reflectivity",
         rhohv=fields["rhohv"], band="C", coefficients="tmatrix"),
     "linear, Bringi et al.": correct_attenuation(
-        sweep, dbzh=fields["dbzh"], zdr="uncorrected_differential_reflectivity",
+        sweep, dbz=fields["dbz"], zdr="uncorrected_differential_reflectivity",
         rhohv=fields["rhohv"], band="C", method="linear"),
 }
 res = att["zphi, T-matrix"]
@@ -291,7 +291,7 @@ res
 ```{code-cell} ipython3
 x, y = sweep.x / 1000.0, sweep.y / 1000.0
 panels = [
-    (sweep[fields["dbzh"]], "uncorrected $Z_H$ (dBZ)", "turbo", -10, 65),
+    (sweep[fields["dbz"]], "uncorrected $Z_H$ (dBZ)", "turbo", -10, 65),
     (res.DBZH_corrected, "corrected $Z_H$ (dBZ)", "turbo", -10, 65),
     (res.PIA, "path attenuation PIA (dB)", "magma_r", 0, 30),
     (res.AH.where(res.AH > 0.01), "specific attenuation $A_H$ (dB/km)", "viridis", 0, 2),
@@ -317,7 +317,7 @@ Along the ray with the largest phase span:
 iray = int(np.nanargmax(res.DELTA_PHIDP.values))
 r_km = sweep.range.values / 1000.0
 fig, axes = plt.subplots(3, 1, figsize=(9, 8), sharex=True)
-axes[0].plot(r_km, sweep[fields["dbzh"]][iray], color="0.5", label="measured")
+axes[0].plot(r_km, sweep[fields["dbz"]][iray], color="0.5", label="measured")
 for name, color in (("zphi, T-matrix", "C0"), ("zphi, Bringi et al.", "C1")):
     axes[0].plot(r_km, att[name].DBZH_corrected[iray], color=color, label=name)
 axes[0].plot(r_km, sweep.attenuation_corrected_reflectivity_h[iray], "k:", label="radar's own chain")
@@ -358,7 +358,7 @@ use = (t.KDP.values > 0.5) & (t.DBZH.values > 30) & (t.DBZH.values < 55)
 slope, icpt = np.polyfit(np.log10(t.KDP.values[use]), t.DBZH.values[use], 1)
 print(f"C-band rain: Z = {icpt:.1f} + {slope:.1f} log10(KDP) dBZ")
 
-raw = sweep[fields["dbzh"]]
+raw = sweep[fields["dbz"]]
 gate = (sweep.KDP > 1.0) & (sweep[fields["rhohv"]] > 0.95) & (raw > 20)
 pred = icpt + slope * np.log10(sweep.KDP.where(gate))
 edges = [0, 2, 5, 10, 20, 40]
@@ -403,9 +403,9 @@ sweep with the fields) or the reflectivity as a `DataArray`, and a dask-backed
 reflectivity stays lazy:
 
 ```{code-cell} ipython3
-kw = dict(dbzh=fields["dbzh"], zdr="uncorrected_differential_reflectivity", rhohv=fields["rhohv"], band="C")
+kw = dict(dbz=fields["dbz"], zdr="uncorrected_differential_reflectivity", rhohv=fields["rhohv"], band="C")
 one = sweep.radarx.correct_attenuation(**kw)  # the accessor of a sweep
-arr = sweep[fields["dbzh"]].radarx.correct_attenuation(  # and of the reflectivity alone
+arr = sweep[fields["dbz"]].radarx.correct_attenuation(  # and of the reflectivity alone
     phidp=sweep.PHIDP_processed, rhohv=sweep[fields["rhohv"]], band="C"
 )
 tree = xr.DataTree.from_dict({"/": dtree.root.to_dataset(), "/sweep_0": sweep})
@@ -420,7 +420,7 @@ print(one.attrs["radarx_method"])
 ```
 
 Without `phidp`, the raw phase is processed by `estimate_kdp` (its defaults, or
-`kdp_options`), and `melting` (the melting level in m), `mask` and `rhohv_min`
+`kdp_options`), and `melting` (the melting level in m), `mask` and `min_rhohv`
 select the gates of the rain path.
 
 ## Speed

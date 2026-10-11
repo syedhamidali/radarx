@@ -290,6 +290,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
+from .._compat import renamed_arguments
 from . import _sounding_numpy
 
 try:
@@ -519,7 +520,7 @@ def _unmask(a):
     return a
 
 
-def _thermo(op, *arrays, engine="auto", n_threads=None):
+def _thermo(op, *arrays, n_threads=None, engine="auto"):
     """Run an elementwise kernel on broadcast NumPy arrays, keeping the shape."""
     arrays = np.broadcast_arrays(
         *(np.asarray(_unmask(a), dtype=np.float64) for a in arrays)
@@ -540,7 +541,7 @@ def _as_dataarray(*args):
     return xr.broadcast(*das)
 
 
-def _wrap(op, name, *args, engine="auto", n_threads=None):
+def _wrap(op, name, *args, n_threads=None, engine="auto"):
     das = _as_dataarray(*args)
     out = _thermo(op, *(d.values for d in das), engine=engine, n_threads=n_threads)
     return das[0].copy(data=out).rename(name).assign_attrs(ATTRS.get(name, {}))
@@ -550,7 +551,7 @@ def _wrap(op, name, *args, engine="auto", n_threads=None):
 # thermodynamics (xarray in, xarray out)
 
 
-def saturation_vapor_pressure(temperature, *, engine="auto", n_threads=None):
+def saturation_vapor_pressure(temperature, *, n_threads=None, engine="auto"):
     """
     Saturation vapour pressure over liquid water.
 
@@ -566,10 +567,10 @@ def saturation_vapor_pressure(temperature, *, engine="auto", n_threads=None):
     ----------
     temperature : xarray.DataArray or array-like
         Temperature in K.
-    engine : {"auto", "compiled", "numpy"}, optional
-        Kernel implementation. Default prefers the compiled kernel.
     n_threads : int, optional
         Threads for the compiled kernel. Default: all cores.
+    engine : {"auto", "compiled", "numpy"}, optional
+        Kernel implementation. Default prefers the compiled kernel.
 
     Returns
     -------
@@ -591,7 +592,7 @@ def saturation_vapor_pressure(temperature, *, engine="auto", n_threads=None):
     )
 
 
-def dewpoint_from_vapor_pressure(vapor_pressure, *, engine="auto", n_threads=None):
+def dewpoint_from_vapor_pressure(vapor_pressure, *, n_threads=None, engine="auto"):
     """
     Dew point from water vapour pressure (Bolton 1980 eq. (10) inverted).
 
@@ -623,7 +624,7 @@ def dewpoint_from_vapor_pressure(vapor_pressure, *, engine="auto", n_threads=Non
 
 
 def dewpoint_from_specific_humidity(
-    specific_humidity, pressure, *, engine="auto", n_threads=None
+    specific_humidity, pressure, *, n_threads=None, engine="auto"
 ):
     """
     Dew point from specific humidity and pressure.
@@ -666,7 +667,7 @@ def dewpoint_from_specific_humidity(
 
 
 def specific_humidity_from_dewpoint(
-    dewpoint, pressure, *, engine="auto", n_threads=None
+    dewpoint, pressure, *, n_threads=None, engine="auto"
 ):
     """
     Specific humidity from dew point and pressure.
@@ -706,7 +707,7 @@ def specific_humidity_from_dewpoint(
 
 
 def relative_humidity_from_dewpoint(
-    temperature, dewpoint, *, engine="auto", n_threads=None
+    temperature, dewpoint, *, n_threads=None, engine="auto"
 ):
     """
     Relative humidity with respect to liquid water, :math:`e_s(T_d) / e_s(T)`.
@@ -743,7 +744,7 @@ def relative_humidity_from_dewpoint(
 
 
 def wet_bulb_temperature(
-    pressure, temperature, dewpoint, *, engine="auto", n_threads=None
+    pressure, temperature, dewpoint, *, n_threads=None, engine="auto"
 ):
     """
     Isobaric wet-bulb temperature.
@@ -799,7 +800,7 @@ def wet_bulb_temperature(
 
 
 def air_density(
-    pressure, temperature, specific_humidity=0.0, *, engine="auto", n_threads=None
+    pressure, temperature, specific_humidity=0.0, *, n_threads=None, engine="auto"
 ):
     """
     Density of moist air, :math:`\\rho = p / (R_d T_v)`.
@@ -850,8 +851,8 @@ def refractivity(
     vapor_pressure=0.0,
     *,
     form="bean_dutton",
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Radio refractivity of air from pressure, temperature and vapour pressure.
@@ -929,7 +930,7 @@ def refractivity(
     )
 
 
-def geopotential_to_height(geopotential, *, engine="auto", n_threads=None):
+def geopotential_to_height(geopotential, *, n_threads=None, engine="auto"):
     """
     Geometric height from geopotential.
 
@@ -2252,8 +2253,8 @@ def era5_profile(
     time_interpolation="linear",
     cache=True,
     surface=True,
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     ERA5 profile at a point.
@@ -2284,10 +2285,10 @@ def era5_profile(
         attached to the level at 2 m). Default True. If the service does not
         return the surface fields a ``RuntimeWarning`` is issued and the
         profile has the pressure levels only.
-    engine : {"auto", "compiled", "numpy"}, optional
-        Kernel implementation.
     n_threads : int, optional
         Threads for the compiled kernel. Default: all cores.
+    engine : {"auto", "compiled", "numpy"}, optional
+        Kernel implementation.
 
     Returns
     -------
@@ -2398,8 +2399,8 @@ def interpolate_profile(
     variables=None,
     *,
     extrapolate=False,
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Interpolate a profile to arbitrary heights.
@@ -2426,10 +2427,10 @@ def interpolate_profile(
     extrapolate : bool, optional
         Hold the lowest/highest valid value beyond the profile. Default
         False (NaN outside).
-    engine : {"auto", "compiled", "numpy"}, optional
-        Kernel implementation.
     n_threads : int, optional
         Threads for the compiled kernel. Default: all cores.
+    engine : {"auto", "compiled", "numpy"}, optional
+        Kernel implementation.
 
     Returns
     -------
@@ -2505,8 +2506,8 @@ def isotherm_height(
     *,
     variable="temperature",
     which="highest",
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Height at which the temperature falls through an isotherm.
@@ -2566,7 +2567,7 @@ def isotherm_height(
     )
 
 
-def wet_bulb_zero_height(profile, *, which="highest", engine="auto", n_threads=None):
+def wet_bulb_zero_height(profile, *, which="highest", n_threads=None, engine="auto"):
     """
     Height of the 0 degC wet-bulb temperature.
 
@@ -2622,7 +2623,7 @@ def wet_bulb_zero_height(profile, *, which="highest", engine="auto", n_threads=N
 
 
 def mean_wind(
-    profile, bottom, top, *, above_ground=False, engine="auto", n_threads=None
+    profile, bottom, top, *, above_ground=False, n_threads=None, engine="auto"
 ):
     """
     Layer-mean wind.
@@ -2882,16 +2883,17 @@ def _background(zcols, cols, grid, attrs, engine, n_threads):
     return bg
 
 
+@renamed_arguments(grid="obj")
 def era5_column(
-    grid,
+    obj,
     time=None,
     *,
     source="auto",
     time_interpolation="linear",
     cache=True,
     surface=True,
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     ERA5 background on a radarx grid.
@@ -2903,7 +2905,7 @@ def era5_column(
 
     Parameters
     ----------
-    grid : xarray.Dataset
+    obj : xarray.Dataset
         A radarx grid (``z``, ``y``, ``x`` in m and ``crs_wkt``), e.g. from
         :func:`radarx.grid.grid_radar` or ``dtree.radarx.to_grid()``.
     time : str or datetime-like, optional
@@ -2921,10 +2923,10 @@ def era5_column(
         10 m wind) to every column before the interpolation to the grid
         levels; see :func:`era5_profile`. Grid levels below the surface level
         are then NaN. Default True.
-    engine : {"auto", "compiled", "numpy"}, optional
-        Kernel implementation.
     n_threads : int, optional
         Threads for the compiled kernel. Default: all cores.
+    engine : {"auto", "compiled", "numpy"}, optional
+        Kernel implementation.
 
     Returns
     -------
@@ -2946,8 +2948,8 @@ def era5_column(
     Quart. J. Roy. Meteor. Soc., 146, 1999-2049,
     https://doi.org/10.1002/qj.3803
     """
-    time = _grid_time(grid) if time is None else time
-    lon, lat, _ = _grid_lonlat_rotation(grid)
+    time = _grid_time(obj) if time is None else time
+    lon, lat, _ = _grid_lonlat_rotation(obj)
     z, cols, meta = _era5_columns(
         source,
         lat.ravel(),
@@ -2960,10 +2962,10 @@ def era5_column(
         surface,
     )
     meta["valid_time"] = str(_to_datetime64(time))
-    return _background(z, cols, grid, meta, engine, n_threads)
+    return _background(z, cols, obj, meta, engine, n_threads)
 
 
-def profile_to_grid(profile, grid, *, engine="auto", n_threads=None):
+def profile_to_grid(profile, grid, *, n_threads=None, engine="auto"):
     """
     Horizontally uniform background on a radarx grid from one profile.
 

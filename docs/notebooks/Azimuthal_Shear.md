@@ -262,8 +262,8 @@ for name, value in zip([n for n in dtree.children if n.startswith("sweep")], nyq
 dealiased = dtree.radarx.assign(dtree.radarx.dealias("VRADH"))
 
 start = time.perf_counter()
-low_layer = dealiased.radarx.azimuthal_shear_layer_max("VRADH_dealiased", layer=(0.0, 2000.0), min_reflectivity=20.0)
-mid_layer = dealiased.radarx.azimuthal_shear_layer_max("VRADH_dealiased", layer=(3000.0, 6000.0), min_reflectivity=20.0)
+low_layer = dealiased.radarx.azimuthal_shear_layer_max("VRADH_dealiased", layer=(0.0, 2000.0), min_dbz=20.0)
+mid_layer = dealiased.radarx.azimuthal_shear_layer_max("VRADH_dealiased", layer=(3000.0, 6000.0), min_dbz=20.0)
 print(f"both layers in {time.perf_counter() - start:.1f} s")
 lowest = dealiased.radarx.azimuthal_shear("VRADH_dealiased")["sweep_1"].to_dataset().azimuthal_shear
 print(f"peak shear: 0.5° tilt {float(lowest.max()):.3f}, 0-2 km maximum {float(low_layer.azimuthal_shear_layer_max.max()):.3f}, "

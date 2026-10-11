@@ -619,8 +619,8 @@ station = pars.assign_coords(
     latitude=lat, longitude=lon, altitude=float(klbb["altitude"]),
     time=pars.time.values - pars.time.values[70] + t_radar,
 )
-pairs = match_radar(station, klbb, fields=["DBZH", "ZDR"], window="60s", delay="fall")
-above = radar_at_location(klbb, lat, lon, float(klbb["altitude"]), fields=["DBZH", "ZDR"])
+pairs = match_radar(station, klbb, data_vars=["DBZH", "ZDR"], window="60s", delay="fall")
+above = radar_at_location(klbb, lat, lon, float(klbb["altitude"]), data_vars=["DBZH", "ZDR"])
 print(f"radar gate above the station: Z_H {above.DBZH.item():.1f} dBZ, "
       f"Z_DR {above.ZDR.item():.2f} dB at {above.beam_height.item():.0f} m")
 pairs[["DBZH", "DBZH_disdrometer", "ZDR", "ZDR_disdrometer", "n_records"]].to_dataframe()
@@ -1286,9 +1286,9 @@ sweep = kgwx["sweep_1"].to_dataset(inherit="all_coords")
 sweep["VRADH"] = dealias_velocity(sweep.assign(VRADH=sweep.VRADH.where(sweep.VRADH > -63.9)))
 sweep = sweep.xradar.georeference()
 shear = azimuthal_shear(sweep)
-couplets = rotation_couplets(sweep, min_reflectivity=20.0)
+couplets = rotation_couplets(sweep, min_dbz=20.0)
 tor_acc = kgwx.radarx.tornado_probability(max_range=150e3)  # the accessor of the volume runs the same network
-couplets_acc = sweep.radarx.rotation_couplets(min_reflectivity=20.0)
+couplets_acc = sweep.radarx.rotation_couplets(min_dbz=20.0)
 print("accessors agree:", bool(np.allclose(tor_acc.tornado_probability, tor.tornado_probability, equal_nan=True)),
       couplets_acc.sizes["couplet"] == couplets.sizes["couplet"])
 print(f"{tor.sizes['chip']} chips; highest tornado probability {float(tor.tornado_probability.max()):.2f}; "
@@ -1752,7 +1752,7 @@ vol_exp = raw_exp.radarx.assign(raw_exp.radarx.kdp()).radarx.assign(raw_exp.rada
 write_zarr(vol_exp, work / "volume.zarr")
 write_cfradial2(vol_exp, work / "volume_cfradial2.nc")
 write_cfradial1(vol_exp, work / "volume_cfradial1.nc")
-write_odim(vol_exp, work / "volume.h5", source="NOD:uskbb", fields=["DBZH", "ZDR", "KDP"])
+write_odim(vol_exp, work / "volume.h5", source="NOD:uskbb", data_vars=["DBZH", "ZDR", "KDP"])
 vol_exp.radarx.to_zarr(work / "volume_accessor.zarr")
 vol_exp.radarx.to_cfradial1(work / "volume_accessor_cf1.nc")
 vol_exp.radarx.to_cfradial2(work / "volume_accessor_cf2.nc")

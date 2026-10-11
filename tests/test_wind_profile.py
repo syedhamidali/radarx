@@ -335,7 +335,7 @@ def test_vad_divergence_vertical_motion_bias_is_documented():
     rng = np.arange(1000.0, 21000.0, 500.0)
     scale = rng * np.cos(np.radians(el)) ** 2
     bias = 2.0 * (0.5 - 3.0) * np.sin(np.radians(el)) / scale
-    np.testing.assert_allclose(out.divergence, ux + vy + bias.mean(), rtol=1e-9)
+    np.testing.assert_allclose(out.divergence, ux + vy + bias.mean(), rtol=1e-6)
 
 
 def test_vad_harmonics_engines_agree():

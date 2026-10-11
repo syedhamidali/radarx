@@ -96,6 +96,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
+from .._compat import renamed_arguments
 from .._gridcf import CRS_NAMES, aeqd_crs, georeference, user_crs
 from .._provenance import HISTORY, METHOD, REFERENCES, VERSION
 from .._registry import accessor_method
@@ -416,13 +417,14 @@ def _same(a, b):
         return a == b
 
 
-def write_cfradial1(dtree, path, *, calibs=True, packing="drop"):
+@renamed_arguments(dtree="obj")
+def write_cfradial1(obj, path, *, calibs=True, packing="drop"):
     """
     Write a radar volume as a CfRadial1 NetCDF file.
 
     The file is written by :func:`xradar.io.to_cfradial1`, which stacks the
     sweeps along one ``time`` dimension (padded to the longest range), as the
-    format requires. radarx prepares a copy of ``dtree`` first (see
+    format requires. radarx prepares a copy of ``obj`` first (see
     :mod:`radarx.io.export`).
 
     CfRadial1 cannot hold everything of a radarx volume:
@@ -454,7 +456,7 @@ def write_cfradial1(dtree, path, *, calibs=True, packing="drop"):
 
     Parameters
     ----------
-    dtree : xarray.DataTree
+    obj : xarray.DataTree
         Radar volume with ``sweep_*`` nodes.
     path : str or os.PathLike
         File to write. An existing file is replaced.
@@ -474,16 +476,16 @@ def write_cfradial1(dtree, path, *, calibs=True, packing="drop"):
     Raises
     ------
     TypeError, ValueError
-        If ``dtree`` is not a DataTree with sweeps, or ``packing`` is unknown.
+        If ``obj`` is not a DataTree with sweeps, or ``packing`` is unknown.
 
     See Also
     --------
     radarx.io.write_cfradial2, radarx.io.write_odim
     """
-    _require_tree(dtree, "write_cfradial1")
+    _require_tree(obj, "write_cfradial1")
     _check_packing(packing)
     writer = _xradar_writer("to_cfradial1")
-    prepared = _prepare_tree(dtree, "netcdf", packing)
+    prepared = _prepare_tree(obj, "netcdf", packing)
     _fold_provenance(prepared)
     # CfRadial1 has no sweep attributes; xradar 0.11 stops when they differ
     for node in prepared.subtree:
@@ -497,12 +499,13 @@ def write_cfradial1(dtree, path, *, calibs=True, packing="drop"):
     return _path(path)
 
 
-def write_cfradial2(dtree, path, *, engine=None, packing="drop"):
+@renamed_arguments(dtree="obj")
+def write_cfradial2(obj, path, *, engine=None, packing="drop"):
     """
     Write a radar volume as a CfRadial2 NetCDF file.
 
     The file is written by :func:`xradar.io.to_cfradial2`: the root and every
-    sweep are NetCDF groups. radarx prepares a copy of ``dtree`` first (see
+    sweep are NetCDF groups. radarx prepares a copy of ``obj`` first (see
     :mod:`radarx.io.export`), which xradar 0.11 also needs because its writer
     changes the tree it is given.
 
@@ -526,7 +529,7 @@ def write_cfradial2(dtree, path, *, engine=None, packing="drop"):
 
     Parameters
     ----------
-    dtree : xarray.DataTree
+    obj : xarray.DataTree
         Radar volume with ``sweep_*`` nodes.
     path : str or os.PathLike
         File to write. An existing file is replaced.
@@ -544,10 +547,10 @@ def write_cfradial2(dtree, path, *, engine=None, packing="drop"):
     --------
     radarx.io.write_cfradial1, radarx.io.write_odim
     """
-    _require_tree(dtree, "write_cfradial2")
+    _require_tree(obj, "write_cfradial2")
     _check_packing(packing)
     writer = _xradar_writer("to_cfradial2")
-    prepared = _prepare_tree(dtree, "netcdf", packing)
+    prepared = _prepare_tree(obj, "netcdf", packing)
     _fold_provenance(prepared)
     # xradar 0.11 does not set these
     prepared.attrs = {**prepared.attrs, "Conventions": "Cf/Radial", "version": "2.0"}
@@ -561,14 +564,14 @@ def _moments(ds):
     return [n for n, v in ds.data_vars.items() if {dim0, "range"} == set(v.dims)]
 
 
-def _odim_tree(dtree, fields, packing):
+def _odim_tree(dtree, data_vars, packing):
     """The copy of the volume that the ODIM writer gets."""
     out = _prepare_tree(dtree, "netcdf", packing)
     groups = list(out.match("sweep_*"))
     for name in groups:
         node = out[name]
         for moment in _moments(node.to_dataset(inherit=False)):
-            if fields is not None and moment not in fields:
+            if data_vars is not None and moment not in data_vars:
                 del node[moment]
                 continue
             var = node[moment]
@@ -614,12 +617,13 @@ def _odim_provenance(path, tree, groups):
                     _write_how(data, _provenance_of(node[quantity].attrs))
 
 
+@renamed_arguments(dtree="obj", fields="data_vars")
 def write_odim(
-    dtree,
+    obj,
     path,
     *,
     source=None,
-    fields=None,
+    data_vars=None,
     optional_how=True,
     compression="gzip",
     compression_opts=6,
@@ -645,7 +649,7 @@ def write_odim(
       ``PHIDP``, ``KDP``, ``VRADH``, ...). Names radarx derives that are not
       in the table (``PHIDP_processed``, ``ECHO_CLASS``, ``HID``,
       ``METEO_SCORE``) are written under their own name, which readers other
-      than xradar may skip or reject; ``fields`` writes a subset.
+      than xradar may skip or reject; ``data_vars`` writes a subset.
     * Only variables on the ``(azimuth, range)`` (``(elevation, range)`` for
       RHI) grid are stored. Per-ray fields (``PHIDP_OFFSET``), scalars,
       strings, the georeferenced ``x``, ``y``, ``z`` and the calibration are
@@ -674,7 +678,7 @@ def write_odim(
 
     Parameters
     ----------
-    dtree : xarray.DataTree
+    obj : xarray.DataTree
         Radar volume with ``sweep_*`` nodes, the root variables
         ``time_coverage_start``, ``time_coverage_end``, ``longitude``,
         ``latitude`` and ``altitude`` and per sweep ``sweep_fixed_angle`` and
@@ -688,7 +692,7 @@ def write_odim(
         accepts ``NOD``, ``RAD`` or ``WMO``. Newer xradar versions build the
         string from the root attributes of a volume that was read from ODIM
         when it is not given; xradar 0.11 needs it.
-    fields : sequence of str, optional
+    data_vars : sequence of str, optional
         Names of the fields to write. Default: all fields on the grid.
     optional_how : bool, optional
         Write the optional ray angles and times to ``how``. Default True.
@@ -708,28 +712,28 @@ def write_odim(
     ------
     ValueError
         If the volume has no radar identifier for ``source``, or a name in
-        ``fields`` is not a field on the grid of any sweep.
+        ``data_vars`` is not a field on the grid of any sweep.
 
     See Also
     --------
     radarx.io.write_cfradial1, radarx.io.write_cfradial2
     """
-    _require_tree(dtree, "write_odim")
+    _require_tree(obj, "write_odim")
     _check_packing(packing)
     writer = _xradar_writer("to_odim")
-    if fields is not None:
-        fields = list(fields)
+    if data_vars is not None:
+        data_vars = list(data_vars)
         known = {
             m
-            for name in dtree.match("sweep_*")
-            for m in _moments(dtree[name].to_dataset(inherit=False))
+            for name in obj.match("sweep_*")
+            for m in _moments(obj[name].to_dataset(inherit=False))
         }
-        unknown = [f for f in fields if f not in known]
+        unknown = [f for f in data_vars if f not in known]
         if unknown:
             raise ValueError(
                 f"{unknown} are not fields on the ray by gate grid of the sweeps"
             )
-    prepared, groups = _odim_tree(dtree, fields, packing)
+    prepared, groups = _odim_tree(obj, data_vars, packing)
     writer(
         prepared,
         os.fspath(path),
@@ -830,7 +834,8 @@ def _cf_grid(ds, crs, bounds, lonlat):
     return out
 
 
-def write_netcdf_cf(grid, path, *, crs=None, bounds=True, lonlat=True, **kwargs):
+@renamed_arguments(grid="obj")
+def write_netcdf_cf(obj, path, *, crs=None, bounds=True, lonlat=True, **kwargs):
     """
     Write a gridded result as a CF-compliant NetCDF file.
 
@@ -878,7 +883,7 @@ def write_netcdf_cf(grid, path, *, crs=None, bounds=True, lonlat=True, **kwargs)
 
     Parameters
     ----------
-    grid : xarray.Dataset or xarray.DataArray
+    obj : xarray.Dataset or xarray.DataArray
         Gridded result with ``x`` and ``y`` dimensions.
     path : str or os.PathLike
         File to write. An existing file is replaced.
@@ -909,7 +914,7 @@ def write_netcdf_cf(grid, path, *, crs=None, bounds=True, lonlat=True, **kwargs)
     --------
     radarx.io.write_zarr
     """
-    ds = _as_dataset(grid)
+    ds = _as_dataset(obj)
     if not isinstance(ds, xr.Dataset):
         raise TypeError("write_netcdf_cf writes a Dataset or a DataArray")
     out = _cf_grid(ds, crs, bounds, lonlat)
@@ -979,8 +984,8 @@ def write_zarr(obj, path, *, cf=False, packing="drop", **kwargs):
 # ---------------------------------------------------------------------------
 # accessor methods
 # ---------------------------------------------------------------------------
-@accessor_method("datatree", name="to_cfradial1")
-def _to_cfradial1(self, path, **kwargs):
+@accessor_method("datatree", name="to_cfradial1", wraps=write_cfradial1)
+def _to_cfradial1(self):
     """
     Write the volume as a CfRadial1 file.
 
@@ -992,11 +997,10 @@ def _to_cfradial1(self, path, **kwargs):
     pathlib.Path
         The file.
     """
-    return write_cfradial1(self.xarray_obj, path, **kwargs)
 
 
-@accessor_method("datatree", name="to_cfradial2")
-def _to_cfradial2(self, path, **kwargs):
+@accessor_method("datatree", name="to_cfradial2", wraps=write_cfradial2)
+def _to_cfradial2(self):
     """
     Write the volume as a CfRadial2 file.
 
@@ -1007,11 +1011,10 @@ def _to_cfradial2(self, path, **kwargs):
     pathlib.Path
         The file.
     """
-    return write_cfradial2(self.xarray_obj, path, **kwargs)
 
 
-@accessor_method("datatree", name="to_odim")
-def _to_odim(self, path, **kwargs):
+@accessor_method("datatree", name="to_odim", wraps=write_odim)
+def _to_odim(self):
     """
     Write the volume as an ODIM_H5 file.
 
@@ -1023,11 +1026,10 @@ def _to_odim(self, path, **kwargs):
     pathlib.Path
         The file.
     """
-    return write_odim(self.xarray_obj, path, **kwargs)
 
 
-@accessor_method("dataarray", "dataset", "datatree", name="to_zarr")
-def _to_zarr(self, path, **kwargs):
+@accessor_method("dataarray", "dataset", "datatree", name="to_zarr", wraps=write_zarr)
+def _to_zarr(self):
     """
     Write the object to a Zarr store.
 
@@ -1038,11 +1040,10 @@ def _to_zarr(self, path, **kwargs):
     pathlib.Path
         The store.
     """
-    return write_zarr(self.xarray_obj, path, **kwargs)
 
 
-@accessor_method("dataarray", "dataset", name="to_netcdf_cf")
-def _to_netcdf_cf(self, path, **kwargs):
+@accessor_method("dataarray", "dataset", name="to_netcdf_cf", wraps=write_netcdf_cf)
+def _to_netcdf_cf(self):
     """
     Write the grid as a CF-compliant NetCDF file.
 
@@ -1053,4 +1054,3 @@ def _to_netcdf_cf(self, path, **kwargs):
     pathlib.Path
         The file.
     """
-    return write_netcdf_cf(self.xarray_obj, path, **kwargs)

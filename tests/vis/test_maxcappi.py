@@ -41,7 +41,7 @@ def test_plot_maxcappi_basic(mock_dtree, tmp_path):
 
     # Plot Max-CAPPI
     plot_maxcappi(
-        ds=ds,
+        obj=ds,
         data_var="corrected_reflectivity_horizontal",
         cmap="viridis",
         vmin=0,

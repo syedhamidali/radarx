@@ -141,6 +141,8 @@ __all__ = [
 import numpy as np
 import xarray as xr
 
+from .._compat import renamed_arguments
+from .._dtypes import fields_as_float32
 from .._fields import VELOCITY, as_sweep
 from .._provenance import provenance
 from .._registry import accessor_method
@@ -233,8 +235,8 @@ def bulk_shear(
     dim="height",
     height=None,
     ground=None,
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Bulk wind difference (bulk shear) over a layer.
@@ -262,10 +264,10 @@ def bulk_shear(
     ground : float or xarray.DataArray, optional
         Height (m) of the ground in the units of the heights; default the
         lowest level with a valid wind.
-    engine : {"auto", "compiled", "numpy"}, optional
-        Kernel implementation.
     n_threads : int, optional
         Threads for the compiled kernel. Default: all cores.
+    engine : {"auto", "compiled", "numpy"}, optional
+        Kernel implementation.
 
     Returns
     -------
@@ -318,8 +320,8 @@ def layer_mean_wind(
     dim="height",
     height=None,
     ground=None,
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Height-weighted (non-pressure-weighted) mean wind of a layer.
@@ -434,8 +436,8 @@ def bunkers_storm_motion(
     dim="height",
     height=None,
     ground=None,
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Supercell motion of Bunkers et al. [1]_ ("internal dynamics" method).
@@ -553,8 +555,8 @@ def storm_relative_helicity(
     dim="height",
     height=None,
     ground=None,
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Storm-relative helicity of a layer.
@@ -641,9 +643,9 @@ def storm_relative_helicity(
 _VELOCITY_NAMES = VELOCITY
 
 
-def _sweep_rings(ds, velocity, min_elevation, max_elevation, max_range):
+def _sweep_rings(ds, field, min_elevation, max_elevation, max_range):
     """Range rings (vr, azimuth, cos elevation, height, R cos^2) of one sweep or None."""
-    name = velocity
+    name = field
     if name is None:
         name = next((n for n in _VELOCITY_NAMES if n in ds), None)
     if name is None or name not in ds:
@@ -674,12 +676,13 @@ def _sweep_rings(ds, velocity, min_elevation, max_elevation, max_range):
     )
 
 
+@renamed_arguments(velocity="field")
 @provenance(
     "Wind profile by the velocity-azimuth display, after Browning and Wexler (1968)"
 )
 def vad_profile(
     obj,
-    velocity=None,
+    field=None,
     *,
     height_bins=None,
     min_gates=50,
@@ -688,8 +691,8 @@ def vad_profile(
     min_elevation=1.0,
     max_elevation=45.0,
     max_range=None,
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Wind profile from radar radial velocities by the velocity-azimuth display.
@@ -709,7 +712,7 @@ def vad_profile(
         volume with ``sweep_*`` groups (xradar layout). The velocities must be
         dealiased (e.g. :func:`radarx.retrieve.dealias_velocity`) and
         no-data codes masked; sweeps without the velocity field are skipped.
-    velocity : str, optional
+    field : str, optional
         Velocity variable; default the first of ``VRADH``, ``VRADV``,
         ``VELOCITY``, ``velocity``, ``VEL``.
     height_bins : array-like, optional
@@ -730,10 +733,10 @@ def vad_profile(
         Use only range rings up to this range (m). Far rings of low sweeps
         average the wind over a circle hundreds of kilometres wide; limiting
         the range keeps the profile local to the radar.
-    engine : {"auto", "compiled", "numpy"}, optional
-        Kernel implementation.
     n_threads : int, optional
         Threads for the compiled kernel. Default: all cores.
+    engine : {"auto", "compiled", "numpy"}, optional
+        Kernel implementation.
 
     Returns
     -------
@@ -777,7 +780,7 @@ def vad_profile(
     rings = [
         r
         for r in (
-            _sweep_rings(ds, velocity, min_elevation, max_elevation, max_range)
+            _sweep_rings(ds, field, min_elevation, max_elevation, max_range)
             for ds in datasets
         )
         if r is not None
@@ -890,7 +893,7 @@ def vad_profile(
         t = np.ravel(site["time"].values)
         if t.size and np.issubdtype(t.dtype, np.datetime64):
             out = out.assign_coords(time=t.min())
-    return out
+    return fields_as_float32(out)
 
 
 # --------------------------------------------------------------------------
@@ -898,8 +901,8 @@ def vad_profile(
 # --------------------------------------------------------------------------
 
 
-@accessor_method("dataset", name="bulk_shear")
-def _bulk_shear_accessor(self, bottom=0.0, top=6000.0, **kwargs):
+@accessor_method("dataset", name="bulk_shear", wraps=bulk_shear)
+def _bulk_shear_accessor(self):
     """
     Bulk wind difference of the ``u``, ``v`` profile over a layer.
 
@@ -910,11 +913,10 @@ def _bulk_shear_accessor(self, bottom=0.0, top=6000.0, **kwargs):
     xarray.Dataset
         Shear components, speed, direction (and line-normal component).
     """
-    return bulk_shear(self.xarray_obj, bottom, top, **kwargs)
 
 
-@accessor_method("dataset", name="bunkers_storm_motion")
-def _bunkers_accessor(self, **kwargs):
+@accessor_method("dataset", name="bunkers_storm_motion", wraps=bunkers_storm_motion)
+def _bunkers_accessor(self):
     """
     Bunkers et al. (2000) storm motion of the ``u``, ``v`` profile.
 
@@ -925,11 +927,12 @@ def _bunkers_accessor(self, **kwargs):
     xarray.Dataset
         ``u``, ``v``, ``speed`` and ``direction`` of the storm motion.
     """
-    return bunkers_storm_motion(self.xarray_obj, **kwargs)
 
 
-@accessor_method("dataset", name="storm_relative_helicity")
-def _srh_accessor(self, storm_motion="right", bottom=0.0, top=3000.0, **kwargs):
+@accessor_method(
+    "dataset", name="storm_relative_helicity", wraps=storm_relative_helicity
+)
+def _srh_accessor(self):
     """
     Storm-relative helicity of the ``u``, ``v`` profile.
 
@@ -940,11 +943,10 @@ def _srh_accessor(self, storm_motion="right", bottom=0.0, top=3000.0, **kwargs):
     xarray.DataArray
         Storm-relative helicity (m2 s-2).
     """
-    return storm_relative_helicity(self.xarray_obj, storm_motion, bottom, top, **kwargs)
 
 
-@accessor_method("dataset", "datatree", name="vad_profile")
-def _vad_accessor(self, velocity=None, **kwargs):
+@accessor_method("dataset", "datatree", name="vad_profile", wraps=vad_profile)
+def _vad_accessor(self):
     """
     Wind profile by the velocity-azimuth display of the sweep or volume.
 
@@ -955,4 +957,3 @@ def _vad_accessor(self, velocity=None, **kwargs):
     xarray.Dataset
         ``u``, ``v``, speed and direction on ``height``.
     """
-    return vad_profile(self.xarray_obj, velocity, **kwargs)

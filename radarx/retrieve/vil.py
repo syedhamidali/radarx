@@ -1172,9 +1172,7 @@ def _dsd_lwc(lwc, factor, units):
 def _lwc_dsd(ds, dbz, factor, units, mask, dsd_kwargs, n_threads, engine):
     from .dsd import dsd as _dsd
 
-    res = _dsd(
-        ds, dbzh=dbz, mask=mask, n_threads=n_threads, engine=engine, **dsd_kwargs
-    )
+    res = _dsd(ds, dbz=dbz, mask=mask, n_threads=n_threads, engine=engine, **dsd_kwargs)
     return _dsd_lwc(res["LWC"], factor, units)
 
 
@@ -1334,7 +1332,7 @@ def _lwc_dsd_tree(dtree, dbz, factor, units, mask, dsd_kwargs, n_threads, engine
     from .dsd import dsd as _dsd
 
     res = _dsd(
-        dtree, dbzh=dbz, mask=mask, n_threads=n_threads, engine=engine, **dsd_kwargs
+        dtree, dbz=dbz, mask=mask, n_threads=n_threads, engine=engine, **dsd_kwargs
     )
     nodes = {"/": res.root.to_dataset(inherit=False)}
     for name in res.children:
@@ -1347,8 +1345,8 @@ def _lwc_dsd_tree(dtree, dbz, factor, units, mask, dsd_kwargs, n_threads, engine
 # --------------------------------------------------------------------------
 
 
-@accessor_method("dataset", "datatree", name="vil")
-def _vil_accessor(self, **kwargs):
+@accessor_method("dataset", "datatree", name="vil", wraps=vil)
+def _vil_accessor(self):
     """
     Vertically integrated liquid of a volume, grid or profile.
 
@@ -1359,11 +1357,10 @@ def _vil_accessor(self, **kwargs):
     xarray.Dataset
         ``VIL`` (kg m-2) with the lower-bound flag and the lowest height.
     """
-    return vil(self.xarray_obj, **kwargs)
 
 
-@accessor_method("dataset", "datatree", name="echo_top")
-def _echo_top_accessor(self, **kwargs):
+@accessor_method("dataset", "datatree", name="echo_top", wraps=echo_top)
+def _echo_top_accessor(self):
     """
     Echo-top height of a volume, grid or profile.
 
@@ -1374,11 +1371,10 @@ def _echo_top_accessor(self, **kwargs):
     xarray.DataArray
         ``ECHO_TOP`` (m above sea level).
     """
-    return echo_top(self.xarray_obj, **kwargs)
 
 
-@accessor_method("dataset", "datatree", name="vil_density")
-def _vil_density_accessor(self, **kwargs):
+@accessor_method("dataset", "datatree", name="vil_density", wraps=vil_density)
+def _vil_density_accessor(self):
     """
     VIL density of a volume, grid or profile.
 
@@ -1389,11 +1385,12 @@ def _vil_density_accessor(self, **kwargs):
     xarray.DataArray
         ``VIL_DENSITY`` (g m-3).
     """
-    return vil_density(self.xarray_obj, **kwargs)
 
 
-@accessor_method("dataset", "datatree", name="liquid_water_content")
-def _liquid_water_content_accessor(self, method="zm", **kwargs):
+@accessor_method(
+    "dataset", "datatree", name="liquid_water_content", wraps=liquid_water_content
+)
+def _liquid_water_content_accessor(self):
     """
     Liquid water content of rain, gate by gate.
 
@@ -1404,4 +1401,3 @@ def _liquid_water_content_accessor(self, method="zm", **kwargs):
     xarray.DataArray or xarray.DataTree
         ``LWC``.
     """
-    return liquid_water_content(self.xarray_obj, method, **kwargs)
