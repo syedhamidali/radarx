@@ -554,10 +554,7 @@ def _snr_dataarray(
         ),
     }
     if not isinstance(level, xr.DataArray) or level.ndim == 0:
-        try:
-            out.attrs["noise_level"] = float(level)
-        except TypeError:  # dask scalar
-            pass
+        out.attrs["noise_level"] = float(level)
     return out
 
 
@@ -663,16 +660,13 @@ def snr(
 # --------------------------------------------------------------------------
 
 
-def _field(ds, value, candidates, what, required=True):
+def _field(ds, value, candidates, what):
     """A DataArray from a name, a DataArray or the default candidates."""
     if isinstance(value, xr.DataArray):
         return value
     if isinstance(ds, xr.DataArray):
-        if required:
-            raise ValueError(f"with a DataArray as obj, pass {what} as a DataArray")
-        return None
-    name = ft.find_field(ds, value, candidates, what, required=required)
-    return None if name is None else ds[name]
+        raise ValueError(f"with a DataArray as obj, pass {what} as a DataArray")
+    return ds[ft.find_field(ds, value, candidates, what)]
 
 
 def _resolve_snr(

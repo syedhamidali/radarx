@@ -504,7 +504,7 @@ def _blend_array(
 # --------------------------------------------------------------------------
 
 
-def _find(ds, spec, key, required=True):
+def _find(ds, spec, key):
     """A field of the dataset ``ds`` as a DataArray: by name, by default name or as given."""
     if isinstance(spec, xr.DataArray):
         return spec
@@ -519,11 +519,7 @@ def _find(ds, spec, key, required=True):
     for cand in _NAMES[key]:
         if cand in ds:
             return ds[cand]
-    if required:
-        raise KeyError(
-            f"no {_WHAT[key]} found among {_NAMES[key]}; pass the field name"
-        )
-    return None
+    raise KeyError(f"no {_WHAT[key]} found among {_NAMES[key]}; pass the field name")
 
 
 def _temperature(ds, spec):
