@@ -204,6 +204,20 @@
   "pages": "1320-1334",
   "doi": "10.1080/02626667.2013.839872"
  },
+ "10.1093/comjnl/7.4.308": {
+  "authors": [
+   "Nelder, J. A.",
+   "Mead, R."
+  ],
+  "year": 1965,
+  "title": "A Simplex Method for Function Minimization",
+  "type": "article",
+  "journal": "The Computer Journal",
+  "volume": "7",
+  "issue": "4",
+  "pages": "308-313",
+  "doi": "10.1093/comjnl/7.4.308"
+ },
  "10.1109/36.917906": {
   "authors": [
    "Zhang, G.",
@@ -1004,6 +1018,36 @@
   "pages": "2128-2142",
   "doi": "10.1175/1520-0493(1999)127<2128:AVMFTA>2.0.CO;2"
  },
+ "10.1175/1520-0493(1999)127<2419:TCKSRF>2.0.CO;2": {
+  "authors": [
+   "Lee, W.-C.",
+   "Jou, B. J.-D.",
+   "Chang, P.-L.",
+   "Deng, S.-M."
+  ],
+  "year": 1999,
+  "title": "Tropical Cyclone Kinematic Structure Retrieved from Single-Doppler Radar Observations. Part I: Interpretation of Doppler Velocity Patterns and the GBVTD Technique",
+  "type": "article",
+  "journal": "Monthly Weather Review",
+  "volume": "127",
+  "issue": "10",
+  "pages": "2419-2439",
+  "doi": "10.1175/1520-0493(1999)127<2419:TCKSRF>2.0.CO;2"
+ },
+ "10.1175/1520-0493(2000)128<1925:TCKSRF>2.0.CO;2": {
+  "authors": [
+   "Lee, W.-C.",
+   "Marks, F. D."
+  ],
+  "year": 2000,
+  "title": "Tropical Cyclone Kinematic Structure Retrieved from Single-Doppler Radar Observations. Part II: The GBVTD-Simplex Center Finding Algorithm",
+  "type": "article",
+  "journal": "Monthly Weather Review",
+  "volume": "128",
+  "issue": "6",
+  "pages": "1925-1936",
+  "doi": "10.1175/1520-0493(2000)128<1925:TCKSRF>2.0.CO;2"
+ },
  "10.1175/1520-0493(2002)130<2917:ABSFMN>2.0.CO;2": {
   "authors": [
    "Bryan, G. H.",
@@ -1393,6 +1437,20 @@
   "pages": "405-425",
   "doi": "10.1175/JAMC-D-10-05024.1"
  },
+ "10.1175/JAMC-D-11-0167.1": {
+  "authors": [
+   "Bell, M. M.",
+   "Lee, W.-C."
+  ],
+  "year": 2012,
+  "title": "Objective Tropical Cyclone Center Tracking Using Single-Doppler Radar",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology and Climatology",
+  "volume": "51",
+  "issue": "5",
+  "pages": "878-896",
+  "doi": "10.1175/JAMC-D-11-0167.1"
+ },
  "10.1175/JAMC-D-12-0101.1": {
   "authors": [
    "Cao, Q.",
@@ -1441,6 +1499,24 @@
   "issue": "11",
   "pages": "2529-2548",
   "doi": "10.1175/JAMC-D-13-0124.1"
+ },
+ "10.1175/JAMC-D-13-031.1": {
+  "authors": [
+   "Chen, X.",
+   "Zhao, K.",
+   "Lee, W.-C.",
+   "Jou, B. J.-D.",
+   "Xue, M.",
+   "Harasti, P. R."
+  ],
+  "year": 2013,
+  "title": "The Improvement to the Environmental Wind and Tropical Cyclone Circulation Retrievals with the Modified GBVTD (MGBVTD) Technique",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology and Climatology",
+  "volume": "52",
+  "issue": "11",
+  "pages": "2493-2508",
+  "doi": "10.1175/JAMC-D-13-031.1"
  },
  "10.1175/JAMC-D-19-0128.1": {
   "authors": [
@@ -1917,6 +1993,23 @@
   "publisher": "NSF NCAR Earth Observing Laboratory",
   "doi": "10.26023/HFBG-7W5M-WA00"
  },
+ "10.3319/TAO.2006.17.2.429(A)": {
+  "authors": [
+   "Lee, W.-C.",
+   "Harasti, P. R.",
+   "Bell, M.",
+   "Jou, B. J.-D.",
+   "Chang, M.-H."
+  ],
+  "year": 2006,
+  "title": "Doppler Velocity Signatures of Idealized Elliptical Vortices",
+  "type": "article",
+  "journal": "Terrestrial, Atmospheric and Oceanic Sciences",
+  "volume": "17",
+  "issue": "2",
+  "pages": "429-446",
+  "doi": "10.3319/TAO.2006.17.2.429(A)"
+ },
  "10.5194/amt-8-343-2015": {
   "authors": [
    "Raupach, T. H.",
@@ -2243,5 +2336,20 @@
   "publisher": "NSF NCAR Computational and Information Systems Laboratory",
   "doi": "10.5065/D6WQ0202",
   "url": "https://github.com/NCAR/DART"
+ },
+ "liou-2005": {
+  "authors": [
+   "Liou, Y.-C.",
+   "Wang, T.-C. C.",
+   "Lee, W.-C.",
+   "Chang, Y.-J."
+  ],
+  "year": 2005,
+  "title": "The extended GBVTD and the recovery of the tropical cyclones asymmetric structures",
+  "type": "inproceedings",
+  "journal": "Preprints, 32nd Conference on Radar Meteorology",
+  "publisher": "American Meteorological Society",
+  "pages": "JP2J.8",
+  "url": "https://ams.confex.com/ams/pdfpapers/95858.pdf"
  }
 }
