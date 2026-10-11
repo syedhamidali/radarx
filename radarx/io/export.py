@@ -615,7 +615,10 @@ def write_odim(
       encoding are stored as floats with ``nodata`` and ``undetect`` set to
       the largest value of the type (infinity for floats), which the xradar
       reader turns back into NaN; a float field cannot say "no echo" and
-      "never measured" apart.
+      "never measured" apart. For an integer field without an encoding
+      (``ECHO_CLASS``, ``HID``) the largest value of the type (127 for
+      ``int8``) is ``nodata``: a class code of that value would read back as
+      NaN, and the field comes back as floats.
     * With ``optional_how=True`` (the default here) the angles and times of
       every ray are written, and xradar reads them back; without them the
       reader rebuilds a regular azimuth grid and the exact ray angles and
