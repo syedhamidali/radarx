@@ -96,6 +96,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
+from .._gridcf import CRS_NAMES, aeqd_crs, georeference, user_crs
 from .._provenance import HISTORY, METHOD, REFERENCES, VERSION
 from .._registry import accessor_method
 
@@ -744,37 +745,15 @@ def write_odim(
 # ---------------------------------------------------------------------------
 # grids: CF georeferencing
 # ---------------------------------------------------------------------------
-_CRS_NAMES = ("crs_wkt", "spatial_ref", "crs")
-_AXES = {
-    "x": {
-        "standard_name": "projection_x_coordinate",
-        "long_name": "x coordinate of the projection",
-        "axis": "X",
-        "units": "m",
-    },
-    "y": {
-        "standard_name": "projection_y_coordinate",
-        "long_name": "y coordinate of the projection",
-        "axis": "Y",
-        "units": "m",
-    },
-    "z": {"long_name": "height", "axis": "Z", "positive": "up", "units": "m"},
-}
+_CRS_NAMES = CRS_NAMES
 
 
 def _find_crs(ds, crs):
     """The grid mapping attributes of the grid, from ``crs`` or the dataset."""
-    import pyproj
-
     if crs is False:
         return None
     if crs is not None:
-        if isinstance(crs, (tuple, list)):
-            lat, lon = (float(v) for v in crs)
-            crs = pyproj.CRS.from_dict(
-                {"proj": "aeqd", "lat_0": lat, "lon_0": lon, "datum": "WGS84"}
-            )
-        return pyproj.CRS.from_user_input(crs).to_cf()
+        return user_crs(crs).to_cf()
     for name in _CRS_NAMES:
         if name in ds.variables and "crs_wkt" in ds[name].attrs:
             return dict(ds[name].attrs)
@@ -784,22 +763,8 @@ def _find_crs(ds, crs):
             return dict(ds[name].attrs)
     if "latitude" in ds.variables and "longitude" in ds.variables:
         if ds["latitude"].ndim == 0 and ds["longitude"].ndim == 0:
-            lat, lon = float(ds["latitude"]), float(ds["longitude"])
-            return pyproj.CRS.from_dict(
-                {"proj": "aeqd", "lat_0": lat, "lon_0": lon, "datum": "WGS84"}
-            ).to_cf()
+            return aeqd_crs(float(ds["latitude"]), float(ds["longitude"])).to_cf()
     return None
-
-
-def _lonlat(crs_attrs, x, y):
-    """2-D longitude and latitude of the cells of a projected grid."""
-    import pyproj
-
-    crs = pyproj.CRS.from_wkt(crs_attrs["crs_wkt"])
-    transformer = pyproj.Transformer.from_crs(crs, crs.geodetic_crs, always_xy=True)
-    gx, gy = np.meshgrid(np.asarray(x, "f8"), np.asarray(y, "f8"))
-    lon, lat = transformer.transform(gx, gy)
-    return np.asarray(lon), np.asarray(lat)
 
 
 def _edges(values):
@@ -824,11 +789,6 @@ def _bounds(ds, name):
     ds[name].attrs["bounds"] = f"{name}_bnds"
 
 
-def _set_attrs(var, defaults):
-    for key, value in defaults.items():
-        var.attrs.setdefault(key, value)
-
-
 def _cf_grid(ds, crs, bounds, lonlat):
     """Copy of a gridded Dataset with CF georeferencing."""
     if "x" not in ds.dims or "y" not in ds.dims:
@@ -836,47 +796,15 @@ def _cf_grid(ds, crs, bounds, lonlat):
     out = _prepare_dataset(ds, "netcdf", "drop")
     mapping = _find_crs(ds, crs)
     out = out.drop_vars([n for n in _CRS_NAMES if n in out.variables])
-
-    for name, attrs in _AXES.items():
-        if name in out.coords:
-            _set_attrs(out[name], attrs)
-            if (
-                name == "z"
-                and "sea level" in str(out[name].attrs.get("long_name", ""))
-                and out[name].ndim == 1
-            ):
-                _set_attrs(out[name], {"standard_name": "altitude"})
-    if "time" in out.coords:
-        _set_attrs(out["time"], {"standard_name": "time", "axis": "T"})
-    for name, units in (
-        ("latitude", "degrees_north"),
-        ("longitude", "degrees_east"),
-        ("altitude", "m"),
-    ):
-        if name in out.coords:
-            _set_attrs(out[name], {"units": units, "long_name": f"{name} of the radar"})
-
+    out = georeference(
+        out,
+        mapping,
+        name="crs",
+        recompute=crs is not None,
+        lonlat_=lonlat,
+    )
     if mapping is not None:
-        out["crs"] = xr.DataArray(0, attrs=mapping)
-        if lonlat and (
-            out.coords.get("lat") is None
-            or out["lat"].ndim == 1
-            or out.coords.get("lon") is None
-            or out["lon"].ndim == 1
-        ):
-            lon, lat = _lonlat(mapping, out["x"].values, out["y"].values)
-            out = out.drop_vars(["lat", "lon"], errors="ignore")
-            out = out.assign_coords(lat=(("y", "x"), lat), lon=(("y", "x"), lon))
-        for var in out.data_vars.values():
-            if "x" in var.dims and "y" in var.dims:
-                var.attrs["grid_mapping"] = "crs"
         out = out.reset_coords("crs")
-    for name, units, standard in (
-        ("lat", "degrees_north", "latitude"),
-        ("lon", "degrees_east", "longitude"),
-    ):
-        if name in out.coords:
-            _set_attrs(out[name], {"units": units, "standard_name": standard})
     if bounds:
         for name in ("x", "y", "z"):
             if name in out.dims and out.sizes[name] > 1 and out[name].ndim == 1:
@@ -905,15 +833,18 @@ def write_netcdf_cf(grid, path, *, crs=None, bounds=True, lonlat=True, **kwargs)
     * a ``crs`` variable with the grid mapping attributes (``grid_mapping_name``,
       ``crs_wkt``, ...) taken from the ``crs_wkt`` of the grid, and
       ``grid_mapping = "crs"`` on every field with ``x`` and ``y``. The
-      ``crs_wkt`` of radarx grids is a coordinate, which cf_xarray and
-      rioxarray do not look at;
+      ``crs_wkt`` of radarx grids is a scalar coordinate, which would be listed
+      in the ``coordinates`` attribute of every field; a data variable is the
+      CF convention;
     * ``standard_name`` (``projection_x_coordinate``,
       ``projection_y_coordinate``, ``altitude`` for ``z`` in metres above sea
       level, ``time``), ``units``, ``axis`` and ``positive`` on the
-      coordinates, where the grid has none;
-    * 2-D ``lat(y, x)`` and ``lon(y, x)`` from the CRS when the grid has 1-D
-      ``lat(y)`` and ``lon(x)``, which are wrong away from the origin of an
-      azimuthal equidistant grid (about 4 km at 230 km range, issue #265);
+      coordinates, where the grid has none (the grids of radarx already have
+      them, see :mod:`radarx._gridcf`);
+    * 2-D ``lat(y, x)`` and ``lon(y, x)`` from the CRS when the grid has none
+      or 1-D ``lat(y)`` and ``lon(x)``, which are wrong away from the origin of
+      an azimuthal equidistant grid (about 4 km at 230 km range, issue #265),
+      or when ``crs`` is given;
     * ``x_bnds``, ``y_bnds`` and ``z_bnds`` (``bounds=True``);
     * ``Conventions = "CF-1.8"`` (added to the ones the grid has) and the
       NetCDF-safe attributes of :mod:`radarx.io.export`, without the ``"None"``
@@ -924,8 +855,8 @@ def write_netcdf_cf(grid, path, *, crs=None, bounds=True, lonlat=True, **kwargs)
     ``latitude`` and ``longitude`` coordinates, as an azimuthal equidistant
     projection centred there. That is how xradar georeferences the sweeps,
     but it is an assumption; pass ``crs=`` to state the CRS or ``crs=False`` for
-    none. Without a CRS no ``grid_mapping`` is written and ``lat`` and ``lon``
-    stay as they are.
+    none. Without a CRS no ``grid_mapping`` is written (one the fields carry is
+    removed) and ``lat`` and ``lon`` stay as they are.
 
     The values of the fields are written as they are. Reading the file back
     with ``xarray.open_dataset`` gives the same fields, attributes and
@@ -948,8 +879,8 @@ def write_netcdf_cf(grid, path, *, crs=None, bounds=True, lonlat=True, **kwargs)
     bounds : bool, optional
         Write the cell bounds of ``x``, ``y`` and ``z``. Default True.
     lonlat : bool, optional
-        Write 2-D ``lat`` and ``lon`` computed from the CRS, replacing 1-D
-        ones. Default True.
+        Write 2-D ``lat`` and ``lon`` computed from the CRS where the grid has
+        none or 1-D ones. Default True.
     **kwargs
         Passed to :meth:`xarray.Dataset.to_netcdf` (``engine``,
         ``encoding``, ...).

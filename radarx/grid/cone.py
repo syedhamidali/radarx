@@ -58,6 +58,7 @@ import numpy as np
 import xarray as xr
 
 from .._fields import node_dataset
+from .._gridcf import aeqd_crs, crs_variable, georeference
 from .._provenance import provenance
 
 try:
@@ -503,10 +504,15 @@ def grid_cones(
     Returns
     -------
     xarray.Dataset
-        Gridded fields on ``(z, y, x)`` as float32, with ``lat``/``lon``
-        axis coordinates, the radar site, ``crs_wkt`` and the mean time of
-        the volume as a scalar ``time`` coordinate, so grids of several
-        volumes stack along time with ``xr.concat(grids, "time")``.
+        Gridded fields on ``(z, y, x)`` as float32, georeferenced as in CF:
+        the azimuthal equidistant CRS centred on the radar as the scalar
+        ``crs_wkt`` (``grid_mapping`` of every field), 2-D ``lat(y, x)`` and
+        ``lon(y, x)`` computed from it, ``standard_name``, ``units``, ``axis``
+        and ``positive`` on ``x``, ``y``, ``z``, the radar site and the mean
+        time of the volume as a scalar ``time`` coordinate, so grids of several
+        volumes stack along time with ``xr.concat(grids, "time")``. Before
+        radarx 0.5 ``lat`` was 1-D along ``y`` and ``lon`` along ``x``, which is
+        wrong away from the radar (633 m in the corner of a 120 km wide grid).
 
     Raises
     ------
@@ -620,7 +626,7 @@ def grid_cones(
             f"each sweep moved from its own time to the analysis time with "
             f"u = {u} m/s, v = {v} m/s"
         )
-    return out.assign_coords(site_coords)
+    return _georeferenced(out, site_coords, site)
 
 
 def _check_k_e(k_e):
@@ -705,26 +711,17 @@ def _grid_compiled(x, y, z, arrays, site_altitude, n_threads, **options):
 
 def _crs_wkt(latitude, longitude):
     """The grid's azimuthal equidistant CRS as a CF ``crs_wkt`` coordinate."""
-    import pyproj
-
-    crs = pyproj.CRS.from_dict(
-        {"proj": "aeqd", "lat_0": latitude, "lon_0": longitude, "datum": "WGS84"}
-    )
-    return xr.DataArray(0, attrs=crs.to_cf())
+    return crs_variable(latitude, longitude)
 
 
 def _to_dataset(gridded, x, y, z, sweeps, site, attrs):
     """Wrap gridded fields with coordinates, site, CRS, time and attributes."""
-    lon, lat = _lonlat_axes(x, y, site["latitude"], site["longitude"])
     out = xr.Dataset(
         gridded,
         coords={
             "z": ("z", z, {"units": "m", "long_name": "height above sea level"}),
             "y": ("y", y, {"units": "m", "long_name": "distance north of the radar"}),
             "x": ("x", x, {"units": "m", "long_name": "distance east of the radar"}),
-            "lat": ("y", lat, {"units": "degrees_north"}),
-            "lon": ("x", lon, {"units": "degrees_east"}),
-            "crs_wkt": _crs_wkt(site["latitude"], site["longitude"]),
         },
     )
     times = [np.ravel(ds["time"].values) for ds in sweeps if "time" in ds]
@@ -736,3 +733,10 @@ def _to_dataset(gridded, x, y, z, sweeps, site, attrs):
     out.attrs["radar_name"] = out.attrs.get("instrument_name", "")
     out.attrs["gridding_method"] = "cone"
     return out
+
+
+def _georeferenced(out, site_coords, site):
+    """The grid with the radar site, the CRS and the CF georeferencing."""
+    out = out.assign_coords(site_coords)
+    mapping = aeqd_crs(site["latitude"], site["longitude"]).to_cf()
+    return georeference(out, mapping)

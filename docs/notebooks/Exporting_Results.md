@@ -206,16 +206,18 @@ attributes of ODIM groups (`elangle` for the fixed angle).
 
 ## Grids
 
-`write_netcdf_cf` adds the georeferencing that other tools look for. The
-Dataset of `grid_cones` has a `crs_wkt` coordinate, 1-D `lat(y)` and `lon(x)`
-and no `grid_mapping`, which is wrong away from the origin of an azimuthal
-equidistant grid. The file gets
+The Datasets of `grid_cones`, `grid_radars` and `create_cappi` are georeferenced
+when they are built: 2-D `lat(y, x)` and `lon(y, x)` from the CRS, a `crs_wkt`
+grid mapping variable with `grid_mapping` on every field, and `standard_name`,
+`units` and `axis` on `x`, `y`, `z` and `time`. `write_netcdf_cf` writes
+them as a CF file and adds what a file needs on top of that
 
-- a `crs` variable with the `crs_wkt` and the grid mapping attributes, and
-  `grid_mapping = "crs"` on every field,
-- `standard_name`, `units` and `axis` on `x`, `y`, `z` and `time`,
-- 2-D `lat(y, x)` and `lon(y, x)` computed from the CRS,
-- the cell bounds of the axes.
+- the grid mapping as a `crs` data variable (a scalar coordinate would be listed
+  in the `coordinates` attribute of every field),
+- the cell bounds of the axes,
+- `Conventions`, and the same georeferencing for a grid that does not have it
+  (a grid of a retrieval, or one with 1-D `lat(y)` and `lon(x)` from an older
+  radarx), or another CRS with `crs=`.
 
 ```{code-cell} ipython3
 grid = grid_cones(
@@ -229,9 +231,7 @@ path = grid.radarx.to_netcdf_cf(work / "grid.nc")
 cf = xr.open_dataset(path)
 print(cf["DBZH"].attrs["grid_mapping"], cf["crs"].attrs["grid_mapping_name"])
 print({k: cf[k].attrs.get("standard_name") for k in ("x", "y", "z", "time", "lat", "lon")})
-print("lat:", grid["lat"].dims, "->", cf["lat"].dims)
-err = abs(cf["lat"].values[-1, -1] - grid["lat"].values[-1]) * 111e3
-print(f"the 1-D latitude is {err:.0f} m off in the corner of this 60 km grid")
+print("lat:", grid["lat"].dims, "->", cf["lat"].dims, "; grid_mapping in the grid:", grid["DBZH"].attrs["grid_mapping"])
 print(cf["x_bnds"].values[:2].tolist(), cf.attrs["Conventions"])
 np.testing.assert_array_equal(cf["DBZH"], grid["DBZH"])
 print(cf.attrs["radarx_method"], "|", cf.attrs["history"])
