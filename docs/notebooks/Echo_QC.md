@@ -18,8 +18,14 @@ clutter, anomalous propagation, second-trip echo and noise. Such echo must be
 removed before KDP, hydrometeor classification, rain rates or gridding.
 
 `radarx.retrieve.echo_mask` (or `.radarx.echo_mask()` on a sweep or a volume)
-classifies every gate with a fuzzy-logic score in the spirit of Gourley et al.
-(2007) and Krause (2016). Features computed along the ray over a short window:
+classifies every gate with a fuzzy-logic score in the manner of Gourley et al.
+(2007) and Krause (2016). The default scheme (`method="radarx"`) is radarx's
+own: only the form of the weighted aggregation and the idea of using the
+texture of $Z_{DR}$ and $\Phi_{DP}$ come from the papers, and its membership
+corners, weights and threshold are not theirs. `method="krause2016"` is the
+MetSignal algorithm of Krause (2016) with the memberships, weights, threshold
+and post-processing rules of the paper (see the section below). The default
+scheme computes these features along the ray over a short window:
 
 - the mean $\rho_{hv}$ (precipitation: above 0.95),
 - the mean $Z_{DR}$ (insects and birds: several dB up to more than 10 dB),
@@ -167,10 +173,52 @@ for ax, data, title in zip(
     ax.set_ylim(-250, 250)
 ```
 
+## The MetSignal algorithm of Krause (2016)
+
+`method="krause2016"` implements the algorithm of Krause (2016): the
+reflectivity, $\rho_{hv}$, the radial velocity and the standard deviations of
+$\Phi_{DP}$, $Z_{DR}$ and $\rho_{hv}$ over nine range bins, the memberships of
+the paper's Fig. 2, the weights 1, 1, 1, 2, 2, 1 of its Table 1, a threshold of
+0.8 in the warm season and 0.7 in the cold season, and the rules that gates
+with $|Z_{DR}| > 4.5$ dB or $\rho_{hv} < 0.65$ are not meteorological while
+gates with at least 11 dBZ at 3 km height in the previous volume scan are.
+Radarx does not build the 3 km field: pass it as a field of the sweep with
+`zh_3km`. Without it, as here, the strict threshold also removes some gates
+of the squall line (4 % of the gates with 35 dBZ or more at 0.8); the paper
+designs the algorithm to flag meteorological signal only where the evidence is
+strong and to add back missed detections with the 3 km rule. The surveillance cut of a NEXRAD split cut holds no velocity, so the
+velocity term is left out of its weighted mean.
+
+```{code-cell} ipython3
+modes = {
+    "radarx (default)": qc,
+    "krause2016, threshold 0.8": dtree.radarx.echo_mask(method="krause2016"),
+    "krause2016, threshold 0.7": dtree.radarx.echo_mask(method="krause2016", threshold=0.7),
+}
+echo = (sweep.DBZH > -10).values
+print(f"{'':28s}{'removed':>9s}{'biological':>12s}{'squall line':>13s}")
+for name, result in modes.items():
+    c = result["sweep_0"].ds.ECHO_CLASS.values
+    row = [np.mean((c != 1)[echo])] + [
+        np.mean(c[region & (c > 0)] != 1) for region in list(regions.values())[:2]
+    ]
+    print(f"{name:28s}" + "".join(f"{100 * v:11.1f} %" for v in row))
+```
+
+The MetSignal score has no 3 x 3 averaging and no speckle filter; `min_size`
+adds the radarx filter if wanted. The default scheme is unchanged and removes
+less echo.
+
+The method of Gourley et al. (2007) is not available: its membership functions
+are density estimates of the C-band data of one radar that the paper shows as
+plots only, so their numbers cannot be taken from it.
+
 ## Options
 
-- `limits` and `weights` change the membership of each feature
-  (`radarx.retrieve.qc.DEFAULT_LIMITS`, `DEFAULT_WEIGHTS`),
+- `method` chooses `"radarx"` (default) or `"krause2016"`; `vrad` and `zh_3km`
+  are the extra fields of the latter,
+- `limits` and `weights` change the membership of each feature of the default
+  scheme (`radarx.retrieve.qc.DEFAULT_LIMITS`, `DEFAULT_WEIGHTS`),
 - `threshold`, `window` (km), `min_size` (gates) and `spin_threshold` (dB),
 - `nodata` sets the no-data floors (NEXRAD codes are detected automatically),
 - `snr` / `snr_min` use a signal-to-noise ratio field where available,
