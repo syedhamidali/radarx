@@ -919,6 +919,19 @@
   "pages": "528-529",
   "doi": "10.1175/1520-0477-37.10.528"
  },
+ "10.1175/1520-0493(1959)087<0367:AOOAS>2.0.CO;2": {
+  "authors": [
+   "Cressman, G. P."
+  ],
+  "year": 1959,
+  "title": "An Operational Objective Analysis System",
+  "type": "article",
+  "journal": "Monthly Weather Review",
+  "volume": "87",
+  "issue": "10",
+  "pages": "367-374",
+  "doi": "10.1175/1520-0493(1959)087<0367:AOOAS>2.0.CO;2"
+ },
  "10.1175/1520-0493(1972)100<0548:VILWNA>2.3.CO;2": {
   "authors": [
    "Greene, D. R.",
@@ -1652,6 +1665,39 @@
   "pages": "1875-1885",
   "doi": "10.1175/JTECH-D-15-0239.1"
  },
+ "10.1175/JTECH-D-18-0076.1": {
+  "authors": [
+   "Allabakash, S.",
+   "Lim, S.",
+   "Chandrasekar, V.",
+   "Min, K.-H.",
+   "Choi, J.",
+   "Jang, B.-J."
+  ],
+  "year": 2019,
+  "title": "X-Band Dual-Polarization Radar Observations of Snow Growth Processes of a Severe Winter Storm: Case of 12 December 2013 in South Korea",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "36",
+  "issue": "7",
+  "pages": "1217-1235",
+  "doi": "10.1175/JTECH-D-18-0076.1"
+ },
+ "10.1175/JTECH-D-20-0011.1": {
+  "authors": [
+   "Murphy, A. M.",
+   "Ryzhkov, A.",
+   "Zhang, P."
+  ],
+  "year": 2020,
+  "title": "Columnar Vertical Profile (CVP) Methodology for Validating Polarimetric Radar Retrievals in Ice Using In Situ Aircraft Measurements",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "37",
+  "issue": "9",
+  "pages": "1623-1642",
+  "doi": "10.1175/JTECH-D-20-0011.1"
+ },
  "10.1175/JTECH-D-21-0130.1": {
   "authors": [
    "Ryzhkov, A.",
@@ -1792,6 +1838,20 @@
   "pages": "1106-1119",
   "doi": "10.1175/WAF-D-13-00072.1"
  },
+ "10.1175/WAF-D-17-0054.1": {
+  "authors": [
+   "Tobin, D. M.",
+   "Kumjian, M. R."
+  ],
+  "year": 2017,
+  "title": "Polarimetric Radar and Surface-Based Precipitation-Type Observations of Ice Pellet to Freezing Rain Transitions",
+  "type": "article",
+  "journal": "Weather and Forecasting",
+  "volume": "32",
+  "issue": "6",
+  "pages": "2065-2082",
+  "doi": "10.1175/WAF-D-17-0054.1"
+ },
  "10.1175/WAF-D-18-0095.1": {
   "authors": [
    "Mahalik, M. C.",
@@ -1916,6 +1976,21 @@
   "type": "dataset",
   "publisher": "NSF NCAR Earth Observing Laboratory",
   "doi": "10.26023/HFBG-7W5M-WA00"
+ },
+ "10.3390/rs11232848": {
+  "authors": [
+   "Allabakash, S.",
+   "Lim, S.",
+   "Jang, B.-J."
+  ],
+  "year": 2019,
+  "title": "Melting Layer Detection and Characterization based on Range Height Indicator–Quasi Vertical Profiles",
+  "type": "article",
+  "journal": "Remote Sensing",
+  "volume": "11",
+  "issue": "23",
+  "pages": "2848",
+  "doi": "10.3390/rs11232848"
  },
  "10.5194/amt-8-343-2015": {
   "authors": [

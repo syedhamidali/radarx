@@ -34,9 +34,19 @@ differs), its top and bottom placed where rhohv returns to its background
 of a sounding or ERA5 profile, and checked for consistency along the time
 series (radarx).
 
-The reductions over (time, azimuth, range) are done by a compiled C++ kernel
-in a single multithreaded pass; if it is not available, an equivalent NumPy
-implementation is used.
+Profiles that do not need a high sweep. :func:`rd_qvp` combines the
+azimuthal means of all sweeps within a range of the radar (the range-defined
+QVP of Tobin and Kumjian 2017 [5], as described by Murphy et al. 2020 [6]; the
+weights are radarx's own), :func:`cvp` is the columnar vertical profile of a
+sector around a point (Murphy et al. 2020 [6]) and :func:`rhi_qvp` the profile
+of an RHI scan (Allabakash et al. 2019 [7]). :func:`melting_layer_ppi` finds
+the melting layer on PPIs between 4 and 10 degrees with the radial-profile rules
+of Giangrande et al. (2008) [3], and :func:`mask_above_melting_layer` removes
+the products of rain-only retrievals above its bottom.
+
+The reductions over (time, azimuth, range) and the averaging in height are done
+by a compiled C++ kernel in a single multithreaded pass; if it is not available,
+an equivalent NumPy implementation is used.
 
 .. autosummary::
    :nosignatures:
@@ -62,11 +72,31 @@ References
    radar analysis of ice microphysical processes in melting layers of winter
    storms using S-band quasi-vertical profiles. *J. Appl. Meteor. Climatol.*,
    **59** (4), 751–767, https://doi.org/10.1175/JAMC-D-19-0128.1
+.. [5] Tobin, D. M., and M. R. Kumjian, 2017: Polarimetric radar and
+   surface-based precipitation-type observations of ice pellet to freezing rain
+   transitions. *Wea. Forecasting*, **32** (6), 2065–2082,
+   https://doi.org/10.1175/WAF-D-17-0054.1
+.. [6] Murphy, A. M., A. Ryzhkov, and P. Zhang, 2020: Columnar vertical profile
+   (CVP) methodology for validating polarimetric radar retrievals in ice using
+   in situ aircraft measurements. *J. Atmos. Oceanic Technol.*, **37** (9),
+   1623–1642, https://doi.org/10.1175/JTECH-D-20-0011.1
+.. [7] Allabakash, S., S. Lim, and B.-J. Jang, 2019: Melting layer detection and
+   characterization based on range height indicator–quasi vertical profiles.
+   *Remote Sens.*, **11** (23), 2848, https://doi.org/10.3390/rs11232848
 """
 
 from __future__ import annotations
 
-__all__ = ["melting_layer", "qvp", "qvp_timeseries"]
+__all__ = [
+    "cvp",
+    "mask_above_melting_layer",
+    "melting_layer",
+    "melting_layer_ppi",
+    "qvp",
+    "qvp_timeseries",
+    "rd_qvp",
+    "rhi_qvp",
+]
 
 __doc__ = __doc__.format("\n   ".join(__all__))
 
@@ -77,6 +107,7 @@ import numpy as np
 import xarray as xr
 
 from .._provenance import provenance
+from .._registry import accessor_method
 
 try:
     from . import _qvp
@@ -188,11 +219,30 @@ def _select_sweep(obj, sweep=None, elevation=None):
         else:
             name = min(names, key=lambda n: abs(elevations[n] - elevation))
         ds = _sweep_dataset(obj, name)
-    root = obj.root.to_dataset()
+    return _with_site(ds, obj)
+
+
+def _with_site(ds, dtree):
+    """``ds`` with the radar site of the root of ``dtree`` as coordinates."""
+    root = dtree.root.to_dataset()
     for key in ("latitude", "longitude", "altitude"):
         if key not in ds.coords and key in root:
             ds = ds.assign_coords({key: root[key].reset_coords(drop=True)})
     return ds
+
+
+def _volume_sweeps(obj):
+    """Every sweep of a volume (xradar layout), or the sweep itself, as Datasets."""
+    if isinstance(obj, xr.Dataset):
+        return [obj]
+    if not isinstance(obj, xr.DataTree):
+        raise TypeError(
+            f"expected an xarray.DataTree volume or Dataset sweep, not {type(obj)}"
+        )
+    names = [name for name in obj.children if name.startswith("sweep")]
+    if not names:
+        raise ValueError("No sweep groups found in DataTree.")
+    return [_with_site(_sweep_dataset(obj, name), obj) for name in names]
 
 
 def _ray_dim(da):
@@ -344,25 +394,8 @@ def _modes(ds, data_vars, reduction, linear):
     return [_MODES["mean_db" if v in linear else "mean"] for v in data_vars]
 
 
-def _profiles(
-    sweeps,
-    data_vars,
-    *,
-    min_rhohv,
-    min_dbz,
-    rhohv,
-    dbz,
-    min_count,
-    min_fraction,
-    reduction,
-    linear,
-    n_threads,
-    engine,
-    elevation_correction=False,
-):
-    """Reduce every sweep; returns the per-sweep profiles and metadata."""
-    use_compiled = _use_compiled(engine)
-    first = sweeps[0]
+def _fields_of(first, data_vars, rhohv, dbz, min_rhohv, min_dbz):
+    """Names of the data variables and the quality fields (with thresholds)."""
     if data_vars is None:
         data_vars = _default_vars(first)
     elif isinstance(data_vars, str):
@@ -384,6 +417,32 @@ def _profiles(
         if name is not None:
             quality.append(name)
             thresholds.append(float(limit))
+    return data_vars, quality, thresholds
+
+
+def _profiles(
+    sweeps,
+    data_vars,
+    *,
+    min_rhohv,
+    min_dbz,
+    rhohv,
+    dbz,
+    min_count,
+    min_fraction,
+    reduction,
+    linear,
+    n_threads,
+    engine,
+    elevation_correction=False,
+    warn_low=True,
+):
+    """Reduce every sweep; returns the per-sweep profiles and metadata."""
+    use_compiled = _use_compiled(engine)
+    first = sweeps[0]
+    data_vars, quality, thresholds = _fields_of(
+        first, data_vars, rhohv, dbz, min_rhohv, min_dbz
+    )
     modes = _modes(first, data_vars, reduction, linear)
     # the mean of a phase is the circular mean: reduce cos and sin instead
     circular = [
@@ -420,7 +479,7 @@ def _profiles(
                 val[v] = np.where(np.isnan(c) | np.isnan(sn), np.nan, angle)
             values[i], counts[i] = val[:nv], cnt[:nv]
     filters = {q: t for q, t in zip(quality, thresholds)}
-    _check_elevation(sweeps, data_vars, values, elevation_correction)
+    _check_elevation(sweeps, data_vars, values, elevation_correction, warn_low)
     return data_vars, modes, values, counts, filters
 
 
@@ -454,7 +513,7 @@ def _zdr_to_horizontal(zdr, elevation):
     return out
 
 
-def _check_elevation(sweeps, data_vars, values, correct):
+def _check_elevation(sweeps, data_vars, values, correct, warn=True):
     """
     Warn for low sweeps; if asked, scale KDP by 1 / cos(elevation)**2 and
     refer ZDR to 0 degrees elevation.
@@ -470,7 +529,7 @@ def _check_elevation(sweeps, data_vars, values, correct):
                     values[i][v] = values[i][v] / np.cos(np.deg2rad(el)) ** 2
                 elif name.lower() in _ZDR_LOWER:
                     values[i][v] = _zdr_to_horizontal(values[i][v], el)
-    if low:
+    if low and warn:
         warnings.warn(
             f"QVP of a sweep at {min(low):.1f} degrees elevation: the method "
             "assumes high elevations (more than 10 to 20 degrees, Ryzhkov et al. "
@@ -1548,3 +1607,1667 @@ def melting_layer(
             },
         )
     return out
+
+
+# ---------------------------------------------------------------------------
+# profiles from several sweeps: range-defined, columnar and RHI profiles
+# ---------------------------------------------------------------------------
+
+_KERNELS = {"top_hat": 0, "cressman": 1}
+_VERTICAL_MEAN = ("linear", "db")
+
+
+def _blend_numpy(height, weight, values, grid, radius, kernel, modes, min_samples):
+    """NumPy implementation of the compiled ``height_blend`` (same results)."""
+    nv, m = values.shape[0], grid.size
+    out = np.full((nv, m), np.nan)
+    cnt = np.zeros((nv, m), dtype=np.int32)
+    r2 = radius * radius
+    lo = np.searchsorted(height, grid - radius, side="left")
+    hi = np.searchsorted(height, grid + radius, side="left")
+    for k in range(m):
+        w = weight[lo[k] : hi[k]]
+        if kernel == _KERNELS["cressman"]:
+            d2 = (height[lo[k] : hi[k]] - grid[k]) ** 2
+            w = np.where(d2 < r2, w * (r2 - d2) / (r2 + d2), 0.0)
+        for v in range(nv):
+            x = values[v, lo[k] : hi[k]]
+            ok = ~np.isnan(x) & (w > 0)
+            n = int(ok.sum())
+            cnt[v, k] = n
+            if n < 1 or n < min_samples:
+                continue
+            xx = x[ok]
+            if modes[v] == _MODES["mean_db"]:
+                xx = np.exp(xx * _LN10_OVER_10)
+            mean = np.sum(w[ok] * xx) / np.sum(w[ok])
+            out[v, k] = 10.0 * np.log10(mean) if modes[v] == _MODES["mean_db"] else mean
+    return out, cnt
+
+
+def _blend(
+    height, weight, values, grid, radius, kernel, modes, min_samples, n_threads, engine
+):
+    """
+    Weighted means of samples on a height grid.
+
+    A sample within ``radius`` of a grid height contributes with its
+    ``weight`` times the kernel (``"top_hat"``: 1 on ``[-radius, radius)``;
+    ``"cressman"``: ``(R**2 - d**2) / (R**2 + d**2)``, Cressman 1959).
+    """
+    use_compiled = _use_compiled(engine)
+    if not radius > 0:
+        raise ValueError("the vertical radius must be positive")
+    order = np.argsort(height, kind="stable")
+    height = np.ascontiguousarray(height[order], dtype=np.float64)
+    weight = np.ascontiguousarray(weight[order], dtype=np.float64)
+    values = np.ascontiguousarray(values[:, order], dtype=np.float64)
+    grid = np.ascontiguousarray(grid, dtype=np.float64)
+    modes = [int(v) for v in modes]
+    args = (height, weight, values, grid, float(radius), _KERNELS[kernel])
+    if use_compiled:
+        return _qvp.height_blend(
+            *args, modes, int(min_samples), n_threads=int(n_threads or 0)
+        )
+    return _blend_numpy(*args, modes, int(min_samples))
+
+
+def _blend_modes(ds, data_vars, linear, vertical_mean):
+    """Reduction mode of the averaging in height for every variable."""
+    if vertical_mean not in _VERTICAL_MEAN:
+        raise ValueError(
+            f"vertical_mean must be 'linear' or 'db', not {vertical_mean!r}"
+        )
+    if vertical_mean == "db":
+        return [_MODES["mean"]] * len(data_vars)
+    return _modes(ds, data_vars, "mean", linear)
+
+
+def _usable_sweeps(sweeps, data_vars, rhohv, dbz, min_rhohv, min_dbz):
+    """The sweeps that have the fields of the first sweep that has any."""
+    ref = None
+    for ds in sweeps:
+        try:
+            ref = _fields_of(ds, data_vars, rhohv, dbz, min_rhohv, min_dbz)
+        except ValueError:
+            continue
+        break
+    if ref is None:
+        raise ValueError("No sweep has the variables to profile.")
+    names = ref[0] + ref[1]
+    return [ds for ds in sweeps if all(n in ds.data_vars for n in names)], ref[0]
+
+
+def _as_volumes(volumes):
+    """``(list of volumes, whether a sequence was given)``."""
+    if isinstance(volumes, (xr.Dataset, xr.DataTree)):
+        return [volumes], False
+    volumes = list(volumes)
+    if not volumes:
+        raise ValueError("No volumes given.")
+    return volumes, True
+
+
+def _volume_time(sweeps):
+    """Mean time of the rays of the sweeps."""
+    t = np.array([_sweep_time(ds) for ds in sweeps], dtype="datetime64[ns]")
+    t = t[~np.isnat(t)]
+    if t.size == 0:
+        return np.datetime64("NaT", "ns")
+    return t.min() + (t - t.min()).mean()
+
+
+def _height_grid(heights, lowest, highest, dz):
+    """The common heights: given, or a regular grid over the samples."""
+    if heights is not None:
+        grid = np.asarray(heights, dtype=np.float64)
+        if grid.ndim != 1 or (grid.size > 1 and np.any(np.diff(grid) <= 0)):
+            raise ValueError("heights must be 1-D and strictly ascending.")
+        return grid
+    if not dz > 0:
+        raise ValueError("dz must be positive.")
+    if not (np.isfinite(lowest) and np.isfinite(highest)):
+        return np.zeros(0)
+    return np.arange(math.ceil(lowest / dz) * dz, highest + 0.5 * dz, dz)
+
+
+def _blend_attrs(name, ds, mode, filters, min_count, text, correct=False):
+    attrs = _var_attrs(ds, name, mode, filters, min_count, correct)
+    attrs["cell_methods"] = text
+    return attrs
+
+
+def _blended_dataset(
+    names,
+    results,
+    grid,
+    times,
+    series,
+    ds,
+    modes,
+    filters,
+    min_count,
+    text,
+    counts,
+    extra,
+):
+    """Dataset of ``(time,) height`` profiles from the blended volumes."""
+    dims = ("time", "height") if series else ("height",)
+    out = {}
+    for v, (name, mode) in enumerate(zip(names, modes)):
+        value = np.stack([r[0][v] for r in results]).astype(np.float32)
+        out[name] = (
+            dims,
+            value if series else value[0],
+            _blend_attrs(name, ds, mode, filters, min_count, text),
+        )
+        if counts:
+            n = np.stack([r[1][v] for r in results])
+            out[f"{name}_count"] = (
+                dims,
+                n if series else n[0],
+                {"long_name": f"number of samples of {name}", "units": "1"},
+            )
+    coords = {"height": _height_coords(grid, grid, grid)["height"]}
+    if series:
+        coords["time"] = (
+            "time",
+            np.array(times, dtype="datetime64[ns]"),
+            {"standard_name": "time"},
+        )
+    else:
+        coords["time"] = times[0]
+    coords.update(extra)
+    return xr.Dataset(out, coords=coords).assign_coords(_site_coords(ds))
+
+
+def _db_text(vertical_mean):
+    return "linear units for dB quantities" if vertical_mean == "linear" else "dB"
+
+
+def _profile_kwargs(
+    min_rhohv, min_dbz, rhohv, dbz, min_count, min_fraction, reduction, linear
+):
+    return dict(
+        min_rhohv=min_rhohv,
+        min_dbz=min_dbz,
+        rhohv=rhohv,
+        dbz=dbz,
+        min_count=min_count,
+        min_fraction=min_fraction,
+        reduction=reduction,
+        linear=linear,
+    )
+
+
+def _elevation_limits(sweeps, minimum, maximum):
+    """The sweeps whose elevation is within the limits."""
+    kept = []
+    for ds in sweeps:
+        el = float(np.nanmedian(ds["elevation"].values))
+        if (minimum is None or el >= minimum) and (maximum is None or el <= maximum):
+            kept.append(ds)
+    return kept
+
+
+@provenance(
+    "Range-defined quasi-vertical profile, after Tobin and Kumjian (2017) "
+    "as described by Murphy et al. (2020); weights are radarx's own"
+)
+def rd_qvp(
+    volumes,
+    data_vars=None,
+    *,
+    rmax=50000.0,
+    power=2.0,
+    heights=None,
+    dz=100.0,
+    radius=None,
+    min_elevation=None,
+    max_elevation=None,
+    min_rhohv=0.6,
+    min_dbz=-10.0,
+    rhohv="auto",
+    dbz="auto",
+    min_count=30,
+    min_fraction=0.0,
+    reduction="mean",
+    linear=None,
+    vertical_mean="linear",
+    min_samples=1,
+    counts=False,
+    elevation_correction=False,
+    n_threads=None,
+    engine="auto",
+):
+    """
+    Range-defined quasi-vertical profile from all sweeps of a volume.
+
+    A quasi-vertical profile (:func:`qvp`) needs a high elevation. The
+    range-defined QVP (RD-QVP) of Tobin and Kumjian (2017) [1]_ builds a
+    profile that reaches the ground from the low and intermediate sweeps as
+    well: the azimuthal means of every sweep, taken over the gates within
+    ``rmax`` of the radar, are combined with weights that decrease with the
+    distance from the radar. It is used for the structure near the surface
+    and close to the radar, and as every QVP it assumes that the
+    precipitation is the same all around the radar (Murphy et al. 2020 [2]_,
+    who describe it).
+
+    The paper of Tobin and Kumjian (2017) could not be read (it is not open
+    access); this function follows the description of Murphy et al. (2020):
+    QVPs of several elevations, each from data within 50 km of the radar,
+    combined by inverse distance weighting. What is radarx's own, and **not
+    checked against the paper**: the form of the weight, ``ground_range **
+    -power`` with ``power = 2``; the vertical radius over which the samples of
+    the sweeps are combined, with the weights of Cressman (1959) [3]_; the
+    height grid; and the use of the azimuthal reduction of :func:`qvp`
+    (thresholds, minimum count, averaging of dB quantities in linear units).
+
+    Parameters
+    ----------
+    volumes : xarray.DataTree, xarray.Dataset or sequence of them
+        A radar volume with ``sweep_*`` groups (xradar layout) or a sweep, or
+        a sequence of volumes in time order. Sweeps that lack the variables
+        (for example Doppler-only cuts) are left out.
+    data_vars : str or list of str, optional
+        Variables to profile, as in :func:`qvp`.
+    rmax : float, optional
+        Only gates within this ground distance (m) of the radar are used.
+        Default 50000 (Murphy et al. 2020 [2]_).
+    power : float, optional
+        Exponent of the weight ``ground_range ** -power`` of a sample (the
+        ground range is at least 1 m). 0 gives equal weights. Default 2
+        (radarx choice).
+    heights : array-like, optional
+        Heights (m above sea level) of the profile. By default a regular grid
+        of ``dz`` over the heights of the gates.
+    dz : float, optional
+        Spacing (m) of the default height grid. Default 100.
+    radius : float, optional
+        Samples within this vertical distance (m) of a grid height are
+        combined, with the weights of Cressman (1959). Default ``dz``.
+    min_elevation, max_elevation : float, optional
+        Use only the sweeps within these elevations (degrees).
+    min_rhohv, min_dbz, rhohv, dbz, min_count, min_fraction, reduction, linear
+        As in :func:`qvp`, for the azimuthal reduction of every sweep.
+    vertical_mean : {"linear", "db"}, optional
+        Whether dB quantities are averaged in height in linear units
+        (default) or in dB.
+    min_samples : int, optional
+        Minimum number of samples (gates of the sweeps) for a defined value.
+        Default 1.
+    counts : bool, optional
+        Also return ``<name>_count``, the number of samples used.
+    elevation_correction : bool, optional
+        Refer KDP and ZDR of every sweep to the horizontal as in :func:`qvp`.
+        There is no warning for low sweeps here. Default False.
+    n_threads : int, optional
+        Threads for the compiled kernels. Default: all cores.
+    engine : {"auto", "compiled", "numpy"}, optional
+        Implementation to use.
+
+    Returns
+    -------
+    xarray.Dataset
+        Profiles on ``height`` (m above sea level) for a single volume, on
+        ``(time, height)`` for a sequence, with the radar site.
+
+    See Also
+    --------
+    qvp, cvp, melting_layer
+
+    Notes
+    -----
+    Not implemented: any weighting of the gates other than by the ground
+    range of their sweep. The hard cut at ``rmax`` is the one described by
+    Murphy et al. (2020); weights beyond ``rmax`` (as in the Py-ART
+    implementation) are not offered.
+
+    References
+    ----------
+    .. [1] Tobin, D. M., and M. R. Kumjian, 2017: Polarimetric radar and
+       surface-based precipitation-type observations of ice pellet to
+       freezing rain transitions. *Wea. Forecasting*, **32** (6), 2065-2082,
+       https://doi.org/10.1175/WAF-D-17-0054.1
+    .. [2] Murphy, A. M., A. Ryzhkov, and P. Zhang, 2020: Columnar vertical
+       profile (CVP) methodology for validating polarimetric radar retrievals
+       in ice using in situ aircraft measurements. *J. Atmos. Oceanic
+       Technol.*, **37** (9), 1623-1642,
+       https://doi.org/10.1175/JTECH-D-20-0011.1
+    .. [3] Cressman, G. P., 1959: An operational objective analysis system.
+       *Mon. Wea. Rev.*, **87** (10), 367-374,
+       https://doi.org/10.1175/1520-0493(1959)087<0367:AOOAS>2.0.CO;2
+
+    Examples
+    --------
+    >>> profile = radarx.retrieve.rd_qvp(dtree, ["DBZH", "ZDR", "RHOHV"])  # doctest: +SKIP
+    >>> profile = dtree.radarx.rd_qvp(rmax=30e3)  # doctest: +SKIP
+    """
+    volumes, series = _as_volumes(volumes)
+    if not rmax > 0:
+        raise ValueError("rmax must be positive.")
+    kw = _profile_kwargs(
+        min_rhohv, min_dbz, rhohv, dbz, min_count, min_fraction, reduction, linear
+    )
+    samples = []
+    for volume in volumes:
+        sweeps, names = _usable_sweeps(
+            _elevation_limits(_volume_sweeps(volume), min_elevation, max_elevation),
+            data_vars,
+            rhohv,
+            dbz,
+            min_rhohv,
+            min_dbz,
+        )
+        cut, height, weight = [], [], []
+        for ds in sweeps:
+            _, _, h, ground = _geometry(ds)
+            n = int(np.searchsorted(ground, rmax, side="right"))
+            if n:
+                cut.append(ds.isel(range=slice(0, n)))
+                height.append(h[:n])
+                weight.append(np.maximum(ground[:n], 1.0) ** -float(power))
+        if not cut:
+            raise ValueError(f"No sweep has gates within rmax={rmax:g} m.")
+        names, modes, values, cnts, filters = _profiles(
+            cut,
+            names,
+            n_threads=n_threads,
+            engine=engine,
+            elevation_correction=elevation_correction,
+            warn_low=False,
+            **kw,
+        )
+        samples.append(
+            (
+                np.concatenate(height),
+                np.concatenate(weight),
+                np.concatenate([np.asarray(v, np.float64) for v in values], axis=1),
+                _volume_time(cut),
+                cut[0],
+            )
+        )
+    lowest = min(s[0].min() for s in samples)
+    highest = max(s[0].max() for s in samples)
+    grid = _height_grid(heights, lowest, highest, dz)
+    blend_modes = _blend_modes(samples[0][4], names, linear, vertical_mean)
+    vertical_radius = float(dz if radius is None else radius)
+    results = [
+        _blend(
+            h,
+            w,
+            v,
+            grid,
+            vertical_radius,
+            "cressman",
+            blend_modes,
+            min_samples,
+            n_threads,
+            engine,
+        )
+        for h, w, v, _, _ in samples
+    ]
+    text = (
+        f"ground range <= {rmax:g} m: azimuth: mean per sweep; height: weighted "
+        f"mean (weight ground_range**-{power:g}, Cressman radius "
+        f"{vertical_radius:g} m) in {_db_text(vertical_mean)}"
+    )
+    out = _blended_dataset(
+        names,
+        results,
+        grid,
+        [s[3] for s in samples],
+        series,
+        samples[0][4],
+        blend_modes,
+        filters,
+        min_count,
+        text,
+        counts,
+        {},
+    )
+    out.attrs = {
+        "title": "range-defined quasi-vertical profile",
+        "references": "Tobin and Kumjian (2017), doi:10.1175/WAF-D-17-0054.1; "
+        "Murphy et al. (2020), doi:10.1175/JTECH-D-20-0011.1",
+    }
+    return out
+
+
+def _height_at_ground(elevation, ground, site_altitude):
+    """Beam height (m above sea level) at a ground distance (4/3 Earth model)."""
+    cos = max(math.cos(math.radians(elevation)), 0.05)
+    rng = np.linspace(0.0, 1.5 * ground / cos + 1000.0, 2001)
+    height, dist = _beam_height(rng, elevation, site_altitude)
+    return float(np.interp(ground, dist, height))
+
+
+@provenance("Columnar vertical profile, after Murphy et al. (2020)")
+def cvp(
+    volumes,
+    data_vars=None,
+    *,
+    azimuth,
+    ground_range,
+    half_range=10000.0,
+    half_azimuth=10.0,
+    heights=None,
+    dz=50.0,
+    radius=100.0,
+    min_rhohv=0.6,
+    min_dbz=-10.0,
+    rhohv="auto",
+    dbz="auto",
+    min_count=1,
+    min_fraction=0.0,
+    reduction="mean",
+    linear=None,
+    vertical_mean="db",
+    min_samples=1,
+    counts=False,
+    elevation_correction=False,
+    n_threads=None,
+    engine="auto",
+):
+    """
+    Columnar vertical profile above a point of a volume.
+
+    The columnar vertical profile (CVP) of Murphy et al. (2020) [1]_ is a
+    vertical profile of a sector of the radar volume. A centre is chosen in
+    azimuth and ground range, and a sector around it
+    (``half_range`` up- and down-radial, ``half_azimuth`` clockwise and
+    counter-clockwise). For every sweep, the data of the sector are averaged
+    over the azimuths for each range gate, and the mean of each gate is
+    projected horizontally to the centre, which gives samples irregularly
+    spaced in height. A sample of a sweep is only used between the heights, at
+    the centre, of the two "intermediate elevation angles" half-way to the
+    sweeps above and below. The samples of all sweeps are then averaged on a
+    regular height grid with the weights of Cressman (1959) [2]_.
+
+    The sector size (20 km in range and 20 degrees in azimuth), the Cressman
+    radius of 100 m and the 50 m spacing are those of Murphy et al. (2020),
+    who use them for stratiform precipitation. Defaults here that are not
+    stated in the paper are radarx's: the thresholds of :func:`qvp`, the
+    minimum of 1 gate per azimuthal mean (``min_count``; the 30 gates of
+    :func:`qvp` cannot be reached in a sector), and the averaging of dB
+    quantities in the azimuthal mean in linear units. The paper states that
+    the Cressman averaging is done on Z and ZDR in logarithmic units
+    (``vertical_mean="db"``, the default here); how the azimuthal averaging
+    treats them is not stated.
+
+    Parameters
+    ----------
+    volumes : xarray.DataTree, xarray.Dataset or sequence of them
+        A radar volume with ``sweep_*`` groups (xradar layout), or a sequence
+        of volumes in time order. Sweeps that lack the variables are left
+        out. Use a different centre for each volume with
+        :func:`radarx.retrieve.cvp` called per volume.
+    data_vars : str or list of str, optional
+        Variables to profile, as in :func:`qvp`.
+    azimuth : float
+        Azimuth (degrees clockwise from north) of the centre of the sector.
+    ground_range : float
+        Ground distance (m) of the centre from the radar. Murphy et al.
+        (2020) use centres within 100 km of the radar: beyond that, the
+        beams are wider than the spacing of the elevations and the profile
+        has gaps.
+    half_range : float, optional
+        Half the radial extent (m) of the sector. Default 10000.
+    half_azimuth : float, optional
+        Half the azimuthal extent (degrees) of the sector. Default 10.
+    heights : array-like, optional
+        Heights (m above sea level) of the profile. By default a regular grid
+        of ``dz`` over the heights of the samples.
+    dz : float, optional
+        Spacing (m) of the default height grid. Default 50.
+    radius : float, optional
+        Cressman radius (m): samples within this vertical distance of a
+        grid height are averaged. Default 100.
+    min_rhohv, min_dbz, rhohv, dbz, min_fraction, reduction, linear
+        As in :func:`qvp`, for the azimuthal reduction.
+    min_count : int, optional
+        Minimum number of gates of the sector in the azimuthal mean of a
+        range gate. Default 1.
+    vertical_mean : {"db", "linear"}, optional
+        Whether dB quantities are averaged in height in dB (default, as
+        Murphy et al. 2020) or in linear units.
+    min_samples : int, optional
+        Minimum number of samples for a defined value. Default 1.
+    counts : bool, optional
+        Also return ``<name>_count``, the number of samples used.
+    elevation_correction : bool, optional
+        Refer KDP and ZDR of every sweep to the horizontal as in :func:`qvp`.
+        Default False.
+    n_threads : int, optional
+        Threads for the compiled kernels. Default: all cores.
+    engine : {"auto", "compiled", "numpy"}, optional
+        Implementation to use.
+
+    Returns
+    -------
+    xarray.Dataset
+        Profiles on ``height`` (m above sea level) for a single volume, on
+        ``(time, height)`` for a sequence, with the centre as the scalar
+        coordinates ``azimuth`` and ``ground_range`` and the radar site.
+
+    See Also
+    --------
+    qvp, rd_qvp, melting_layer
+
+    Notes
+    -----
+    Not implemented: the moving CVP that follows an aircraft or a storm (give
+    a different centre per volume by calling the function for each volume and
+    concatenating the results), and the KDP processing of Griffin et al.
+    (2018) that the paper applies (use :func:`radarx.retrieve.estimate_kdp`).
+    The 1.3 % displacement of the mean location of the projected points
+    reported in the paper was not checked.
+
+    References
+    ----------
+    .. [1] Murphy, A. M., A. Ryzhkov, and P. Zhang, 2020: Columnar vertical
+       profile (CVP) methodology for validating polarimetric radar retrievals
+       in ice using in situ aircraft measurements. *J. Atmos. Oceanic
+       Technol.*, **37** (9), 1623-1642,
+       https://doi.org/10.1175/JTECH-D-20-0011.1
+    .. [2] Cressman, G. P., 1959: An operational objective analysis system.
+       *Mon. Wea. Rev.*, **87** (10), 367-374,
+       https://doi.org/10.1175/1520-0493(1959)087<0367:AOOAS>2.0.CO;2
+
+    Examples
+    --------
+    >>> profile = radarx.retrieve.cvp(dtree, azimuth=225.0, ground_range=30e3)  # doctest: +SKIP
+    >>> profile = dtree.radarx.cvp(azimuth=225.0, ground_range=30e3)  # doctest: +SKIP
+    """
+    volumes, series = _as_volumes(volumes)
+    if not (half_range > 0 and half_azimuth > 0 and ground_range > 0):
+        raise ValueError("half_range, half_azimuth and ground_range must be positive.")
+    kw = _profile_kwargs(
+        min_rhohv, min_dbz, rhohv, dbz, min_count, min_fraction, reduction, linear
+    )
+    samples = []
+    for volume in volumes:
+        sweeps, names = _usable_sweeps(
+            _volume_sweeps(volume), data_vars, rhohv, dbz, min_rhohv, min_dbz
+        )
+        elevation = [_geometry(ds)[0] for ds in sweeps]
+        levels = np.unique(np.round(elevation, 2))
+        site = _site_altitude(sweeps[0])
+        cut, height = [], []
+        for ds, el in zip(sweeps, elevation):
+            if "azimuth" not in ds:
+                raise ValueError("every sweep needs an 'azimuth' coordinate.")
+            _, _, h, ground = _geometry(ds)
+            raydim = ds["azimuth"].dims[0]
+            dist = np.abs((ds["azimuth"].values - azimuth + 180.0) % 360.0 - 180.0)
+            rays = np.flatnonzero(dist <= half_azimuth)
+            g0 = int(np.searchsorted(ground, ground_range - half_range, side="left"))
+            g1 = int(np.searchsorted(ground, ground_range + half_range, side="right"))
+            if rays.size == 0 or g1 <= g0:
+                continue
+            cut.append(ds.isel({raydim: rays, "range": slice(g0, g1)}))
+            height.append(
+                (
+                    h[g0:g1],
+                    *_intermediate_band(levels, el, ground_range, site),
+                )
+            )
+        if not cut:
+            raise ValueError("No sweep has gates in the sector.")
+        names, modes, values, cnts, filters = _profiles(
+            cut,
+            names,
+            n_threads=n_threads,
+            engine=engine,
+            elevation_correction=elevation_correction,
+            warn_low=False,
+            **kw,
+        )
+        h_all, v_all = [], []
+        for (h, low, high), val in zip(height, values):
+            val = np.array(val, dtype=np.float64)
+            val[:, (h < low) | (h > high)] = np.nan
+            h_all.append(h)
+            v_all.append(val)
+        h_all = np.concatenate(h_all)
+        samples.append(
+            (
+                h_all,
+                np.ones(h_all.size),
+                np.concatenate(v_all, axis=1),
+                _volume_time(cut),
+                cut[0],
+            )
+        )
+    lowest = min(s[0].min() for s in samples)
+    highest = max(s[0].max() for s in samples)
+    grid = _height_grid(heights, lowest, highest, dz)
+    blend_modes = _blend_modes(samples[0][4], names, linear, vertical_mean)
+    results = [
+        _blend(
+            h,
+            w,
+            v,
+            grid,
+            radius,
+            "cressman",
+            blend_modes,
+            min_samples,
+            n_threads,
+            engine,
+        )
+        for h, w, v, _, _ in samples
+    ]
+    text = (
+        f"sector {ground_range:g} +- {half_range:g} m, azimuth {azimuth:g} +- "
+        f"{half_azimuth:g} degrees: azimuth: mean per sweep; height: Cressman "
+        f"mean (radius {radius:g} m) in {_db_text(vertical_mean)}"
+    )
+    extra = {
+        "azimuth": (
+            (),
+            float(azimuth),
+            {"long_name": "azimuth of the CVP centre", "units": "degrees"},
+        ),
+        "ground_range": (
+            (),
+            float(ground_range),
+            {"long_name": "ground range of the CVP centre", "units": "m"},
+        ),
+    }
+    out = _blended_dataset(
+        names,
+        results,
+        grid,
+        [s[3] for s in samples],
+        series,
+        samples[0][4],
+        blend_modes,
+        filters,
+        min_count,
+        text,
+        counts,
+        extra,
+    )
+    out.attrs = {
+        "title": "columnar vertical profile",
+        "references": "Murphy et al. (2020), doi:10.1175/JTECH-D-20-0011.1",
+    }
+    return out
+
+
+def _intermediate_band(levels, elevation, ground, site_altitude):
+    """
+    Lowest and highest height at which a sweep contributes to a CVP.
+
+    Heights, at ground distance ``ground``, of the beams at the "intermediate
+    elevation angles" half-way to the next lower and higher elevation of the
+    volume (Murphy et al. 2020, Sect. 3a); unbounded below the lowest sweep
+    and above the highest.
+    """
+    k = int(np.argmin(np.abs(levels - elevation)))
+    low, high = -np.inf, np.inf
+    if k > 0:
+        low = _height_at_ground(
+            0.5 * (levels[k - 1] + levels[k]), ground, site_altitude
+        )
+    if k < levels.size - 1:
+        high = _height_at_ground(
+            0.5 * (levels[k] + levels[k + 1]), ground, site_altitude
+        )
+    return low, high
+
+
+@provenance(
+    "Quasi-vertical profile of an RHI (RHI-QVP), after Allabakash et al. (2019)"
+)
+def rhi_qvp(
+    rhi,
+    data_vars=None,
+    *,
+    sweep=0,
+    rmin=6000.0,
+    rmax=20000.0,
+    max_elevation=45.0,
+    min_rhohv=0.6,
+    min_dbz=0.0,
+    rhohv="auto",
+    dbz="auto",
+    dz=100.0,
+    heights=None,
+    linear=None,
+    min_samples=1,
+    counts=False,
+    n_threads=None,
+    engine="auto",
+):
+    """
+    Vertical profile of a range-height indicator (RHI) scan.
+
+    The range of every gate of an RHI is converted to height, and the gates
+    of all elevations within a height bin are averaged, which gives a
+    vertical profile at the azimuth of the RHI (the range-height-indicator
+    quasi-vertical profile, R-QVP, of Allabakash et al. 2019 [1]_, [2]_). A
+    sequence of RHIs gives a time-height profile. The profile has the
+    variables and the ``height`` dimension of :func:`qvp` and can be given to
+    :func:`melting_layer`.
+
+    The settings are those of Allabakash et al. (2019) [1]_, who use X-band
+    RHIs: gates with ``rhohv > 0.6`` and ``Z >= 0 dBZ``, between 6 and 20 km
+    range and below 45 degrees elevation (to reduce ground clutter and beam
+    broadening), averaged in 100 m bins. They do not say in which scale dB
+    quantities are averaged: radarx averages them in linear units, as
+    :func:`qvp` does. The gate heights use the 4/3 Earth model of
+    :func:`qvp`.
+
+    Parameters
+    ----------
+    rhi : xarray.Dataset, xarray.DataTree or sequence of them
+        An RHI sweep on ``(ray, range)`` with an ``elevation`` for every ray
+        (xradar layout), or a volume of RHI sweeps (then ``sweep`` is used),
+        or a sequence in time order.
+    data_vars : str or list of str, optional
+        Variables to profile, as in :func:`qvp`.
+    sweep : int or str, optional
+        The sweep of a volume to use. Default 0.
+    rmin, rmax : float, optional
+        Range limits (m) of the gates used. Default 6000 and 20000.
+    max_elevation : float, optional
+        Only rays below this elevation (degrees) are used. Default 45.
+    min_rhohv, min_dbz : float or None, optional
+        Gates with ``rhohv > min_rhohv`` and ``Z >= min_dbz`` are used.
+        Default 0.6 and 0 dBZ. ``None`` disables a test.
+    rhohv, dbz : str or None, optional
+        Names of the fields of the two tests, as in :func:`qvp`.
+    dz : float, optional
+        Height of the bins (m). Default 100.
+    heights : array-like, optional
+        Centres of the bins (m above sea level). By default a regular grid of
+        ``dz`` over the heights of the gates.
+    linear : str or list of str, optional
+        Variables averaged in linear units, as in :func:`qvp`.
+    min_samples : int, optional
+        Minimum number of gates in a bin. Default 1.
+    counts : bool, optional
+        Also return ``<name>_count``, the number of gates in each bin.
+    n_threads : int, optional
+        Threads for the compiled kernel. Default: all cores.
+    engine : {"auto", "compiled", "numpy"}, optional
+        Implementation to use.
+
+    Returns
+    -------
+    xarray.Dataset
+        Profiles on ``height`` (m above sea level), or ``(time, height)`` for
+        a sequence, with the ``azimuth`` of the RHI and the radar site.
+
+    See Also
+    --------
+    qvp, melting_layer
+
+    Notes
+    -----
+    The melting layer of Allabakash et al. (2019) is found from the
+    gradients of Z, ZDR and rhohv and of their products with 1 - rhohv in the
+    R-QVP; that method is not implemented. :func:`melting_layer` applied to
+    the R-QVP is a different method (radarx's, see there).
+
+    References
+    ----------
+    .. [1] Allabakash, S., S. Lim, and B.-J. Jang, 2019: Melting layer
+       detection and characterization based on range height
+       indicator-quasi vertical profiles. *Remote Sens.*, **11** (23), 2848,
+       https://doi.org/10.3390/rs11232848
+    .. [2] Allabakash, S., S. Lim, V. Chandrasekar, K.-H. Min, J. Choi, and
+       B.-J. Jang, 2019: X-band dual-polarization radar observations of snow
+       growth processes of a severe winter storm: Case of 12 December 2013 in
+       South Korea. *J. Atmos. Oceanic Technol.*, **36** (7), 1217-1235,
+       https://doi.org/10.1175/JTECH-D-18-0076.1
+
+    Examples
+    --------
+    >>> profile = radarx.retrieve.rhi_qvp(rhi, ["DBZH", "ZDR", "RHOHV"])  # doctest: +SKIP
+    >>> ml = radarx.retrieve.melting_layer(profile)  # doctest: +SKIP
+    """
+    if isinstance(rhi, (xr.Dataset, xr.DataTree)):
+        scans, series = [rhi], False
+    else:
+        scans, series = list(rhi), True
+        if not scans:
+            raise ValueError("No scans given.")
+    sweeps = [
+        _select_sweep(s, sweep=sweep) if isinstance(s, xr.DataTree) else s
+        for s in scans
+    ]
+    samples = [
+        _rhi_samples(
+            ds, data_vars, rmin, rmax, max_elevation, min_rhohv, min_dbz, rhohv, dbz
+        )
+        for ds in sweeps
+    ]
+    names = samples[0][0]
+    heights_in = [s[1] for s in samples if s[1].size]
+    lowest = min((h.min() for h in heights_in), default=np.inf)
+    highest = max((h.max() for h in heights_in), default=-np.inf)
+    grid = _height_grid(heights, lowest, highest, dz)
+    modes = _modes(sweeps[0], names, "mean", linear)
+    results = [
+        _blend(
+            h,
+            np.ones(h.size),
+            values,
+            grid,
+            0.5 * dz,
+            "top_hat",
+            modes,
+            min_samples,
+            n_threads,
+            engine,
+        )
+        for _, h, values in samples
+    ]
+    first = sweeps[0]
+    extra = {}
+    if "azimuth" in first:
+        extra["azimuth"] = (
+            (),
+            float(np.nanmedian(first["azimuth"].values)),
+            {"long_name": "median azimuth of the RHI", "units": "degrees"},
+        )
+    out = _blended_dataset(
+        names,
+        results,
+        grid,
+        [_sweep_time(ds) for ds in sweeps],
+        series,
+        first,
+        modes,
+        {},
+        1,
+        f"height bins of {dz:g} m: mean of the gates of all elevations",
+        counts,
+        extra,
+    )
+    for name in names:
+        out[name].attrs["qvp_filter"] = (
+            f"rhohv > {min_rhohv} and Z >= {min_dbz} dBZ, range {rmin:g} to "
+            f"{rmax:g} m, elevation < {max_elevation:g} degrees"
+        )
+        out[name].attrs.pop("qvp_min_count", None)
+    out.attrs = {
+        "title": "RHI quasi-vertical profile",
+        "references": "Allabakash et al. (2019), doi:10.3390/rs11232848",
+    }
+    return out
+
+
+def _rhi_samples(
+    ds, data_vars, rmin, rmax, max_elevation, min_rhohv, min_dbz, rhohv, dbz
+):
+    """Names, heights and values of the gates of an RHI that pass the tests."""
+    names = _fields_of(ds, data_vars, rhohv, dbz, min_rhohv, min_dbz)[0]
+    ray = _ray_dim(ds[names[0]])
+    arrays, _ = _sweep_arrays(ds, names, [])
+    el = np.asarray(ds["elevation"].values, dtype=np.float64)
+    if el.shape != (ds.sizes[ray],):
+        raise ValueError("the elevation must have one value for every ray.")
+    rng = np.asarray(ds["range"].values, dtype=np.float64)
+    ok = (
+        ((rng >= rmin) & (rng <= rmax))[None, :]
+        & (el < max_elevation)[:, None]
+        & np.ones((el.size, rng.size), dtype=bool)
+    )
+    for value, limit, cands, std, what, strict in (
+        (rhohv, min_rhohv, _RHOHV_NAMES, _RHOHV_STANDARD, "rhohv", True),
+        (dbz, min_dbz, _DBZ_NAMES, _DBZ_STANDARD, "reflectivity", False),
+    ):
+        name = None if limit is None else _resolve_field(ds, value, cands, std, what)
+        if name is not None:
+            q = _sweep_arrays(ds, [name], [])[0][0].astype(np.float64)
+            ok &= (q > limit) if strict else (q >= limit)
+    _, _, z = _antenna_to_cartesian(rng[None, :], el[:, None], _site_altitude(ds))
+    height = np.broadcast_to(z, ok.shape)[ok]
+    values = np.stack([a[ok].astype(np.float64) for a in arrays])
+    return names, height, values
+
+
+def _antenna_to_cartesian(rng, elevation, site_altitude):
+    from xradar.georeference import antenna_to_cartesian
+
+    return antenna_to_cartesian(
+        rng, 0.0, elevation, earth_radius=EARTH_RADIUS, site_altitude=site_altitude
+    )
+
+
+# ---------------------------------------------------------------------------
+# melting layer on PPIs
+# ---------------------------------------------------------------------------
+
+
+def _ppi_flags_numpy(zh, rho, zdr, hgate, hi, params):
+    """Melting-layer points of one sweep: a boolean (ray, gate) array."""
+    rho_lo, rho_hi, zdr_lo, zdr_hi, dbz_lo, dbz_hi, hmax = params
+    zh, rho, zdr = (np.asarray(a, dtype=np.float64) for a in (zh, rho, zdr))
+    flag = np.zeros(zh.shape, dtype=bool)
+    candidate = (rho > rho_lo) & (rho < rho_hi) & (hgate[None, :] < hmax)
+    zf = np.where(np.isnan(zh), -np.inf, zh)
+    df = np.where(np.isnan(zdr), -np.inf, zdr)
+    for j in np.flatnonzero(candidate.any(axis=0)):
+        zmax = zf[:, j : hi[j]].max(axis=1)
+        dmax = df[:, j : hi[j]].max(axis=1)
+        flag[:, j] = (
+            candidate[:, j]
+            & (zmax >= dbz_lo)
+            & (zmax <= dbz_hi)
+            & (dmax >= zdr_lo)
+            & (dmax <= zdr_hi)
+        )
+    return flag
+
+
+def _ppi_layer_numpy(sweeps, target, sector, q_top, q_bottom, min_points, params):
+    """NumPy implementation of the compiled ``ppi_melting_layer``."""
+    pooled = []  # (azimuth of the ray, heights of its points)
+    for zh, rho, zdr, az, hgate, hi in sweeps:
+        flag = _ppi_flags_numpy(zh, rho, zdr, hgate, hi, params)
+        pooled += [(a, hgate[f]) for a, f in zip(az, flag)]
+    azimuth = np.array([p[0] for p in pooled])
+
+    def percentiles(points):
+        n = points.size
+        if n == 0 or n < min_points:
+            return np.nan, np.nan, n
+        return (
+            float(np.percentile(points, q_top)),
+            float(np.percentile(points, q_bottom)),
+            n,
+        )
+
+    top = np.full(target.size, np.nan)
+    bottom = np.full(target.size, np.nan)
+    npts = np.zeros(target.size, dtype=np.int64)
+    for k, t in enumerate(target):
+        d = np.abs(np.fmod(azimuth - t, 360.0))
+        d = np.where(d > 180.0, 360.0 - d, d)
+        take = [p[1] for p, near in zip(pooled, d <= 0.5 * sector) if near]
+        points = np.concatenate(take) if take else np.zeros(0)
+        top[k], bottom[k], npts[k] = percentiles(points)
+    everything = np.concatenate([p[1] for p in pooled]) if pooled else np.zeros(0)
+    return top, bottom, npts, *percentiles(everything)
+
+
+@provenance("Melting layer from the PPIs of a volume, after Giangrande et al. (2008)")
+def melting_layer_ppi(
+    volumes,
+    *,
+    dbz="auto",
+    rhohv="auto",
+    zdr="auto",
+    elevation_range=(4.0, 10.0),
+    sector=20.0,
+    percentiles=(80.0, 20.0),
+    rhohv_range=(0.90, 0.97),
+    zdr_range=(0.8, 2.5),
+    dbz_range=(30.0, 47.0),
+    window=500.0,
+    height_max=6000.0,
+    min_points=20,
+    azimuth_step=1.0,
+    n_threads=None,
+    engine="auto",
+):
+    """
+    Melting-layer top and bottom from the PPIs of a volume.
+
+    This is the radial-profile method of Giangrande et al. (2008) [1]_ for
+    PPIs at moderate elevation, where the melting layer shows as a ring of
+    low rhohv with a Z and ZDR enhancement. On every ray the gates with
+    ``0.90 < rhohv < 0.97`` below 6 km are flagged as melting-layer points if
+    the maxima of Z and ZDR in a window of 500 m above them are between 30 and
+    47 dBZ and between 0.8 and 2.5 dB (the thresholds and the window of the
+    journal paper as given in :func:`melting_layer`, the sector width of the
+    conference version of the paper [2]_). The height of a gate is its beam
+    height (4/3 Earth model, as in :func:`qvp`). The bottom and top of the
+    layer are the 20th and 80th percentile of the heights of the points of
+    all rays within a running azimuthal window (Ryzhkov and Krause 2022 [3]_,
+    who describe this designation, p. 530), here 20 degrees wide [2]_. The
+    sweeps with elevations between 4 and 10 degrees are used together
+    [2]_, where the signature is pronounced and the beam does not blur the
+    layer.
+
+    Unlike the azimuthal mean of a QVP, the result keeps the dependence on
+    the azimuth, and the sweeps are not averaged before the detection. It is
+    meant for the layer at heights and ranges where the beam at 4 to 10
+    degrees crosses it, that is for a layer between about 1 and 6 km. The
+    effect of the beam width on the layer (which Ryzhkov and Krause 2022
+    correct with simulated profiles, a method that is not implemented here)
+    is not corrected.
+
+    Parameters
+    ----------
+    volumes : xarray.DataTree, xarray.Dataset or sequence of them
+        A radar volume with ``sweep_*`` groups (xradar layout), a sweep, or a
+        sequence of volumes in time order. The sweeps with an elevation in
+        ``elevation_range`` that have Z, ZDR and rhohv are used. A sweep
+        given directly is used whatever its elevation (with a warning if it
+        is outside the range).
+    dbz, rhohv, zdr : str, optional
+        Variable names; ``"auto"`` (default) looks for common names and the
+        CF standard names.
+    elevation_range : tuple of float, optional
+        Elevations (degrees) of the sweeps used. Default ``(4, 10)``.
+    sector : float, optional
+        Width (degrees) of the azimuthal window. Default 20. The window of a
+        target azimuth contains the points of the rays within half of it on
+        both sides.
+    percentiles : tuple of float, optional
+        Percentiles of the heights of the points that give the top and the
+        bottom. Default ``(80, 20)``.
+    rhohv_range, zdr_range, dbz_range : tuple of float, optional
+        Ranges of rhohv at the gate (strictly between), of the maximum of ZDR
+        (dB) and of the maximum of Z (dBZ) above it. Defaults
+        ``(0.90, 0.97)``, ``(0.8, 2.5)`` and ``(30, 47)``.
+    window : float, optional
+        Height (m) of the window above the gate in which the maxima are
+        searched. Default 500.
+    height_max : float, optional
+        Gates must be below this height (m above sea level). Default 6000.
+    min_points : int, optional
+        Minimum number of points in a window for a top and a bottom. Default
+        20 (the paper leaves this a parameter; the value is radarx's choice).
+    azimuth_step : float, optional
+        Spacing (degrees) of the azimuths of the result. Default 1.
+    n_threads : int, optional
+        Threads for the compiled kernel. Default: all cores.
+    engine : {"auto", "compiled", "numpy"}, optional
+        Implementation to use.
+
+    Returns
+    -------
+    xarray.Dataset
+        ``melting_layer_top``, ``melting_layer_bottom`` (m above sea level)
+        and ``melting_layer_points`` (number of points) on ``azimuth``; the
+        same for all azimuths together as ``melting_layer_top_all``,
+        ``melting_layer_bottom_all`` and ``melting_layer_points_all``. A
+        sequence of volumes adds the ``time`` dimension. NaN where there are
+        fewer than ``min_points`` points.
+
+    See Also
+    --------
+    melting_layer, qvp, rhi_qvp
+
+    Notes
+    -----
+    Left out: the weighting of the elevations (the conference paper says the
+    higher elevations are weighted), the fuzzy-logic filter of clutter and
+    hail, the use of earlier volumes and of model values where nothing is
+    found, and the gaps filled in time, all of which belong to the
+    operational algorithm.
+
+    References
+    ----------
+    .. [1] Giangrande, S. E., J. M. Krause, and A. V. Ryzhkov, 2008:
+       Automatic designation of the melting layer with a polarimetric
+       prototype of the WSR-88D radar. *J. Appl. Meteor. Climatol.*, **47**
+       (5), 1354-1364, https://doi.org/10.1175/2007JAMC1634.1
+    .. [2] Giangrande, S. E., A. V. Ryzhkov, and J. Krause, 2007: Automatic
+       detection of the melting layer with a polarimetric prototype of the
+       WSR-88D radar. Preprints, 33rd Conf. on Radar Meteorology, Cairns,
+       Australia, Amer. Meteor. Soc., 11R.2 (conference version, read in
+       full; no DOI).
+    .. [3] Ryzhkov, A., and J. Krause, 2022: New polarimetric radar algorithm
+       for melting-layer detection and determination of its height. *J.
+       Atmos. Oceanic Technol.*, **39** (5), 529-543,
+       https://doi.org/10.1175/JTECH-D-21-0130.1
+
+    Examples
+    --------
+    >>> ml = radarx.retrieve.melting_layer_ppi(dtree)  # doctest: +SKIP
+    >>> ml = dtree.radarx.melting_layer_ppi(sector=30.0)  # doctest: +SKIP
+    """
+    use_compiled = _use_compiled(engine)
+    volumes, series = _as_volumes(volumes)
+    if not azimuth_step > 0:
+        raise ValueError("azimuth_step must be positive.")
+    if not sector > 0:
+        raise ValueError("sector must be positive.")
+    target = np.arange(0.0, 360.0, float(azimuth_step))
+    params = (*map(float, (*rhohv_range, *zdr_range, *dbz_range)), float(height_max))
+    top, bottom, npts, tops, bottoms, nall, times = [], [], [], [], [], [], []
+    for volume in volumes:
+        used = _ppi_sweeps(volume, dbz, rhohv, zdr, elevation_range)
+        sweeps = []
+        for ds, names in used:
+            _, _, h, _ = _geometry(ds)
+            if np.any(np.diff(h) <= 0):
+                raise ValueError("the beam height must increase with range.")
+            arrays, _ = _sweep_arrays(ds, names, [])
+            az = np.asarray(ds["azimuth"].values, dtype=np.float64)
+            hi = np.searchsorted(h, h + float(window), side="right").astype(np.int64)
+            sweeps.append((*arrays, az, h, hi))
+        args = (
+            target,
+            float(sector),
+            float(percentiles[0]),
+            float(percentiles[1]),
+            int(min_points),
+        )
+        if use_compiled:
+            res = _qvp.ppi_melting_layer(
+                [s[0] for s in sweeps],
+                [s[1] for s in sweeps],
+                [s[2] for s in sweeps],
+                [s[3] for s in sweeps],
+                [s[4] for s in sweeps],
+                [s[5] for s in sweeps],
+                target,
+                *params,
+                float(sector),
+                float(percentiles[0]),
+                float(percentiles[1]),
+                int(min_points),
+                n_threads=int(n_threads or 0),
+            )
+        else:
+            res = _ppi_layer_numpy(
+                [(s[0], s[1], s[2], s[3], s[4], s[5]) for s in sweeps], *args, params
+            )
+        for store, value in zip((top, bottom, npts, tops, bottoms, nall), res):
+            store.append(value)
+        times.append(_volume_time([u[0] for u in used]))
+    coords = {
+        "azimuth": (
+            "azimuth",
+            target,
+            {"long_name": "azimuth of the window centre", "units": "degrees"},
+        )
+    }
+    method = (
+        "gates with 0.90 < rhohv < 0.97 and the Z and ZDR maxima above them in range "
+        "(after Giangrande et al. 2008); "
+        f"{percentiles[0]:g}th and {percentiles[1]:g}th percentile of their heights "
+        f"within {sector:g} degrees of azimuth"
+    )
+    dims = ("time", "azimuth") if series else ("azimuth",)
+    scalar = ("time",) if series else ()
+
+    def stack(values, dtype):
+        a = np.array(values, dtype=dtype)
+        return a if series else a[0]
+
+    height_attrs = {
+        "standard_name": "altitude",
+        "units": "m",
+        "method": method,
+    }
+    out = xr.Dataset(
+        {
+            "melting_layer_top": (
+                dims,
+                stack(top, np.float64),
+                {**height_attrs, "long_name": "melting layer top above sea level"},
+            ),
+            "melting_layer_bottom": (
+                dims,
+                stack(bottom, np.float64),
+                {**height_attrs, "long_name": "melting layer bottom above sea level"},
+            ),
+            "melting_layer_points": (
+                dims,
+                stack(npts, np.int64),
+                {"long_name": "melting layer points in the window", "units": "1"},
+            ),
+            "melting_layer_top_all": (
+                scalar,
+                stack(tops, np.float64),
+                {
+                    **height_attrs,
+                    "long_name": "melting layer top above sea level, all azimuths",
+                },
+            ),
+            "melting_layer_bottom_all": (
+                scalar,
+                stack(bottoms, np.float64),
+                {
+                    **height_attrs,
+                    "long_name": "melting layer bottom above sea level, all azimuths",
+                },
+            ),
+            "melting_layer_points_all": (
+                scalar,
+                stack(nall, np.int64),
+                {"long_name": "melting layer points, all azimuths", "units": "1"},
+            ),
+        },
+        coords=coords,
+    )
+    if series:
+        out = out.assign_coords(time=("time", np.array(times, dtype="datetime64[ns]")))
+    else:
+        out = out.assign_coords(time=times[0])
+    return out
+
+
+def _ppi_sweeps(volume, dbz, rhohv, zdr, elevation_range):
+    """``[(sweep, (dbz, rhohv, zdr names))]`` of the sweeps used for the PPI layer."""
+    direct = isinstance(volume, xr.Dataset)
+    chosen = []
+    for ds in _volume_sweeps(volume):
+        el = float(np.nanmedian(ds["elevation"].values))
+        inside = elevation_range[0] <= el <= elevation_range[1]
+        if direct and not inside:
+            warnings.warn(
+                f"the sweep is at {el:.1f} degrees, outside the {elevation_range[0]:g} "
+                f"to {elevation_range[1]:g} degrees of the method",
+                UserWarning,
+                stacklevel=3,
+            )
+        if not (inside or direct):
+            continue
+        names = []
+        for value, cands, std, what in (
+            (dbz, _DBZ_NAMES, _DBZ_STANDARD, "dbz"),
+            (rhohv, _RHOHV_NAMES, _RHOHV_STANDARD, "rhohv"),
+            (zdr, _ZDR_NAMES, _ZDR_STANDARD, "zdr"),
+        ):
+            names.append(_resolve_field(ds, value, cands, std, what))
+        if None in names:
+            if direct:
+                raise ValueError("the sweep needs Z, ZDR and rhohv fields.")
+            continue
+        chosen.append((ds, names))
+    if not chosen:
+        raise ValueError(
+            f"No sweep between {elevation_range[0]:g} and {elevation_range[1]:g} "
+            "degrees has reflectivity, ZDR and rhohv."
+        )
+    return chosen
+
+
+# ---------------------------------------------------------------------------
+# rain-only products below the melting layer
+# ---------------------------------------------------------------------------
+
+#: Products of the retrievals that are valid in rain only, set to NaN above
+#: the melting layer by default: the rain rates of :mod:`radarx.retrieve.qpe`
+#: and the drop size distribution parameters of :func:`radarx.retrieve.dsd`.
+RAIN_ONLY_PRODUCTS = (
+    "RAIN_RATE",
+    "RAIN_RATE_Z",
+    "RAIN_RATE_KDP",
+    "RAIN_RATE_Z_ZDR",
+    "RAIN_RATE_A",
+    "N0",
+    "NW",
+    "D0",
+    "DM",
+    "MU",
+    "LAMBDA",
+    "LWC",
+)
+
+#: Value of ``RAIN_RATE_FLAG`` where the rain rate was removed above the layer.
+ABOVE_MELTING_LAYER_FLAG = 4
+
+
+def _gate_height(obj, height, beam_width):
+    """
+    Height (m above sea level) of the gates of a sweep, or the height of the
+    lower edge of the beam if ``beam_width`` (degrees) is given.
+    """
+    if height is None:
+        if "elevation" not in obj.coords or "range" not in obj.coords:
+            raise ValueError(
+                "the gate heights need the elevation and range coordinates of the "
+                "sweep, or give height="
+            )
+        el = np.asarray(obj["elevation"].values, dtype=np.float64)
+        rng = np.asarray(obj["range"].values, dtype=np.float64)
+        alt = float(obj["altitude"].values) if "altitude" in obj.coords else 0.0
+        if el.ndim == 0:
+            z = _antenna_to_cartesian(rng, float(el), alt)[2]
+            dims = ("range",)
+        elif el.ndim == 1:
+            z = _antenna_to_cartesian(rng[None, :], el[:, None], alt)[2]
+            dims = (obj["elevation"].dims[0], "range")
+        else:
+            raise ValueError("the elevation must be a scalar or one value per ray.")
+        height = xr.DataArray(np.asarray(z), dims=dims)
+    if beam_width:
+        rng = obj["range"].reset_coords(drop=True)
+        el = np.deg2rad(obj["elevation"].reset_coords(drop=True))
+        half = 0.5 * np.deg2rad(float(beam_width)) * rng * np.cos(el)
+        height = height - half
+    return height
+
+
+def _cap_height(melting_layer, bottom, margin):
+    """Height (m) above which rain-only products are removed."""
+    if isinstance(melting_layer, xr.Dataset):
+        if bottom not in melting_layer:
+            raise ValueError(f"the melting layer has no {bottom!r}.")
+        cap = melting_layer[bottom]
+    elif isinstance(melting_layer, xr.DataArray):
+        cap = melting_layer
+    else:
+        cap = xr.DataArray(np.asarray(melting_layer, dtype=np.float64))
+    return cap.astype(np.float64).reset_coords(drop=True) + float(margin)
+
+
+def _align_azimuth(cap, obj):
+    """``cap`` on the azimuth of the rays of ``obj`` (nearest, circular)."""
+    if "azimuth" not in cap.dims or "azimuth" not in cap.coords:
+        return cap
+    if "azimuth" not in obj.coords or obj["azimuth"].ndim != 1:
+        raise ValueError(
+            "a melting layer that depends on the azimuth needs products with an "
+            "azimuth coordinate."
+        )
+    ray = obj["azimuth"].dims[0]
+    az = np.asarray(obj["azimuth"].values, dtype=np.float64)
+    ref = np.asarray(cap["azimuth"].values, dtype=np.float64)
+    d = np.abs((az[:, None] - ref[None, :] + 180.0) % 360.0 - 180.0)
+    picked = cap.isel(azimuth=xr.DataArray(np.argmin(d, axis=1), dims=ray))
+    return picked.drop_vars("azimuth", errors="ignore")
+
+
+def _capped_flag_attrs():
+    from .qpe import FLAG_MEANINGS
+
+    return {
+        "long_name": "why the rain rate is missing",
+        "flag_values": np.arange(len(FLAG_MEANINGS) + 1, dtype=np.int8),
+        "flag_meanings": " ".join((*FLAG_MEANINGS, "above_melting_layer")),
+        "comment": (
+            "0: estimated; 1: no valid relation for the hydrometeor class; "
+            "2: an input of the relation is missing; 3: the gate is not "
+            "classified; 4: removed above the melting layer"
+        ),
+    }
+
+
+def _cap_sweep(obj, melting_layer, bottom, height, margin, beam_width, variables):
+    cap = _align_azimuth(_cap_height(melting_layer, bottom, margin), obj)
+    edge = _gate_height(obj, height, beam_width)
+    above = edge > cap  # NaN where the layer or the height is unknown: kept
+    text = (
+        f"set to NaN where the beam is above the melting layer bottom + {margin:g} m"
+        + (f" (lower edge of a {beam_width:g} degree beam)" if beam_width else "")
+    )
+    if isinstance(obj, xr.DataArray):
+        out = obj.where(~above)
+        out.attrs["comment"] = "; ".join(filter(None, [obj.attrs.get("comment"), text]))
+        return out
+    if variables is None:
+        names = [v for v in RAIN_ONLY_PRODUCTS if v in obj.data_vars]
+    else:
+        names = [variables] if isinstance(variables, str) else list(variables)
+        missing = [v for v in names if v not in obj.data_vars]
+        if missing:
+            raise ValueError(f"no {missing} in the dataset.")
+    out = obj.copy()
+    removed = None
+    if "RAIN_RATE_FLAG" in obj and "RAIN_RATE" in obj:
+        removed = above & np.isfinite(obj["RAIN_RATE"])
+    for name in names:
+        da = obj[name]
+        out[name] = da.where(~above)
+        out[name].attrs = dict(da.attrs)
+        out[name].attrs["comment"] = "; ".join(
+            filter(None, [da.attrs.get("comment"), text])
+        )
+    if removed is not None and "RAIN_RATE" in names:
+        flag = xr.where(removed, ABOVE_MELTING_LAYER_FLAG, obj["RAIN_RATE_FLAG"])
+        out["RAIN_RATE_FLAG"] = flag.astype(obj["RAIN_RATE_FLAG"].dtype)
+        out["RAIN_RATE_FLAG"].attrs = _capped_flag_attrs()
+        if "RAIN_RATE_RELATION" in obj:
+            rel = xr.where(removed, 0, obj["RAIN_RATE_RELATION"])
+            out["RAIN_RATE_RELATION"] = rel.astype(obj["RAIN_RATE_RELATION"].dtype)
+            out["RAIN_RATE_RELATION"].attrs = dict(obj["RAIN_RATE_RELATION"].attrs)
+    return out
+
+
+@provenance(
+    "Rain-only products set to NaN above the melting layer bottom, radarx's own"
+)
+def mask_above_melting_layer(
+    products,
+    melting_layer,
+    *,
+    bottom="melting_layer_bottom",
+    height=None,
+    margin=0.0,
+    beam_width=None,
+    variables=None,
+):
+    """
+    Remove the products of rain-only retrievals above the melting layer.
+
+    The rain rates of :func:`radarx.retrieve.rain_rate_z`, ``rain_rate_kdp``,
+    ``rain_rate_z_zdr``, ``rain_rate_a`` and the drop size distribution
+    parameters of :func:`radarx.retrieve.dsd` hold for rain. Above the
+    melting layer the radar sees snow and ice, and in it wet snow, for which
+    the relations do not apply. :func:`radarx.retrieve.rain_rate` already
+    leaves the gates of the hydrometeor classes without a relation (including
+    the melting layer, "wet snow") empty, but depends on the classification;
+    this function makes a cap from a melting-layer height instead, for example
+    from :func:`melting_layer` (profiles of a QVP, with the time of the
+    volume) or :func:`melting_layer_ppi` (with the azimuth).
+
+    A gate is removed where its height is above the bottom of the melting
+    layer plus ``margin``. The bottom is the end of snow melting (Ryzhkov
+    and Krause 2022 [1]_, p. 533), so below it there are no wet snow and no
+    ice: the rain-only relations apply from there downward. The ``margin``
+    (default 0 m) moves the cap, and ``beam_width`` makes it use the lower
+    edge of the beam instead of its centre, because a beam whose lower half
+    is in rain and upper half in the layer is contaminated. Both are radarx's
+    definition and are not taken from a paper. Gates are kept where the
+    melting layer is not known (NaN): the function does not assume that there
+    is no melting layer.
+
+    Parameters
+    ----------
+    products : xarray.DataArray, xarray.Dataset or xarray.DataTree
+        A rain-only product (DataArray), a sweep with such products
+        (Dataset), or a volume. Datasets need the ``elevation`` and ``range``
+        coordinates (and ``altitude``) for the gate heights.
+    melting_layer : xarray.Dataset, xarray.DataArray or float
+        The bottom of the melting layer, in m above sea level: the output of
+        :func:`melting_layer` or :func:`melting_layer_ppi` (variable
+        ``bottom``), a DataArray, or a number. A DataArray or variable on
+        ``azimuth`` is matched to the azimuths of the rays (nearest, circular);
+        one without dimensions applies to all gates.
+    bottom : str, optional
+        Variable of a Dataset that holds the bottom. Default
+        ``"melting_layer_bottom"``.
+    height : xarray.DataArray, optional
+        Height of the gates (m above sea level). By default the beam height
+        of :func:`qvp` (4/3 Earth model) from the ``elevation``, ``range`` and
+        ``altitude`` coordinates.
+    margin : float, optional
+        Added to the bottom (m); gates above the sum are removed. Default 0.
+    beam_width : float, optional
+        Two-way half-power beam width (degrees). With it the height compared
+        with the cap is the lower edge of the beam, ``height - 0.5 * width *
+        range * cos(elevation)``. Default None: the centre of the beam.
+    variables : str or list of str, optional
+        The variables of a Dataset to remove. Default: those of
+        :data:`RAIN_ONLY_PRODUCTS` the Dataset has.
+
+    Returns
+    -------
+    xarray.DataArray, xarray.Dataset or xarray.DataTree
+        The products with NaN above the layer; other variables are
+        unchanged. In a Dataset with ``RAIN_RATE`` and ``RAIN_RATE_FLAG`` the
+        flag is 4 (``above_melting_layer``) and ``RAIN_RATE_RELATION`` 0
+        where an estimate was removed.
+
+    See Also
+    --------
+    melting_layer, melting_layer_ppi, radarx.retrieve.rain_rate
+
+    Notes
+    -----
+    Nothing here estimates the rain rate in the melting layer or above it:
+    the relations scaled for wet snow and dry snow of Giangrande and Ryzhkov
+    (2007) are listed in :mod:`radarx.retrieve.qpe` and are chosen there with
+    ``class_relations``.
+
+    References
+    ----------
+    .. [1] Ryzhkov, A., and J. Krause, 2022: New polarimetric radar algorithm
+       for melting-layer detection and determination of its height. *J.
+       Atmos. Oceanic Technol.*, **39** (5), 529-543,
+       https://doi.org/10.1175/JTECH-D-21-0130.1
+
+    Examples
+    --------
+    >>> ml = radarx.retrieve.melting_layer_ppi(dtree)  # doctest: +SKIP
+    >>> rr = radarx.retrieve.rain_rate_z(sweep)  # doctest: +SKIP
+    >>> rr = radarx.retrieve.mask_above_melting_layer(rr, ml, margin=-200.0)  # doctest: +SKIP
+    """
+    if isinstance(products, xr.DataTree):
+        from ._fieldtools import map_sweeps
+
+        return map_sweeps(
+            products,
+            lambda ds, name: _cap_sweep(
+                ds, melting_layer, bottom, height, margin, beam_width, variables
+            ),
+            "mask_above_melting_layer",
+        )
+    if not isinstance(products, (xr.DataArray, xr.Dataset)):
+        raise TypeError("products must be an xarray DataArray, Dataset or DataTree.")
+    return _cap_sweep(
+        products, melting_layer, bottom, height, margin, beam_width, variables
+    )
+
+
+# ---------------------------------------------------------------------------
+# accessors
+# ---------------------------------------------------------------------------
+
+
+@accessor_method("dataset", "datatree", name="rd_qvp")
+def _rd_qvp_accessor(self, data_vars=None, **kwargs):
+    """
+    Range-defined quasi-vertical profile of this volume.
+
+    Parameters
+    ----------
+    data_vars : str or list of str, optional
+        Variables to profile.
+    **kwargs
+        Options of :func:`radarx.retrieve.rd_qvp` (``rmax``, ``power``,
+        ``dz``, ...).
+
+    Returns
+    -------
+    xarray.Dataset
+        Profiles on the ``height`` dimension.
+
+    See Also
+    --------
+    radarx.retrieve.rd_qvp
+    """
+    return rd_qvp(self.xarray_obj, data_vars, **kwargs)
+
+
+@accessor_method("dataset", "datatree", name="cvp")
+def _cvp_accessor(self, data_vars=None, **kwargs):
+    """
+    Columnar vertical profile of this volume.
+
+    Parameters
+    ----------
+    data_vars : str or list of str, optional
+        Variables to profile.
+    **kwargs
+        Options of :func:`radarx.retrieve.cvp`; ``azimuth`` and
+        ``ground_range`` of the centre are required.
+
+    Returns
+    -------
+    xarray.Dataset
+        Profiles on the ``height`` dimension.
+
+    See Also
+    --------
+    radarx.retrieve.cvp
+    """
+    return cvp(self.xarray_obj, data_vars, **kwargs)
+
+
+@accessor_method("dataset", "datatree", name="rhi_qvp")
+def _rhi_qvp_accessor(self, data_vars=None, **kwargs):
+    """
+    Vertical profile of this RHI scan.
+
+    Parameters
+    ----------
+    data_vars : str or list of str, optional
+        Variables to profile.
+    **kwargs
+        Options of :func:`radarx.retrieve.rhi_qvp` (``rmin``, ``rmax``,
+        ``dz``, ...).
+
+    Returns
+    -------
+    xarray.Dataset
+        Profiles on the ``height`` dimension.
+
+    See Also
+    --------
+    radarx.retrieve.rhi_qvp
+    """
+    return rhi_qvp(self.xarray_obj, data_vars, **kwargs)
+
+
+@accessor_method("dataset", "datatree", name="melting_layer_ppi")
+def _melting_layer_ppi_accessor(self, **kwargs):
+    """
+    Melting-layer top and bottom from the PPIs of this volume.
+
+    Parameters
+    ----------
+    **kwargs
+        Options of :func:`radarx.retrieve.melting_layer_ppi`
+        (``elevation_range``, ``sector``, ``percentiles``, ...).
+
+    Returns
+    -------
+    xarray.Dataset
+        ``melting_layer_top`` and ``melting_layer_bottom`` (m above sea
+        level) on ``azimuth``, and the same for all azimuths.
+
+    See Also
+    --------
+    radarx.retrieve.melting_layer_ppi
+    """
+    return melting_layer_ppi(self.xarray_obj, **kwargs)
+
+
+@accessor_method("dataarray", "dataset", "datatree", name="mask_above_melting_layer")
+def _mask_above_melting_layer_accessor(self, melting_layer, **kwargs):
+    """
+    Remove rain-only products above the melting layer.
+
+    Parameters
+    ----------
+    melting_layer : xarray.Dataset, xarray.DataArray or float
+        The bottom of the melting layer (m above sea level), for example the
+        output of ``melting_layer_ppi``.
+    **kwargs
+        Options of :func:`radarx.retrieve.mask_above_melting_layer`
+        (``margin``, ``beam_width``, ...).
+
+    Returns
+    -------
+    xarray.DataArray, xarray.Dataset or xarray.DataTree
+        The products with NaN above the layer.
+
+    See Also
+    --------
+    radarx.retrieve.mask_above_melting_layer
+    """
+    return mask_above_melting_layer(self.xarray_obj, melting_layer, **kwargs)
