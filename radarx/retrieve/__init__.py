@@ -25,6 +25,7 @@ _SECTIONS = {
         "dealias",
         "kdp",
         "attenuation",
+        "beam_blockage",
         "noise",
         "calibration",
         "advection",
