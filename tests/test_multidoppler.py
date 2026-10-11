@@ -21,6 +21,7 @@ import xarray as xr
 import radarx  # noqa: F401
 from radarx.retrieve import multidoppler as md
 from radarx.retrieve.multidoppler import (
+    dual_doppler_analytic,
     fall_speed,
     multi_doppler,
     multi_doppler_input,
@@ -528,6 +529,15 @@ def test_real_dual_doppler(nexrad_pair):
     # deep south-westerly flow ahead of the line at mid levels
     mid = out.v.sel(z=5000.0).values[good[4]]
     assert mid.mean() > 10.0
+    # the analytic solution gives the horizontal wind where the beams cross; its
+    # w is NaN because the lowest levels are not seen by KBMX (no divergence)
+    ana = dual_doppler_analytic(grids, freezing_level="rain")
+    solved = np.isfinite(ana.u.values) & good
+    assert solved.sum() > 1000
+    for c in "uv":
+        diff = (ana[c].values - out[c].values)[solved]
+        assert np.sqrt(np.mean(diff**2)) < 4.0
+    assert np.isnan(ana.w.values[good]).all()
 
 
 # --------------------------------------------------------------------------
@@ -845,3 +855,582 @@ def test_input_places_radars_by_geodesic_distance():
         assert np.sqrt(np.nanmean(err**2)) < 1e-3  # 0.044 dBZ (400 m) before
     assert out.azimuth.dims == ("radar", "z", "y", "x")
     np.testing.assert_allclose(out.radar_x, [100e3, -100e3], atol=1.0)
+
+
+# --------------------------------------------------------------------------
+# analytic dual-Doppler, O'Brien adjustment, observation weights, error estimate
+# --------------------------------------------------------------------------
+
+OBRIEN_DOI = "10.1175/1520-0450(1970)009<0197:ASTTCV>2.0.CO;2"
+
+
+def _columns(seed=0, nz=6, ny=3, nx=4):
+    rng = np.random.default_rng(seed)
+    z = np.cumsum(rng.uniform(300.0, 700.0, nz)) - 400.0  # uneven levels
+    flux = rng.normal(scale=1e-3, size=(nz, ny, nx))
+    rho = 1.2 * np.exp(-z[:, None, None] / 1e4) * rng.uniform(0.9, 1.1, (nz, ny, nx))
+    return z, flux, rho, rng.normal(scale=0.2, size=(ny, nx))
+
+
+@pytest.mark.parametrize("mode", [0, 1, 2])
+@pytest.mark.parametrize("power", [1.0, 2.0, 1.5])
+def test_integrate_mass_engines_agree(mode, power):
+    z, flux, rho, wb = _columns()
+    flux[2, 1, 1] = np.nan
+    ref = md._integrate_mass(flux, rho, z, wb, mode, power, False, None)
+    if md.HAS_COMPILED_KERNEL:
+        for threads in (1, 4):
+            got = md._integrate_mass(flux, rho, z, wb, mode, power, True, threads)
+            np.testing.assert_allclose(got, ref, rtol=1e-12, atol=1e-14, equal_nan=True)
+    gap = np.isnan(ref[:, 1, 1])
+    if mode == 0:  # integrating upward, the gap spoils the levels above it
+        assert gap.tolist() == [False, False, True, True, True, True]
+    elif mode == 1:
+        assert gap.tolist() == [True, True, True, False, False, False]
+    else:
+        assert gap.all()
+    assert np.isfinite(np.delete(ref.reshape(len(z), -1), 5, axis=1)).all()
+
+
+def test_integrate_mass_follows_the_analytic_anelastic_profile():
+    z = np.linspace(0.0, 10e3, 101)
+    ztop, scale = 10e3, 10e3
+    rho = (1.2 * np.exp(-z / scale))[:, None, None] * np.ones((1, 2, 2))
+    amp = 3.0
+    mass = amp * 1.2 * np.exp(-z / scale) * np.sin(np.pi * z / ztop)
+    w = (mass / (1.2 * np.exp(-z / scale)))[:, None, None] * np.ones((1, 2, 2))
+    flux = (
+        -amp
+        * 1.2
+        * np.exp(-z / scale)
+        * (-np.sin(np.pi * z / ztop) / scale + np.pi / ztop * np.cos(np.pi * z / ztop))
+    )[:, None, None] * np.ones((1, 2, 2))
+    zero = np.zeros((2, 2))
+    for mode in (0, 1, 2):
+        for compiled in (False, True) if md.HAS_COMPILED_KERNEL else (False,):
+            got = md._integrate_mass(flux, rho, z, zero, mode, 2.0, compiled, None)
+            # trapezoid rule on 100 m levels; w is zero at both ends of the profile
+            np.testing.assert_allclose(got, w, atol=2e-3)
+    # a bottom value shifts the upward integral by rho(z0) w0 / rho(z)
+    shifted = md._integrate_mass(flux, rho, z, zero + 1.0, 0, 2.0, False, None)
+    np.testing.assert_allclose(shifted - w, (rho[0] / rho)[:, :, :] * 1.0, atol=2e-3)
+
+
+@pytest.mark.parametrize("kind,power", [("linear", 2.0), ("constant", 1.0)])
+def test_obrien_adjust_zeroes_the_top(kind, power):
+    z, _, rho, _ = _columns(1)
+    w = np.random.default_rng(2).normal(size=rho.shape)
+    w[:, 0, 0] = np.nan  # a column without data stays as it is
+    out = md._obrien_adjust(w, rho, z, kind, False, None)
+    np.testing.assert_allclose(out[-1][np.isfinite(w[-1])], 0.0, atol=1e-14)
+    np.testing.assert_allclose(out[0, 1:], w[0, 1:])  # lowest level unchanged
+    s = ((z - z[0]) / (z[-1] - z[0])) ** power
+    want = (rho * w - s[:, None, None] * (rho * w)[-1]) / rho
+    np.testing.assert_allclose(out[:, 1:], want[:, 1:], rtol=1e-12)
+    assert np.isnan(out[:, 0, 0]).all()
+    if md.HAS_COMPILED_KERNEL:
+        got = md._obrien_adjust(w, rho, z, kind, True, 2)
+        np.testing.assert_allclose(got, out, rtol=1e-12, atol=1e-14, equal_nan=True)
+    with pytest.raises(ValueError, match="obrien_error"):
+        md._obrien_adjust(w, rho, z, "cubic", False, None)
+
+
+@needs_kernel
+def test_new_kernels_reject_bad_shapes():
+    z, flux, rho, wb = _columns()
+    k = md._multidoppler
+    with pytest.raises(ValueError, match="flux_div"):
+        k.integrate_mass(flux[0], rho, z, wb, 0)
+    with pytest.raises(ValueError, match="two levels"):
+        k.integrate_mass(flux[:1], rho[:1], z[:1], wb, 0)
+    with pytest.raises(ValueError, match="rho"):
+        k.integrate_mass(flux, rho[:2], z, wb, 0)
+    with pytest.raises(ValueError, match="mode"):
+        k.integrate_mass(flux, rho, z, wb, 3)
+    with pytest.raises(ValueError, match="w must be"):
+        k.obrien_adjust(flux[0], rho, z)
+    with pytest.raises(ValueError, match="two levels"):
+        k.obrien_adjust(flux[:1], rho[:1], z[:1])
+    with pytest.raises(ValueError, match="z has"):
+        k.obrien_adjust(flux, rho, z[:2])
+    nr, shape = 2, (3, 4, 5)
+    coef = np.zeros((nr * 3,) + shape)
+    with pytest.raises(ValueError, match="target"):
+        k.horizontal_wind(
+            coef, np.zeros(shape), np.zeros((nr,) + shape), np.zeros(shape), 1e-8
+        )
+    with pytest.raises(ValueError, match="coef"):
+        k.horizontal_wind(
+            coef[:3],
+            np.zeros((nr,) + shape),
+            np.zeros((nr,) + shape),
+            np.zeros(shape),
+            1e-8,
+        )
+
+
+def _uniform_flow_case(u0=8.0, v0=-3.0, step=4000.0, nz=5, seed=None, sigma=0.0):
+    ds, _, _ = synthetic_case(step=step, nz=nz)
+    geo = radar_geometry(ds)
+    el, az = np.radians(geo.elevation.values), np.radians(geo.azimuth.values)
+    vr = np.cos(el) * (np.sin(az) * u0 + np.cos(az) * v0)
+    if seed is not None:
+        vr = vr + sigma * np.random.default_rng(seed).normal(size=vr.shape)
+    return geo.assign(VRADH=(("radar", "z", "y", "x"), vr)), geo
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_analytic_horizontal_wind_and_geometric_error(engine):
+    ds, geo = _uniform_flow_case()
+    sigma = 0.7
+    out = dual_doppler_analytic(
+        ds,
+        fall_speed_correction=False,
+        obs_error=sigma,
+        iterations=1,
+        min_crossing_angle=30.0,
+        engine=engine,
+    )
+    ok = np.isfinite(out.u.values)
+    assert ok.sum() > 1500
+    # no vertical velocity, no noise: the 2 x 2 system returns the wind exactly
+    np.testing.assert_allclose(out.u.values[ok], 8.0, atol=1e-4)
+    np.testing.assert_allclose(out.v.values[ok], -3.0, atol=1e-4)
+    # only cells seen by two radars at 30 degrees or more are solved
+    beta = out.beam_crossing_angle.values
+    assert (beta[ok] >= 30.0).all() and (out.n_radars.values[ok] == 2).all()
+    assert (~ok[(beta < 30.0)]).all()
+    # sigma_u^2 + sigma_v^2 = sigma^2 (cos^2 p1 + cos^2 p2) / (cos^2 p1 cos^2 p2 sin^2 b)
+    el = np.radians(geo.elevation.values)
+    az = np.radians(geo.azimuth.values)
+    c1, c2 = np.cos(el[0]) ** 2, np.cos(el[1]) ** 2
+    sin_b = np.sin(az[0] - az[1])
+    with np.errstate(divide="ignore", invalid="ignore"):
+        want = sigma**2 * (c1 + c2) / (c1 * c2 * sin_b**2)
+    got = out.u_error.values**2 + out.v_error.values**2
+    np.testing.assert_allclose(got[ok], want[ok], rtol=2e-4)
+    # beams crossing at 90 degrees at ground level: sqrt(2) sigma
+    right = ok & (np.abs(beta - 90.0) < 1.0) & (el[0] < 0.05) & (el[1] < 0.05)
+    assert right.any()
+    np.testing.assert_allclose(np.sqrt(got[right]), np.sqrt(2.0) * sigma, rtol=2e-3)
+    assert out.u_error.attrs["units"] == "m s-1"
+
+
+def test_analytic_horizontal_error_with_unequal_radar_errors():
+    ds, geo = _uniform_flow_case()
+    errors = [0.5, 2.0]
+    out = dual_doppler_analytic(
+        ds, fall_speed_correction=False, obs_error=errors, iterations=1
+    )
+    el, az = np.radians(geo.elevation.values), np.radians(geo.azimuth.values)
+    a, b = np.cos(el) * np.sin(az), np.cos(el) * np.cos(az)
+    wts = 1.0 / np.array(errors)[:, None, None, None] ** 2
+    n11, n12, n22 = (wts * a * a).sum(0), (wts * a * b).sum(0), (wts * b * b).sum(0)
+    det = n11 * n22 - n12**2
+    ok = np.isfinite(out.u.values)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        var_u, var_v = n22 / det, n11 / det
+    np.testing.assert_allclose(out.u_error.values[ok] ** 2, var_u[ok], rtol=2e-4)
+    np.testing.assert_allclose(out.v_error.values[ok] ** 2, var_v[ok], rtol=2e-4)
+    # the noisier radar makes the error larger than for two radars of 0.5 m/s
+    equal = dual_doppler_analytic(
+        ds, fall_speed_correction=False, obs_error=0.5, iterations=1
+    )
+    assert (out.u_error.values[ok] > equal.u_error.values[ok]).all()
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_analytic_solver_retrieves_the_beltrami_flow(engine):
+    ds, bg, truth = synthetic_case(noise=0.0)
+    obrien = dual_doppler_analytic(
+        ds,
+        bg,
+        fall_speed_correction=False,
+        boundary="obrien",
+        iterations=6,
+        engine=engine,
+    )
+    good = (obrien.beam_crossing_angle > 30).values & np.isfinite(obrien.w.values)
+    err = rms_error(obrien, truth, good)
+    # exact radial velocities: u is exact, v and w carry the discretisation
+    # error of the coupled horizontal-wind and continuity iteration
+    assert err["u"] < 0.05 and err["v"] < 1.0 and err["w"] < 0.8
+    assert float(abs(obrien.w.isel(z=-1)).max()) < 1e-6  # w = 0 at the top
+    assert (
+        obrien.w.isel(z=0).values[np.isfinite(obrien.w.isel(z=0).values)] == 0
+    ).all()
+    assert obrien.attrs["obrien_error"] == "linear"
+    assert obrien.attrs["w_change_last_iteration_rms"] < 0.05
+    # the Beltrami flow is zero at both ends: the downward integral works too,
+    # the upward one lets the divergence error accumulate with height
+    down = dual_doppler_analytic(
+        ds,
+        bg,
+        fall_speed_correction=False,
+        boundary="downward",
+        iterations=6,
+        engine=engine,
+    )
+    assert float(abs(down.w.isel(z=-1)).max()) == 0.0
+    err_down = rms_error(down, truth, good)
+    up = dual_doppler_analytic(
+        ds, bg, fall_speed_correction=False, iterations=1, engine=engine
+    )
+    err_up = rms_error(up, truth, good)
+    assert err_down["w"] < 1.5 and err_up["w"] > err["w"]
+    assert err["w"] < err_up["w"]
+
+
+@needs_kernel
+def test_analytic_solver_engines_agree():
+    ds, bg, _ = synthetic_case(noise=0.5)
+    a = dual_doppler_analytic(ds, bg, fall_speed_correction=False, boundary="obrien")
+    b = dual_doppler_analytic(
+        ds, bg, fall_speed_correction=False, boundary="obrien", engine="numpy"
+    )
+    for c in ("u", "v", "w", "u_error", "v_error"):
+        np.testing.assert_allclose(a[c], b[c], rtol=1e-4, atol=1e-5, equal_nan=True)
+
+
+def test_analytic_solver_is_validated_against_the_variational_solution():
+    ds, bg, truth = synthetic_case(noise=0.5)
+    var = multi_doppler(
+        ds, bg, fall_speed_correction=False, w_boundary=("bottom", "obrien")
+    )
+    ana = dual_doppler_analytic(ds, bg, fall_speed_correction=False, boundary="obrien")
+    good = lobes(var) & np.isfinite(ana.w.values)
+    e_var, e_ana = rms_error(var, truth, good), rms_error(ana, truth, good)
+    # the variational solution is closer to the truth in every component
+    for c in "uvw":
+        assert e_var[c] < e_ana[c], (c, e_var, e_ana)
+    # and the two agree on the horizontal wind to the noise level
+    assert float(np.sqrt(np.mean((var.u.values - ana.u.values)[good] ** 2))) < 1.0
+
+
+def test_analytic_solver_fall_speed_and_options():
+    ds, bg, truth = synthetic_case(dbz=45.0)
+    on = dual_doppler_analytic(ds, bg, freezing_level="rain", boundary="obrien")
+    off = dual_doppler_analytic(ds, bg, fall_speed_correction=False, boundary="obrien")
+    good = (on.beam_crossing_angle > 30).values & np.isfinite(on.w.values)
+    assert float(on.fall_speed.max()) > 7.0
+    # ignoring the fall speed biases the horizontal wind (5.6 m/s against 0.5 m/s)
+    assert rms_error(on, truth, good)["v"] < 0.3 * rms_error(off, truth, good)["v"]
+    # w_bottom: a number or a field on (y, x), shifting the upward integral
+    base = dual_doppler_analytic(ds, bg, fall_speed_correction=False, iterations=1)
+    field = xr.DataArray(np.full((ds.sizes["y"], ds.sizes["x"]), 0.5), dims=("y", "x"))
+    moved = dual_doppler_analytic(
+        ds, bg, fall_speed_correction=False, iterations=1, w_bottom=field
+    )
+    ok = np.isfinite(moved.w.values) & np.isfinite(base.w.values)
+    assert (moved.w.isel(z=0).values[ok[0]] == 0.5).all()
+    assert (moved.w.values[ok] > base.w.values[ok] - 1e-3).mean() > 0.9
+    # a single radar gives no wind; a list of grids is concatenated
+    one = dual_doppler_analytic(ds.isel(radar=[0]), bg, fall_speed_correction=False)
+    assert np.isnan(one.u).all() and "beam_crossing_angle" not in one
+    parts = [ds.isel(radar=[i]) for i in range(2)]
+    both = dual_doppler_analytic(parts, bg, fall_speed_correction=False, iterations=1)
+    np.testing.assert_allclose(both.u, base.u, equal_nan=True)
+
+
+def test_analytic_solver_errors():
+    ds, bg, _ = synthetic_case()
+    kw = dict(fall_speed_correction=False)
+    with pytest.raises(ValueError, match="boundary"):
+        dual_doppler_analytic(ds, boundary="sideways", **kw)
+    with pytest.raises(ValueError, match="obrien_error"):
+        dual_doppler_analytic(ds, boundary="obrien", obrien_error="cubic", **kw)
+    with pytest.raises(ValueError, match="iterations"):
+        dual_doppler_analytic(ds, iterations=0, **kw)
+    with pytest.raises(ValueError, match="w_bottom must be a number"):
+        dual_doppler_analytic(ds, w_bottom=np.zeros((2, 2)), **kw)
+    with pytest.raises(ValueError, match="w_bottom must be finite"):
+        dual_doppler_analytic(ds, w_bottom=np.nan, **kw)
+    with pytest.raises(ValueError, match="engine"):
+        dual_doppler_analytic(ds, engine="fortran", **kw)
+    with pytest.raises(ValueError, match="positive"):
+        dual_doppler_analytic(ds, obs_error=-1.0, **kw)
+
+
+def test_analytic_accessor_provenance_and_unchanged_input():
+    ds, bg, _ = synthetic_case(noise=0.5)
+    obs = xr.DataArray(
+        np.full(ds.VRADH.shape, 0.5), dims=ds.VRADH.dims, coords=ds.VRADH.coords
+    )
+    before, before_bg, before_obs = (
+        ds.copy(deep=True),
+        bg.copy(deep=True),
+        obs.copy(deep=True),
+    )
+    out = ds.radarx.dual_doppler_analytic(
+        bg, fall_speed_correction=False, boundary="obrien", obs_error=obs
+    )
+    xr.testing.assert_identical(ds, before)
+    xr.testing.assert_identical(bg, before_bg)
+    xr.testing.assert_identical(obs, before_obs)
+    # (u and v are variables of the background too, which the decorator treats as inputs)
+    assert OBRIEN_DOI in out.w.attrs["radarx_references"]
+    assert OBRIEN_DOI in out.attrs["radarx_references"]
+    assert out.attrs["radarx_method"].startswith("Analytic dual-Doppler")
+    assert "boundary='obrien'" in out.attrs["history"]
+    # the O'Brien adjustment of the variational retrieval cites the paper too
+    var = ds.radarx.multi_doppler(
+        bg,
+        fall_speed_correction=False,
+        w_boundary=("bottom", "obrien"),
+        max_iterations=3,
+    )
+    assert OBRIEN_DOI in var.attrs["radarx_references"]
+    assert var.attrs["obrien_error"] == "linear"
+
+
+# ---- observation weights --------------------------------------------------
+
+
+def _prepared(ds, bg=None, **kw):
+    weights = dict(md.DEFAULT_WEIGHTS)
+    weights["smoothness_vertical"] = weights["smoothness"]
+    args = dict(
+        velocity="VRADH",
+        reflectivity="DBZH",
+        use_fall_speed=False,
+        weights=weights,
+        storm_motion=(0.0, 0.0),
+        w_boundary="bottom",
+    )
+    args.update(kw)
+    return md._prepare(md._as_multi_radar(ds, "VRADH"), bg, **args)
+
+
+@pytest.fixture(scope="module")
+def small_case():
+    return synthetic_case(step=4000.0, nz=6, noise=0.5)
+
+
+def test_observation_error_sets_the_weights(small_case):
+    ds, bg, _ = small_case
+    plain = _prepared(ds, bg)
+    seen = plain["weight"] > 0
+    np.testing.assert_array_equal(plain["weight"][seen], 1.0)
+    two = _prepared(ds, bg, obs_error=2.0)
+    np.testing.assert_allclose(two["weight"][seen], 0.25)
+    np.testing.assert_allclose(two["co"], 0.25)
+    per_radar = _prepared(ds, bg, obs_error=[1.0, 4.0])
+    np.testing.assert_allclose(per_radar["weight"][0][seen[0]], 1.0)
+    np.testing.assert_allclose(per_radar["weight"][1][seen[1]], 1.0 / 16.0)
+    # a DataArray on (z, y, x) or on (radar, z, y, x), and a NaN removes the observation
+    field = xr.DataArray(
+        np.full((ds.sizes["z"], ds.sizes["y"], ds.sizes["x"]), 0.5),
+        dims=("z", "y", "x"),
+    )
+    np.testing.assert_allclose(_prepared(ds, bg, obs_error=field)["weight"][seen], 4.0)
+    full = xr.DataArray(np.full(ds.VRADH.shape, 0.5), dims=ds.VRADH.dims)
+    full[1, 2, 3, 4] = np.nan
+    dropped = _prepared(ds, bg, obs_error=full)
+    assert dropped["weight"][1, 2, 3, 4] == 0.0
+    assert dropped["n_obs"][2, 3, 4] == plain["n_obs"][2, 3, 4] - int(seen[1, 2, 3, 4])
+    with pytest.raises(ValueError, match="positive"):
+        _prepared(ds, bg, obs_error=0.0)
+    with pytest.raises(ValueError, match="broadcasts"):
+        _prepared(ds, bg, obs_error=np.ones(5))
+
+
+def test_crossing_angle_weight_is_sin_squared(small_case):
+    ds, bg, _ = small_case
+    plain = _prepared(ds, bg)
+    w = _prepared(ds, bg, crossing_angle_weight=True)
+    seen = plain["weight"] > 0
+    geo = md._as_multi_radar(ds, "VRADH")
+    beta = md._crossing_angle(geo, seen)
+    two = np.isfinite(beta)
+    want = np.maximum(np.sin(np.radians(beta)) ** 2, md._CROSSING_FLOOR)
+    np.testing.assert_allclose(w["weight"][0][two & seen[0]], want[two & seen[0]])
+    one = seen[0] & ~two  # cells of one radar keep the weight 1
+    assert one.any() and (w["weight"][0][one] == 1.0).all()
+    assert w["co"] < 1.0 and w["co"] > 0.0
+    # one radar: no crossing angle, nothing changes
+    single = _prepared(ds.isel(radar=[0]), bg, crossing_angle_weight=True)
+    assert (single["weight"][single["weight"] > 0] == 1.0).all()
+
+
+def test_defaults_of_multi_doppler_are_unchanged(small_case):
+    ds, bg, _ = small_case
+    kw = dict(fall_speed_correction=False)
+    base = multi_doppler(ds, bg, **kw)
+    explicit = multi_doppler(
+        ds,
+        bg,
+        obs_error=None,
+        crossing_angle_weight=False,
+        obrien_error="linear",
+        error=False,
+        **kw,
+    )
+    unit = multi_doppler(ds, bg, obs_error=1.0, **kw)
+    for other in (explicit, unit):
+        for name in ("u", "v", "w", "vr_residual"):
+            np.testing.assert_array_equal(base[name].values, other[name].values)
+        # the cost is summed over threads in a varying order
+        np.testing.assert_allclose(base.cost.values, other.cost.values, rtol=1e-12)
+    assert sorted(base.data_vars) == sorted(
+        [
+            "u", "v", "w", "fall_speed", "mass_residual", "n_radars",
+            "vr_residual", "cost", "cost_history", "beam_crossing_angle",
+        ]
+    )  # fmt: skip
+    assert "obrien_error" not in base.attrs and "error_method" not in base.attrs
+    # obs_error = 2 is the observation weight 1/4
+    quarter = multi_doppler(ds, bg, weights={"observation": 0.25}, **kw)
+    twice = multi_doppler(ds, bg, obs_error=2.0, **kw)
+    np.testing.assert_array_equal(quarter.w.values, twice.w.values)
+
+
+def test_noisy_radar_gets_less_weight():
+    ds, bg, truth = synthetic_case(step=4000.0, nz=6, noise=0.0)
+    rng = np.random.default_rng(5)
+    errors = [0.2, 1.0]  # the weights of the other terms are tuned for ~1 m/s
+    sig = np.array(errors)[:, None, None, None]
+    noisy = ds.assign(VRADH=ds.VRADH + sig * rng.normal(size=ds.VRADH.shape))
+    kw = dict(fall_speed_correction=False)
+    flat = multi_doppler(noisy, bg, **kw)
+    weighted = multi_doppler(noisy, bg, obs_error=errors, **kw)
+    m = lobes(flat)
+    e_flat, e_w = rms_error(flat, truth, m), rms_error(weighted, truth, m)
+    # trusting the good radar more reduces the error (0.54, 0.83, 0.75 against
+    # 0.77, 1.13, 0.99 m/s)
+    assert all(e_w[c] < 0.85 * e_flat[c] for c in "uvw"), (e_flat, e_w)
+
+
+def test_crossing_angle_weight_runs_and_changes_the_solution(small_case):
+    ds, bg, truth = small_case
+    kw = dict(fall_speed_correction=False)
+    plain = multi_doppler(ds, bg, **kw)
+    weighted = multi_doppler(ds, bg, crossing_angle_weight=True, **kw)
+    assert not np.allclose(plain.w, weighted.w)
+    m = lobes(plain)
+    # not worse than a factor of 1.5 on the well-crossing cells
+    e0, e1 = rms_error(plain, truth, m), rms_error(weighted, truth, m)
+    assert all(e1[c] < 1.5 * e0[c] for c in "uvw")
+    assert weighted.attrs["converged"] == 1
+
+
+# ---- O'Brien adjustment of the variational solution -------------------------
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("kind", ["linear", "constant"])
+def test_variational_obrien_adjustment(small_case, engine, kind):
+    ds, bg, truth = small_case
+    kw = dict(fall_speed_correction=False, engine=engine)
+    plain = multi_doppler(ds, bg, w_boundary="bottom", **kw)
+    adj = multi_doppler(
+        ds, bg, w_boundary=("bottom", "obrien"), obrien_error=kind, **kw
+    )
+    assert float(abs(adj.w.isel(z=-1)).max()) < 1e-6
+    assert (adj.w.isel(z=0) == 0).all()
+    np.testing.assert_array_equal(adj.u.values, plain.u.values)
+    np.testing.assert_array_equal(adj.v.values, plain.v.values)
+    rho = bg.air_density.values
+    z = ds.z.values
+    want = md._obrien_adjust(plain.w.values.astype(float), rho, z, kind, False, None)
+    np.testing.assert_allclose(adj.w.values, want, atol=2e-6)
+    assert adj.attrs["obrien_error"] == kind
+    # the Beltrami flow is zero at the top: the adjustment brings w closer to it
+    m = lobes(plain)
+    assert rms_error(adj, truth, m)["w"] < rms_error(plain, truth, m)["w"]
+    assert float(adj.cost.sum()) > float(plain.cost.sum())  # no longer the minimiser
+
+
+def test_obrien_option_errors(small_case):
+    ds, bg, _ = small_case
+    with pytest.raises(ValueError, match="obrien_error"):
+        multi_doppler(ds, bg, obrien_error="cubic")
+    with pytest.raises(
+        ValueError, match="w_boundary items must be bottom, top, echo_top or obrien"
+    ):
+        multi_doppler(ds, bg, w_boundary="sides")
+
+
+# ---- error estimate ---------------------------------------------------------
+
+
+def test_error_estimate_matches_the_inverse_hessian():
+    ds, bg, _ = synthetic_case(step=20e3, nz=4, noise=0.5)
+    p = _prepared(ds, bg, obs_error=0.5)
+    free = p["free"]
+    homogeneous = dict(p, target=np.zeros_like(p["target"]), bg=np.zeros_like(p["bg"]))
+    n = free.size
+    index = np.concatenate([np.arange(2 * n), 2 * n + np.flatnonzero(free.ravel())])
+    h = np.empty((index.size, index.size))
+    for col, k in enumerate(index):
+        x = np.zeros(3 * n)
+        x[k] = 1.0
+        _, g = md._cost_gradient(homogeneous, x.reshape((3,) + free.shape), False, 0)
+        h[:, col] = g.reshape(-1)[index]
+    np.testing.assert_allclose(h, h.T, atol=1e-9)
+    cov = 2.0 * np.linalg.inv(h)  # (H / 2)^-1 for J = sum of squares
+    exact = np.zeros(3 * n)
+    exact[index] = np.sqrt(np.diag(cov))
+    exact = exact.reshape((3,) + free.shape)
+    est = md._posterior_error(p, md.HAS_COMPILED_KERNEL, None, 600, 3, 2000, 1e-6)
+    assert (est[2][~free] == 0).all() and (exact[2][~free] == 0).all()
+    sel = exact > 0
+    # 600 draws: the relative uncertainty of each standard deviation is 3 %
+    rel = est[sel] / exact[sel]
+    assert abs(np.sqrt(np.mean(est[sel] ** 2) / np.mean(exact[sel] ** 2)) - 1.0) < 0.03
+    assert np.percentile(np.abs(rel - 1.0), 90) < 0.12
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_error_estimate_in_multi_doppler(small_case, engine):
+    ds, bg, truth = small_case
+    kw = dict(fall_speed_correction=False, obs_error=0.5, engine=engine)
+    out = multi_doppler(ds, bg, error=True, error_samples=12, **kw)
+    plain = multi_doppler(ds, bg, **kw)
+    for c in "uvw":
+        np.testing.assert_array_equal(out[c].values, plain[c].values)
+        assert out[f"{c}_error"].dims == ("z", "y", "x")
+        assert out[f"{c}_error"].attrs["units"] == "m s-1"
+    assert (out.w_error.isel(z=0) == 0).all()  # fixed w has no error
+    assert (out.w_error.isel(z=slice(1, None)) > 0).all()
+    assert "Gauss-Markov" in out.attrs["error_method"]
+    again = multi_doppler(ds, bg, error=True, error_samples=12, **kw)
+    np.testing.assert_array_equal(again.w_error.values, out.w_error.values)
+    other = multi_doppler(ds, bg, error=True, error_samples=12, error_seed=1, **kw)
+    assert not np.array_equal(other.w_error.values, out.w_error.values)
+
+
+def test_error_estimate_is_close_to_the_actual_error():
+    """Beltrami flow on the 2 km grid with 0.5 m/s noise, beams crossing at > 30 deg."""
+    sigma = 0.5
+    ds, bg, truth = synthetic_case(noise=sigma)
+    out = multi_doppler(
+        ds,
+        bg,
+        fall_speed_correction=False,
+        obs_error=sigma,
+        error=True,
+        error_samples=8,
+    )
+    m = lobes(out)
+    ratio = {}
+    for c in "uvw":
+        actual = float(np.sqrt(np.mean((out[c].values - truth[c].values)[m] ** 2)))
+        estimate = float(np.sqrt(np.mean(out[f"{c}_error"].values[m] ** 2)))
+        ratio[c] = estimate / actual
+    # 1.4, 1.3 and 1.0 with 32 draws: the estimate includes the spread allowed
+    # by the weights of the smoothness and mass terms, the actual error is that
+    # of a smooth field
+    assert 0.7 < ratio["w"] < 1.6 and 0.7 < ratio["v"] < 2.0 and 0.7 < ratio["u"] < 2.2
+    # less accurate where the beams cross at small angles
+    err = out.v_error.values
+    lo = (out.beam_crossing_angle.values > 30) & (out.beam_crossing_angle.values < 50)
+    hi = out.beam_crossing_angle.values > 70
+    assert err[lo].mean() > err[hi].mean()
+
+
+def test_error_estimate_errors(small_case):
+    ds, bg, _ = small_case
+    with pytest.raises(ValueError, match="error_samples"):
+        multi_doppler(ds, bg, error=True, error_samples=1)
+    with pytest.raises(ValueError, match="quadratic"):
+        multi_doppler(ds, bg, error=True, weights={"vorticity": 0.01}, solver="lbfgsb")

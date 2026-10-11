@@ -204,6 +204,20 @@
   "pages": "1320-1334",
   "doi": "10.1080/02626667.2013.839872"
  },
+ "10.1093/comjnl/7.4.308": {
+  "authors": [
+   "Nelder, J. A.",
+   "Mead, R."
+  ],
+  "year": 1965,
+  "title": "A Simplex Method for Function Minimization",
+  "type": "article",
+  "journal": "The Computer Journal",
+  "volume": "7",
+  "issue": "4",
+  "pages": "308-313",
+  "doi": "10.1093/comjnl/7.4.308"
+ },
  "10.1109/36.917906": {
   "authors": [
    "Zhang, G.",
@@ -576,6 +590,33 @@
   "pages": "396-409",
   "doi": "10.1175/1520-0450(1964)003<0396:ATFMDI>2.0.CO;2"
  },
+ "10.1175/1520-0493(1959)087<0367:AOOAS>2.0.CO;2": {
+  "authors": [
+   "Cressman, G. P."
+  ],
+  "year": 1959,
+  "title": "An Operational Objective Analysis System",
+  "type": "article",
+  "journal": "Monthly Weather Review",
+  "volume": "87",
+  "issue": "10",
+  "pages": "367-374",
+  "doi": "10.1175/1520-0493(1959)087<0367:AOOAS>2.0.CO;2"
+ },
+ "10.5334/jors.119": {
+  "authors": [
+   "Helmus, J. J.",
+   "Collis, S. M."
+  ],
+  "year": 2016,
+  "title": "The Python ARM Radar Toolkit (Py-ART), a Library for Working with Weather Radar Data in the Python Programming Language",
+  "type": "article",
+  "journal": "Journal of Open Research Software",
+  "volume": "4",
+  "issue": "1",
+  "pages": "e25",
+  "doi": "10.5334/jors.119"
+ },
  "10.1175/1520-0450(1968)007<0105:TDOKPO>2.0.CO;2": {
   "authors": [
    "Browning, K. A.",
@@ -603,6 +644,19 @@
   "issue": "2",
   "pages": "249-253",
   "doi": "10.1175/1520-0450(1969)008<0249:TVORA>2.0.CO;2"
+ },
+ "10.1175/1520-0450(1970)009<0197:ASTTCV>2.0.CO;2": {
+  "authors": [
+   "O'Brien, J. J."
+  ],
+  "year": 1970,
+  "title": "Alternative Solutions to the Classical Vertical Velocity Problem",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology",
+  "volume": "9",
+  "issue": "2",
+  "pages": "197-203",
+  "doi": "10.1175/1520-0450(1970)009<0197:ASTTCV>2.0.CO;2"
  },
  "10.1175/1520-0450(1978)017<0515:TKEOHP>2.0.CO;2": {
   "authors": [
@@ -1004,6 +1058,36 @@
   "pages": "2128-2142",
   "doi": "10.1175/1520-0493(1999)127<2128:AVMFTA>2.0.CO;2"
  },
+ "10.1175/1520-0493(1999)127<2419:TCKSRF>2.0.CO;2": {
+  "authors": [
+   "Lee, W.-C.",
+   "Jou, B. J.-D.",
+   "Chang, P.-L.",
+   "Deng, S.-M."
+  ],
+  "year": 1999,
+  "title": "Tropical Cyclone Kinematic Structure Retrieved from Single-Doppler Radar Observations. Part I: Interpretation of Doppler Velocity Patterns and the GBVTD Technique",
+  "type": "article",
+  "journal": "Monthly Weather Review",
+  "volume": "127",
+  "issue": "10",
+  "pages": "2419-2439",
+  "doi": "10.1175/1520-0493(1999)127<2419:TCKSRF>2.0.CO;2"
+ },
+ "10.1175/1520-0493(2000)128<1925:TCKSRF>2.0.CO;2": {
+  "authors": [
+   "Lee, W.-C.",
+   "Marks, F. D."
+  ],
+  "year": 2000,
+  "title": "Tropical Cyclone Kinematic Structure Retrieved from Single-Doppler Radar Observations. Part II: The GBVTD-Simplex Center Finding Algorithm",
+  "type": "article",
+  "journal": "Monthly Weather Review",
+  "volume": "128",
+  "issue": "6",
+  "pages": "1925-1936",
+  "doi": "10.1175/1520-0493(2000)128<1925:TCKSRF>2.0.CO;2"
+ },
  "10.1175/1520-0493(2002)130<2917:ABSFMN>2.0.CO;2": {
   "authors": [
    "Bryan, G. H.",
@@ -1393,6 +1477,20 @@
   "pages": "405-425",
   "doi": "10.1175/JAMC-D-10-05024.1"
  },
+ "10.1175/JAMC-D-11-0167.1": {
+  "authors": [
+   "Bell, M. M.",
+   "Lee, W.-C."
+  ],
+  "year": 2012,
+  "title": "Objective Tropical Cyclone Center Tracking Using Single-Doppler Radar",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology and Climatology",
+  "volume": "51",
+  "issue": "5",
+  "pages": "878-896",
+  "doi": "10.1175/JAMC-D-11-0167.1"
+ },
  "10.1175/JAMC-D-12-0101.1": {
   "authors": [
    "Cao, Q.",
@@ -1441,6 +1539,24 @@
   "issue": "11",
   "pages": "2529-2548",
   "doi": "10.1175/JAMC-D-13-0124.1"
+ },
+ "10.1175/JAMC-D-13-031.1": {
+  "authors": [
+   "Chen, X.",
+   "Zhao, K.",
+   "Lee, W.-C.",
+   "Jou, B. J.-D.",
+   "Xue, M.",
+   "Harasti, P. R."
+  ],
+  "year": 2013,
+  "title": "The Improvement to the Environmental Wind and Tropical Cyclone Circulation Retrievals with the Modified GBVTD (MGBVTD) Technique",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology and Climatology",
+  "volume": "52",
+  "issue": "11",
+  "pages": "2493-2508",
+  "doi": "10.1175/JAMC-D-13-031.1"
  },
  "10.1175/JAMC-D-19-0128.1": {
   "authors": [
@@ -1917,6 +2033,23 @@
   "publisher": "NSF NCAR Earth Observing Laboratory",
   "doi": "10.26023/HFBG-7W5M-WA00"
  },
+ "10.3319/TAO.2006.17.2.429(A)": {
+  "authors": [
+   "Lee, W.-C.",
+   "Harasti, P. R.",
+   "Bell, M.",
+   "Jou, B. J.-D.",
+   "Chang, M.-H."
+  ],
+  "year": 2006,
+  "title": "Doppler Velocity Signatures of Idealized Elliptical Vortices",
+  "type": "article",
+  "journal": "Terrestrial, Atmospheric and Oceanic Sciences",
+  "volume": "17",
+  "issue": "2",
+  "pages": "429-446",
+  "doi": "10.3319/TAO.2006.17.2.429(A)"
+ },
  "10.5194/amt-8-343-2015": {
   "authors": [
    "Raupach, T. H.",
@@ -2243,5 +2376,305 @@
   "publisher": "NSF NCAR Computational and Information Systems Laboratory",
   "doi": "10.5065/D6WQ0202",
   "url": "https://github.com/NCAR/DART"
+ },
+ "liou-2005": {
+  "authors": [
+   "Liou, Y.-C.",
+   "Wang, T.-C. C.",
+   "Lee, W.-C.",
+   "Chang, Y.-J."
+  ],
+  "year": 2005,
+  "title": "The extended GBVTD and the recovery of the tropical cyclones asymmetric structures",
+  "type": "inproceedings",
+  "journal": "Preprints, 32nd Conference on Radar Meteorology",
+  "publisher": "American Meteorological Society",
+  "pages": "JP2J.8",
+  "url": "https://ams.confex.com/ams/pdfpapers/95858.pdf"
+ },
+ "10.1175/2007MWR2083.1": {
+  "authors": [
+   "Jung, Y.",
+   "Zhang, G.",
+   "Xue, M."
+  ],
+  "year": 2008,
+  "title": "Assimilation of Simulated Polarimetric Radar Data for a Convective Storm Using the Ensemble Kalman Filter. Part I: Observation Operators for Reflectivity and Polarimetric Variables",
+  "type": "article",
+  "journal": "Monthly Weather Review",
+  "volume": "136",
+  "issue": "6",
+  "pages": "2228-2245",
+  "doi": "10.1175/2007MWR2083.1"
+ },
+ "10.3390/atmos11040362": {
+  "authors": [
+   "Ryzhkov, A. V.",
+   "Snyder, J.",
+   "Carlin, J. T.",
+   "Khain, A.",
+   "Pinsky, M."
+  ],
+  "year": 2020,
+  "title": "What Polarimetric Weather Radars Offer to Cloud Modelers: Forward Radar Operators and Microphysical/Thermodynamic Retrievals",
+  "type": "article",
+  "journal": "Atmosphere",
+  "volume": "11",
+  "issue": "4",
+  "pages": "362",
+  "doi": "10.3390/atmos11040362"
+ },
+ "10.1098/rsta.1904.0024": {
+  "authors": [
+   "Maxwell Garnett, J. C."
+  ],
+  "year": 1904,
+  "title": "Colours in metal glasses and in metallic films",
+  "type": "article",
+  "journal": "Philosophical Transactions of the Royal Society of London. Series A, Containing Papers of a Mathematical or Physical Character",
+  "volume": "203",
+  "issue": "359-371",
+  "pages": "385-420",
+  "doi": "10.1098/rsta.1904.0024"
+ },
+ "10.6028/NBS.MONO.92": {
+  "authors": [
+   "Bean, B. R.",
+   "Dutton, E. J."
+  ],
+  "year": 1966,
+  "title": "Radio meteorology",
+  "type": "book",
+  "publisher": "National Bureau of Standards",
+  "doi": "10.6028/NBS.MONO.92"
+ },
+ "10.1109/JRPROC.1953.274297": {
+  "authors": [
+   "Smith, E.",
+   "Weintraub, S."
+  ],
+  "year": 1953,
+  "title": "The Constants in the Equation for Atmospheric Refractive Index at Radio Frequencies",
+  "type": "article",
+  "journal": "Proceedings of the IRE",
+  "volume": "41",
+  "issue": "8",
+  "pages": "1035-1037",
+  "doi": "10.1109/JRPROC.1953.274297"
+ },
+ "10.1175/1520-0469(1982)039<1591:CCABOR>2.0.CO;2": {
+  "authors": [
+   "Low, T. B.",
+   "List, R."
+  ],
+  "year": 1982,
+  "title": "Collision, Coalescence and Breakup of Raindrops. Part I: Experimentally Established Coalescence Efficiencies and Fragment Size Distributions in Breakup",
+  "type": "article",
+  "journal": "Journal of the Atmospheric Sciences",
+  "volume": "39",
+  "issue": "7",
+  "pages": "1591-1606",
+  "doi": "10.1175/1520-0469(1982)039<1591:CCABOR>2.0.CO;2"
+ },
+ "10.1175/1520-0469(1982)039<1607:CCABOR>2.0.CO;2": {
+  "authors": [
+   "Low, T. B.",
+   "List, R."
+  ],
+  "year": 1982,
+  "title": "Collision, Coalescence and Breakup of Raindrops. Part II: Parameterization of Fragment Size Distributions",
+  "type": "article",
+  "journal": "Journal of the Atmospheric Sciences",
+  "volume": "39",
+  "issue": "7",
+  "pages": "1607-1619",
+  "doi": "10.1175/1520-0469(1982)039<1607:CCABOR>2.0.CO;2"
+ },
+ "10.1175/1520-0469(2004)061<0777:ANROCB>2.0.CO;2": {
+  "authors": [
+   "McFarquhar, G. M."
+  ],
+  "year": 2004,
+  "title": "A New Representation of Collision-Induced Breakup of Raindrops and Its Implications for the Shapes of Raindrop Size Distributions",
+  "type": "article",
+  "journal": "Journal of the Atmospheric Sciences",
+  "volume": "61",
+  "issue": "7",
+  "pages": "777-794",
+  "doi": "10.1175/1520-0469(2004)061<0777:ANROCB>2.0.CO;2"
+ },
+ "10.1175/JAM2544.1": {
+  "authors": [
+   "Prat, O. P.",
+   "Barros, A. P."
+  ],
+  "year": 2007,
+  "title": "A Robust Numerical Solution of the Stochastic Collection–Breakup Equation for Warm Rain",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology and Climatology",
+  "volume": "46",
+  "issue": "9",
+  "pages": "1480-1497",
+  "doi": "10.1175/JAM2544.1"
+ },
+ "10.1175/JAS-D-19-0185.1": {
+  "authors": [
+   "Heymsfield, A.",
+   "Szakáll, M.",
+   "Jost, A.",
+   "Giammanco, I.",
+   "Wright, R.",
+   "Brimelow, J."
+  ],
+  "year": 2020,
+  "title": "Corrigendum (to: A comprehensive observational study of graupel and hail terminal velocity, mass flux, and kinetic energy)",
+  "type": "article",
+  "journal": "Journal of the Atmospheric Sciences",
+  "volume": "77",
+  "issue": "1",
+  "pages": "405-412",
+  "doi": "10.1175/JAS-D-19-0185.1"
+ },
+ "10.5194/gmd-6-1925-2013": {
+  "authors": [
+   "Frick, C.",
+   "Seifert, A.",
+   "Wernli, H."
+  ],
+  "year": 2013,
+  "title": "A bulk parametrization of melting snowflakes with explicit liquid water fraction for the COSMO model",
+  "type": "article",
+  "journal": "Geoscientific Model Development",
+  "volume": "6",
+  "issue": "6",
+  "pages": "1925-1939",
+  "doi": "10.5194/gmd-6-1925-2013"
+ },
+ "10.1175/JTECH-D-18-0076.1": {
+  "authors": [
+   "Allabakash, S.",
+   "Lim, S.",
+   "Chandrasekar, V.",
+   "Min, K.-H.",
+   "Choi, J.",
+   "Jang, B.-J."
+  ],
+  "year": 2019,
+  "title": "X-Band Dual-Polarization Radar Observations of Snow Growth Processes of a Severe Winter Storm: Case of 12 December 2013 in South Korea",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "36",
+  "issue": "7",
+  "pages": "1217-1235",
+  "doi": "10.1175/JTECH-D-18-0076.1"
+ },
+ "10.1175/JTECH-D-20-0011.1": {
+  "authors": [
+   "Murphy, A. M.",
+   "Ryzhkov, A.",
+   "Zhang, P."
+  ],
+  "year": 2020,
+  "title": "Columnar Vertical Profile (CVP) Methodology for Validating Polarimetric Radar Retrievals in Ice Using In Situ Aircraft Measurements",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "37",
+  "issue": "9",
+  "pages": "1623-1642",
+  "doi": "10.1175/JTECH-D-20-0011.1"
+ },
+ "10.1175/WAF-D-17-0054.1": {
+  "authors": [
+   "Tobin, D. M.",
+   "Kumjian, M. R."
+  ],
+  "year": 2017,
+  "title": "Polarimetric Radar and Surface-Based Precipitation-Type Observations of Ice Pellet to Freezing Rain Transitions",
+  "type": "article",
+  "journal": "Weather and Forecasting",
+  "volume": "32",
+  "issue": "6",
+  "pages": "2065-2082",
+  "doi": "10.1175/WAF-D-17-0054.1"
+ },
+ "10.3390/rs11232848": {
+  "authors": [
+   "Allabakash, S.",
+   "Lim, S.",
+   "Jang, B.-J."
+  ],
+  "year": 2019,
+  "title": "Melting Layer Detection and Characterization based on Range Height Indicator–Quasi Vertical Profiles",
+  "type": "article",
+  "journal": "Remote Sensing",
+  "volume": "11",
+  "issue": "23",
+  "pages": "2848",
+  "doi": "10.3390/rs11232848"
+ },
+ "10.1175/1520-0426(2003)20<443:AACODP>2.0.CO;2": {
+  "authors": [
+   "Holleman, I.",
+   "Beekhuis, H."
+  ],
+  "year": 2003,
+  "title": "Analysis and Correction of Dual PRF Velocity Data",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "20",
+  "issue": "4",
+  "pages": "443-453",
+  "doi": "10.1175/1520-0426(2003)20<443:AACODP>2.0.CO;2"
+ },
+ "10.1175/BAMS-D-14-00173.1": {
+  "authors": [
+   "Smith, T. M.",
+   "Lakshmanan, V.",
+   "Stumpf, G. J.",
+   "Ortega, K. L.",
+   "Hondl, K.",
+   "Cooper, K.",
+   "Calhoun, K. M.",
+   "Kingfield, D. M.",
+   "Manross, K. L.",
+   "Toomey, R.",
+   "Brogden, J."
+  ],
+  "year": 2016,
+  "title": "Multi-Radar Multi-Sensor (MRMS) Severe Weather and Aviation Products: Initial Operating Capabilities",
+  "type": "article",
+  "journal": "Bulletin of the American Meteorological Society",
+  "volume": "97",
+  "issue": "9",
+  "pages": "1617-1630",
+  "doi": "10.1175/BAMS-D-14-00173.1"
+ },
+ "10.1175/JTECH-D-19-0020.1": {
+  "authors": [
+   "Louf, V.",
+   "Protat, A.",
+   "Jackson, R. C.",
+   "Collis, S. M.",
+   "Helmus, J."
+  ],
+  "year": 2020,
+  "title": "UNRAVEL: A Robust Modular Velocity Dealiasing Technique for Doppler Radar",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "37",
+  "issue": "5",
+  "pages": "741-758",
+  "doi": "10.1175/JTECH-D-19-0020.1"
+ },
+ "roc-mesocyclone-detection": {
+  "authors": [
+   "WSR-88D Radar Operations Center"
+  ],
+  "year": 2003,
+  "title": "Mesocyclone Detection Algorithm Description (NX-DR-03-002/34)",
+  "type": "report",
+  "journal": "WSR-88D algorithm description NX-DR-03-002/34",
+  "publisher": "NOAA Radar Operations Center",
+  "url": "https://www2.mmm.ucar.edu/episodes/ROC/WSR-88D_algorithms/pdfs/mesocyclone_detection.pdf"
  }
 }

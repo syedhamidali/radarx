@@ -20,6 +20,7 @@ This module adapts and extends concepts and calculations inspired by the CSU Rad
 .. automodule:: radarx.fundamentals.power
 .. automodule:: radarx.fundamentals.principles
 .. automodule:: radarx.fundamentals.reflectivity
+.. automodule:: radarx.fundamentals.refraction
 .. automodule:: radarx.fundamentals.scattering
 .. automodule:: radarx.fundamentals.system
 .. automodule:: radarx.fundamentals.timing
@@ -37,6 +38,7 @@ from .geometry import *  # noqa
 from .power import *  # noqa
 from .principles import *  # noqa
 from .reflectivity import *  # noqa
+from .refraction import *  # noqa
 from .scattering import *  # noqa
 from .system import *  # noqa
 from .timing import *  # noqa

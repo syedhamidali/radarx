@@ -26,12 +26,18 @@ _SECTIONS = {
         "kdp",
         "attenuation",
         "beam_blockage",
+        "beam_path",
         "noise",
         "calibration",
         "advection",
     ],
     "Products and profiles": ["cappi", "vertical_profiles"],
-    "Wind retrieval and kinematics": ["single_doppler", "multidoppler", "shear"],
+    "Wind retrieval and kinematics": [
+        "single_doppler",
+        "multidoppler",
+        "shear",
+        "tc_winds",
+    ],
     "Precipitation microphysics": [
         "hid",
         "dsd",
@@ -39,6 +45,8 @@ _SECTIONS = {
         "qpe",
         "disdrometer",
         "evaporation",
+        "rain_collisions",
+        "ice_fall",
     ],
     "Thermodynamics and cold pools": [
         "lagrangian",
@@ -47,6 +55,7 @@ _SECTIONS = {
         "wind_profile",
     ],
     "Convective hazards": ["lightning", "tornado", "biology", "hail"],
+    "Model verification": ["forward_operator"],
 }
 
 _modules = sorted(

@@ -37,6 +37,24 @@
 //
 // All sums that decide a fold are integers, so the result does not depend
 // on the number of threads and matches the NumPy reference exactly.
+//
+// local_median (separate from the dealiasing above): the median of the valid
+// gates of a square window around every valid gate, the window growing from
+// half-width half_start to half_max until it holds min_points valid gates. It
+// is the building block of two products: the local dealiasing step of the dual
+// PRF correction of Holleman and Beekhuis (2003: median of at least nine valid
+// gates in a window enlarged step by step, the gate itself included) and the
+// continuity measure of the dealiasing confidence (the median of the
+// neighbours, the gate left out).
+//
+// neighbour_disagreement: for every valid gate, the fraction of its valid
+// neighbours (the square window around it, the gate left out) whose velocity
+// differs from the gate's by more than a threshold. With a threshold of one
+// Nyquist velocity a neighbour that differs by more would be closer to the
+// next fold of the gate than to the chosen one, so 1 minus this fraction is the
+// share of the neighbours that support the chosen fold against the second best
+// candidate (the confidence of dealias_confidence). The gate check of the
+// dealiasing refolds gates for which the fraction is 1.
 
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
@@ -1021,6 +1039,120 @@ std::vector<py::array_t<int32_t>> absolute_folds(
     return out;
 }
 
+// Median of the valid gates in the (2h+1) x (2h+1) window around every valid
+// gate, h = half_start, half_start + 1, ... half_max, the first that holds
+// min_points valid gates; NaN for invalid gates and where no window does.
+// Rows wrap around (full-circle sweeps) if wrap is set, columns are cut at the
+// ends of the ray. include_centre says whether the gate itself is counted.
+py::array_t<double> local_median(const DArray& data, bool wrap, int half_start, int half_max,
+                                 int min_points, bool include_centre, int n_threads) {
+    if (data.ndim() != 2) throw std::invalid_argument("data must be 2-D (ray, gate)");
+    if (half_start < 0 || half_max < half_start || min_points < 1)
+        throw std::invalid_argument("need 0 <= half_start <= half_max and min_points >= 1");
+    const int64_t nray = data.shape(0), ngate = data.shape(1);
+    const double* v = data.data();
+    py::array_t<double> out({nray, ngate});
+    double* po = out.mutable_data();
+    int hmax = half_max;
+    if (wrap) hmax = static_cast<int>(std::min<int64_t>(hmax, (nray - 1) / 2));
+    {
+        py::gil_scoped_release release;
+        const int nt = resolve_threads(n_threads);
+        parallel_blocks(nray, 8, nt, [&](int, int64_t r0, int64_t r1) {
+            std::vector<double> buf;
+            for (int64_t i = r0; i < r1; ++i) {
+                for (int64_t g = 0; g < ngate; ++g) {
+                    double result = std::numeric_limits<double>::quiet_NaN();
+                    if (!std::isnan(v[i * ngate + g])) {
+                        for (int h = half_start; h <= hmax; ++h) {
+                            buf.clear();
+                            for (int64_t d = -h; d <= h; ++d) {
+                                int64_t q = i + d;
+                                if (wrap) {
+                                    q %= nray;
+                                    if (q < 0) q += nray;
+                                } else if (q < 0 || q >= nray) {
+                                    continue;
+                                }
+                                const double* row = v + q * ngate;
+                                const int64_t k0 = std::max<int64_t>(0, g - h);
+                                const int64_t k1 = std::min<int64_t>(ngate - 1, g + h);
+                                for (int64_t k = k0; k <= k1; ++k) {
+                                    if (!include_centre && d == 0 && k == g) continue;
+                                    if (!std::isnan(row[k])) buf.push_back(row[k]);
+                                }
+                            }
+                            if (static_cast<int>(buf.size()) >= min_points) {
+                                const size_t n = buf.size(), mid = n / 2;
+                                std::nth_element(buf.begin(), buf.begin() + mid, buf.end());
+                                const double upper = buf[mid];
+                                result = upper;
+                                if (n % 2 == 0)
+                                    result = 0.5 * (*std::max_element(buf.begin(), buf.begin() + mid) + upper);
+                                break;
+                            }
+                        }
+                    }
+                    po[i * ngate + g] = result;
+                }
+            }
+        });
+    }
+    return out;
+}
+
+// Fraction of the valid neighbours of every valid gate (window of half-width
+// `half`, the gate left out, rows wrapping if `wrap`) whose velocity differs
+// from the gate's by more than `threshold`; NaN for invalid gates and for gates
+// with fewer than min_neighbours valid neighbours.
+py::array_t<double> neighbour_disagreement(const DArray& data, bool wrap, int half,
+                                           double threshold, int min_neighbours, int n_threads) {
+    if (data.ndim() != 2) throw std::invalid_argument("data must be 2-D (ray, gate)");
+    if (half < 1 || min_neighbours < 1)
+        throw std::invalid_argument("need half >= 1 and min_neighbours >= 1");
+    const int64_t nray = data.shape(0), ngate = data.shape(1);
+    const double* v = data.data();
+    py::array_t<double> out({nray, ngate});
+    double* po = out.mutable_data();
+    const int h = wrap ? static_cast<int>(std::min<int64_t>(half, (nray - 1) / 2)) : half;
+    {
+        py::gil_scoped_release release;
+        const int nt = resolve_threads(n_threads);
+        parallel_blocks(nray, 8, nt, [&](int, int64_t r0, int64_t r1) {
+            for (int64_t i = r0; i < r1; ++i) {
+                for (int64_t g = 0; g < ngate; ++g) {
+                    const double centre = v[i * ngate + g];
+                    double result = std::numeric_limits<double>::quiet_NaN();
+                    if (!std::isnan(centre)) {
+                        int64_t valid = 0, far = 0;
+                        for (int64_t d = -h; d <= h; ++d) {
+                            int64_t q = i + d;
+                            if (wrap) {
+                                q %= nray;
+                                if (q < 0) q += nray;
+                            } else if (q < 0 || q >= nray) {
+                                continue;
+                            }
+                            const double* row = v + q * ngate;
+                            const int64_t k0 = std::max<int64_t>(0, g - h);
+                            const int64_t k1 = std::min<int64_t>(ngate - 1, g + h);
+                            for (int64_t k = k0; k <= k1; ++k) {
+                                if ((d == 0 && k == g) || std::isnan(row[k])) continue;
+                                ++valid;
+                                if (std::fabs(centre - row[k]) > threshold) ++far;
+                            }
+                        }
+                        if (valid >= min_neighbours)
+                            result = static_cast<double>(far) / static_cast<double>(valid);
+                    }
+                    po[i * ngate + g] = result;
+                }
+            }
+        });
+    }
+    return out;
+}
+
 PYBIND11_MODULE(_dealias, m) {
     m.doc() = "Compiled region-based Doppler velocity dealiasing kernel for radarx.";
     m.def("region_folds", &region_folds, py::arg("velocity"), py::arg("ray_link"),
@@ -1032,5 +1164,11 @@ PYBIND11_MODULE(_dealias, m) {
           py::arg("ray_cos"), py::arg("ray_link"), py::arg("vad_window") = 20,
           py::arg("gate_passes") = 2, py::arg("previous") = std::vector<int>(),
           py::arg("prev_ray") = std::vector<IArray>(), py::arg("prev_gate") = std::vector<IArray>(),
+          py::arg("n_threads") = 0);
+    m.def("local_median", &local_median, py::arg("data"), py::arg("wrap"), py::arg("half_start"),
+          py::arg("half_max"), py::arg("min_points"), py::arg("include_centre"),
+          py::arg("n_threads") = 0);
+    m.def("neighbour_disagreement", &neighbour_disagreement, py::arg("data"), py::arg("wrap"),
+          py::arg("half"), py::arg("threshold"), py::arg("min_neighbours"),
           py::arg("n_threads") = 0);
 }

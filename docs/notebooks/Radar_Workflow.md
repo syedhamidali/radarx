@@ -31,13 +31,13 @@ multi-radar steps.
 | 1 | volumes, Nyquist velocity, georeferencing | xradar, `download_file` |
 | 2 | non-meteorological echo removed | `dtree.radarx.echo_mask`, `apply_mask` |
 | 3 | environment: ERA5 profile and radiosonde, 0 °C height, humidity, wind-profile and parcel parameters (CAPE, CIN) | `dtree.radarx.sounding`, `read_sounding`, `bulk_shear` |
-| 4 | dealiased Doppler velocity, VAD wind profile | `dtree.radarx.dealias`, `vad_profile` |
+| 4 | dealiased Doppler velocity and its confidence, VAD wind profile | `dtree.radarx.dealias`, `dealias_confidence`, `vad_profile` |
 | 5 | processed ΦDP and KDP, attenuation correction | `dtree.radarx.kdp`, `correct_attenuation` |
 | 6 | hydrometeor classes | `dtree.radarx.hid` |
 | 7 | rain drop size distribution and rain rate, with the Bayesian posterior | `ds.radarx.dsd`, `dsd_bayesian` |
 | 7c | rain rate from $Z_H$, $Z_{DR}$, $K_{DP}$ and $A$, and from the hydrometeor class | `dtree.radarx.rain_rate`, `rain_rate_z`, `rain_rate_kdp`, `rain_rate_z_zdr`, `rain_rate_a` |
-| 8 | QVP time series and melting layer | `qvp_timeseries`, `melting_layer` |
-| 9 | azimuthal shear and radial divergence | `dtree.radarx.llsd` |
+| 8 | QVP time series and melting layer, range-defined and columnar profiles, RHI profile, melting layer on PPIs, rain products capped at the melting layer | `qvp_timeseries`, `melting_layer`, `rd_qvp`, `cvp`, `rhi_qvp`, `melting_layer_ppi`, `mask_above_melting_layer` |
+| 9 | azimuthal shear and radial divergence, layer-maximum azimuthal shear | `dtree.radarx.llsd`, `azimuthal_shear_layer_max` |
 | 10 | 3D grid, Max-CAPPI, other gridding functions, plotting functions, interactive view, UGRID | `dtree.radarx.to_grid`, `grid_cones`, `plot_ppi`, `to_uxarray` |
 | 11 | storm motion, common analysis time, time interpolation | `estimate_motion`, `advect`, `interpolate_time` |
 | 12 | multi-radar grid, radar bias, ERA5 on the grid, three-dimensional wind | `grid_radars`, `network_bias`, `multi_doppler` |
@@ -52,7 +52,7 @@ The [second part](Radar_Workflow_Advanced) of this notebook shows the rest of
 radarx on small open or synthetic data: the radar equation and unit helpers,
 disdrometers, raindrop trajectories, surface stations and cold pools, lightning,
 tornado detection, single-Doppler winds, the diabatic Lagrangian analysis,
-the machine-learning interface and beam blockage from a digital elevation model. The *Function index* at the end of this page
+the machine-learning interface, beam blockage from a digital elevation model and tropical-cyclone winds from one radar. The *Function index* at the end of this page
 lists every function of radarx with the section where it is used.
 
 All heavy steps run in compiled, multithreaded kernels; the runtimes in the
@@ -77,8 +77,10 @@ import radarx  # noqa: F401  registers the .radarx accessors
 from radarx.grid import (
     gate_corners,
     grid_cones,
+    grid_gates,
     grid_radar,
     grid_radars,
+    grid_rhi,
     make_3d_grid,
     merge_radars,
     network_bias,
@@ -114,15 +116,19 @@ from radarx.retrieve import (
     apply_mask,
     attenuation_coefficients,
     azimuthal_shear,
+    azimuthal_shear_layer_max,
     bulk_shear,
     bunkers_storm_motion,
     correct_attenuation,
     correct_rhohv_noise,
     correct_zdr_noise,
     create_cappi,
+    cvp,
+    dealias_confidence,
     dealias_velocity,
     dsd_bayesian,
     dsd_prior,
+    dual_doppler_analytic,
     echo_mask,
     echo_top,
     estimate_kdp,
@@ -138,7 +144,9 @@ from radarx.retrieve import (
     layer_mean_wind,
     liquid_water_content,
     llsd,
+    mask_above_melting_layer,
     melting_layer,
+    melting_layer_ppi,
     mesh,
     multi_doppler_input,
     noise_level,
@@ -146,6 +154,7 @@ from radarx.retrieve import (
     posh,
     qvp,
     qvp_timeseries,
+    rd_qvp,
     radar_geometry,
     radial_divergence,
     rain_rate,
@@ -153,6 +162,7 @@ from radarx.retrieve import (
     rain_rate_kdp,
     rain_rate_z,
     rain_rate_z_zdr,
+    rhi_qvp,
     shi,
     snr,
     storm_relative_helicity,
@@ -591,6 +601,29 @@ print("same unfolded velocity as the accessor:",
       bool(np.array_equal(unfolded.values, volumes[1]["sweep_1"].VRADH_dealiased.values, equal_nan=True)))
 ```
 
+`dealias_confidence` says, for every gate, how clearly the chosen fold beats
+the next one given the neighbouring gates: the share of the valid neighbours
+(the 3 x 3 gates around it) that differ from the gate by no more than the
+Nyquist velocity, so that they prefer its fold to the next. It is 1 in a
+smooth field and 0 for an isolated gate unfolded differently from all its
+neighbours, and along a straight fold line it is 5/8 on both sides. It is a
+radarx definition, computed from the result alone, and it marks small-scale
+disagreement, not a whole region that is unfolded wrongly. `dealias(...,
+confidence=True)` returns it with the velocity.
+
+```{code-cell} ipython3
+confidence = volumes[1].radarx.dealias_confidence("VRADH_dealiased")
+conf = confidence["sweep_1"].to_dataset().VRADH_dealiased_confidence
+conf_fn = dealias_confidence(volumes[1]["sweep_1"].to_dataset(), "VRADH_dealiased")
+print("accessor and function agree:", bool(np.array_equal(conf.values, conf_fn.values, equal_nan=True)),
+      f"| gates with confidence below 0.5: {float((conf < 0.5).sum() / conf.notnull().sum()):.2%}")
+fig, ax = plt.subplots(figsize=(6.5, 5.5), layout="constrained")
+pm = ppi(ax, doppler.assign(confidence=conf), "confidence", extent=150, cmap="viridis", vmin=0, vmax=1)
+fig.colorbar(pm, ax=ax, label="confidence of the fold")
+ax.set_title("KGWX 0.5° Doppler cut, 00:00 UTC")
+plt.show()
+```
+
 The dealiased velocities of the higher sweeps also give the horizontal wind
 above the radar. `vad_profile` fits a sinusoid to the velocities of every
 range ring (the velocity-azimuth display of Browning and Wexler 1968) and
@@ -964,6 +997,101 @@ print("same profile as the time series:",
       "| melting layer from the accessor:", bool(ml_acc.melting_layer_peak.equals(ml.melting_layer_peak)))
 ```
 
++++
+
+### Range-defined and columnar profiles, and the melting layer on PPIs
+
+The QVP needs a high sweep. `rd_qvp` (Tobin and Kumjian 2017) combines the
+azimuthal means of all sweeps within 50 km of the radar, so that the profile
+reaches the ground, and `cvp` (Murphy et al. 2020) profiles a sector of the
+volume (here 20 km by 20 degrees) around a chosen point from the sweeps that
+see it. Both put the profile on a regular height grid. `melting_layer_ppi`
+finds the melting layer on the PPIs between 4 and 10 degrees, with the
+radial-profile rules of Giangrande et al. (2008), as the 80th and 20th
+percentile of the heights of its points, for every azimuth.
+
+```{code-cell} ipython3
+fields = ["DBZH", "ZDR", "RHOHV"]
+with timed("8b. range-defined, columnar and PPI profiles"):
+    rd = rd_qvp(volumes[1], fields, rmax=50e3)
+    # the azimuth with the strongest echo at 40 km on the lowest sweep
+    sweep0 = volumes[1]["sweep_0"].to_dataset()
+    az0 = float(sweep0.DBZH.sel(range=slice(35e3, 45e3)).mean("range").idxmax("azimuth"))
+    column = cvp(volumes[1], fields, azimuth=az0, ground_range=40e3)
+    ml_ppi = melting_layer_ppi(volumes)
+rd_acc = volumes[1].radarx.rd_qvp(fields, rmax=50e3)
+column_acc = volumes[1].radarx.cvp(fields, azimuth=az0, ground_range=40e3)
+ml_ppi_acc = volumes[1].radarx.melting_layer_ppi()
+print("accessors agree:", bool(rd_acc.DBZH.equals(rd.DBZH)), bool(column_acc.DBZH.equals(column.DBZH)),
+      bool(ml_ppi_acc.melting_layer_top_all.equals(ml_ppi.melting_layer_top_all.isel(time=1))))
+fig, axes = plt.subplots(1, 3, figsize=(13, 4.5), sharey=True, layout="constrained")
+for ax, name in zip(axes, fields):
+    ax.plot(tqvp[name].isel(time=1), tqvp.height / 1e3, label="QVP, 19.5°")
+    ax.plot(rd[name], rd.height / 1e3, label="RD-QVP, 50 km")
+    ax.plot(column[name], column.height / 1e3, label=f"CVP, {az0:.0f}°, 40 km")
+    ax.set_xlabel(name)
+axes[0].set_ylim(0, 12)
+axes[0].set_ylabel("height above sea level (km)")
+axes[0].legend(fontsize=8)
+plt.show()
+top, bottom = ml_ppi.melting_layer_top_all.isel(time=1), ml_ppi.melting_layer_bottom_all.isel(time=1)
+print(f"melting layer in the PPIs, all azimuths: {float(bottom):.0f} to {float(top):.0f} m "
+      f"({int(ml_ppi.melting_layer_points_all.isel(time=1))} points); "
+      f"top between {float(ml_ppi.melting_layer_top.isel(time=1).min()):.0f} and "
+      f"{float(ml_ppi.melting_layer_top.isel(time=1).max()):.0f} m depending on the azimuth")
+```
+
+The rain rates of the lowest sweep hold in rain only. `mask_above_melting_layer`
+sets them (and the other rain-only products) to NaN above the bottom of the
+melting layer, here the azimuth-dependent one of the PPIs, and flags the
+removed gates in `RAIN_RATE_FLAG`:
+
+```{code-cell} ipython3
+rain_sweep = rain_blend.assign_coords(altitude=float(volumes[1].altitude))
+capped = mask_above_melting_layer(rain_sweep, ml_ppi.isel(time=1))
+capped_acc = rain_sweep.radarx.mask_above_melting_layer(ml_ppi.isel(time=1), margin=0.0)
+removed = int((capped.RAIN_RATE_FLAG == 4).sum())
+print(f"{removed} of {int(rain_blend.RAIN_RATE.notnull().sum())} rain rates removed above the melting layer;",
+      "accessor agrees:", bool(capped_acc.RAIN_RATE.equals(capped.RAIN_RATE)))
+```
+
+A scan in range-height (RHI) form has a profile of its own. `rhi_qvp` converts the
+range of every gate to its height and averages the gates of all elevations in 100 m
+bins (Allabakash et al. 2019). Here an RHI is simulated by sampling the QVP of
+this volume along an RHI geometry, so that the profile it returns can be compared
+with the one it came from; `melting_layer` works on the result as on a QVP:
+
+```{code-cell} ipython3
+from xradar.georeference import antenna_to_cartesian
+
+rhi_range = np.arange(250.0, 40e3, 250.0)
+rhi_elevation = np.arange(1.0, 60.0, 0.5)
+_, _, rhi_height = antenna_to_cartesian(
+    rhi_range[None, :], 0.0, rhi_elevation[:, None], earth_radius=6371000.0, site_altitude=float(volumes[1].altitude)
+)
+prof = tqvp.isel(time=1)
+rhi = xr.Dataset(
+    {
+        name: (("azimuth", "range"), np.interp(rhi_height, prof.height, prof[name]).astype("float32"), {"units": unit})
+        for name, unit in (("DBZH", "dBZ"), ("ZDR", "dB"), ("RHOHV", "1"))
+    },
+    coords={
+        "azimuth": np.full(rhi_elevation.size, 109.0),
+        "range": rhi_range,
+        "elevation": ("azimuth", rhi_elevation),
+        "altitude": float(volumes[1].altitude),
+    },
+)
+rhi_profile = rhi_qvp(rhi, fields, rmin=2e3, rmax=30e3)
+rhi_acc = rhi.radarx.rhi_qvp(fields, rmin=2e3, rmax=30e3)
+ok = rhi_profile.DBZH.notnull()
+diff = rhi_profile.DBZH - np.interp(rhi_profile.height, prof.height, prof.DBZH)
+print(f"RHI profile: {int(ok.sum())} bins of 100 m, RMS difference from the profile it was "
+      f"sampled from {float(np.sqrt((diff.where(ok) ** 2).mean())):.2f} dB; accessor agrees:",
+      bool(rhi_acc.DBZH.equals(rhi_profile.DBZH)))
+melting_layer(rhi_profile)[["melting_layer_bottom", "melting_layer_top"]]
+```
+
 ## 9. Azimuthal shear and radial divergence
 
 The linear least-squares derivative (LLSD) of the **dealiased** velocity from
@@ -1007,6 +1135,46 @@ print("the accessors agree:", bool(np.allclose(shear_acc, shear_fn, equal_nan=Tr
 print("the three calls agree:",
       bool(np.allclose(both.azimuthal_shear, shear_fn, equal_nan=True)),
       bool(np.allclose(both.radial_divergence, div_fn, equal_nan=True)))
+```
+
+The warning and research products of the NSSL (Smith et al. 2016) are not
+the shear of one tilt but its **maximum over the tilts of a height layer**: 0 to
+2 km above the ground for near-surface rotation and 3 to 6 km for mid-level
+rotation, after the shear of gates that are not in or near a storm cell
+(reflectivity of 20 dBZ within 5 km) is left out.
+`azimuthal_shear_layer_max` does this for a volume, on the grid of the lowest
+tilt: at each position it takes the value of every tilt whose beam centre is in
+the layer at that ground range and azimuth (4/3 Earth model), and the largest.
+`median_filter=3` adds the 3 x 3 median of the velocity that Smith and Elmore
+(2004) apply before the fit. `layer_max_elevation` says which tilt gave each
+value.
+
+```{code-cell} ipython3
+with timed("9b. layer-maximum azimuthal shear"):
+    low_layer = volumes[1].radarx.azimuthal_shear_layer_max(
+        "VRADH_dealiased", layer=(0.0, 2000.0), min_reflectivity=20.0
+    )
+    mid_layer = azimuthal_shear_layer_max(
+        volumes[1], "VRADH_dealiased", layer=(3000.0, 6000.0), min_reflectivity=20.0, median_filter=3
+    )
+lowest = volumes[1]["sweep_1"].to_dataset()
+fig, axes = plt.subplots(1, 3, figsize=(17, 4.8), sharey=True, layout="constrained")
+for ax, (da, label) in zip(
+    axes,
+    [
+        (lowest.azimuthal_shear, "0.5° tilt"),
+        (low_layer.azimuthal_shear_layer_max, "maximum over 0-2 km"),
+        (mid_layer.azimuthal_shear_layer_max, "maximum over 3-6 km"),
+    ],
+):
+    pm = ppi(ax, lowest.assign(field=da), "field", extent=120, cmap="RdBu_r", vmin=-0.01, vmax=0.01)
+    ax.set_title(label)
+fig.colorbar(pm, ax=axes, label="azimuthal shear (s⁻¹)", shrink=0.85)
+axes[0].set_ylabel("north of KGWX (km)")
+plt.show()
+used = float(low_layer.layer_max_elevation.notnull().mean())
+print(f"0-2 km layer maximum has data at {used:.0%} of the 0.5° gates; tilts used:",
+      np.unique(low_layer.layer_max_elevation.values[np.isfinite(low_layer.layer_max_elevation.values)]).round(1).tolist())
 ```
 
 ## 10. Cone gridding, Max-CAPPI, interactive view and UGRID
@@ -1117,6 +1285,53 @@ corners = gate_corners(volumes[1]["sweep_0"].to_dataset().isel(azimuth=slice(0, 
 print(f"cone grid {dict(cones.sizes)}; pseudo-CAPPI grid {dict(pseudo.sizes)}; CAPPI {dict(cappi.sizes)}; "
       f"{points.sizes['npoints']} gates stacked; make_3d_grid axes {z_axis.size} x {y_axis.size} x {x_axis.size}; "
       f"corner arrays {corners[0].shape}")
+```
+
+### Gridding with a radius of influence
+
+`grid_cones` has no smoothing length. `grid_gates` is the other way to grid: each
+output point is the weighted mean of the gates within a radius of influence in
+metres, with the weights of Cressman (1959) or Barnes (1964), or the nearest
+gate. The radius can grow with the distance from the radar (`roi_range_factor`),
+or follow the beam width (`beam_width`, in degrees), as the radius functions of
+Py-ART do. A gate is a point in space, so the scan does not matter: the same
+call grids sector scans, RHIs and volumes that repeat a tilt. `grid_rhi` gives a
+vertical section through the radar in the same way. For repeated sweeps of one
+elevation, such as the split cuts of NEXRAD or the extra low tilts of SAILS,
+`grid_cones(..., repeats="mean")` merges them into one cone, and with `motion`
+each repeat is first moved to the analysis time:
+
+```{code-cell} ipython3
+zs_section = np.arange(250.0, 10e3, 250.0)
+distance = np.arange(2e3, 150e3, 1000.0)
+with timed("10d. Radius of influence gridding"):
+    cressman = grid_gates(
+        volumes[1], ["DBZH"], x=xs, y=xs, z=zs, weighting="cressman", roi=1000.0, beam_width=1.0
+    )
+    barnes = volumes[1].radarx.grid_gates(
+        ["DBZH"], x=xs, y=xs, z=zs, weighting="barnes", roi=1000.0, beam_width=1.0
+    )
+    nearest = grid_gates(volumes[1], ["DBZH"], x=xs, y=xs, z=zs, weighting="nearest", roi=1000.0)
+    section = grid_rhi(
+        volumes[1], ["DBZH"], azimuth=250.0, distance=distance, z=zs_section, roi=1000.0, beam_width=1.0
+    )
+    section_acc = volumes[1].radarx.grid_rhi(
+        ["DBZH"], azimuth=250.0, distance=distance, z=zs_section, roi=1000.0, beam_width=1.0
+    )
+    merged = grid_cones(volumes[1], ["DBZH"], x=xs, y=xs, z=zs, repeats="mean")
+both = cones.DBZH.notnull() & cressman.DBZH.notnull()
+rms = float(np.sqrt(((cones.DBZH - cressman.DBZH).where(both) ** 2).mean()))
+print(
+    f"filled cells: cone {float(cones.DBZH.notnull().mean()):.2f}, "
+    f"Cressman {float(cressman.DBZH.notnull().mean()):.2f}, Barnes {float(barnes.DBZH.notnull().mean()):.2f}; "
+    f"rms difference cone - Cressman {rms:.1f} dB; section {dict(section.sizes)}; "
+    f"split cuts merged, filled cells {float(merged.DBZH.notnull().mean()):.3f}"
+)
+fig, axes = plt.subplots(1, 3, figsize=(15, 4.4), layout="constrained")
+for ax, grid, label in zip(axes, (cones, cressman, barnes), ("grid_cones", "Cressman", "Barnes")):
+    grid.DBZH.sel(z=2000.0).plot(ax=ax, x="x", y="y", cmap="ChaseSpectral", vmin=-10, vmax=70)
+    ax.set(title=f"{label}, 2 km", aspect="equal")
+fig
 ```
 
 The vertical section of a volume along one azimuth is a pseudo range-height
@@ -1277,7 +1492,8 @@ with the same ERA5 wind profile, and
   motion of step 11, and merge their reflectivity;
 - retrieve the three-dimensional wind with the variational multi-Doppler
   method (`multi_doppler`; Gao et al. 1999), with the ERA5 profile as the
-  background.
+  background, and with the classical analytic solution of the 2 x 2 system
+  of the two radial velocities (`dual_doppler_analytic`) for a quick check.
 
 The [multi-radar gridding](Multi_Radar_Grid) and [multi-Doppler](Multi_Doppler)
 notebooks show both in more detail.
@@ -1319,7 +1535,14 @@ with timed("12c. multi-Doppler wind"):
     )
     background = sounding.profile_to_grid(era5, md_grid)
     wind = md_grid.radarx.multi_doppler(background, velocity="VRADH_dealiased")
+    # the classical analytic solution (2 x 2 system per cell, continuity equation upward)
+    analytic = md_grid.radarx.dual_doppler_analytic(background, velocity="VRADH_dealiased")
+    analytic_fn = dual_doppler_analytic(md_grid, background, velocity="VRADH_dealiased")
 print(f"iterations per grid level: {wind.attrs['iterations']}")
+solved = analytic.u.notnull() & (wind.n_radars >= 2)
+print(f"analytic dual-Doppler: {int(solved.sum())} cells with a horizontal wind, "
+      f"rms difference to the variational u {float(np.sqrt(((analytic.u - wind.u).where(solved) ** 2).mean())):.1f} m/s; "
+      "the accessor and the function agree:", bool(analytic.u.equals(analytic_fn.u)))
 mosaic_fn = grid_radars([kgwx, kbmx], x, y, z, data_vars=["DBZH"], names=["KGWX", "KBMX"],
                         time=analysis_time, motion=motion, merge=["DBZH"])
 print("the accessor of the first volume and grid_radars give the same mosaic:",
@@ -1854,6 +2077,8 @@ notebooks or from this index.
 | `ground_range` | `radarx.fundamentals.geometry` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `half_power_radius` | `radarx.fundamentals.geometry` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `k_e_from_refractivity` | `radarx.fundamentals.geometry` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
+| `k_e_from_rays` | `radarx.fundamentals.refraction` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
+| `trace_rays` | `radarx.fundamentals.refraction` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `sample_volume_gaussian` | `radarx.fundamentals.geometry` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `compute_average_power` | `radarx.fundamentals.power` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `compute_min_detectable_signal` | `radarx.fundamentals.power` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
@@ -1904,6 +2129,8 @@ notebooks or from this index.
 | `radial_velocity` | `radarx.fundamentals.variables` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `reflectivity_factor` | `radarx.fundamentals.variables` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `grid_cones` | `radarx.grid.cone` | [core](Radar_Workflow): Other ways to grid, section and plot |
+| `grid_gates` | `radarx.grid.gates` | [core](Radar_Workflow): Other ways to grid, section and plot |
+| `grid_rhi` | `radarx.grid.gates` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `grid_radar` | `radarx.grid.grid` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `make_3d_grid` | `radarx.grid.grid` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `stack_data` | `radarx.grid.grid` | [core](Radar_Workflow): Other ways to grid, section and plot |
@@ -1941,6 +2168,7 @@ notebooks or from this index.
 | `open_sounding_file` | `radarx.io.sounding` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
 | `profile_to_grid` | `radarx.io.sounding` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `read_sounding` | `radarx.io.sounding` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
+| `refractivity` | `radarx.io.sounding` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `relative_humidity_from_dewpoint` | `radarx.io.sounding` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
 | `saturation_vapor_pressure` | `radarx.io.sounding` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
 | `specific_humidity_from_dewpoint` | `radarx.io.sounding` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
@@ -1966,6 +2194,7 @@ notebooks or from this index.
 | `biological_echo` | `radarx.retrieve.biology` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
 | `correct_attenuation` | `radarx.retrieve.attenuation` | [core](Radar_Workflow): 5. ΦDP processing and KDP |
 | `beam_blockage` | `radarx.retrieve.beam_blockage` | [part 2](Radar_Workflow_Advanced): 11. Beam blockage and terrain clutter |
+| `beam_path` | `radarx.retrieve.beam_path` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `zdr_offset` | `radarx.retrieve.calibration` | [core](Radar_Workflow): 15. Noise and calibration |
 | `z_offset` | `radarx.retrieve.calibration` | [core](Radar_Workflow): 15. Noise and calibration |
 | `phidp_offset` | `radarx.retrieve.calibration` | [core](Radar_Workflow): 15. Noise and calibration |
@@ -1978,7 +2207,9 @@ notebooks or from this index.
 | `cold_pool_perturbation` | `radarx.retrieve.coldpool` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `potential_temperatures` | `radarx.retrieve.coldpool` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `rkw_ratio` | `radarx.retrieve.coldpool` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
+| `dealias_confidence` | `radarx.retrieve.dealias` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
 | `dealias_velocity` | `radarx.retrieve.dealias` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
+| `correct_dual_prf` | `radarx.retrieve.dealias` | [part 2](Radar_Workflow_Advanced): 15. Dual-PRF velocity correction |
 | `diabatic_lagrangian` | `radarx.retrieve.diabatic_lagrangian` | [part 2](Radar_Workflow_Advanced): 9. Diabatic Lagrangian analysis |
 | `microphysical_rates` | `radarx.retrieve.diabatic_lagrangian` | [part 2](Radar_Workflow_Advanced): 9. Diabatic Lagrangian analysis |
 | `polarimetric_precipitation` | `radarx.retrieve.diabatic_lagrangian` | [part 2](Radar_Workflow_Advanced): 9. Diabatic Lagrangian analysis |
@@ -2005,6 +2236,10 @@ notebooks or from this index.
 | `drop_evaporation_rate` | `radarx.retrieve.evaporation` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `evaporation` | `radarx.retrieve.evaporation` | [core](Radar_Workflow): 13. Evaporation |
 | `integrate_evaporation` | `radarx.retrieve.evaporation` | [core](Radar_Workflow): 13. Evaporation |
+| `forward_operator` | `radarx.retrieve.forward_operator` | [part 2](Radar_Workflow_Advanced): 14. Forward operator for WRF and MPAS output |
+| `to_radar_grid` | `radarx.retrieve.forward_operator` | [part 2](Radar_Workflow_Advanced): 14. Forward operator for WRF and MPAS output |
+| `wrf_state` | `radarx.retrieve.forward_operator` | [part 2](Radar_Workflow_Advanced): 14. Forward operator for WRF and MPAS output |
+| `mpas_state` | `radarx.retrieve.forward_operator` | [part 2](Radar_Workflow_Advanced): 14. Forward operator for WRF and MPAS output |
 | `hail_kinetic_energy` | `radarx.retrieve.hail` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `hail_products` | `radarx.retrieve.hail` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `mesh` | `radarx.retrieve.hail` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
@@ -2012,6 +2247,8 @@ notebooks or from this index.
 | `shi` | `radarx.retrieve.hail` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `hid` | `radarx.retrieve.hid` | [core](Radar_Workflow): 6. Hydrometeor classification |
 | `hid_classes` | `radarx.retrieve.hid` | [core](Radar_Workflow): 6. Hydrometeor classification |
+| `hail_fall_speed` | `radarx.retrieve.ice_fall` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
+| `melting_snow_fall_speed` | `radarx.retrieve.ice_fall` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `estimate_kdp` | `radarx.retrieve.kdp` | [core](Radar_Workflow): 5. ΦDP processing and KDP |
 | `trajectories` | `radarx.retrieve.lagrangian` | [part 2](Radar_Workflow_Advanced): 9. Diabatic Lagrangian analysis |
 | `cell_flash_rate` | `radarx.retrieve.lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
@@ -2019,6 +2256,7 @@ notebooks or from this index.
 | `grid_lightning` | `radarx.retrieve.lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `lightning_jump` | `radarx.retrieve.lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `vertical_source_distribution` | `radarx.retrieve.lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
+| `dual_doppler_analytic` | `radarx.retrieve.multidoppler` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `fall_speed` | `radarx.retrieve.multidoppler` | [part 2](Radar_Workflow_Advanced): 9. Diabatic Lagrangian analysis |
 | `multi_doppler` | `radarx.retrieve.multidoppler` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `multi_doppler_input` | `radarx.retrieve.multidoppler` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
@@ -2034,6 +2272,7 @@ notebooks or from this index.
 | `rain_rate_kdp` | `radarx.retrieve.qpe` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
 | `rain_rate_z` | `radarx.retrieve.qpe` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
 | `rain_rate_z_zdr` | `radarx.retrieve.qpe` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
+| `rain_shaft` | `radarx.retrieve.rain_collisions` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `rain_source_points` | `radarx.retrieve.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `rain_trajectories` | `radarx.retrieve.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `size_sorting` | `radarx.retrieve.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
@@ -2041,16 +2280,27 @@ notebooks or from this index.
 | `trajectory_matched_times` | `radarx.retrieve.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `attenuation_coefficients` | `radarx.retrieve.attenuation` | [core](Radar_Workflow): 5. ΦDP processing and KDP |
 | `azimuthal_shear` | `radarx.retrieve.shear` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
+| `azimuthal_shear_layer_max` | `radarx.retrieve.shear` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `llsd` | `radarx.retrieve.shear` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `radial_divergence` | `radarx.retrieve.shear` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `single_doppler_winds` | `radarx.retrieve.single_doppler` | [part 2](Radar_Workflow_Advanced): 8. Wind from a single Doppler radar |
+| `gbvtd` | `radarx.retrieve.tc_winds` | [part 2](Radar_Workflow_Advanced): 13. Tropical-cyclone winds from one radar |
+| `synthetic_vortex` | `radarx.retrieve.tc_winds` | [part 2](Radar_Workflow_Advanced): 13. Tropical-cyclone winds from one radar |
+| `tc_center` | `radarx.retrieve.tc_winds` | [part 2](Radar_Workflow_Advanced): 13. Tropical-cyclone winds from one radar |
+| `tc_decompose` | `radarx.retrieve.tc_winds` | [part 2](Radar_Workflow_Advanced): 13. Tropical-cyclone winds from one radar |
+| `vortex_profile` | `radarx.retrieve.tc_winds` | [part 2](Radar_Workflow_Advanced): 13. Tropical-cyclone winds from one radar |
 | `superobs` | `radarx.retrieve.superobs` | [core](Radar_Workflow): 16. Super-observations for data assimilation |
 | `rotation_couplets` | `radarx.retrieve.tornado` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
 | `tornado_probability` | `radarx.retrieve.tornado` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
 | `tornet_inputs` | `radarx.retrieve.tornado` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
+| `cvp` | `radarx.retrieve.vertical_profiles` | [core](Radar_Workflow): 8. QVP time series and melting layer |
+| `mask_above_melting_layer` | `radarx.retrieve.vertical_profiles` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `melting_layer` | `radarx.retrieve.vertical_profiles` | [core](Radar_Workflow): 8. QVP time series and melting layer |
+| `melting_layer_ppi` | `radarx.retrieve.vertical_profiles` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `qvp` | `radarx.retrieve.vertical_profiles` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `qvp_timeseries` | `radarx.retrieve.vertical_profiles` | [core](Radar_Workflow): 8. QVP time series and melting layer |
+| `rd_qvp` | `radarx.retrieve.vertical_profiles` | [core](Radar_Workflow): 8. QVP time series and melting layer |
+| `rhi_qvp` | `radarx.retrieve.vertical_profiles` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `echo_top` | `radarx.retrieve.vil` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `liquid_water_content` | `radarx.retrieve.vil` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `vil` | `radarx.retrieve.vil` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
@@ -2084,29 +2334,40 @@ The methods of the `.radarx` accessors:
 | `.radarx.apply_mask` | [core](Radar_Workflow): 2. Remove non-meteorological echo |
 | `.radarx.assign` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
 | `.radarx.azimuthal_shear` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
+| `.radarx.azimuthal_shear_layer_max` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `.radarx.background` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `.radarx.baroclinic_generation` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `.radarx.beam_blockage` | [part 2](Radar_Workflow_Advanced): 11. Beam blockage and terrain clutter |
+| `.radarx.beam_path` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `.radarx.biological_echo` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
 | `.radarx.bulk_shear` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
 | `.radarx.bunkers_storm_motion` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
 | `.radarx.cluster_flashes` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `.radarx.cold_pool_intensity` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `.radarx.correct_attenuation` | [core](Radar_Workflow): 5. ΦDP processing and KDP |
+| `.radarx.correct_dual_prf` | [part 2](Radar_Workflow_Advanced): 15. Dual-PRF velocity correction |
 | `.radarx.correct_rhohv_noise` | [core](Radar_Workflow): 15. Noise and calibration |
 | `.radarx.correct_zdr_noise` | [core](Radar_Workflow): 15. Noise and calibration |
 | `.radarx.create_cappi` | [core](Radar_Workflow): Other ways to grid, section and plot |
+| `.radarx.cvp` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `.radarx.dealias` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
+| `.radarx.dealias_confidence` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
 | `.radarx.diabatic_lagrangian` | [part 2](Radar_Workflow_Advanced): 9. Diabatic Lagrangian analysis |
 | `.radarx.disdrometer` | [part 2](Radar_Workflow_Advanced): 2. Disdrometers |
 | `.radarx.dsd` | [core](Radar_Workflow): 7. Rain drop size distribution |
 | `.radarx.dsd_bayesian` | [core](Radar_Workflow): 7. Rain drop size distribution |
+| `.radarx.dual_doppler_analytic` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `.radarx.echo_mask` | [core](Radar_Workflow): 2. Remove non-meteorological echo |
 | `.radarx.echo_top` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.estimate_motion` | [core](Radar_Workflow): 11. Storm motion, common analysis time and time interpolation |
 | `.radarx.evaporation` | [core](Radar_Workflow): 13. Evaporation |
+| `.radarx.forward_operator` | [part 2](Radar_Workflow_Advanced): 14. Forward operator for WRF and MPAS output |
+| `.radarx.gbvtd` | [part 2](Radar_Workflow_Advanced): 13. Tropical-cyclone winds from one radar |
+| `.radarx.grid_gates` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `.radarx.grid_lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `.radarx.grid_radars` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
+| `.radarx.grid_rhi` | [core](Radar_Workflow): Other ways to grid, section and plot |
+| `.radarx.hail_fall_speed` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `.radarx.hail_kinetic_energy` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.hail_products` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.hid` | [core](Radar_Workflow): 6. Hydrometeor classification |
@@ -2117,7 +2378,10 @@ The methods of the `.radarx` accessors:
 | `.radarx.lightning_jump` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `.radarx.liquid_water_content` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.llsd` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
+| `.radarx.mask_above_melting_layer` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `.radarx.melting_layer` | [core](Radar_Workflow): 8. QVP time series and melting layer |
+| `.radarx.melting_layer_ppi` | [core](Radar_Workflow): 8. QVP time series and melting layer |
+| `.radarx.melting_snow_fall_speed` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `.radarx.merge_radars` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `.radarx.mesh` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.multi_doppler` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
@@ -2139,7 +2403,10 @@ The methods of the `.radarx` accessors:
 | `.radarx.rain_rate_kdp` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
 | `.radarx.rain_rate_z` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
 | `.radarx.rain_rate_z_zdr` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
+| `.radarx.rain_shaft` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `.radarx.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
+| `.radarx.rd_qvp` | [core](Radar_Workflow): 8. QVP time series and melting layer |
+| `.radarx.rhi_qvp` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `.radarx.rotation_couplets` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
 | `.radarx.shi` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.single_doppler_winds` | [part 2](Radar_Workflow_Advanced): 8. Wind from a single Doppler radar |
@@ -2147,14 +2414,16 @@ The methods of the `.radarx` accessors:
 | `.radarx.sounding` | [core](Radar_Workflow): 3. Environment |
 | `.radarx.storm_relative_helicity` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
 | `.radarx.superobs` | [core](Radar_Workflow): 16. Super-observations for data assimilation |
+| `.radarx.to_cappi` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `.radarx.to_cfradial1` | [part 2](Radar_Workflow_Advanced): 12. Export to files |
 | `.radarx.to_cfradial2` | [part 2](Radar_Workflow_Advanced): 12. Export to files |
-| `.radarx.to_cappi` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `.radarx.to_grid` | [core](Radar_Workflow): 10. Cone gridding, Max-CAPPI, interactive view and UGRID |
 | `.radarx.to_netcdf_cf` | [part 2](Radar_Workflow_Advanced): 12. Export to files |
 | `.radarx.to_odim` | [part 2](Radar_Workflow_Advanced): 12. Export to files |
+| `.radarx.to_radar_grid` | [part 2](Radar_Workflow_Advanced): 14. Forward operator for WRF and MPAS output |
 | `.radarx.to_uxarray` | [core](Radar_Workflow): 10. Cone gridding, Max-CAPPI, interactive view and UGRID |
 | `.radarx.to_zarr` | [part 2](Radar_Workflow_Advanced): 12. Export to files |
+| `.radarx.tc_center` | [part 2](Radar_Workflow_Advanced): 13. Tropical-cyclone winds from one radar |
 | `.radarx.tornado_probability` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
 | `.radarx.trajectories` | [part 2](Radar_Workflow_Advanced): 9. Diabatic Lagrangian analysis |
 | `.radarx.vad_profile` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
@@ -2188,5 +2457,7 @@ The methods of the `.radarx` accessors:
 - Ryzhkov, A., M. Diederich, P. Zhang, and C. Simmer, 2014: Potential Utilization of Specific Attenuation for Rainfall Estimation, Mitigation of Partial Beam Blockage, and Radar Networking. *Journal of Atmospheric and Oceanic Technology*, **31**, 599-619, <https://doi.org/10.1175/JTECH-D-13-00038.1>
 - Seo, B.-C., W. F. Krajewski, and J. A. Smith, 2014: Four-dimensional reflectivity data comparison between two ground-based radars: methodology and statistical analysis. *Hydrological Sciences Journal*, **59**, 1320-1334, <https://doi.org/10.1080/02626667.2013.839872>
 - Seo, B.-C., W. F. Krajewski, and Y. Qi, 2020: Utility of vertically integrated liquid water content for radar-rainfall estimation: Quality control and precipitation type classification. *Atmospheric Research*, **236**, 104800, <https://doi.org/10.1016/j.atmosres.2019.104800>
+- Smith, T. M., and K. L. Elmore, 2004: The use of radial velocity derivative to diagnose rotation and divergence. *Preprints, 11th Conf. on Aviation, Range, and Aerospace Meteorology*, Hyannis, MA, Amer. Meteor. Soc., P5.6, <https://ams.confex.com/ams/pdfpapers/81827.pdf>
+- Smith, T. M., V. Lakshmanan, G. J. Stumpf, K. L. Ortega, K. Hondl, K. Cooper, K. M. Calhoun, D. M. Kingfield, K. L. Manross, R. Toomey, and J. Brogden, 2016: Multi-Radar Multi-Sensor (MRMS) Severe Weather and Aviation Products: Initial Operating Capabilities. *Bulletin of the American Meteorological Society*, **97**, 1617-1630, <https://doi.org/10.1175/BAMS-D-14-00173.1>
 - Zhang, G., J. Vivekanandan, and E. Brandes, 2001: A method for estimating rain rate and drop size distribution from polarimetric radar measurements. *IEEE Transactions on Geoscience and Remote Sensing*, **39**, 830-841, <https://doi.org/10.1109/36.917906>
 - Zhang, J., K. Howard, and J. J. Gourley, 2005: Constructing Three-Dimensional Multiple-Radar Reflectivity Mosaics: Examples of Convective Storms and Stratiform Rain Echoes. *Journal of Atmospheric and Oceanic Technology*, **22**, 30-42, <https://doi.org/10.1175/JTECH-1689.1>

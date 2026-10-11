@@ -37,12 +37,18 @@ from .test_beam_blockage import make_sweep as bb_sweep
 from .test_beam_blockage import volume as bb_volume
 from .test_dealias import synthetic_sweep
 from .test_dealias import volume as dealias_volume
+from .test_forward_operator import SITE as FO_SITE
+from .test_forward_operator import synthetic_mpas, synthetic_wrf
 from .test_kdp import _sweep as kdp_sweep
 from .test_kdp import _volume as kdp_volume
 from .test_qc import _sweep as qc_sweep
+from .test_tc_winds import CENTER as TC_CENTER
+from .test_tc_winds import small_tc_center as tc_center_result
+from .test_tc_winds import small_vortex as tc_vortex
 from .test_vil import storm_volume
 
 ROOT = Path(__file__).resolve().parents[1]
+TC_RADII = np.array([15000.0, 20000.0, 25000.0])
 ATTRS = (METHOD, REFERENCES, VERSION)
 
 # Public functions of radarx.retrieve and radarx.grid that return plain arrays,
@@ -52,6 +58,7 @@ EXCEPTIONS = {
     "grid.make_3d_grid": "tuple of NumPy arrays",
     "ugrid.gate_corners": "tuple of NumPy arrays",
     "attenuation.attenuation_coefficients": "dict of numbers",
+    "tc_winds.vortex_profile": "tuple of NumPy arrays",
 }
 
 # Accessor methods that do not wrap a function of radarx.retrieve or
@@ -84,6 +91,8 @@ KEY_MARKS = {
     "ester-1996": "Ester, M., H.-P. Kriegel",
     "holleman-2001": "Holleman, I., 2001",
     "graham-nelson-1998": "Graham, R. A., and J. A. Nelson",
+    "liou-2005": "Liou, Y.-C., T.-C. C. Wang",
+    "roc-mesocyclone-detection": "WSR-88D Radar Operations Center",
 }
 
 
@@ -335,6 +344,12 @@ def test_sweep_and_volume_results():
         "beam_blockage tree": radarx.retrieve.beam_blockage(
             bb_volume(), geographic_dem(bell())
         ),
+        "synthetic_vortex": tc_vortex(),
+        "tc_center": tc_center_result(),
+        "gbvtd": radarx.retrieve.gbvtd(tc_vortex(), TC_CENTER, radii=TC_RADII),
+        "tc_decompose": radarx.retrieve.tc_decompose(
+            radarx.retrieve.gbvtd(tc_vortex(), TC_CENTER, radii=TC_RADII)
+        ),
         "hail_products": radarx.retrieve.hail_products(
             storm_volume(), freezing_level=3000.0, minus20_level=6000.0
         ),
@@ -348,7 +363,17 @@ def test_sweep_and_volume_results():
             storm_volume(), freezing_level=3000.0, minus20_level=6000.0
         ),
         "hail_kinetic_energy": radarx.retrieve.hail_kinetic_energy(storm_volume()),
+        "wrf_state": radarx.retrieve.wrf_state(synthetic_wrf(nx=10, ny=8, nz=8)),
+        "mpas_state": radarx.retrieve.mpas_state(*synthetic_mpas(ncell=30, nz=6)),
     }
+    fo_fields = radarx.retrieve.forward_operator(results["wrf_state"], nrain="QNRAIN")
+    results["forward_operator"] = fo_fields
+    results["to_radar_grid"] = radarx.retrieve.to_radar_grid(
+        fo_fields, FO_SITE, 1.0, azimuth=[10.0], gate_range=[5000.0]
+    )
+    results["to_radar_grid tree"] = radarx.retrieve.to_radar_grid(
+        fo_fields, FO_SITE, [1.0, 2.0], azimuth=[10.0], gate_range=[5000.0]
+    )
     for name, out in results.items():
         check_attrs(out)
 

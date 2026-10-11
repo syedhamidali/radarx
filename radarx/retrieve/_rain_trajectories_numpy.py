@@ -200,7 +200,22 @@ def _v0(m, d):
     kind = m["fall_kind"]
     fc = m["fc"]
     with np.errstate(all="ignore"):
-        if kind == 0:
+        if kind == 4:
+            nseg = int(fc[0])
+            k = np.searchsorted(fc[1:nseg], d, side="right")
+            v = fc[nseg + 2 * k] * np.power(d / 10.0, fc[nseg + 2 * k + 1])
+            dv = fc[nseg + 2 * k + 1] * v / d
+        elif kind == 5:
+            vs = fc[1] * np.power(d, fc[2])
+            dvs = fc[2] * vs / d
+            sph, dsph = _raindrop_fall.sphere(d)
+            small = d < fc[3]
+            e = np.exp(-0.6 * d)
+            vr = np.where(small, sph, 9.65 - 10.3 * e)
+            dvr = np.where(small, dsph, 6.18 * e)
+            v = (1.0 - fc[0]) * vs + fc[0] * vr
+            dv = (1.0 - fc[0]) * dvs + fc[0] * dvr
+        elif kind == 0:
             e = np.exp(-0.6 * d)
             v = 9.65 - 10.3 * e
             dv = 6.18 * e
@@ -230,7 +245,8 @@ def _rhs(m, t, y, turb):
     rho, drho, nu, fkd, ssat, cs = _environment(m, z)
     d = np.sqrt(np.maximum(s, D_FLOOR * D_FLOOR))
     v0, dv0 = _v0(m, d)
-    corr = np.power(m["rho0"] / rho, 0.4) if m["dens"] else 1.0
+    dexp = 0.0 if m["fall_kind"] >= 4 else 0.4  # no density correction of ice laws
+    corr = np.power(m["rho0"] / rho, dexp) if m["dens"] else 1.0
     vt = v0 * corr
     f = np.zeros_like(y)
     f[0] = u + turb[0]
@@ -248,7 +264,7 @@ def _rhs(m, t, y, turb):
         if m["wdiv"]:
             div = dudx + dvdy + dwdz
         if m["dens"]:
-            div = div + 0.4 * vt * drho / rho
+            div = div + dexp * vt * drho / rho
         if m["evap"]:
             with np.errstate(all="ignore"):
                 dfv = np.where(

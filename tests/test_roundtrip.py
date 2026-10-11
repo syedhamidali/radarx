@@ -21,19 +21,26 @@ import radarx
 
 from .grid.test_cone import GRID
 from .grid.test_cone import _volume as cone_volume
+from .grid.test_gates import GRID as GATES_GRID
+from .grid.test_gates import _rhi_volume
 from .test_advection import T0, _blobs
 from .test_beam_blockage import bell, geographic_dem
 from .test_beam_blockage import make_sweep as bb_sweep
 from .test_cappi import _make_ppi_sweep
 from .test_coldpool import column, station_network
+from .test_couplets_vertical import COLUMN
+from .test_couplets_vertical import volume as couplet_volume
 from .test_dealias import synthetic_sweep
 from .test_dealias import volume as dealias_volume
+from .test_dealias_extras import VH, VL, dual_prf_sweep
 from .test_disdrometer import _station
 from .test_dsd import _sweep as dsd_sweep
 from .test_dsd import _volume as dsd_volume
 from .test_dsd_bayes import _volume as bayes_volume
 from .test_evaporation import _profile as evap_profile
 from .test_evaporation import _series as evap_series
+from .test_forward_operator import SITE as FO_SITE
+from .test_forward_operator import synthetic_mpas, synthetic_wrf
 from .test_hid import _random_volume as hid_volume
 from .test_kdp import _sweep as kdp_sweep
 from .test_kdp import _volume as kdp_volume
@@ -45,6 +52,9 @@ from .test_qvp import _melting_profile, _profiles_dataset
 from .test_qvp import _volume as qvp_volume
 from .test_rain_trajectories import _source_grid
 from .test_rain_trajectories import profile as rain_profile
+from .test_shear_layer import column_volume
+from .test_tc_winds import CENTER as TC_CENTER
+from .test_tc_winds import small_tc_center, small_vortex
 from .test_tornado import rankine
 from .test_vil import storm_volume
 from .test_wind_profile import vad_sweep
@@ -162,6 +172,7 @@ NOT_COVERED = {
     "multi.grid_radars": "needs several radar volumes",
     "multi.merge_radars": "needs a multi-radar grid",
     "multi.network_bias": "needs a multi-radar grid",
+    "multidoppler.dual_doppler_analytic": "needs gridded volumes of several radars",
     "multidoppler.multi_doppler": "needs gridded volumes of several radars",
     "multidoppler.multi_doppler_input": "needs several radar volumes",
     "multidoppler.radar_geometry": "needs a grid with radar positions",
@@ -193,9 +204,39 @@ PRODUCTS = {
     "beam_blockage": lambda: R.beam_blockage(
         bb_sweep(nray=6, ngate=60), geographic_dem(bell())
     ),
+    "synthetic_vortex": small_vortex,
+    "tc_center": small_tc_center,
+    "gbvtd": lambda: R.gbvtd(
+        small_vortex(), TC_CENTER, radii=np.array([15000.0, 20000.0, 25000.0])
+    ),
+    "tc_decompose": lambda: R.tc_decompose(
+        R.gbvtd(small_vortex(), TC_CENTER, radii=np.array([15000.0, 20000.0, 25000.0]))
+    ),
+    "wrf_state": lambda: R.wrf_state(synthetic_wrf(nx=10, ny=8, nz=8)),
+    "mpas_state": lambda: R.mpas_state(*synthetic_mpas(ncell=30, nz=6)),
+    "forward_operator": lambda: R.forward_operator(
+        R.wrf_state(synthetic_wrf(nx=10, ny=8, nz=8)), nrain="QNRAIN"
+    ),
+    "to_radar_grid": lambda: R.to_radar_grid(
+        R.forward_operator(R.wrf_state(synthetic_wrf(nx=24, ny=20, nz=12))),
+        FO_SITE,
+        1.0,
+        azimuth=[10.0, 80.0, 150.0],
+        gate_range=[5000.0, 10000.0, 20000.0],
+    ),
     "vil": lambda: R.vil(storm_volume()),
     "echo_top": lambda: R.echo_top(storm_volume()),
     "grid_cones": _grid,
+    "grid_gates": lambda: radarx.grid.grid_gates(
+        cone_volume(field="random"), "DBZH", **GRID, roi=1500.0
+    ),
+    "grid_rhi": lambda: radarx.grid.grid_rhi(
+        _rhi_volume(lambda x, y, z: 20.0 + 0.001 * z),
+        "DBZH",
+        distance=np.arange(2e3, 20e3, 2e3),
+        z=GATES_GRID["z"],
+        roi=1000.0,
+    ),
     "liquid_water_content": lambda: R.liquid_water_content(storm_volume()),
     "vil_density": lambda: R.vil_density(storm_volume()),
     "qvp": lambda: R.qvp(qvp_volume()),
@@ -282,6 +323,23 @@ PRODUCTS = {
         _flashes(), lightning_grid(), interval="1min"
     ),
     "rotation_couplets": lambda: R.rotation_couplets(rankine()),
+    "rotation_couplets (min_tilts)": lambda: R.rotation_couplets(
+        couplet_volume({"sweep_0": (0.5, [COLUMN]), "sweep_1": (1.5, [COLUMN])}),
+        min_tilts=2,
+    ),
+    "azimuthal_shear_layer_max": lambda: R.azimuthal_shear_layer_max(
+        column_volume(elevations=(0.5, 1.5, 3.0), n_az=90), min_reflectivity=20.0
+    ),
+    "correct_dual_prf": lambda: R.correct_dual_prf(
+        dual_prf_sweep(nray=60, ngate=40)[0], nyquist_high=VH, nyquist_low=VL
+    ),
+    "dealias_confidence": lambda: R.dealias_confidence(
+        R.dealias_velocity(_dealiased(), nyquist_velocity=10.0).to_dataset(),
+        nyquist_velocity=10.0,
+    ),
+    "dealias_velocity (confidence)": lambda: R.dealias_velocity(
+        _dealiased(), nyquist_velocity=10.0, confidence=True
+    ),
     "lightning_jump": lambda: R.lightning_jump(
         _rate([12, 12, 13, 12, 13, 12, 12, 13, 12, 12, 13, 12, 12, 12] + [20, 30, 34])
     ),
@@ -352,7 +410,9 @@ def test_not_covered_products_exist():
     assert set(NOT_COVERED) <= set(DECORATED)
 
 
-@pytest.mark.parametrize("name", ["estimate_kdp", "hid (park)", "grid_cones"])
+@pytest.mark.parametrize(
+    "name", ["estimate_kdp", "hid (park)", "grid_cones", "grid_gates", "grid_rhi"]
+)
 def test_chunked_product_round_trip_is_identical(name, tmp_path):
     pytest.importorskip("dask")
     out = PRODUCTS[name]()

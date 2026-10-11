@@ -64,6 +64,7 @@ import numpy as np
 import xarray as xr
 from scipy.spatial import cKDTree
 
+from .._gridcf import aeqd_crs, georeference
 from .._provenance import provenance
 
 _CARTESIAN_IDW_METHOD = "cartesian_idw"
@@ -620,7 +621,14 @@ def _create_cappi_cartesian_idw(
         },
     )
 
-    return ds_cappi
+    # xradar's x and y are metres east and north of the radar on an azimuthal
+    # equidistant projection, so the CRS comes from the radar position.
+    mapping = None
+    if "latitude" in ref_coords and "longitude" in ref_coords:
+        mapping = aeqd_crs(
+            float(ref_coords["latitude"]), float(ref_coords["longitude"])
+        ).to_cf()
+    return georeference(ds_cappi, mapping)
 
 
 def _interp_to_reference(ds, field, az_ref, r_ref):
@@ -1195,6 +1203,12 @@ def create_cappi(
     xarray.Dataset
         CAPPI dataset in either Cartesian ``(y, x)`` or native polar
         ``(azimuth, range)`` geometry, depending on the selected method.
+        The Cartesian CAPPI is georeferenced like the grids of
+        :func:`radarx.grid.grid_cones`: ``crs_wkt`` (the azimuthal equidistant
+        CRS centred on the radar position, which is how xradar defines ``x``
+        and ``y``; none if the volume has no ``latitude`` and ``longitude``),
+        ``grid_mapping`` on the fields, 2-D ``lat(y, x)`` and ``lon(y, x)`` and
+        ``standard_name``, ``units`` and ``axis`` on the coordinates.
 
     Notes
     -----

@@ -137,6 +137,81 @@ fig.colorbar(im, ax=axes[2], label="m/s")
 plt.show()
 ```
 
+## Fall speed
+
+The radial velocity of precipitation includes its fall speed, so the
+variational cost corrects it (`fall_speed_correction=True`, the default).
+The synthetic radial velocities here have no fall speed, so the retrieval
+above was run with `fall_speed_correction=False`, and the result says so:
+
+```{code-cell} ipython3
+print(wind.attrs["fall_speed_correction"])
+```
+
+With a network the correction is explicit only in the variational
+refinement (`refine=True`). The network itself takes the uncorrected radial
+velocity and the reflectivity and was trained against fall-speed corrected
+radial velocities, so the correction in the raw prediction (`refine=False`,
+`u_network`, `v_network`, `w_network`) is whatever it learned from the
+reflectivity, and `fall_speed_correction` has no effect on it (a warning says
+so if it is `False`). The attribute `fall_speed_correction` of the result
+tells which of these cases applies.
+
+## Uncertainty
+
+`uncertainty=True` adds `u_uncertainty`, `v_uncertainty` and
+`w_uncertainty`: the standard deviation of the retrieved wind over `members`
+retrievals from inputs with random errors. The radial velocities get noise of
+standard deviation `vr_error`, and the background `u` and `v` a smooth,
+mass-continuous random error of standard deviation `background_error` with
+the horizontal and vertical scales `correlation`. This propagates the stated
+input errors through the retrieval; it is radarx's own definition, not the
+posterior covariance of the cost function (the continuity and smoothness
+terms are not perturbed, and the default errors are radarx choices). The grid
+is coarsened here to keep the example short.
+
+```{code-cell} ipython3
+coarse = dict(x=slice(None, None, 2), y=slice(None, None, 2), z=slice(None, None, 2))
+radar_c, background_c, truth_c = radar.isel(coarse), background.isel(coarse), truth.isel(coarse)
+seen_c = np.isfinite(radar_c.VRADH[0])
+
+# weights that agree with the stated errors: the background weight is
+# (vr_error / background_error)**2 of the observation weight
+wind_u = rx.retrieve.single_doppler_winds(
+    radar_c, background_c, fall_speed_correction=False, uncertainty=True,
+    members=8, vr_error=1.0, background_error=3.0,
+    weights={"background": (1.0 / 3.0) ** 2},
+)
+for c in "uvw":
+    actual = float(np.sqrt(((wind_u[c] - truth_c[c]) ** 2).where(seen_c).mean()))
+    spread = float(np.sqrt((wind_u[f"{c}_uncertainty"] ** 2).where(seen_c).mean()))
+    print(f"{c}: actual RMS error {actual:.2f} m/s, RMS uncertainty {spread:.2f} m/s")
+```
+
+The uncertainty is the part of the error that comes from the stated input
+errors, so it is a fair estimate of the actual error only when the input
+errors are the stated ones, the weights of the cost function agree with them
+(as above) and the true flow satisfies the continuity constraint. With the
+default weights (background weight 0.001) the retrieval trusts the
+background far less than the stated error model assumes, and the actual
+error of the cross-beam wind is larger than the spread. Here the storm is
+not a random draw from the stated background error, and the vertical
+velocity, which no beam observes directly, has an actual error about twice
+its spread.
+
+```{code-cell} ipython3
+fig, axes = plt.subplots(1, 3, figsize=(15, 4.5), layout="constrained")
+level = dict(z=5000.0)
+for ax, c in zip(axes, "uvw"):
+    im = wind_u[f"{c}_uncertainty"].sel(**level).plot(
+        ax=ax, vmin=0, cmap="viridis", add_colorbar=False
+    )
+    ax.set_title(f"{c}_uncertainty at 5 km")
+    ax.set_aspect("equal")
+    fig.colorbar(im, ax=ax, label="m/s")
+plt.show()
+```
+
 ## With a trained network
 
 A network exported to ONNX (see `ml/models/single_doppler/README.md`) is

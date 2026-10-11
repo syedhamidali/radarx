@@ -20,11 +20,14 @@ import xarray as xr
 import radarx  # noqa: F401
 from radarx.retrieve import (
     beam_blockage,
+    beam_path,
     correct_attenuation,
+    gbvtd,
     rain_rate,
     rain_rate_a,
     rain_rate_z_zdr,
     snr,
+    tc_center,
     z_offset,
 )
 
@@ -58,6 +61,7 @@ def make_sweep():
                     "flag_meanings": "drizzle rain big_drops",
                 },
             ),
+            "VRADH": field(-12.0, 12.0, units="m s-1"),
         },
         coords={
             "azimuth": (
@@ -93,8 +97,22 @@ CALLS = {
         ds, dbzh="DBZH", zdr="ZDR", phidp="PHIDP", rhohv="RHOHV", band="S"
     ),
     "z_offset": lambda ds: z_offset(ds, dbz="DBZH", zdr="ZDR", kdp="KDP", band="S"),
+    "tc_center": lambda ds: tc_center(
+        ds, first_guess=(3000.0, 4000.0), radii=np.array([1500.0, 2000.0]), guess_grid=2
+    ),
+    "gbvtd": lambda ds: gbvtd(
+        ds, (3000.0, 4000.0), radii=np.array([1500.0, 2000.0]), min_points=5
+    ),
     "beam_blockage": lambda ds: beam_blockage(
         ds, geographic_dem(bell()), site=(30.0, 78.0, 500.0), beamwidth=1.0
+    ),
+    "beam_path": lambda ds: beam_path(
+        ds,
+        (
+            np.arange(0.0, 12001.0, 500.0),
+            313.0 - 39.2e-3 * np.arange(0.0, 12001.0, 500.0),
+        ),
+        radar_height=500.0,
     ),
 }
 

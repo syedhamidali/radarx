@@ -20,6 +20,14 @@
 // above and below the minimum (onset of the signature, after Griffin et al.
 // 2020) or, alternatively, the half-prominence edges of the ZDR / rhohv
 // anomalies.
+//
+// height_blend: weighted means of samples on a height grid, with a top-hat
+// (bins) or Cressman (1959) vertical kernel; used by the range-defined, columnar
+// and RHI profiles.
+//
+// ppi_melting_layer: melting-layer points on the rays of PPIs and their
+// percentiles over azimuth windows (Giangrande et al. 2008; see
+// melting_layer_ppi in vertical_profiles.py).
 
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
@@ -420,8 +428,233 @@ py::tuple melting_layer(const DArray& zh, const DArray& rhohv, const DArray& zdr
     return py::make_tuple(top, bottom, peak);
 }
 
+namespace {
+
+constexpr double kLn10Over10 = 0.2302585092994046;  // ln(10) / 10
+
+enum Kernel : int { kTopHat = 0, kCressman = 1 };
+
+}  // namespace
+
+// Weighted mean of samples at heights `height` (ascending, (n,)) on the target
+// heights `grid` (m,). A sample within `radius` of a target contributes with
+// weight[i] * K(d), d the height distance: K = 1 on [-radius, radius) for the
+// top hat (bins), K = (R^2 - d^2) / (R^2 + d^2) for |d| < R for the Cressman
+// (1959) weights. values: (nv, n); NaN samples are skipped. modes[v]: 0 mean,
+// 1 mean in linear units of a dB quantity. A target needs at least
+// min_samples contributing samples. Returns (values, counts), (nv, m).
+py::tuple height_blend(const DArray& height, const DArray& weight, const DArray& values,
+                       const DArray& grid, double radius, int kernel,
+                       const std::vector<int>& modes, int64_t min_samples, int n_threads) {
+    if (height.ndim() != 1 || weight.ndim() != 1 || grid.ndim() != 1 || values.ndim() != 2)
+        throw std::invalid_argument("height, weight and grid must be 1-D and values 2-D");
+    const int64_t n = height.shape(0), m = grid.shape(0);
+    const int64_t nv = values.shape(0);
+    if (weight.shape(0) != n || values.shape(1) != n ||
+        static_cast<int64_t>(modes.size()) != nv)
+        throw std::invalid_argument("height, weight, values and modes do not match");
+    if (kernel != kTopHat && kernel != kCressman)
+        throw std::invalid_argument("unknown kernel");
+    for (int md : modes)
+        if (md != kMean && md != kMeanDb) throw std::invalid_argument("unknown reduction mode");
+    if (!(radius > 0.0)) throw std::invalid_argument("radius must be positive");
+    const double* H = height.data();
+    for (int64_t i = 1; i < n; ++i)
+        if (H[i] < H[i - 1]) throw std::invalid_argument("height must be ascending");
+    py::array_t<double> out({nv, m});
+    py::array_t<int32_t> cnt({nv, m});
+    double* po = out.mutable_data();
+    int32_t* pc = cnt.mutable_data();
+    const double *W = weight.data(), *X = values.data(), *G = grid.data();
+    constexpr int64_t kBlock = 16;
+    const int64_t n_items = (m + kBlock - 1) / kBlock;
+    {
+        py::gil_scoped_release release;
+        std::atomic<int64_t> next{0};
+        auto worker = [&]() {
+            for (int64_t item = next.fetch_add(1); item < n_items; item = next.fetch_add(1)) {
+                const int64_t k1 = std::min(m, (item + 1) * kBlock);
+                for (int64_t k = item * kBlock; k < k1; ++k) {
+                    const double z = G[k];
+                    const int64_t lo = std::lower_bound(H, H + n, z - radius) - H;
+                    const int64_t hi = std::lower_bound(H, H + n, z + radius) - H;
+                    for (int64_t v = 0; v < nv; ++v) {
+                        const double* x = X + v * n;
+                        double sw = 0.0, sx = 0.0;
+                        int64_t c = 0;
+                        for (int64_t i = lo; i < hi; ++i) {
+                            if (std::isnan(x[i]) || !(W[i] > 0.0)) continue;
+                            double w = W[i];
+                            if (kernel == kCressman) {
+                                const double d = H[i] - z;
+                                const double r2 = radius * radius, d2 = d * d;
+                                if (!(d2 < r2)) continue;
+                                w *= (r2 - d2) / (r2 + d2);
+                            }
+                            const double val =
+                                modes[v] == kMeanDb ? std::exp(x[i] * kLn10Over10) : x[i];
+                            sw += w;
+                            sx += w * val;
+                            ++c;
+                        }
+                        pc[v * m + k] = static_cast<int32_t>(c);
+                        if (c < 1 || c < min_samples || !(sw > 0.0)) {
+                            po[v * m + k] = kNaN;
+                        } else {
+                            const double mean = sx / sw;
+                            po[v * m + k] =
+                                modes[v] == kMeanDb ? 10.0 * std::log10(mean) : mean;
+                        }
+                    }
+                }
+            }
+        };
+        run_parallel(n_workers(n_threads, n_items), worker);
+    }
+    return py::make_tuple(out, cnt);
+}
+
+namespace {
+
+// Linear-interpolation percentile (NumPy's default) of the sorted values.
+double percentile_sorted(const std::vector<double>& v, double q) {
+    const double pos = (static_cast<double>(v.size()) - 1.0) * q / 100.0;
+    const size_t lo = static_cast<size_t>(std::floor(pos));
+    const size_t hi = std::min(lo + 1, v.size() - 1);
+    return v[lo] + (pos - static_cast<double>(lo)) * (v[hi] - v[lo]);
+}
+
+struct PpiParams {
+    double rho_lo, rho_hi;  // gate: rho_lo < rhohv < rho_hi
+    double zdr_lo, zdr_hi;  // maximum of ZDR above the gate within [zdr_lo, zdr_hi]
+    double dbz_lo, dbz_hi;  // maximum of Z above the gate within [dbz_lo, dbz_hi]
+    double hmax;            // gate lower than hmax
+};
+
+}  // namespace
+
+// Melting-layer designation on PPIs (Giangrande et al. 2008): the gates of
+// every ray with rho_lo < rhohv < rho_hi below hmax that have, within the
+// gates [j, hi[j]) (a height window above the gate), a maximum of Z and of ZDR
+// in the ranges are melting-layer points. For every target azimuth, the top and
+// bottom are the q_top and q_bottom percentiles of the heights of the points of
+// all rays (of all sweeps) within sector / 2 degrees of it, if there are at
+// least min_points. Also returned: the same over all azimuths.
+// zh, rhohv, zdr: per sweep (nray, ngate); azimuth: per sweep (nray,);
+// height: per sweep (ngate,), ascending; hi: per sweep (ngate,).
+py::tuple ppi_melting_layer(const std::vector<FArray>& zh, const std::vector<FArray>& rhohv,
+                            const std::vector<FArray>& zdr, const std::vector<DArray>& azimuth,
+                            const std::vector<DArray>& height,
+                            const std::vector<py::array_t<int64_t>>& hi, const DArray& target,
+                            double rho_lo, double rho_hi, double zdr_lo, double zdr_hi,
+                            double dbz_lo, double dbz_hi, double hmax, double sector,
+                            double q_top, double q_bottom, int64_t min_points, int n_threads) {
+    const size_t ns = zh.size();
+    if (rhohv.size() != ns || zdr.size() != ns || azimuth.size() != ns ||
+        height.size() != ns || hi.size() != ns)
+        throw std::invalid_argument("every field needs one entry per sweep");
+    if (target.ndim() != 1) throw std::invalid_argument("target azimuths must be 1-D");
+    const PpiParams params{rho_lo, rho_hi, zdr_lo, zdr_hi, dbz_lo, dbz_hi, hmax};
+    std::vector<int64_t> nray(ns), ngate(ns), first_ray(ns + 1, 0);
+    for (size_t s = 0; s < ns; ++s) {
+        if (zh[s].ndim() != 2) throw std::invalid_argument("fields must be 2-D (ray, gate)");
+        nray[s] = zh[s].shape(0);
+        ngate[s] = zh[s].shape(1);
+        for (const auto* a : {&rhohv[s], &zdr[s]})
+            if (a->ndim() != 2 || a->shape(0) != nray[s] || a->shape(1) != ngate[s])
+                throw std::invalid_argument("zh, rhohv and zdr shapes do not match");
+        if (azimuth[s].ndim() != 1 || azimuth[s].shape(0) != nray[s] ||
+            height[s].ndim() != 1 || height[s].shape(0) != ngate[s] || hi[s].ndim() != 1 ||
+            hi[s].shape(0) != ngate[s])
+            throw std::invalid_argument("azimuth, height or hi shape does not match");
+        first_ray[s + 1] = first_ray[s] + nray[s];
+    }
+    const int64_t total = first_ray[ns];
+    const int64_t nt = target.shape(0);
+    std::vector<std::vector<double>> points(total);
+    std::vector<double> ray_az(total);
+    for (size_t s = 0; s < ns; ++s)
+        for (int64_t r = 0; r < nray[s]; ++r) ray_az[first_ray[s] + r] = azimuth[s].data()[r];
+    py::array_t<double> top(nt), bottom(nt);
+    py::array_t<int64_t> npts(nt);
+    double *pt = top.mutable_data(), *pb = bottom.mutable_data();
+    int64_t* pn = npts.mutable_data();
+    const double* T = target.data();
+    double all[3] = {kNaN, kNaN, 0.0};
+    {
+        py::gil_scoped_release release;
+        std::atomic<int64_t> next{0};
+        auto flag_rays = [&]() {
+            for (int64_t i = next.fetch_add(1); i < total; i = next.fetch_add(1)) {
+                const size_t s = static_cast<size_t>(
+                    std::upper_bound(first_ray.begin(), first_ray.end(), i) - first_ray.begin() -
+                    1);
+                const int64_t r = i - first_ray[s], ng = ngate[s];
+                const float *Z = zh[s].data() + r * ng, *R = rhohv[s].data() + r * ng,
+                            *D = zdr[s].data() + r * ng;
+                const double* H = height[s].data();
+                const int64_t* HI = hi[s].data();
+                auto& out = points[i];
+                for (int64_t j = 0; j < ng; ++j) {
+                    if (!(H[j] < params.hmax) || !(R[j] > params.rho_lo) ||
+                        !(R[j] < params.rho_hi))
+                        continue;
+                    double zmax = -std::numeric_limits<double>::infinity(), dmax = zmax;
+                    for (int64_t q = j; q < HI[j]; ++q) {
+                        if (Z[q] == Z[q]) zmax = std::max(zmax, static_cast<double>(Z[q]));
+                        if (D[q] == D[q]) dmax = std::max(dmax, static_cast<double>(D[q]));
+                    }
+                    if (zmax >= params.dbz_lo && zmax <= params.dbz_hi &&
+                        dmax >= params.zdr_lo && dmax <= params.zdr_hi)
+                        out.push_back(H[j]);
+                }
+            }
+        };
+        run_parallel(n_workers(n_threads, total), flag_rays);
+        std::atomic<int64_t> next2{0};
+        auto reduce_sectors = [&]() {
+            std::vector<double> pool;
+            for (int64_t k = next2.fetch_add(1); k < nt; k = next2.fetch_add(1)) {
+                pool.clear();
+                for (int64_t i = 0; i < total; ++i) {
+                    double d = std::fabs(std::fmod(ray_az[i] - T[k], 360.0));
+                    if (d > 180.0) d = 360.0 - d;
+                    if (d <= 0.5 * sector) pool.insert(pool.end(), points[i].begin(), points[i].end());
+                }
+                pn[k] = static_cast<int64_t>(pool.size());
+                if (pool.empty() || static_cast<int64_t>(pool.size()) < min_points) {
+                    pt[k] = pb[k] = kNaN;
+                    continue;
+                }
+                std::sort(pool.begin(), pool.end());
+                pt[k] = percentile_sorted(pool, q_top);
+                pb[k] = percentile_sorted(pool, q_bottom);
+            }
+        };
+        run_parallel(n_workers(n_threads, nt), reduce_sectors);
+        std::vector<double> pool;
+        for (int64_t i = 0; i < total; ++i) pool.insert(pool.end(), points[i].begin(), points[i].end());
+        all[2] = static_cast<double>(pool.size());
+        if (!pool.empty() && static_cast<int64_t>(pool.size()) >= min_points) {
+            std::sort(pool.begin(), pool.end());
+            all[0] = percentile_sorted(pool, q_top);
+            all[1] = percentile_sorted(pool, q_bottom);
+        }
+    }
+    return py::make_tuple(top, bottom, npts, all[0], all[1], static_cast<int64_t>(all[2]));
+}
+
 PYBIND11_MODULE(_qvp, m) {
     m.doc() = "Compiled quasi-vertical profile kernels for radarx.";
+    m.def("height_blend", &height_blend, py::arg("height"), py::arg("weight"),
+          py::arg("values"), py::arg("grid"), py::arg("radius"), py::arg("kernel"),
+          py::arg("modes"), py::arg("min_samples") = 1, py::arg("n_threads") = 0);
+    m.def("ppi_melting_layer", &ppi_melting_layer, py::arg("zh"), py::arg("rhohv"),
+          py::arg("zdr"), py::arg("azimuth"), py::arg("height"), py::arg("hi"),
+          py::arg("target"), py::arg("rho_lo"), py::arg("rho_hi"), py::arg("zdr_lo"),
+          py::arg("zdr_hi"), py::arg("dbz_lo"), py::arg("dbz_hi"), py::arg("hmax"),
+          py::arg("sector"), py::arg("q_top"), py::arg("q_bottom"), py::arg("min_points"),
+          py::arg("n_threads") = 0);
     m.def("azimuthal_reduce", &azimuthal_reduce, py::arg("data"), py::arg("quality"),
           py::arg("thresholds"), py::arg("modes"), py::arg("min_valid"),
           py::arg("n_threads") = 0);

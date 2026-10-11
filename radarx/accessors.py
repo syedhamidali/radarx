@@ -721,6 +721,31 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
 
         return multi_doppler(self.xarray_obj, background, **kwargs)
 
+    def dual_doppler_analytic(self, background=None, **kwargs):
+        """
+        Analytic dual-Doppler winds from the radial velocities of several radars.
+
+        Parameters
+        ----------
+        background : xarray.Dataset, optional
+            Background on the grid; only its air density and freezing level
+            are used.
+        **kwargs
+            Options of :func:`radarx.retrieve.dual_doppler_analytic`.
+
+        Returns
+        -------
+        xarray.Dataset
+            ``u``, ``v``, ``w``, ``u_error`` and ``v_error`` on the grid.
+
+        See Also
+        --------
+        radarx.retrieve.dual_doppler_analytic, radarx.retrieve.multi_doppler
+        """
+        from .retrieve.multidoppler import dual_doppler_analytic
+
+        return dual_doppler_analytic(self.xarray_obj, background, **kwargs)
+
     def plot_max_cappi(
         self,
         data_var,

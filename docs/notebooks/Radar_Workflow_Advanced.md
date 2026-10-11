@@ -26,10 +26,10 @@ written on the fly).
 
 | Section | What it shows | radarx calls |
 |---|---|---|
-| 1 | radar equation, beam geometry, Doppler and unit helpers | `radarx.fundamentals`, `radarx.core` |
+| 1 | radar equation, beam geometry (4/3 Earth and ray tracing through a refractivity profile), Doppler and unit helpers | `radarx.fundamentals`, `radarx.core`, `refractivity`, `beam_path` |
 | 2 | disdrometer spectra, quality control, gamma fits, radar variables | `radarx.io.read_parsivel`, `disdrometer_qc`, `fit_gamma`, `match_radar` |
 | 3 | Bayesian DSD retrieval with uncertainty | `dsd_prior`, `forward_grid`, `dsd_bayesian` |
-| 4 | raindrop trajectories and size sorting | `rain_trajectories`, `size_sorting`, `surface_dsd` |
+| 4 | raindrop trajectories and size sorting, collisions in a rain shaft, hail and melting snow fall speeds | `rain_trajectories`, `size_sorting`, `surface_dsd`, `rain_shaft`, `hail_fall_speed`, `melting_snow_fall_speed` |
 | 5 | surface stations, profilers, cold pools | `read_sticknet`, `read_pips`, `cold_pool_intensity` |
 | 6 | lightning mapping | `read_lma`, `cluster_flashes`, `lightning_jump` |
 | 7 | tornado detection and biological echo | `tornet_inputs`, `tornado_probability`, `biological_echo` |
@@ -38,6 +38,9 @@ written on the fly).
 | 10 | machine-learning plumbing | `radarx.ml` |
 | 11 | beam blockage and terrain clutter from a digital elevation model | `beam_blockage` |
 | 12 | export to CfRadial1, CfRadial2, ODIM_H5, Zarr and CF NetCDF | `write_cfradial1`, `write_cfradial2`, `write_odim`, `write_zarr`, `write_netcdf_cf` |
+| 13 | tropical-cyclone winds from one radar: centre, GBVTD, decomposition | `tc_center`, `gbvtd`, `tc_decompose`, `synthetic_vortex`, `vortex_profile` |
+| 14 | polarimetric forward operator for WRF and MPAS model output | `wrf_state`, `mpas_state`, `forward_operator`, `to_radar_grid` |
+| 15 | dual-PRF velocity correction | `correct_dual_prf` |
 
 ```{code-cell} ipython3
 import math
@@ -64,6 +67,7 @@ from radarx.fundamentals import (
     power,
     principles,
     reflectivity,
+    refraction,
     scattering,
     system,
     timing,
@@ -80,6 +84,8 @@ from radarx.io import (
     read_sticknet,
     read_sticknet_locations,
     read_wind_profiler,
+    refractivity,
+    saturation_vapor_pressure,
     write_cfradial1,
     write_cfradial2,
     write_netcdf_cf,
@@ -90,6 +96,7 @@ from radarx.retrieve import (
     azimuthal_shear,
     baroclinic_generation,
     beam_blockage,
+    beam_path,
     biological_echo,
     bulk_shear,
     buoyancy,
@@ -99,6 +106,7 @@ from radarx.retrieve import (
     cold_pool_intensity_from_pressure,
     cold_pool_intensity_from_surface,
     cold_pool_perturbation,
+    correct_dual_prf,
     dealias_velocity,
     diabatic_lagrangian,
     disdrometer_qc,
@@ -113,10 +121,15 @@ from radarx.retrieve import (
     fit_gamma,
     fit_gamma_moments,
     forward_grid,
+    forward_operator,
+    gbvtd,
     grid_lightning,
+    hail_fall_speed,
     lightning_jump,
     match_radar,
+    melting_snow_fall_speed,
     microphysical_rates,
+    mpas_state,
     number_concentration,
     parsivel_bins,
     polarimetric_precipitation,
@@ -125,6 +138,7 @@ from radarx.retrieve import (
     radar_at_location,
     radar_from_dsd,
     radar_geometry,
+    rain_shaft,
     rain_source_points,
     rain_trajectories,
     raupach_berne_correction,
@@ -134,12 +148,18 @@ from radarx.retrieve import (
     single_doppler_winds,
     size_sorting,
     surface_dsd,
+    synthetic_vortex,
+    tc_center,
+    tc_decompose,
     terminal_fall_speed,
+    to_radar_grid,
     tornado_probability,
     tornet_inputs,
     trajectories,
     trajectory_matched_times,
     vertical_source_distribution,
+    vortex_profile,
+    wrf_state,
     ziegler2013_precipitation,
     ziegler2013_profiles,
 )
@@ -360,6 +380,41 @@ for el, color in zip(elevation, [OKABE["blue"], OKABE["orange"], OKABE["green"]]
 ax2.set(xlabel="range (km)", ylabel="beam centre height (km)")
 ax2.legend(title="elevation", frameon=False)
 plt.show()
+```
+
+### Refraction: the beam through a refractivity profile
+
+The 4/3 Earth stands for a refractivity that decreases by 39 N-units per km.
+`refractivity` computes $N$ from pressure, temperature and vapour pressure
+(Bean and Dutton 1966, Eq. 1.17), `trace_rays` integrates the ray through the
+profile (Snell's law in a spherically stratified atmosphere) and gives the true
+beam height and ground range, `k_e_from_rays` the effective Earth radius factor
+that reproduces a traced beam, and `beam_path`, also a method of a sweep or a
+volume, does it for the gates of a sweep. A moist layer under dry air bends
+the beam down; here a sounding with such a layer is compared with the 4/3 Earth:
+
+```{code-cell} ipython3
+zr = np.arange(0.0, 12001.0, 100.0)
+p_r = 101325.0 * (1.0 - 2.25577e-5 * zr) ** 5.25588
+t_r = np.maximum(288.15 - 0.0065 * zr, 216.65)
+e_r = 0.55 * saturation_vapor_pressure(t_r).values * np.exp(-zr / 1500.0)
+e_r = e_r * (1.0 + 0.5 * np.exp(-zr / 300.0))  # a moist layer at the ground
+n_r = refractivity(p_r, t_r, e_r).values
+ranges_r = np.arange(2e3, 200e3 + 1.0, 2e3)
+ray = refraction.trace_rays(ranges_r, 0.5, zr, n_r, radar_height=100.0)
+h43 = geometry.beam_center_height(ranges_r, 0.5, 100.0)
+k_e = refraction.k_e_from_rays(ranges_r, 0.5, ray.beam_height, 100.0)
+print(f"N at the ground {n_r[0]:.0f}; beam height at 150 km {float(ray.beam_height.sel(range=150e3)):.0f} m "
+      f"(4/3 Earth: {geometry.beam_center_height(150e3, 0.5, 100.0):.0f} m); k_e of the gates {float(k_e.median()):.3f}")
+sweep_r = xr.Dataset(
+    {"DBZH": (("azimuth", "range"), np.zeros((4, ranges_r.size), dtype="f4"))},
+    coords={"azimuth": np.arange(4) * 90.0 + 45.0, "range": ranges_r,
+            "elevation": ("azimuth", np.full(4, 0.5)), "altitude": 100.0},
+)
+profile_r = xr.Dataset({"refractivity": ("height", n_r)}, coords={"height": zr})
+path = beam_path(sweep_r, profile_r)
+print("beam_path, accessor:", float(sweep_r.radarx.beam_path(profile_r).beam_height.isel(azimuth=0, range=-1)),
+      "m =", float(path.beam_height.isel(azimuth=0, range=-1)), "m")
 ```
 
 ## 2. Disdrometers
@@ -816,6 +871,47 @@ ax2.set(xlabel="drop diameter (mm)", ylabel="arrival relative to the 2 mm drops 
 plt.show()
 ```
 
+### Collisions in a rain shaft, and hail and melting snow
+
+The trajectories cannot let drop sizes collide. `rain_shaft` evolves the DSD of
+a column of still air with collisions, coalescence and breakup (the scheme of
+Low and List 1982, with the geometric collision kernel) and conserves the rain
+rate; with coalescence only, the drops grow and become few, with breakup the
+large drops that form break up again:
+
+```{code-cell} ipython3
+d_shaft = np.geomspace(0.2, 7.0, 40)
+nd_shaft = xr.DataArray(8000.0 * np.exp(-4.1 * 50.0**-0.21 * d_shaft), dims="diameter",
+                        coords={"diameter": ("diameter", d_shaft, {"units": "mm"})})
+runs = {name: rain_shaft(nd_shaft, depth=[0.0, 2000.0], collisions=name)
+        for name in ("none", "coalescence", "low_list1982")}
+for name, out in runs.items():
+    print(f"{name:13s} drops {float(out.number_concentration.isel(depth=0)):7.0f} -> "
+          f"{float(out.number_concentration.isel(depth=1)):7.0f} m-3, rain rate "
+          f"{float(out.rain_rate.isel(depth=1)):.3f} mm/h")
+via = nd_shaft.radarx.rain_shaft(depth=2000.0)  # the accessor of a DSD
+```
+
+Above and in the melting layer the fall speeds are other laws.
+`hail_fall_speed` is the size relation of Heymsfield et al. (2020) for the
+maximum dimension of a stone, and `melting_snow_fall_speed` mixes the dry-snow
+and raindrop speeds with the weight of Frick et al. (2013) (the dry-snow law has
+to be given: the one here is an example). Both are also `fall_speed` options of
+`rain_trajectories`:
+
+```{code-cell} ipython3
+stones = np.array([8.0, 15.0, 30.0, 60.0])
+print("hail:", ", ".join(f"{d:g} mm {v:.1f} m/s" for d, v in zip(stones, hail_fall_speed(stones).values)))
+print("percentiles at 30 mm:", [float(hail_fall_speed(30.0, f"heymsfield2020_p{p}")) for p in (10, 50, 90)])
+liquid = xr.DataArray([0.0, 0.3, 0.6, 0.9, 1.0], dims="liquid_fraction")
+print("2 mm melting snow:", melting_snow_fall_speed(2.0, liquid, snow=(1.0, 0.3)).values.round(2), "m/s")
+print("accessors:", xr.DataArray(stones, dims="d").radarx.hail_fall_speed().values.round(1),
+      xr.DataArray([1.0, 2.0], dims="d").radarx.melting_snow_fall_speed(0.5, snow=(1.0, 0.3)).values.round(2))
+stone = rain_trajectories({"x": 0.0, "y": 0.0, "z": 4000.0}, stones, profile=profile,
+                          storm_motion=motion, fall_speed=("hail", "heymsfield2020")).squeeze()
+print("hail landing distance (km):", (np.hypot(stone.landing_x, stone.landing_y).values / 1e3).round(1))
+```
+
 ## 5. Surface stations, profilers and cold pools
 
 A squall line lives off the balance between its cold pool and the low-level
@@ -1155,7 +1251,8 @@ squall line, 23:46 UTC. `tornet_inputs` prepares the network inputs
 (dealiased velocity, KDP and the polarimetric fields of the 0.5 and 0.9
 degree tilts), `tornado_probability` runs the network, and
 `rotation_couplets` finds the physical counterpart, compact maxima of the
-linear least-squares derivative (LLSD) azimuthal shear from `azimuthal_shear`.
+linear least-squares derivative (LLSD) azimuthal shear from `azimuthal_shear`;
+with `min_tilts` they must also be vertically continuous.
 
 ```{code-cell} ipython3
 import gzip
@@ -1197,6 +1294,25 @@ print("accessors agree:", bool(np.allclose(tor_acc.tornado_probability, tor.torn
 print(f"{tor.sizes['chip']} chips; highest tornado probability {float(tor.tornado_probability.max()):.2f}; "
       f"{couplets.sizes['couplet']} rotation couplets above 0.006 1/s")
 couplets.isel(couplet=slice(0, 5)).to_dataframe()[["azimuth", "range", "azimuthal_shear", "delta_v"]].round(3)
+```
+
+A circulation that is real extends over several tilts. With `min_tilts`, the
+chain of couplets through each couplet is followed up and down the Doppler cuts
+of the dealiased volume (on the next elevation angle, the nearest couplet of the
+same sense of rotation within `link_distance` of the peak, after the association
+of shear features across elevation angles in the NSSL Mesocyclone Detection
+Algorithm), and only the couplets on a chain of at least that many tilts are
+kept. `n_tilts` says how long the chain is:
+
+```{code-cell} ipython3
+volume = kgwx.radarx.assign(kgwx.radarx.dealias("VRADH"))
+every = rotation_couplets(volume, "VRADH_dealiased")
+continuous = rotation_couplets(volume, "VRADH_dealiased", min_tilts=3)
+n_every = sum(every[n].sizes["couplet"] for n in every.children)
+n_kept = sum(continuous[n].sizes["couplet"] for n in continuous.children)
+print(f"{n_every} couplets on {len(every.children)} Doppler cuts; {n_kept} are on a chain of at least 3 tilts")
+deepest = max(continuous.children, key=lambda n: continuous[n].sizes["couplet"])
+continuous[deepest].to_dataset()[["azimuthal_shear", "delta_v", "n_tilts"]].isel(couplet=slice(0, 4)).to_dataframe().round(3)
 ```
 
 ```{code-cell} ipython3
@@ -1320,6 +1436,24 @@ for comp in "uvw":
     err = float(np.sqrt(((wind_sd[comp] - truth[comp]) ** 2).where(seen).mean()))
     err_bg = float(np.sqrt(((background.get(comp, 0.0) - truth[comp]) ** 2).where(seen).mean()))
     print(f"{comp}: RMS error {err:.2f} m/s (background {err_bg:.2f} m/s)")
+```
+
+With `uncertainty=True` the retrieval is repeated on inputs with random errors
+(`vr_error` for the radial velocity, `background_error` for the background wind)
+and `u_uncertainty`, `v_uncertainty` and `w_uncertainty` are the standard
+deviations of the members. The weights below agree with the stated errors, and
+the result records how the fall speed was handled:
+
+```{code-cell} ipython3
+wind_u = single_doppler_winds(
+    rad, background, fall_speed_correction=False, uncertainty=True, members=6,
+    vr_error=1.0, background_error=3.0, weights={"background": (1.0 / 3.0) ** 2},
+)
+for comp in "uvw":
+    actual = float(np.sqrt(((wind_u[comp] - truth[comp]) ** 2).where(seen).mean()))
+    spread = float(np.sqrt((wind_u[f"{comp}_uncertainty"] ** 2).where(seen).mean()))
+    print(f"{comp}: actual RMS error {actual:.2f} m/s, RMS uncertainty {spread:.2f} m/s")
+print(wind_u.attrs["fall_speed_correction"])
 ```
 
 ```{code-cell} ipython3
@@ -1642,21 +1776,222 @@ with xr.open_dataset(work / "grid.nc") as cf_grid:
     print(cf_grid["DBZH"].attrs["grid_mapping"], cf_grid["lat"].dims, cf_grid.attrs["Conventions"])
 ```
 
+## 13. Tropical-cyclone winds from one radar
+
+`synthetic_vortex` forward-models a modified Rankine-combined vortex
+(Chen et al. 2013) with a mean wind, a wavenumber-1 asymmetry and noise to the
+Doppler velocity of one radar 70 km away, and `vortex_profile` gives its
+axisymmetric truth. `tc_center` finds the circulation centre and the radius of
+maximum wind (the simplex consensus of Bell and Lee 2012), `gbvtd` retrieves the
+axisymmetric tangential and radial wind and the wavenumber-1 asymmetry on rings
+around it (the ground-based velocity track display, Lee et al. 1999, with the
+equations of Liou et al. 2005) and `tc_decompose` splits the result into the
+symmetric and asymmetric winds on a polar grid. The
+[tropical-cyclone notebook](Tropical_Cyclone_Winds) tests the retrieval against
+the vortex, shows the sensitivity to the centre (1, 2 and 5 km) and tries the
+Tauktae (2021) volume of the Goa radar, which is too far away to be retrieved.
+
+```{code-cell} ipython3
+tc_true = (0.0, 70000.0)  # centre, m east and north of the radar
+tc_sweep = synthetic_vortex(
+    center=tc_true, vmax=45.0, rmw=18000.0, xt=0.6, asymmetry={1: (0.2, 60.0)},
+    mean_wind=(6.0, 0.0), noise=1.5, seed=2, azimuth_step=2.0, max_range=120000.0,
+)
+tc_found = tc_center(tc_sweep, min_radius=10000.0, max_radius=30000.0, max_wavenumber=1)
+tc_acc = tc_sweep.radarx.tc_center(min_radius=10000.0, max_radius=30000.0, max_wavenumber=1)  # the accessor
+tc_radii = np.arange(4000.0, 40001.0, 2000.0)
+tc_rings = gbvtd(tc_sweep, tc_found, radii=tc_radii, mean_wind=(6.0, 0.0))
+tc_rings_acc = tc_sweep.radarx.gbvtd(tc_true, radii=tc_radii, mean_wind=(6.0, 0.0))  # the accessor
+tc_vt, _ = vortex_profile(tc_radii, 45.0, 18000.0, 0.6)
+tc_polar = tc_decompose(tc_rings, azimuth=np.arange(0.0, 360.0, 10.0))
+print(f"centre error {np.hypot(float(tc_found.CENTER_X) - tc_true[0], float(tc_found.CENTER_Y) - tc_true[1]):.0f} m, "
+      f"RMW {float(tc_found.RMW) / 1e3:.1f} km (truth 18), maximum {float(tc_found.VT_MAX):.1f} m/s (truth 45)")
+print(f"VT0 rms error {float(np.sqrt(np.nanmean((tc_rings.VT0 - tc_vt) ** 2))):.2f} m/s; "
+      f"wavenumber-1 amplitude {float(tc_rings.VT1_AMPLITUDE.sel(radius=30000.0)):.1f} m/s "
+      f"(truth {0.2 * float(tc_vt[13]):.1f}) towards {float(tc_rings.VT1_AZIMUTH.sel(radius=30000.0)):.0f} deg (truth 60)")
+print("accessors agree:", bool(np.isclose(float(tc_acc.CENTER_X), float(tc_found.CENTER_X))
+                           and np.allclose(tc_rings_acc.VT0, gbvtd(tc_sweep, tc_true, radii=tc_radii, mean_wind=(6.0, 0.0)).VT0)))
+```
+
+```{code-cell} ipython3
+fig, axes = plt.subplots(1, 2, figsize=(10, 3.8), layout="constrained")
+axes[0].plot(tc_radii / 1e3, tc_vt, "k", label="truth")
+axes[0].plot(tc_radii / 1e3, tc_rings.VT0, label="GBVTD")
+axes[0].set(xlabel="radius (km)", ylabel="axisymmetric tangential wind (m/s)")
+axes[0].legend()
+im = axes[1].pcolormesh(tc_polar.X / 1e3, tc_polar.Y / 1e3, tc_polar.VT, cmap="viridis", shading="auto")
+axes[1].set(aspect="equal", xlabel="east (km)", ylabel="north (km)", title="retrieved tangential wind")
+fig.colorbar(im, ax=axes[1], label="m/s")
+plt.show()
+```
+
+## 14. Forward operator for WRF and MPAS output
+
+A forward operator turns the microphysics state of a numerical model into the
+fields a radar measures, so that a model run is compared with the radar in radar
+space. `wrf_state` and `mpas_state` read a WRF `wrfout` Dataset or an MPAS output
+Dataset on its unstructured mesh into one standard state; `forward_operator`
+computes `DBZH`, `ZDR`, `KDP`, `RHOHV` and the fall speed on the model grid (T-matrix
+rain, and Rayleigh dry snow, hail and graupel as in Jung et al. 2008, with the
+equations of Ryzhkov et al. 2020); `to_radar_grid` samples them along the beam
+(4/3 Earth radius, site altitude in the radius) and adds the radial velocity. The
+rain size distribution of a scheme is not encoded: the intercept `n0_rain`, the
+shape `mu_rain` or the number concentration is an explicit assumption. The
+[forward operator notebook](Forward_Operator) shows a squall line, the checks
+against closed forms and `radar_from_dsd`, and the assumptions. No WRF output is
+read here: the Datasets are small synthetic ones with the variables of the two
+Registries.
+
+```{code-cell} ipython3
+def tiny_wrf(nx=40, ny=30, nz=24, dx=4000.0):
+    """A rain and snow blob with the variables of a wrfout file (flat terrain)."""
+    zi = 16000.0 * np.linspace(0, 1, nz + 1) ** 1.4
+    zm = 0.5 * (zi[:-1] + zi[1:])
+    t_k = 288.15 - 6.5e-3 * np.minimum(zm, 11000.0)
+    p_pa = 101325.0 * (t_k / 288.15) ** 5.2559
+    jj, ii = np.mgrid[0:ny, 0:nx]
+    lat = 35.0 + (jj - ny / 2) * dx / 111195.0
+    lon = -97.5 + (ii - nx / 2) * dx / (111195.0 * np.cos(np.deg2rad(35.0)))
+    blob = np.exp(-(((ii - 24) ** 2 + (jj - 15) ** 2) / 40.0))[None]
+    q_rain = np.where(t_k[:, None, None] > 273.15, 3e-3 * blob * np.exp(-zm / 3000.0)[:, None, None], 0.0)
+    q_snow = np.where(t_k[:, None, None] <= 273.15, 0.8e-3 * blob, 0.0)
+    d3 = ("Time", "bottom_top", "south_north", "west_east")
+    d3z = ("Time", "bottom_top_stag", "south_north", "west_east")
+    full = lambda a: np.broadcast_to(a, (nz, ny, nx))[None]  # noqa: E731
+    return xr.Dataset({
+        "T": (d3, full((t_k * (1e5 / p_pa) ** (287.0 / 1004.5) - 300.0)[:, None, None])),
+        "P": (d3, full(np.zeros((1, 1, 1)))), "PB": (d3, full(p_pa[:, None, None])),
+        "PH": (d3z, np.zeros((1, nz + 1, ny, nx))),
+        "PHB": (d3z, np.broadcast_to(9.81 * zi[:, None, None], (nz + 1, ny, nx))[None]),
+        "QVAPOR": (d3, full(0.008 * np.exp(-zm / 2500.0)[:, None, None])),
+        "QRAIN": (d3, q_rain[None]), "QSNOW": (d3, q_snow[None]),
+        "QNRAIN": (d3, np.where(q_rain > 0, 6.0 * q_rain / (np.pi * 1000.0 * 1.2e-3**3), 0.0)[None]),
+        "U": (("Time", "bottom_top", "south_north", "west_east_stag"), np.full((1, nz, ny, nx + 1), 12.0)),
+        "V": (("Time", "bottom_top", "south_north_stag", "west_east"), np.full((1, nz, ny + 1, nx), 3.0)),
+        "W": (d3z, np.full((1, nz + 1, ny, nx), 0.5)),
+        "XLAT": (("Time", "south_north", "west_east"), lat[None]),
+        "XLONG": (("Time", "south_north", "west_east"), lon[None]),
+    })
+
+
+fo_state = wrf_state(tiny_wrf())  # TEMPERATURE, AIR_DENSITY, HEIGHT, winds, mixing ratios
+fo_fields = forward_operator(fo_state, nrain="QNRAIN", mu_rain=2.0)  # name the rain assumption
+fo_acc = fo_state.radarx.forward_operator(nrain="QNRAIN", mu_rain=2.0, band="C")  # the accessor
+fo_sweep = to_radar_grid(fo_fields, (35.0, -98.1, 300.0), 0.5, gate_range=np.arange(500.0, 90001.0, 500.0))
+fo_volume = fo_fields.radarx.to_radar_grid((35.0, -98.1, 300.0), [0.5, 2.0], gate_range=np.arange(500.0, 90001.0, 500.0))
+print(f"model grid: DBZH up to {float(fo_fields.DBZH.max()):.1f} dBZ, ZDR up to {float(fo_fields.ZDR.max()):.2f} dB, "
+      f"KDP up to {float(fo_fields.KDP.max()):.2f} deg/km; C band ZDR {float(fo_acc.ZDR.max()):.2f} dB")
+print(f"radar space: DBZH {float(fo_sweep.DBZH.max()):.1f} dBZ, VRADH {float(fo_sweep.VRADH.min()):.1f} to "
+      f"{float(fo_sweep.VRADH.max()):.1f} m/s, volume sweeps {sorted(fo_volume.children)}")
+
+rng_mp = np.random.default_rng(0)
+n_mp, nz_mp = 300, 20
+lat_mp = 35.0 + rng_mp.uniform(-2, 2, n_mp)
+lon_mp = -97.5 + rng_mp.uniform(-2, 2, n_mp)
+zi_mp = np.repeat((15000.0 * np.linspace(0, 1, nz_mp + 1) ** 1.4)[None], n_mp, 0)
+zm_mp = 0.5 * (zi_mp[:, :-1] + zi_mp[:, 1:])
+t_mp = 288.15 - 6.5e-3 * np.minimum(zm_mp, 11000.0)
+p_mp = 101325.0 * (t_mp / 288.15) ** 5.2559
+dims_mp = ("Time", "nCells", "nVertLevels")
+mpas = xr.Dataset({
+    "qr": (dims_mp, np.where(t_mp > 273.15, 2e-3, 0.0)[None]), "qs": (dims_mp, np.where(t_mp <= 273.15, 4e-4, 0.0)[None]),
+    "rho": (dims_mp, (p_mp / (287.0 * t_mp))[None]), "theta": (dims_mp, (t_mp * (1e5 / p_mp) ** (287.0 / 1004.5))[None]),
+    "pressure": (dims_mp, p_mp[None]),
+    "uReconstructZonal": (dims_mp, np.full((1, n_mp, nz_mp), 8.0)),
+    "uReconstructMeridional": (dims_mp, np.full((1, n_mp, nz_mp), 2.0)),
+    "w": (("Time", "nCells", "nVertLevelsP1"), np.zeros((1, n_mp, nz_mp + 1))),
+})
+mpas_grid_ = xr.Dataset({"lonCell": ("nCells", np.deg2rad(lon_mp)), "latCell": ("nCells", np.deg2rad(lat_mp)),
+                         "zgrid": (("nCells", "nVertLevelsP1"), zi_mp)})
+mp_fields = forward_operator(mpas_state(mpas, mpas_grid_), n0_rain=4.0e6)  # unstructured mesh, fixed intercept
+mp_sweep = to_radar_grid(mp_fields, (35.0, -97.5, 200.0), 1.0, azimuth=np.arange(0.5, 360.0, 2.0),
+                         gate_range=np.arange(1000.0, 120001.0, 1000.0))
+print(f"MPAS-like mesh: DBZH up to {float(mp_fields.DBZH.max()):.1f} dBZ on the cells, "
+      f"{int(mp_sweep.DBZH.notnull().sum())} radar gates with echo")
+```
+
+## 15. Dual-PRF velocity correction
+
+A dual-PRF radar alternates two pulse repetition frequencies from ray to ray
+and unfolds each ray with the difference of the two velocity estimates. The
+difference is noisy (five times the noise of one estimate for an unfolding
+factor of 3), so some gates (1 % in the C-band data of the paper, 0.5 % below) are unfolded to the wrong Nyquist
+interval of its PRF and stands out as an isolated outlier. `correct_dual_prf`
+moves the outliers back by multiples of twice the unambiguous velocity of their
+ray's PRF, using the local median velocity (Holleman and Beekhuis 2003). The
+data are synthetic: a smooth wind field that the "radar processor" measures at
+alternating Nyquist velocities of 16 and 12 m/s (extended interval 48 m/s)
+with 1 m/s noise:
+
+```{code-cell} ipython3
+vh, vl = 16.0, 12.0  # Nyquist velocities of the high and low PRF
+factor = vl / (vh - vl)  # unfolding factor 3
+vext = vh * vl / (vh - vl)
+rnd = np.random.default_rng(2)
+az = np.arange(720) * 0.5 + 0.25
+rng = 1000.0 + 250.0 * np.arange(240)
+truth = 28.0 * np.sin(np.radians(az)[:, None] + 0.4) * (0.5 + 0.5 * rng[None, :] / rng[-1]) + 5.0 * np.sin(rng[None, :] / 8e3)
+
+
+def fold(v, vu):
+    return (v + vu) % (2 * vu) - vu
+
+
+high = np.arange(az.size) % 2 == 0
+vu = np.where(high, vh, vl)[:, None]
+noisy = truth + rnd.standard_normal(truth.shape)  # what each ray measures, before folding
+measured = fold(noisy, vu)
+previous = np.roll(measured, 1, axis=0)
+primary = fold((factor + 1) * np.where(high[:, None], previous, measured) - factor * np.where(high[:, None], measured, previous), vext)
+radar = measured + 2 * vu * np.round((primary - measured) / (2 * vu))  # the unfolded velocity of the processor
+dual = xr.Dataset(
+    {"VRADH": (("azimuth", "range"), radar)},
+    coords={"azimuth": az, "range": rng, "elevation": ("azimuth", np.full(az.size, 0.5))},
+)
+
+fixed = dual.radarx.correct_dual_prf("VRADH", nyquist_high=vh, nyquist_low=vl)
+direct = correct_dual_prf(dual, "VRADH", nyquist_high=vh, nyquist_low=vl, passes=1)
+outliers = lambda v: float((np.abs(v - noisy) > 5.0).mean())
+print(f"outliers: raw {outliers(radar):.2%}, one pass {outliers(direct.VRADH_dualprf.values):.3%}, "
+      f"two passes {outliers(fixed.VRADH_dualprf.values):.3%}; "
+      f"{int((fixed.VRADH_dualprf_shift != 0).sum())} gates moved, "
+      f"{int((fixed.VRADH_dualprf_shift.values[high] != 0).sum())} of them on high-PRF rays")
+fig, axes = plt.subplots(1, 3, figsize=(15, 4.2), layout="constrained")
+x, y = rng * np.sin(np.radians(az))[:, None] / 1e3, rng * np.cos(np.radians(az))[:, None] / 1e3
+for ax, (name, field) in zip(axes, [("raw dual-PRF velocity", radar), ("corrected", fixed.VRADH_dualprf.values), ("gates moved", fixed.VRADH_dualprf_shift.values != 0)]):
+    pm = ax.pcolormesh(x, y, field, cmap="RdBu_r" if name != "gates moved" else "Greys", vmin=-35 if name != "gates moved" else 0, vmax=35 if name != "gates moved" else 1)
+    ax.set(title=name, aspect="equal", xlim=(-30, 30), ylim=(-30, 30), xlabel="east (km)")
+plt.show()
+```
+
+What it does not do: it does not remove clutter and noise first (the group-size
+filter of the paper), and it does not unfold velocities beyond the extended
+interval; run `dealias_velocity` with `nyquist_velocity` equal to the extended
+interval (48 m/s here) for that.
+
 ## References
 
 - Dawson, D., M. Biggerstaff, and S. Waugh, 2025: PERiLS_2022: Portable In Situ Precipitation Stations (PIPS) Data. Version 1.0. NSF NCAR Earth Observing Laboratory, https://doi.org/10.26023/HFBG-7W5M-WA00.
+- Bean, B. R., and E. J. Dutton, 1966: Radio Meteorology. *NBS Monograph 92*, National Bureau of Standards, <https://doi.org/10.6028/NBS.MONO.92>
 - Bruning, E. C., and D. R. MacGorman, 2013: Theory and Observations of Controls on Lightning Flash Size Spectra. *Journal of the Atmospheric Sciences*, **70**, 4012-4029, <https://doi.org/10.1175/JAS-D-12-0289.1>
+- Frick, C., A. Seifert, and H. Wernli, 2013: A bulk parametrization of melting snowflakes with explicit liquid water fraction for the COSMO model. *Geoscientific Model Development*, **6**, 1925-1939, <https://doi.org/10.5194/gmd-6-1925-2013>
 - Fuchs, B. R., E. C. Bruning, S. A. Rutledge, L. D. Carey, P. R. Krehbiel, and W. Rison, 2016: Climatological analyses of LMA data with an open-source lightning flash-clustering algorithm. *Journal of Geophysical Research: Atmospheres*, **121**, 8625-8648, <https://doi.org/10.1002/2015JD024663>
+- Holleman, I., and H. Beekhuis, 2003: Analysis and Correction of Dual PRF Velocity Data. *Journal of Atmospheric and Oceanic Technology*, **20**, 443-453, <https://doi.org/10.1175/1520-0426(2003)20<443:AACODP>2.0.CO;2>
 - Gao, J., M. Xue, A. Shapiro, and K. K. Droegemeier, 1999: A Variational Method for the Analysis of Three-Dimensional Wind Fields from Two Doppler Radars. *Monthly Weather Review*, **127**, 2128-2142, <https://doi.org/10.1175/1520-0493(1999)127<2128:AVMFTA>2.0.CO;2>
+- Heymsfield, A., M. Szakáll, A. Jost, I. Giammanco, R. Wright, and J. Brimelow, 2020: Corrigendum (to: A comprehensive observational study of graupel and hail terminal velocity, mass flux, and kinetic energy). *Journal of the Atmospheric Sciences*, **77**, 405-412, <https://doi.org/10.1175/JAS-D-19-0185.1>
+- Jung, Y., G. Zhang, and M. Xue, 2008: Assimilation of Simulated Polarimetric Radar Data for a Convective Storm Using the Ensemble Kalman Filter. Part I: Observation Operators for Reflectivity and Polarimetric Variables. *Monthly Weather Review*, **136**, 2228-2245, <https://doi.org/10.1175/2007MWR2083.1>
 - Kumjian, M. R., and A. V. Ryzhkov, 2012: The Impact of Size Sorting on the Polarimetric Radar Variables. *Journal of the Atmospheric Sciences*, **69**, 2042-2060, <https://doi.org/10.1175/JAS-D-11-0125.1>
 - Lin, T.-Y., K. Winner, G. Bernstein, A. Mittal, A. M. Dokter, K. G. Horton, C. Nilsson, B. M. Van Doren, A. Farnsworth, F. A. La Sorte, S. Maji, and D. Sheldon, 2019: MistNet: Measuring historical bird migration in the US using archived weather radar data and convolutional neural networks. *Methods in Ecology and Evolution*, **10**, 1908-1922, <https://doi.org/10.1111/2041-210X.13280>
 - Lin, Y.-L., R. D. Farley, and H. D. Orville, 1983: Bulk Parameterization of the Snow Field in a Cloud Model. *Journal of Climate and Applied Meteorology*, **22**, 1065-1092, <https://doi.org/10.1175/1520-0450(1983)022<1065:BPOTSF>2.0.CO;2>
+- Low, T. B., and R. List, 1982: Collision, coalescence and breakup of raindrops. Part I: Experimentally established coalescence efficiencies and fragment size distributions in breakup. *Journal of the Atmospheric Sciences*, **39**, 1591-1606, <https://doi.org/10.1175/1520-0469(1982)039<1591:CCABOR>2.0.CO;2>
+- Low, T. B., and R. List, 1982: Collision, coalescence and breakup of raindrops. Part II: Parameterization of fragment size distributions. *Journal of the Atmospheric Sciences*, **39**, 1607-1619, <https://doi.org/10.1175/1520-0469(1982)039<1607:CCABOR>2.0.CO;2>
 - Mahalik, M. C., B. R. Smith, K. L. Elmore, D. M. Kingfield, K. L. Ortega, and T. M. Smith, 2019: Estimates of Gradients in Radar Moments Using a Linear Least Squares Derivative Technique. *Weather and Forecasting*, **34**, 415-434, <https://doi.org/10.1175/WAF-D-18-0095.1>
 - Rahman, H., 2019: Fundamental Principles of Radar. CRC Press, <https://doi.org/10.1201/9780429279478>
 - Raupach, T. H., and A. Berne, 2015: Correction of raindrop size distributions measured by Parsivel disdrometers, using a two-dimensional video disdrometer as a reference. *Atmospheric Measurement Techniques*, **8**, 343-365, <https://doi.org/10.5194/amt-8-343-2015>
 - Rison, W., R. J. Thomas, P. R. Krehbiel, T. Hamlin, and J. Harlin, 1999: A GPS-based three-dimensional lightning mapping system: Initial observations in central New Mexico. *Geophysical Research Letters*, **26**, 3573-3576, <https://doi.org/10.1029/1999GL010856>
 - Rotunno, R., J. B. Klemp, and M. L. Weisman, 1988: A Theory for Strong, Long-Lived Squall Lines. *Journal of the Atmospheric Sciences*, **45**, 463-485, <https://doi.org/10.1175/1520-0469(1988)045<0463:ATFSLL>2.0.CO;2>
 - Sandmæl, T. N., B. R. Smith, A. E. Reinhart, I. M. Schick, M. C. Ake, J. G. Madden, R. B. Steeves, S. S. Williams, K. L. Elmore, and T. C. Meyer, 2023: The Tornado Probability Algorithm: A Probabilistic Machine Learning Tornadic Circulation Detection Algorithm. *Weather and Forecasting*, **38**, 445-466, <https://doi.org/10.1175/WAF-D-22-0123.1>
+- Ryzhkov, A. V., J. Snyder, J. T. Carlin, A. Khain, and M. Pinsky, 2020: What Polarimetric Weather Radars Offer to Cloud Modelers: Forward Radar Operators and Microphysical/Thermodynamic Retrievals. *Atmosphere*, **11**, 362, <https://doi.org/10.3390/atmos11040362>
 - Schultz, C. J., W. A. Petersen, and L. D. Carey, 2009: Preliminary Development and Evaluation of Lightning Jump Algorithms for the Real-Time Detection of Severe Weather. *Journal of Applied Meteorology and Climatology*, **48**, 2543-2563, <https://doi.org/10.1175/2009JAMC2237.1>
 - Shapiro, A., 1993: The Use of an Exact Solution of the Navier-Stokes Equations in a Validation Test of a Three-Dimensional Nonhydrostatic Numerical Model. *Monthly Weather Review*, **121**, 2420-2425, <https://doi.org/10.1175/1520-0493(1993)121<2420:TUOAES>2.0.CO;2>
 - Veillette, M. S., J. M. Kurdzo, P. M. Stepanian, J. Y. N. Cho, T. Reis, S. Samsi, J. McDonald, and N. Chisler, 2025: A Benchmark Dataset for Tornado Detection and Prediction Using Full-Resolution Polarimetric Weather Radar Data. *Artificial Intelligence for the Earth Systems*, **4**, <https://doi.org/10.1175/AIES-D-24-0006.1>

@@ -88,6 +88,18 @@ RANGE_SCALE = 150000.0  # m
 DEFAULT_SPACING = {"dx": 1000.0, "dy": 1000.0, "dz": 500.0}
 DEFAULT_PAD_MULTIPLE = 4
 REFINE_WEIGHTS = {"background": 0.05, "background_w": 0.05}
+# What the ``fall_speed_correction`` attribute of a result says.
+_FALL_SPEED = {
+    "variational": "applied in the cost function (radial velocity plus fall speed "
+    "times sin(elevation))",
+    "refinement": "applied in the variational refinement; the network prediction "
+    "that serves as its background is not corrected explicitly",
+    "network": "not applied explicitly: the network takes the uncorrected radial "
+    "velocity and the reflectivity and was trained against fall-speed corrected "
+    "radial velocities, so a fall speed correction is only what it learned; the "
+    "fall_speed_correction argument has no effect without refinement",
+    "off": "not applied (fall_speed_correction=False)",
+}
 _TILE = 160  # horizontal tile (cells) of the network
 _OVERLAP = 32
 
@@ -389,6 +401,133 @@ def _back_to_grid(wind, fine, ds):
     return back.values
 
 
+# -- uncertainty -----------------------------------------------------------
+
+
+def _check_uncertainty(members, vr_error, background_error, correlation):
+    members = int(members)
+    if members < 2:
+        raise ValueError("members must be at least 2")
+    if not vr_error >= 0 or not background_error >= 0:
+        raise ValueError("vr_error and background_error must not be negative")
+    corr = tuple(float(c) for c in correlation)
+    if len(corr) != 2 or min(corr) <= 0:
+        raise ValueError("correlation needs a horizontal and a vertical length (m)")
+    return members, float(vr_error), float(background_error), corr
+
+
+def _smooth_field(shape, scales, rng):
+    """
+    Random field of unit variance and Gaussian correlation.
+
+    White noise smoothed with a Gaussian filter of standard deviations
+    ``scales`` (grid cells per axis, periodic edges) and divided by the
+    standard deviation that filter gives to white noise, the square root of
+    the sum of the squared weights of the separable kernel.
+    """
+    from scipy.ndimage import gaussian_filter, gaussian_filter1d
+
+    white = rng.standard_normal(shape)
+    var = 1.0
+    for axis, sigma in enumerate(scales):
+        if sigma <= 0:
+            continue
+        n = 2 * int(np.ceil(4 * sigma)) + 1
+        impulse = np.zeros(n)
+        impulse[n // 2] = 1.0
+        var *= float(np.sum(gaussian_filter1d(impulse, sigma, mode="constant") ** 2))
+    smooth = gaussian_filter(white, [max(s_, 0) for s_ in scales], mode="wrap")
+    return smooth / np.sqrt(var)
+
+
+def _background_error(ds, background, sigma, corr, rng):
+    """
+    Random error of the background wind ``(du, dv)``, mass-continuous.
+
+    The error is the horizontal wind of a random stream function (a smooth
+    field, see :func:`_smooth_field`): ``rho du = -dpsi/dy``,
+    ``rho dv = dpsi/dx``, so that it has no horizontal mass divergence and no
+    vertical velocity and is not removed by the mass continuity term of the
+    retrieval. It is scaled so that the root mean square of ``du`` and ``dv``
+    over the grid is ``sigma``.
+    """
+    from .multidoppler import _spacing, _standard_density
+
+    dims = ("z", "y", "x")
+    shape = tuple(ds.sizes[d] for d in dims)
+    dz, dy, dx = (_spacing(ds[d]) for d in dims)
+    scales = (corr[1] / abs(dz), corr[0] / abs(dy), corr[0] / abs(dx))
+    if background is not None and "air_density" in background:
+        rho = np.broadcast_to(background["air_density"].values, shape)
+    else:
+        rho = np.broadcast_to(
+            np.asarray(_standard_density(ds["z"].values))[:, None, None], shape
+        )
+    psi = _smooth_field(shape, scales, rng)
+    du = -np.gradient(psi, dy, axis=1) / rho
+    dv = np.gradient(psi, dx, axis=2) / rho
+    rms = np.sqrt(0.5 * np.mean(du**2 + dv**2))
+    scale = sigma / rms if rms > 0 else 0.0
+    return du * scale, dv * scale
+
+
+def _perturbed(ds, background, velocity, vr_error, background_error, corr, rng):
+    """Copies of the observations and the background with random errors."""
+    pert = ds.copy()
+    vr = ds[velocity].values
+    noise = vr_error * rng.standard_normal(vr.shape)
+    pert[velocity] = ds[velocity].copy(data=(vr + noise).astype(vr.dtype))
+    bg = None
+    if background is not None:
+        bg = background.copy()
+        if background_error > 0:
+            du, dv = _background_error(ds, background, background_error, corr, rng)
+            for name, err in (("u", du), ("v", dv)):
+                if name in bg:
+                    bg[name] = bg[name].copy(data=bg[name].values + err)
+    return pert, bg
+
+
+def _with_uncertainty(out, ds, background, net, run, checked, seed, velocity):
+    """Add the standard deviation over perturbed retrievals to ``out``."""
+    members, vr_error, background_error, corr = checked
+    rng = np.random.default_rng(seed)
+    mean = {c: np.zeros(out[c].shape) for c in "uvw"}
+    m2 = {c: np.zeros(out[c].shape) for c in "uvw"}
+    with warnings.catch_warnings():
+        # the member retrievals repeat the warnings of the first one
+        warnings.simplefilter("ignore")
+        for n in range(1, members + 1):
+            pert, bg = _perturbed(
+                ds, background, velocity, vr_error, background_error, corr, rng
+            )
+            member = _retrieve(pert, bg, net=net, **run)
+            for c in "uvw":
+                x = member[c].values.astype(np.float64)
+                delta = x - mean[c]
+                mean[c] += delta / n
+                m2[c] += delta * (x - mean[c])
+    out = out.copy()
+    for c in "uvw":
+        out[f"{c}_uncertainty"] = (
+            out[c]
+            .copy(data=np.sqrt(m2[c] / (members - 1)).astype(np.float32))
+            .assign_attrs(
+                long_name=f"standard deviation of the retrieved {c} over perturbed inputs",
+                units="m s-1",
+            )
+        )
+        out[f"{c}_uncertainty"].attrs.pop("standard_name", None)
+    out.attrs["uncertainty_method"] = (
+        f"standard deviation of {members} retrievals from inputs with random errors "
+        f"(radial velocity {vr_error:g} m s-1 uncorrelated; background "
+        f"{background_error:g} m s-1 with Gaussian correlation scales "
+        f"{corr[0]:g} m horizontal and {corr[1]:g} m vertical); radarx's own "
+        "definition, not from a paper"
+    )
+    return out
+
+
 # -- public API ------------------------------------------------------------
 
 
@@ -411,6 +550,12 @@ def single_doppler_winds(
     fall_speed_correction=True,
     w_boundary="bottom",
     providers=None,
+    uncertainty=False,
+    members=20,
+    vr_error=1.0,
+    background_error=3.0,
+    correlation=(25000.0, 1000.0),
+    seed=0,
     engine="auto",
     n_threads=None,
     **input_kwargs,
@@ -481,6 +626,29 @@ def single_doppler_winds(
         Default ``"bottom"``.
     providers : list of str, optional
         ONNX Runtime execution providers. Default: CPU.
+    uncertainty : bool, optional
+        Also return ``u_uncertainty``, ``v_uncertainty`` and ``w_uncertainty``,
+        the standard deviation of the retrieved wind over an ensemble of
+        retrievals from perturbed inputs (see Notes). The retrieval itself is
+        the unperturbed one and does not change. Costs ``members`` more
+        retrievals (network predictions included). Default False.
+    members : int, optional
+        Number of perturbed retrievals, at least 2. Default 20.
+    vr_error : float, optional
+        Standard deviation (m s-1) of the error of the gridded radial
+        velocity, added as spatially uncorrelated noise to every gate with a
+        velocity. Default 1.0 (a radarx choice).
+    background_error : float, optional
+        Standard deviation (m s-1) of the error of the background ``u`` and
+        ``v``, added as a random field with the ``correlation`` lengths. Zero
+        or no ``background`` leaves the background as it is. Default 3.0 (a
+        radarx choice).
+    correlation : tuple of float, optional
+        Horizontal and vertical correlation scales (m) of the background
+        error, the standard deviations of the Gaussian smoothing of the
+        random field. Default ``(25000.0, 1000.0)`` (a radarx choice).
+    seed : int, optional
+        Seed of the random number generator of the ensemble. Default 0.
     engine : {"auto", "compiled", "numpy"}, optional
         Implementation of the variational cost (and of the gridding).
     n_threads : int, optional
@@ -498,7 +666,9 @@ def single_doppler_winds(
         ``cost``, ``cost_history``). With a network, ``u_network``,
         ``v_network`` and ``w_network`` hold its raw prediction and the
         attributes ``ml_model``, ``ml_model_version`` and
-        ``ml_model_licence`` name it.
+        ``ml_model_licence`` name it, and ``fall_speed_correction`` says how
+        the fall speed was handled. With ``uncertainty=True`` there are also
+        ``u_uncertainty``, ``v_uncertainty`` and ``w_uncertainty`` (m s-1).
 
     Notes
     -----
@@ -516,6 +686,40 @@ def single_doppler_winds(
     component along its beams; the cross-beam wind comes from the background
     and the prior, so the retrieved cross-beam wind is not an observation.
 
+    *Fall speed.* The variational cost corrects the radial velocity for the
+    fall speed (:func:`radarx.retrieve.fall_speed`), so with ``model=None`` and
+    with ``refine=True`` (``fall_speed_correction=True``) the correction is
+    applied explicitly. The network takes the *uncorrected* radial velocity and
+    the reflectivity; it was trained with a physics loss on fall-speed
+    corrected radial velocities, so it can only have learned the correction
+    from the reflectivity. The raw prediction (``refine=False``, and
+    ``u_network``, ``v_network``, ``w_network``) therefore carries no explicit
+    correction, ``fall_speed_correction`` has no effect on it, and the
+    attribute ``fall_speed_correction`` of the result says which case applies.
+    The correction in the refinement does not change the network prediction
+    that serves as its background.
+
+    *Uncertainty.* With ``uncertainty=True`` the uncertainty of each wind
+    component is the standard deviation, over ``members`` retrievals, of the
+    wind retrieved from inputs with random errors: Gaussian noise of standard
+    deviation ``vr_error`` added independently to every gate of the gridded
+    radial velocity, and, with a ``background``, a random field of standard
+    deviation ``background_error`` added to its ``u`` and ``v`` (white noise
+    smoothed by a Gaussian filter of ``correlation`` metres horizontally and
+    vertically, periodic at the edges, scaled to the stated standard
+    deviation). With a network, the whole pipeline (network prediction and
+    refinement) is run for every member. This is a Monte Carlo propagation of
+    the stated input errors through the retrieval, which is a linear
+    least-squares problem without the vorticity term; it is radarx's own
+    definition and is not taken from a paper. It is not the posterior
+    covariance of the cost function: the ensemble does not perturb the mass
+    continuity and smoothness terms, so the spread does not contain the error
+    that comes from the truth not satisfying those weak constraints, or from
+    errors of the fall speed, the beam geometry or the advection correction,
+    and the default errors are radarx choices that should be set to the
+    errors of the data at hand. Where no velocity is observed the spread comes
+    from the background error only.
+
     References
     ----------
     .. [1] Gao, J., M. Xue, A. Shapiro, and K. K. Droegemeier, 1999: A
@@ -531,8 +735,6 @@ def single_doppler_winds(
     >>> wind = radarx.retrieve.single_doppler_winds(
     ...     grid, bg, model="single_doppler.onnx")  # doctest: +SKIP
     """
-    from .multidoppler import DEFAULT_WEIGHTS, multi_doppler
-
     kw = dict(n_threads=n_threads, engine=engine, **input_kwargs)
     ds = _single_radar(grid_or_volume, x, y, z, radar, velocity, reflectivity, **kw)
     if background is None:
@@ -553,15 +755,56 @@ def single_doppler_winds(
         engine=engine,
         n_threads=n_threads,
     )
+    run = dict(
+        model=model,
+        refine=refine,
+        weights=weights,
+        providers=providers,
+        variational=variational,
+    )
+    if uncertainty:
+        run_checked = _check_uncertainty(
+            members, vr_error, background_error, correlation
+        )
+        net = _load_network(model, providers)
+        out = _retrieve(ds, background, net=net, **run)
+        return _with_uncertainty(
+            out, ds, background, net, run, run_checked, seed, velocity
+        )
+    return _retrieve(ds, background, net=_load_network(model, providers), **run)
+
+
+def _load_network(model, providers):
+    """``(model object, metadata)`` of a network, or None without one."""
+    return None if model is None else _resolve_model(model, providers)
+
+
+def _retrieve(ds, background, *, net, model, refine, weights, providers, variational):
+    """One retrieval on the single-radar Dataset ``ds`` (see single_doppler_winds)."""
+    from .multidoppler import DEFAULT_WEIGHTS, multi_doppler
+
+    velocity = variational["velocity"]
+    reflectivity = variational["reflectivity"]
     if model is None:
         out = multi_doppler(ds, background, weights=weights, **variational)
         out.attrs["method"] = (
             "variational single-Doppler analysis (cost of Gao et al. 1999 with "
             "one radar)"
         )
+        out.attrs["fall_speed_correction"] = _FALL_SPEED[
+            "variational" if variational["fall_speed_correction"] else "off"
+        ]
         return out.squeeze("radar", drop=False)
 
-    net, info = _resolve_model(model, providers)
+    net, info = net
+    if not refine and not variational["fall_speed_correction"]:
+        warnings.warn(
+            "fall_speed_correction=False has no effect on a network prediction "
+            "without refinement: the network takes the uncorrected radial "
+            "velocity and was trained against fall-speed corrected velocities",
+            UserWarning,
+            stacklevel=2,
+        )
     spacing = _model_spacing(info)
     pad = int(info.get("pad_multiple", DEFAULT_PAD_MULTIPLE))
     fine, fine_bg, regridded = _on_spacing(
@@ -598,6 +841,12 @@ def single_doppler_winds(
     else:
         out = network.copy()
         method = "physics-informed network"
+    if not refine:
+        fall = _FALL_SPEED["network"]
+    elif variational["fall_speed_correction"]:
+        fall = _FALL_SPEED["refinement"]
+    else:
+        fall = _FALL_SPEED["off"]
     for c in "uvw":
         out[c].attrs = {
             "standard_name": names[c],
@@ -612,6 +861,7 @@ def single_doppler_winds(
         ml_model=str(info.get("name", model if isinstance(model, str) else "")),
         ml_model_version=str(info.get("version", "")),
         ml_model_licence=str(info.get("licence", info.get("license", ""))),
+        fall_speed_correction=fall,
     )
     return out
 
@@ -627,7 +877,7 @@ def _single_doppler_winds_accessor(self, background=None, **kwargs):
         Background on the grid (``grid.radarx.background()``).
     **kwargs
         Options of :func:`radarx.retrieve.single_doppler_winds` (``model``,
-        ``refine``, and ``x``, ``y``, ``z`` for a volume).
+        ``refine``, ``uncertainty``, and ``x``, ``y``, ``z`` for a volume).
 
     Returns
     -------

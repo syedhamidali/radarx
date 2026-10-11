@@ -135,8 +135,8 @@ def test_output_layout_and_metadata():
     for name in ("lat", "lon", "latitude", "longitude", "altitude", "time"):
         assert name in out.variables
     assert "time" in out.coords and out["time"].ndim == 0
-    assert out.lat.dims == ("y",) and out.lon.dims == ("x",)
-    np.testing.assert_allclose(float(out.lat.sel(y=0.0)), 45.0)
+    assert out.lat.dims == ("y", "x") and out.lon.dims == ("y", "x")
+    np.testing.assert_allclose(float(out.lat.sel(x=0.0, y=0.0)), 45.0)
     assert out.attrs["gridding_method"] == "cone"
 
 
@@ -405,3 +405,206 @@ def test_mean_time_of_a_volume():
     only_nat = _timed_sweep([0, 0])
     only_nat["time"][:] = np.datetime64("NaT", "ns")
     assert np.isnat(cone._volume_time([only_nat, bare]))
+
+
+# ---------------------------------------------------------------------------
+# repeated low tilts
+# ---------------------------------------------------------------------------
+def _repeat_volume(values, times, elevations, ranges=None, nan=()):
+    """
+    Sweeps with a constant value each (``values``), starting at ``times`` seconds.
+
+    ``ranges`` gives the number of gates of each sweep; the sweeps in ``nan``
+    hold only missing values.
+    """
+    rng_m = np.arange(125.0, 60_000.0, 250.0)
+    azimuth = np.arange(0.5, 360.0, 1.0)
+    sweeps = {}
+    for k, (value, t, el) in enumerate(zip(values, times, elevations)):
+        n = len(rng_m) if ranges is None else ranges[k]
+        data = np.full((azimuth.size, n), np.nan if k in nan else value)
+        stamp = np.datetime64("2026-01-01T00:00", "ns") + np.timedelta64(int(t), "s")
+        sweeps[f"sweep_{k}"] = xr.Dataset(
+            {"DBZH": (("azimuth", "range"), data, {"units": "dBZ"})},
+            coords={
+                "azimuth": azimuth,
+                "range": rng_m[:n],
+                "elevation": ("azimuth", np.full(azimuth.size, el)),
+                "time": ("azimuth", np.full(azimuth.size, stamp)),
+            },
+        )
+    root = xr.Dataset(coords={"latitude": 45.0, "longitude": 10.0, "altitude": ALT})
+    return xr.DataTree.from_dict({"/": root, **sweeps})
+
+
+LOW = dict(x=[30e3], y=[0.0], z=[500.0])
+
+
+def _low(dtree, engine, **kwargs):
+    out = cone.grid_cones(
+        dtree, "DBZH", **LOW, fill_below=True, engine=engine, **kwargs
+    )
+    return float(out.DBZH.values.squeeze())
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_repeated_tilts_mean_latest_nearest(engine):
+    # the 0.5 degree tilt at 0, 300 and 900 s, then 1.5 and 3 degrees
+    dtree = _repeat_volume(
+        [10.0, 20.0, 40.0, 100.0, 200.0],
+        [0, 300, 900, 450, 500],
+        [0.5, 0.5, 0.5, 1.5, 3.0],
+    )
+    assert _low(dtree, engine) == 10.0  # farthest: ties keep the first (lowest sweep)
+    assert _low(dtree, engine, repeats="mean") == pytest.approx(70.0 / 3, rel=1e-6)
+    assert _low(dtree, engine, repeats="latest") == 40.0
+    # the mean time of the volume is 430 s: 300 s is the nearest
+    assert _low(dtree, engine, repeats="nearest") == 20.0
+    assert _low(dtree, engine, repeats="nearest", time="2026-01-01T00:15") == 40.0
+    assert _low(dtree, engine, repeats="nearest", time="2026-01-01T00:00") == 10.0
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_repeats_fall_back_to_the_members_that_have_a_value(engine):
+    dtree = _repeat_volume(
+        [10.0, 20.0, 40.0, 100.0],
+        [0, 300, 900, 450],
+        [0.5, 0.5, 0.5, 1.5],
+        nan=(2,),
+    )
+    assert _low(dtree, engine, repeats="latest") == 20.0  # the latest is empty
+    assert _low(dtree, engine, repeats="mean") == pytest.approx(15.0, rel=1e-6)
+    # every repeat empty: the cone is there but has no value
+    none = _repeat_volume([1.0, 2.0, 100.0], [0, 300, 450], [0.5, 0.5, 1.5], nan=(0, 1))
+    for repeats in ("mean", "latest"):
+        assert np.isnan(_low(none, engine, repeats=repeats))
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_a_short_repeat_only_counts_where_it_reaches(engine):
+    dtree = _repeat_volume(
+        [10.0, 30.0, 100.0],
+        [0, 300, 450],
+        [0.5, 0.5, 1.5],
+        ranges=[240, 40, 240],  # the second repeat reaches 10 km
+    )
+    near = cone.grid_cones(
+        dtree,
+        "DBZH",
+        x=[5e3, 30e3],
+        y=[0.0],
+        z=[300.0],
+        fill_below=True,
+        repeats="mean",
+        engine=engine,
+    )["DBZH"].values.squeeze()
+    assert near[0] == pytest.approx(20.0, rel=1e-6)  # both repeats
+    assert near[1] == pytest.approx(10.0, rel=1e-6)  # only the long one
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_mean_of_advected_repeats_does_not_smear(engine):
+    """The echo moves 10 m/s east; the repeats are 10 minutes apart."""
+    u = 10.0
+    rng_m = np.arange(125.0, 30_000.0, 125.0)
+    azimuth = np.arange(0.5, 360.0, 0.5)
+    sweeps = {}
+    for k, t in enumerate((0, 600, 1200)):
+        gx, gy, _ = antenna_to_cartesian(
+            rng_m[None, :],
+            azimuth[:, None],
+            np.full((azimuth.size, 1), 0.5),
+            site_altitude=ALT,
+        )
+        data = np.exp(-(((gx - 12e3 - u * t) / 2e3) ** 2 + (gy / 3e3) ** 2))
+        stamp = np.datetime64("2026-01-01T00:00", "ns") + np.timedelta64(t, "s")
+        sweeps[f"sweep_{k}"] = xr.Dataset(
+            {"DBZH": (("azimuth", "range"), data, {"units": "dBZ"})},
+            coords={
+                "azimuth": azimuth,
+                "range": rng_m,
+                "elevation": ("azimuth", np.full(azimuth.size, 0.5)),
+                "time": ("azimuth", np.full(azimuth.size, stamp)),
+            },
+        )
+    root = xr.Dataset(coords={"latitude": 45.0, "longitude": 10.0, "altitude": ALT})
+    dtree = xr.DataTree.from_dict({"/": root, **sweeps})
+    x = np.arange(4e3, 26e3, 500.0)
+    kw = dict(x=x, y=[0.0], z=[300.0], fill_below=True, repeats="mean", engine=engine)
+    still = cone.grid_cones(dtree, "DBZH", **kw)["DBZH"].values.squeeze()
+    moved = cone.grid_cones(
+        dtree, "DBZH", **kw, motion=(u, 0.0), time="2026-01-01T00:20"
+    )["DBZH"].values.squeeze()
+    truth = np.exp(-(((x - 12e3 - u * 1200.0) / 2e3) ** 2))
+    assert np.abs(moved - truth).max() < 0.05
+    assert np.abs(still - truth).max() > 0.2
+    assert moved.max() > 0.95 and still.max() < 0.8  # smeared out
+
+
+@pytest.mark.skipif(not cone.HAS_COMPILED_KERNEL, reason="compiled kernel not built")
+@pytest.mark.parametrize("repeats", ["mean", "latest", "nearest"])
+def test_engines_agree_with_repeats(repeats):
+    dtree = _volume(
+        field="random", nan_fraction=0.15, elevations=(0.5, 0.5, 1.5, 1.5, 3.0)
+    )
+    for k in range(5):
+        stamp = np.datetime64("2026-01-01T00:00") + np.timedelta64(100 * k, "s")
+        dtree[f"sweep_{k}"]["time"].values[:] = stamp
+    kw = dict(
+        repeats=repeats, fill_below=True, motion=(5.0, -3.0), time="2026-01-01T00:05"
+    )
+    a = cone.grid_cones(dtree, "DBZH", **GRID, engine="compiled", **kw)
+    b = cone.grid_cones(dtree, "DBZH", **GRID, engine="numpy", **kw)
+    np.testing.assert_array_equal(np.isnan(a.DBZH.values), np.isnan(b.DBZH.values))
+    np.testing.assert_allclose(a.DBZH.values, b.DBZH.values, atol=1e-4, equal_nan=True)
+
+
+def test_repeats_errors_and_default():
+    dtree = _volume()
+    with pytest.raises(ValueError, match="repeats must be"):
+        cone.grid_cones(dtree, "DBZH", **GRID, repeats="oldest")
+    for engine in ENGINES:
+        a = cone.grid_cones(dtree, "DBZH", **GRID, engine=engine)
+        b = cone.grid_cones(dtree, "DBZH", **GRID, engine=engine, repeats="farthest")
+        np.testing.assert_array_equal(a.DBZH.values, b.DBZH.values)
+    # a volume without repeats is the same whatever the choice
+    mean = cone.grid_cones(dtree, "DBZH", **GRID, repeats="mean")
+    np.testing.assert_allclose(
+        mean.DBZH.values,
+        cone.grid_cones(dtree, "DBZH", **GRID).DBZH.values,
+        atol=1e-4,
+        equal_nan=True,
+    )
+
+
+@pytest.mark.skipif(not cone.HAS_COMPILED_KERNEL, reason="compiled kernel not built")
+def test_kernel_group_checks():
+    from radarx.grid import _cone
+
+    args = dict(
+        x=np.zeros(1),
+        y=np.zeros(1),
+        z=np.zeros(1),
+        data=[np.ones((4, 3))] * 3,
+        azimuth=[np.arange(4.0) * 90] * 3,
+        elevation=[np.zeros(4)] * 3,
+        range=[np.arange(1.0, 4.0)] * 3,
+        site_altitude=0.0,
+    )
+    _cone.grid_cones(**args, groups=[2, 1])
+    for groups in ([2], [0, 3], [4, -1]):
+        with pytest.raises(ValueError):
+            _cone.grid_cones(**args, groups=groups)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_repeats_skip_sweeps_without_the_field_or_the_time(engine):
+    dtree = _repeat_volume([10.0, 20.0, 100.0], [0, 300, 450], [0.5, 0.5, 1.5])
+    renamed = dtree["sweep_1"].to_dataset().rename(DBZH="VRADH")
+    dtree["sweep_1"] = xr.DataTree(renamed)
+    assert _low(dtree, engine, repeats="mean") == pytest.approx(10.0)
+    untimed = _repeat_volume([10.0, 20.0, 100.0], [0, 300, 450], [0.5, 0.5, 1.5])
+    for name in ("sweep_0", "sweep_1", "sweep_2"):
+        untimed[name] = xr.DataTree(untimed[name].to_dataset().drop_vars("time"))
+    assert _low(untimed, engine, repeats="mean") == pytest.approx(15.0)
+    assert _low(untimed, engine, repeats="latest") == 10.0  # no time: first reach

@@ -31,6 +31,7 @@ notebooks/Dealiasing
 notebooks/KDP
 notebooks/Attenuation_Correction
 notebooks/Beam_Blockage
+notebooks/Beam_Refraction
 notebooks/Advection_Correction
 notebooks/Superobs_Data_Assimilation
 ```
@@ -48,6 +49,7 @@ notebooks/Radar_UGRID_uxarray
 :caption: Wind retrieval and kinematics
 
 notebooks/Single_Doppler_Winds
+notebooks/Tropical_Cyclone_Winds
 notebooks/Multi_Doppler
 notebooks/Azimuthal_Shear
 ```
@@ -61,6 +63,8 @@ notebooks/DSD_Retrieval
 notebooks/Disdrometers
 notebooks/QVP
 notebooks/Evaporation
+notebooks/Rain_Size_Sorting
+notebooks/Rain_Collisions
 notebooks/Bayesian_DSD
 notebooks/Rainfall_Estimation
 ```
@@ -81,6 +85,13 @@ notebooks/Cold_Pools_and_Wind_Profiles
 notebooks/Lightning
 notebooks/Tornado_Detection
 notebooks/Hail_Products
+```
+
+```{toctree}
+:maxdepth: 2
+:caption: Model verification
+
+notebooks/Forward_Operator
 ```
 
 ```{toctree}

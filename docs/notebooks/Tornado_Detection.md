@@ -167,6 +167,37 @@ couplets = rotation_couplets(sweep, min_reflectivity=20.0)
 show(inputs, sweep, tor, couplets, (-150, 150, -150, 150), "KGWX 2022-03-30 23:46 UTC")
 ```
 
+### Vertical continuity of the couplets
+
+A shear maximum on one tilt may be noise or a boundary; a circulation extends
+over several tilts. `rotation_couplets(volume, min_tilts=N)` follows the chain
+of couplets through each couplet up and down the elevation angles of a
+volume of dealiased velocities (on the next elevation angle, the nearest
+couplet of the same sense of rotation within `link_distance` = 5 km of the
+peak; `max_skip` lets the chain cross missing tilts) and keeps the couplets that
+are on a chain of at least `N` tilts. The rule follows the association of shear
+features across elevation angles in the NSSL Mesocyclone Detection Algorithm as
+its algorithm description gives it; the distance, the thresholds and the
+nearest-couplet choice are radarx's. `n_tilts` is the length of the chain.
+
+```{code-cell} ipython3
+volume = kgwx.radarx.assign(kgwx.radarx.dealias("VRADH"))
+every = rotation_couplets(volume, "VRADH_dealiased")
+continuous = rotation_couplets(volume, "VRADH_dealiased", min_tilts=3)
+count = lambda tree: sum(tree[n].sizes["couplet"] for n in tree.children)
+print(f"{count(every)} couplets above 0.006 s⁻¹ on {len(every.children)} Doppler cuts; "
+      f"{count(continuous)} are on a chain of at least 3 tilts")
+lowest = [n for n in continuous.children if float(volume[n].sweep_fixed_angle) < 1.0 and continuous[n].sizes["couplet"]]
+first = continuous[lowest[0]].to_dataset()
+print("0.5° cut", lowest[0], "couplets by shear:", first.azimuthal_shear.values[:5].round(3),
+      "tilts in the chain:", first.n_tilts.values[:5])
+```
+
+The strongest couplets of the lowest cut are on chains of three to six tilts,
+and a few chains cover all 14 elevation angles of the volume, from 0.5° up to
+19.5° (a chain can also run through noise above the echo top, so `n_tilts` is
+an upper bound of the depth of the circulation).
+
 ## Accuracy on the TorNet test set
 
 The converted network was evaluated on the TorNet test files of 2013

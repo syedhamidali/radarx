@@ -908,26 +908,43 @@ def test_grid_netcdf_cf(grid, tmp_path):
         assert back["latitude"].attrs["units"] == "degrees_north"
         assert back["altitude"].attrs["units"] == "m"
         assert "_FillValue" not in back["x_bnds"].encoding
-        # 2-D lat and lon, equal to the 1-D ones along the axes through the origin
+        # 2-D lat and lon of the grid are written as they are
         assert back["lat"].dims == ("y", "x") and back["lon"].dims == ("y", "x")
-        ix, iy = grid.sizes["x"] // 2, grid.sizes["y"] // 2
-        np.testing.assert_allclose(
-            back["lat"].values[:, ix], grid["lat"].values, atol=1e-9
-        )
-        np.testing.assert_allclose(
-            back["lon"].values[iy, :], grid["lon"].values, atol=1e-9
-        )
-        # and away from them the old 1-D values were wrong by more than 50 m
-        corner = (
-            abs(back["lat"].values[-1, -1] - grid["lat"].values[-1]) * 111e3
-            + abs(back["lon"].values[-1, -1] - grid["lon"].values[-1]) * 79e3
-        )
-        assert corner > 50.0
+        np.testing.assert_allclose(back["lat"].values, grid["lat"].values, atol=1e-9)
+        np.testing.assert_allclose(back["lon"].values, grid["lon"].values, atol=1e-9)
         # bounds
         assert back["x"].attrs["bounds"] == "x_bnds"
         np.testing.assert_allclose(back["x_bnds"].values[0], [-41e3, -39e3])
         np.testing.assert_allclose(back["z_bnds"].values[-1], [5875.0, 6125.0])
         assert back["y_bnds"].dims == ("y", "bnds")
+
+
+def legacy_axes(grid):
+    """The grid with 1-D lat(y) and lon(x), as grid_cones returned them before."""
+    from radarx.grid.cone import _lonlat_axes
+
+    lon, lat = _lonlat_axes(
+        grid["x"].values, grid["y"].values, float(grid.latitude), float(grid.longitude)
+    )
+    return grid.drop_vars(["lat", "lon"]).assign_coords(lat=("y", lat), lon=("x", lon))
+
+
+def test_one_dimensional_lat_and_lon_are_replaced(grid, tmp_path):
+    old = legacy_axes(grid)
+    out = radarx.io.write_netcdf_cf(old, tmp_path / "old.nc")
+    with xr.open_dataset(out) as back:
+        assert back["lat"].dims == ("y", "x") and back["lon"].dims == ("y", "x")
+        # equal to the 1-D ones along the axes through the origin
+        ix, iy = grid.sizes["x"] // 2, grid.sizes["y"] // 2
+        np.testing.assert_allclose(back["lat"].values[:, ix], old["lat"], atol=1e-9)
+        np.testing.assert_allclose(back["lon"].values[iy, :], old["lon"], atol=1e-9)
+        # and away from them the 1-D values are wrong by more than 50 m
+        corner = (
+            abs(back["lat"].values[-1, -1] - old["lat"].values[-1]) * 111e3
+            + abs(back["lon"].values[-1, -1] - old["lon"].values[-1]) * 79e3
+        )
+        assert corner > 50.0
+        np.testing.assert_allclose(back["lat"].values, grid["lat"].values, atol=1e-9)
 
 
 def test_grid_conventions_are_added_to_the_existing_ones(grid, tmp_path):
@@ -949,7 +966,9 @@ def test_grid_conventions_are_added_to_the_existing_ones(grid, tmp_path):
 
 
 def test_grid_without_options_and_accessor(grid, tmp_path):
-    out = grid.radarx.to_netcdf_cf(tmp_path / "plain.nc", bounds=False, lonlat=False)
+    out = legacy_axes(grid).radarx.to_netcdf_cf(
+        tmp_path / "plain.nc", bounds=False, lonlat=False
+    )
     with xr.open_dataset(out) as back:
         assert back["lat"].dims == ("y",) and "x_bnds" not in back.variables
         assert back["DBZH"].attrs["grid_mapping"] == "crs"
@@ -989,9 +1008,10 @@ def test_crs_argument(cappi, tmp_path):
 
     none = radarx.io.write_netcdf_cf(cappi, tmp_path / "none.nc", crs=False)
     with xr.open_dataset(none) as back:
-        assert "crs" not in back.variables
+        assert "crs" not in back.variables and "crs_wkt" not in back.variables
         assert "grid_mapping" not in back["DBZH"].attrs
-        assert "lat" not in back.coords
+        # the 2-D lat and lon of the CAPPI are not touched
+        assert back["lat"].dims == ("y", "x")
     tup = radarx.io.write_netcdf_cf(cappi, tmp_path / "tup.nc", crs=(10.0, 20.0))
     with xr.open_dataset(tup) as back:
         assert back["crs"].attrs["longitude_of_projection_origin"] == 20.0

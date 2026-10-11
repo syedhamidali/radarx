@@ -40,6 +40,7 @@ import time
 
 import matplotlib.pyplot as plt
 import numpy as np
+import xarray as xr
 import xradar as xd
 from xradar.io.backends.nexrad_level2 import NEXRADLevel2File
 
@@ -172,6 +173,144 @@ profile = xr.Dataset(
 with_profile = dtree.radarx.dealias("VRADH", wind_profile=profile)
 ```
 
+## Where the fold choice is uncertain
+
+`confidence=True` returns, next to the dealiased velocity, a confidence in the
+fold chosen for every gate (also available on its own as
+`dtree.radarx.dealias_confidence`, for the result of any dealiasing method).
+A gate could have been unfolded to $v \pm 2V_n$ instead. A neighbouring gate is
+closer to the chosen value than to the next candidate if it differs by less
+than $V_n$, and the confidence is the share of the valid neighbours (the 3 x 3
+gates around the gate) that do:
+
+- 1 where all neighbours support the fold, as in a smooth field;
+- 5/8 on both sides of a straight fold line, 3/8 at the corner of a region;
+- 0 for an isolated gate that is unfolded differently from all its neighbours.
+
+It is a radarx definition (no paper defines a confidence for these algorithms)
+and it is computed from the result alone. It marks isolated gates, small
+clusters and the lines along which the fold changes; a large region that was
+unfolded wrongly as a whole has confidence 1 inside and is flagged only along
+its edge. Real shear and turbulence also lower it where the velocity changes by
+more than $V_n$ from gate to gate.
+
+```{code-cell} ipython3
+with_confidence = dtree.radarx.dealias("VRADH", confidence=True)
+node = with_confidence["sweep_1"].to_dataset()
+conf = node.VRADH_dealiased_confidence
+print(f"gates with data: {int(conf.notnull().sum())}")
+for level in (1.0, 0.9, 0.5):
+    print(f"confidence >= {level}: {float((conf >= level).sum() / conf.notnull().sum()):.2%}")
+print(f"confidence below 0.5: {int((conf < 0.5).sum())} gates, "
+      f"of which {int((conf == 0).sum())} disagree with all their neighbours")
+```
+
+```{code-cell} ipython3
+ds = dealiased["sweep_1"].to_dataset().sortby("azimuth")
+conf_sorted = conf.sortby("azimuth")
+fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
+for ax, da, title, kw in zip(
+    axes,
+    [ds.VRADH_dealiased, conf_sorted],
+    ["dealiased velocity (m/s)", "confidence of the fold"],
+    [dict(cmap="RdBu_r", vmin=-60, vmax=60), dict(cmap="viridis", vmin=0, vmax=1)],
+):
+    mesh = da.assign_coords(x=ds.x / 1e3, y=ds.y / 1e3).plot.pcolormesh(
+        x="x", y="y", ax=ax, add_colorbar=True, **kw
+    )
+    ax.set(title=title, xlabel="x (km)", ylabel="", aspect="equal", xlim=(-150, 150), ylim=(-150, 150))
+axes[0].set_ylabel("y (km)")
+plt.show()
+```
+
+## Dual-PRF radars
+
+A dual-PRF radar unfolds the velocity of each ray with a noisy estimate and
+leaves isolated dealiasing errors of a different kind; they are corrected with
+`correct_dual_prf` (Holleman and Beekhuis 2003), shown on synthetic data in
+section 13 of the [second workflow notebook](Radar_Workflow_Advanced).
+
+## UNRAVEL
+
+`method="unravel"` runs the UNRAVEL algorithm of Louf et al. (2020), which needs
+no reference wind. The paper gives the algorithm as modules that a driver calls
+in order: a modified z-score filter that also unfolds the edges of aliased
+areas, two reference radials found where the mean $|v|$ is smallest, azimuthal
+continuity in four sectors from them with $\alpha = 0.6$, range and azimuthal
+continuity and box passes with growing windows against the mean or median of
+the gates processed so far, a closest-reference module for what is left, a
+least-squares check along each ray and a box check, and for a volume a check
+against the sweep below ($\alpha = 0.8$ in the later modules). The module
+documentation of `radarx.retrieve.dealias` lists the steps, which values are the
+paper's and which radarx chose where the paper is silent. What was not
+implemented: the "long range" driver, the box that precedes the gate and the
+reflectivity gate filter. A compiled kernel runs the sweeps in parallel; a
+Python specification gives identical values.
+
+Because it assumes that the reference radials are not aliased, UNRAVEL is
+built for a Nyquist velocity that is larger than the winds seen on the radials
+of lowest $|v|$; a field folded more than once at those radials is out of its
+reach. On the KGWX volume the two methods agree where both have a value:
+
+```{code-cell} ipython3
+start = time.perf_counter()
+unraveled = dtree.radarx.assign(dtree.radarx.dealias("VRADH", method="unravel"))
+print(f"UNRAVEL dealiased the volume in {time.perf_counter() - start:.1f} s")
+for name in ("sweep_1", "sweep_8"):
+    a = dealiased[name].to_dataset().VRADH_dealiased
+    b = unraveled[name].to_dataset().VRADH_dealiased
+    both = a.notnull() & b.notnull()
+    print(f"{name}: UNRAVEL keeps {float(b.notnull().sum() / a.notnull().sum()):.1%} of the gates of the "
+          f"region method; they agree within 1 m/s on {float((abs(a - b) < 1).where(both).mean()):.2%}")
+```
+
+The test of the UNRAVEL paper folds an unaliased volume into a smaller Nyquist
+interval and counts the gates that a method does not bring back. Here the
+Doppler cuts up to 4°, dealiased at their own Nyquist velocity (about 26 m/s)
+by the region method, are folded into ±13.3 m/s, the Nyquist velocity of a
+C-band radar, and both methods unfold them again; a gate is an error if it
+differs from the reference by more than 1 m/s:
+
+```{code-cell} ipython3
+nodes = {"/": dtree.to_dataset()}
+for name in sweeps:
+    ds = dealiased[name].to_dataset()
+    if "VRADH" in ds and float(ds.elevation.median()) < 4.1:
+        folded = (ds.VRADH_dealiased + 13.3) % 26.6 - 13.3
+        nodes["/" + name] = ds[["VRADH_dealiased"]].assign(VRADH=folded).assign_coords(nyquist_velocity=13.3)
+c_band = xr.DataTree.from_dict(nodes)
+rows = {}
+for label, kwargs in (("region", {}), ("UNRAVEL", dict(method="unravel")),
+                      ("UNRAVEL, 2-D only", dict(method="unravel", sweep_continuity=False))):
+    start = time.perf_counter()
+    result = c_band.radarx.dealias("VRADH", **kwargs)
+    errors = total = 0
+    for name in result.children:
+        got = result[name].to_dataset().VRADH_dealiased
+        ref = c_band[name].to_dataset().VRADH_dealiased
+        both = got.notnull() & ref.notnull()
+        errors += int(((abs(got - ref) > 1.0) & both).sum())
+        total += int(both.sum())
+    rows[label] = (errors / total, time.perf_counter() - start)
+for label, (rate, seconds) in rows.items():
+    print(f"{label:18s} error rate {rate:.2%} in {seconds:.1f} s")
+```
+
+The numbers depend strongly on the volume. On the four KGWX volumes of this
+case, with one cut per elevation (the validation scripts of radarx), the error
+rate of this test was 1 to 22 % for the region method, 4 to 39 % for UNRAVEL and
+29 to 58 % for UNRAVEL without the check between sweeps; UNRAVEL did better
+than the region method on two of the four and worse on the other two, and it
+dropped about 4 % of the gates as noise. Its result depends on the absolute fold
+of the lowest sweep, which the reference radials fix, and the check between
+sweeps carries it upward: when the lowest sweep is right the others are
+repaired (from 33 % to 4 % on one volume), when it is wrong they follow it. The
+volume above, with its repeated 0.5° cuts, is a fifth sample. The error rate of
+the paper (0.2 % on its test) is not reproduced on this case: the winds of the
+squall line fold up to four times at 13.3 m/s, which is a harder test than the
+paper's, and radarx fixed the details that the paper leaves open without
+tuning them to this data.
+
 ## References
 
 - Jing, Z., and G. Wiener, 1993: Two-dimensional dealiasing of Doppler
@@ -184,6 +323,13 @@ with_profile = dtree.radarx.dealias("VRADH", wind_profile=profile)
 - James, C. N., and R. A. Houze, 2001: A real-time four-dimensional Doppler
   dealiasing scheme. *J. Atmos. Oceanic Technol.*, **18**, 1674–1683,
   <https://doi.org/10.1175/1520-0426(2001)018<1674:ARTFDD>2.0.CO;2>
+- Holleman, I., and H. Beekhuis, 2003: Analysis and correction of dual PRF
+  velocity data. *J. Atmos. Oceanic Technol.*, **20**, 443–453,
+  <https://doi.org/10.1175/1520-0426(2003)20<443:AACODP>2.0.CO;2>
+- Louf, V., A. Protat, R. C. Jackson, S. M. Collis, and J. Helmus, 2020: UNRAVEL:
+  A robust modular velocity dealiasing technique for Doppler radar. *J. Atmos.
+  Oceanic Technol.*, **37**, 741–758,
+  <https://doi.org/10.1175/JTECH-D-19-0020.1>
 - Browning, K. A., and R. Wexler, 1968: The determination of kinematic
   properties of a wind field using Doppler radar. *J. Appl. Meteor.*, **7**,
   105–113, <https://doi.org/10.1175/1520-0450(1968)007<0105:TDOKPO>2.0.CO;2>

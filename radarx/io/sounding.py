@@ -172,6 +172,12 @@ same constants). Formulas and constants, with what is and is not traceable:
   rule for layer means (radarx choices, not from a paper). Pressure is
   interpolated linearly in its logarithm, as are missing geopotential heights
   (:func:`interpolate_profile`).
+- Radio refractivity :math:`N = (n - 1) 10^6` of :func:`refractivity`: the
+  two-term formula of Bean and Dutton [10], Eq. (1.17),
+  :math:`N = 77.6\\,p/T + 3.73\\times10^5\\,e/T^2` (p and e in hPa, T in K),
+  read in the book (the constants are those of Smith and Weintraub [11], as
+  the book reports them; that paper itself was not read), and the two
+  variants listed there and in ITU-R P.453-9 (``form``).
 - Wind: the meteorological convention, direction the wind blows *from*
   clockwise from north, :math:`u = -s \\sin\\phi`, :math:`v = -s \\cos\\phi`
   (meteorological convention). One knot is 0.514444 m s-1 (the exact value is
@@ -232,6 +238,11 @@ References
 .. [9] Durre, I., X. Yin, R. S. Vose, S. Applequist, and J. Arnfield, 2016:
    Integrated Global Radiosonde Archive (IGRA), Version 2. NOAA National
    Centers for Environmental Information, https://doi.org/10.7289/V5X63K0Q
+.. [10] Bean, B. R., and E. J. Dutton, 1966: Radio Meteorology. NBS Monograph
+   92, National Bureau of Standards, https://doi.org/10.6028/NBS.MONO.92
+.. [11] Smith, E. K., and S. Weintraub, 1953: The constants in the equation
+   for atmospheric refractive index at radio frequencies. Proc. IRE, 41,
+   1035-1037, https://doi.org/10.1109/JRPROC.1953.274297
 
 .. autosummary::
    :nosignatures:
@@ -259,6 +270,7 @@ __all__ = [
     "relative_humidity_from_dewpoint",
     "wet_bulb_temperature",
     "air_density",
+    "refractivity",
     "geopotential_to_height",
 ]
 
@@ -389,6 +401,10 @@ ATTRS = {
         "long_name": "density of moist air",
         "units": "kg m-3",
     },
+    "refractivity": {
+        "long_name": "radio refractivity, N = (n - 1) 1e6",
+        "units": "1",
+    },
     "vapor_pressure": {
         "standard_name": "water_vapor_partial_pressure_in_air",
         "long_name": "water vapour pressure",
@@ -467,6 +483,9 @@ _OP_UNITS = {
     "esat": ("K",),
     "wet_bulb": ("Pa", "K", "K"),
     "density": ("Pa", "K", None),
+    "refractivity_bd": ("Pa", "K", None),
+    "refractivity_sw": ("Pa", "K", None),
+    "refractivity_itu": ("Pa", "K", None),
     "vapor_pressure": (None, "Pa"),
     "specific_humidity": (None, "Pa"),
 }
@@ -813,6 +832,98 @@ def air_density(
         pressure,
         temperature,
         specific_humidity,
+        engine=engine,
+        n_threads=n_threads,
+    )
+
+
+REFRACTIVITY_FORMS = {
+    "bean_dutton": "refractivity_bd",
+    "smith_weintraub": "refractivity_sw",
+    "itu": "refractivity_itu",
+}
+
+
+def refractivity(
+    pressure,
+    temperature,
+    vapor_pressure=0.0,
+    *,
+    form="bean_dutton",
+    engine="auto",
+    n_threads=None,
+):
+    """
+    Radio refractivity of air from pressure, temperature and vapour pressure.
+
+    The refractivity :math:`N = (n - 1) \\times 10^6` of the refractive index
+    :math:`n` of moist air at radio frequencies (valid, with an accuracy of
+    0.5 %, up to about 30 GHz according to Bean and Dutton [1]; ITU-R P.453-9
+    [3] states the same accuracy up to 100 GHz). The forms, with :math:`p` and
+    :math:`e` in hPa and :math:`T` in K:
+
+    ``"bean_dutton"`` (default)
+        :math:`N = 77.6\\,p/T + 3.73\\times10^5\\,e/T^2`, the two-term
+        formula of Bean and Dutton [1], Eq. (1.17), which agrees with the
+        three-term formula within 0.02 % (0.1 N-unit) from -50 to 40 degC. The
+        book credits its constants to Smith and Weintraub [2].
+    ``"smith_weintraub"``
+        :math:`N = 77.6\\,p/T - 5.6\\,e/T + 3.75\\times10^5\\,e/T^2`,
+        Eq. (1.16) of [1], the full three-term formula with
+        :math:`p_d = p - e`.
+    ``"itu"``
+        :math:`N = 77.6\\,p/T + 3.732\\times10^5\\,e/T^2`, Eqs. (2)-(4) of
+        ITU-R P.453-9 [3] (the wet constant differs by 0.05 %).
+
+    The equations were read in the book [1] and the recommendation [3]; the
+    paper of Smith and Weintraub [2] was not read. Heights, units and the
+    saturation and humidity functions are those of this module: the vapour
+    pressure comes from :func:`saturation_vapor_pressure` times the relative
+    humidity, or from the specific humidity or dew point.
+
+    Parameters
+    ----------
+    pressure : xarray.DataArray or array-like
+        Pressure in Pa.
+    temperature : xarray.DataArray or array-like
+        Temperature in K.
+    vapor_pressure : xarray.DataArray or array-like, optional
+        Water vapour pressure in Pa. Default 0 (dry air).
+    form : {"bean_dutton", "smith_weintraub", "itu"}, optional
+        Constants of the formula, see above.
+    engine, n_threads : optional
+        See :func:`saturation_vapor_pressure`.
+
+    Returns
+    -------
+    xarray.DataArray
+        Refractivity N (dimensionless, in N-units).
+
+    References
+    ----------
+    .. [1] Bean, B. R., and E. J. Dutton, 1966: Radio Meteorology. NBS
+       Monograph 92, National Bureau of Standards,
+       https://doi.org/10.6028/NBS.MONO.92
+    .. [2] Smith, E. K., and S. Weintraub, 1953: The constants in the
+       equation for atmospheric refractive index at radio frequencies. Proc.
+       IRE, 41, 1035-1037, https://doi.org/10.1109/JRPROC.1953.274297
+    .. [3] ITU-R, 2003: Recommendation ITU-R P.453-9, The radio refractive
+       index: its formula and refractivity data.
+
+    Examples
+    --------
+    >>> refractivity(101325.0, 288.15, 1000.0).item()  # doctest: +SKIP
+    """
+    if form not in REFRACTIVITY_FORMS:
+        raise ValueError(
+            f"form must be one of {sorted(REFRACTIVITY_FORMS)}, not {form!r}"
+        )
+    return _wrap(
+        REFRACTIVITY_FORMS[form],
+        "refractivity",
+        pressure,
+        temperature,
+        vapor_pressure,
         engine=engine,
         n_threads=n_threads,
     )

@@ -19,6 +19,14 @@ EPS = RD / RV
 CPD = 1005.7  # specific heat of dry air [J kg-1 K-1]; radarx value, not traced to Bolton 1980 / Davies-Jones 2008
 CPV = 1875.0  # specific heat of water vapour [J kg-1 K-1]; radarx value, not traced
 T0 = 273.15  # 0 degC [K]
+# (K1, K2, K3) of N = K1 p / T + K2 e / T + K3 e / T**2 (p, e in hPa, T in K) per kernel op:
+# Bean and Dutton (1966) Eq. 1.17, the Smith and Weintraub constants of Eq. 1.16 of the same
+# book (77.6 p/T - 5.6 e/T + 3.75e5 e/T^2) and ITU-R P.453-9 Eqs. 2-4.
+REFRACTIVITY = {
+    "refractivity_bd": (77.6, 0.0, 3.73e5),
+    "refractivity_sw": (77.6, -5.6, 3.75e5),
+    "refractivity_itu": (77.6, 0.0, 3.732e5),
+}
 G0 = 9.80665  # standard gravity [m s-2]; conventional (CGPM 1901) value
 RE = 6371008.8  # mean Earth radius [m]; GRS80 (2a+b)/3 = 6371008.77 m, Moritz (2000), rounded
 # Heights that differ by less than this are the same level: a layer limit
@@ -105,6 +113,12 @@ def thermo(op, inputs, n_threads=0):
     if op == "density":
         p, t, q = a
         return p / (RD * t * (1.0 + (1.0 / EPS - 1.0) * q))
+    if op in REFRACTIVITY:
+        p, t, e = a
+        pt = 0.01 * p / t
+        et = 0.01 * e / t
+        k1, k2, k3 = REFRACTIVITY[op]
+        return k1 * pt + k2 * et + k3 * et / t
     raise ValueError(f"unknown op {op}")
 
 
