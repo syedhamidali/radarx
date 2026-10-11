@@ -77,8 +77,10 @@ import radarx  # noqa: F401  registers the .radarx accessors
 from radarx.grid import (
     gate_corners,
     grid_cones,
+    grid_gates,
     grid_radar,
     grid_radars,
+    grid_rhi,
     make_3d_grid,
     merge_radars,
     network_bias,
@@ -1120,6 +1122,53 @@ print(f"cone grid {dict(cones.sizes)}; pseudo-CAPPI grid {dict(pseudo.sizes)}; C
       f"corner arrays {corners[0].shape}")
 ```
 
+### Gridding with a radius of influence
+
+`grid_cones` has no smoothing length. `grid_gates` is the other way to grid: each
+output point is the weighted mean of the gates within a radius of influence in
+metres, with the weights of Cressman (1959) or Barnes (1964), or the nearest
+gate. The radius can grow with the distance from the radar (`roi_range_factor`),
+or follow the beam width (`beam_width`, in degrees), as the radius functions of
+Py-ART do. A gate is a point in space, so the scan does not matter: the same
+call grids sector scans, RHIs and volumes that repeat a tilt. `grid_rhi` gives a
+vertical section through the radar in the same way. For repeated sweeps of one
+elevation, such as the split cuts of NEXRAD or the extra low tilts of SAILS,
+`grid_cones(..., repeats="mean")` merges them into one cone, and with `motion`
+each repeat is first moved to the analysis time:
+
+```{code-cell} ipython3
+zs_section = np.arange(250.0, 10e3, 250.0)
+distance = np.arange(2e3, 150e3, 1000.0)
+with timed("10d. Radius of influence gridding"):
+    cressman = grid_gates(
+        volumes[1], ["DBZH"], x=xs, y=xs, z=zs, weighting="cressman", roi=1000.0, beam_width=1.0
+    )
+    barnes = volumes[1].radarx.grid_gates(
+        ["DBZH"], x=xs, y=xs, z=zs, weighting="barnes", roi=1000.0, beam_width=1.0
+    )
+    nearest = grid_gates(volumes[1], ["DBZH"], x=xs, y=xs, z=zs, weighting="nearest", roi=1000.0)
+    section = grid_rhi(
+        volumes[1], ["DBZH"], azimuth=250.0, distance=distance, z=zs_section, roi=1000.0, beam_width=1.0
+    )
+    section_acc = volumes[1].radarx.grid_rhi(
+        ["DBZH"], azimuth=250.0, distance=distance, z=zs_section, roi=1000.0, beam_width=1.0
+    )
+    merged = grid_cones(volumes[1], ["DBZH"], x=xs, y=xs, z=zs, repeats="mean")
+both = cones.DBZH.notnull() & cressman.DBZH.notnull()
+rms = float(np.sqrt(((cones.DBZH - cressman.DBZH).where(both) ** 2).mean()))
+print(
+    f"filled cells: cone {float(cones.DBZH.notnull().mean()):.2f}, "
+    f"Cressman {float(cressman.DBZH.notnull().mean()):.2f}, Barnes {float(barnes.DBZH.notnull().mean()):.2f}; "
+    f"rms difference cone - Cressman {rms:.1f} dB; section {dict(section.sizes)}; "
+    f"split cuts merged, filled cells {float(merged.DBZH.notnull().mean()):.3f}"
+)
+fig, axes = plt.subplots(1, 3, figsize=(15, 4.4), layout="constrained")
+for ax, grid, label in zip(axes, (cones, cressman, barnes), ("grid_cones", "Cressman", "Barnes")):
+    grid.DBZH.sel(z=2000.0).plot(ax=ax, x="x", y="y", cmap="ChaseSpectral", vmin=-10, vmax=70)
+    ax.set(title=f"{label}, 2 km", aspect="equal")
+fig
+```
+
 The vertical section of a volume along one azimuth is a pseudo range-height
 indicator, the input of `plot_rhi`. With `plot_ppi`, `plot_cappi` and
 `plot_maxcappi` the plotting functions of `radarx.vis` draw into Matplotlib
@@ -1913,6 +1962,8 @@ notebooks or from this index.
 | `radial_velocity` | `radarx.fundamentals.variables` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `reflectivity_factor` | `radarx.fundamentals.variables` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `grid_cones` | `radarx.grid.cone` | [core](Radar_Workflow): Other ways to grid, section and plot |
+| `grid_gates` | `radarx.grid.gates` | [core](Radar_Workflow): Other ways to grid, section and plot |
+| `grid_rhi` | `radarx.grid.gates` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `grid_radar` | `radarx.grid.grid` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `make_3d_grid` | `radarx.grid.grid` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `stack_data` | `radarx.grid.grid` | [core](Radar_Workflow): Other ways to grid, section and plot |
@@ -2127,8 +2178,10 @@ The methods of the `.radarx` accessors:
 | `.radarx.evaporation` | [core](Radar_Workflow): 13. Evaporation |
 | `.radarx.forward_operator` | [part 2](Radar_Workflow_Advanced): 14. Forward operator for WRF and MPAS output |
 | `.radarx.gbvtd` | [part 2](Radar_Workflow_Advanced): 13. Tropical-cyclone winds from one radar |
+| `.radarx.grid_gates` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `.radarx.grid_lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `.radarx.grid_radars` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
+| `.radarx.grid_rhi` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `.radarx.hail_kinetic_energy` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.hail_products` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.hid` | [core](Radar_Workflow): 6. Hydrometeor classification |

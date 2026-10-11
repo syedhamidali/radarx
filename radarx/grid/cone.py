@@ -54,10 +54,13 @@ __all__ = ["grid_cones"]
 
 __doc__ = __doc__.format("\n   ".join(__all__))
 
+import warnings
+
 import numpy as np
 import xarray as xr
 
 from .._fields import node_dataset
+from .._gridcf import aeqd_crs, crs_variable, georeference
 from .._provenance import provenance
 
 try:
@@ -157,6 +160,72 @@ def _select_sweeps(sweeps, variable, tolerance=0.1):
         if key not in best or reach > best[key][1]:
             best[key] = (ds, reach, elevation)
     return [ds for ds, _, _ in sorted(best.values(), key=lambda item: item[2])]
+
+
+REPEATS = ("farthest", "mean", "latest", "nearest")
+
+
+def _sweep_groups(sweeps, variable, repeats, analysis_time, tolerance=0.1):
+    """
+    Groups of sweeps of one elevation that contain ``variable``, lowest first.
+
+    ``repeats="farthest"`` keeps one sweep per elevation (:func:`_select_sweeps`).
+    The other choices keep all of them, ordered by priority within the group:
+    ``"mean"`` by time, ``"latest"`` the latest first and ``"nearest"`` the one
+    closest to ``analysis_time`` first; sweeps that tie come with the farthest
+    reach first. Returns ``(groups, flat list of sweeps)``.
+    """
+    if repeats not in REPEATS:
+        raise ValueError(f"repeats must be one of {REPEATS}, not {repeats!r}")
+    if repeats == "farthest":
+        flat = _select_sweeps(sweeps, variable, tolerance)
+        return [1] * len(flat), flat
+    t0 = np.datetime64(analysis_time, "ns")
+    found = {}
+    for ds in sweeps:
+        if variable not in ds:
+            continue
+        elevation = float(np.nanmedian(ds["elevation"].values))
+        time = _mean_time(ds)
+        seconds = 0.0 if np.isnat(time) else float((time - t0) / np.timedelta64(1, "s"))
+        reach = float(ds["range"].values[-1])
+        priority = {"mean": seconds, "latest": -seconds, "nearest": abs(seconds)}
+        found.setdefault(round(elevation / tolerance), []).append(
+            (priority[repeats], -reach, elevation, ds)
+        )
+    ordered = sorted(
+        (sorted(group, key=lambda m: m[:2]) for group in found.values()),
+        key=lambda group: float(np.median([m[2] for m in group])),
+    )
+    return [len(g) for g in ordered], [m[3] for g in ordered for m in g]
+
+
+def _reduce_groups(values, heights, groups, mean):
+    """
+    One cone per group of repeated sweeps from stacks of values and heights.
+
+    The mean of the members that have a value (and of their heights), or the
+    first member that has a value, as in the compiled kernel.
+    """
+    out_v, out_h = [], []
+    start = 0
+    for size in groups:
+        v, h = values[start : start + size], heights[start : start + size]
+        start += size
+        if mean:
+            with np.errstate(all="ignore"), warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                out_v.append(np.nanmean(v, axis=0))
+                out_h.append(np.nanmean(h, axis=0))
+            continue
+        first_v, first_h = v[0].copy(), h[0].copy()
+        for member_v, member_h in zip(v[1:], h[1:]):
+            take = np.isnan(first_v) & (np.isfinite(member_v) | np.isnan(first_h))
+            first_v = np.where(take, member_v, first_v)
+            first_h = np.where(take, member_h, first_h)
+        out_v.append(first_v)
+        out_h.append(first_h)
+    return np.stack(out_v), np.stack(out_h)
 
 
 def _mean_time(ds):
@@ -306,6 +375,8 @@ def _grid_numpy(
     k_e=K_E,
     fill_depth=np.inf,
     shifts=None,
+    groups=None,
+    group_mean=False,
 ):
     """NumPy implementation of the compiled kernel (same results)."""
     X, Y = np.meshgrid(x, y)
@@ -323,6 +394,8 @@ def _grid_numpy(
         k_e,
         fill_depth,
         shifts,
+        groups,
+        group_mean,
     )
 
 
@@ -348,6 +421,8 @@ def _columns_numpy(
     k_e=K_E,
     fill_depth=np.inf,
     shifts=None,
+    groups=None,
+    group_mean=False,
 ):
     """
     Cone gridding of columns at ground distance ``s`` and azimuth ``az``.
@@ -359,7 +434,9 @@ def _columns_numpy(
     interpolates in elevation angle). With a finite ``fill_depth`` the lowest
     cone fills at most that many metres below itself and not below the radar
     altitude. ``shifts`` gives a displacement ``(dx, dy)`` in metres per
-    sweep: the cone is sampled at the column position minus the shift.
+    sweep: the cone is sampled at the column position minus the shift. With
+    ``groups`` (sizes of runs of consecutive sweeps) every run is merged into one
+    cone first, by its mean or by its first member that has a value.
     """
     shifts = shifts if shifts is not None else [(0.0, 0.0)] * len(arrays)
     values, heights = zip(
@@ -377,6 +454,8 @@ def _columns_numpy(
     )
     V = np.stack(values)
     H = np.stack(heights)
+    if groups is not None:
+        V, H = _reduce_groups(V, H, groups, group_mean)
     nk = V.shape[0]
     # Only cones that reach a column take part (low tilts can start farther
     # out than high ones): move missing cones to the end of each column.
@@ -435,6 +514,7 @@ def grid_cones(
     k_e=K_E,
     motion=None,
     time=None,
+    repeats="farthest",
     max_gap=2.0,
     min_weight=0.5,
     n_threads=None,
@@ -487,6 +567,19 @@ def grid_cones(
     time : datetime-like, optional
         Analysis time for ``motion``. Default: the mean time of the volume.
         Also the ``time`` of the result when given.
+    repeats : {"farthest", "mean", "latest", "nearest"}, optional
+        What to do with several sweeps of the same elevation (within 0.1
+        degrees). ``"farthest"`` (default, as before) takes the one that reaches
+        farthest, which sorts out the split cuts of NEXRAD. The other choices use
+        all of them, for volumes that repeat the lowest tilt (SAILS and
+        MESO-SAILS of NEXRAD, or any other repeated sweep): ``"mean"`` averages
+        the repeats that have a value at the column, ``"latest"`` takes the
+        latest repeat that has a value and ``"nearest"`` the one closest in time
+        to ``time`` (default: the mean time of the volume). With ``motion`` every
+        repeat is moved to the analysis time before they are combined, so
+        ``"mean"`` averages the echo at one position instead of smearing it.
+        Merging is by elevation, not by time: repeated sweeps of the
+        highest tilts are merged as well.
     max_gap : float, optional
         Do not interpolate between rays more than this many median ray
         spacings apart (sector edges, missing rays). Default 2.
@@ -503,10 +596,15 @@ def grid_cones(
     Returns
     -------
     xarray.Dataset
-        Gridded fields on ``(z, y, x)`` as float32, with ``lat``/``lon``
-        axis coordinates, the radar site, ``crs_wkt`` and the mean time of
-        the volume as a scalar ``time`` coordinate, so grids of several
-        volumes stack along time with ``xr.concat(grids, "time")``.
+        Gridded fields on ``(z, y, x)`` as float32, georeferenced as in CF:
+        the azimuthal equidistant CRS centred on the radar as the scalar
+        ``crs_wkt`` (``grid_mapping`` of every field), 2-D ``lat(y, x)`` and
+        ``lon(y, x)`` computed from it, ``standard_name``, ``units``, ``axis``
+        and ``positive`` on ``x``, ``y``, ``z``, the radar site and the mean
+        time of the volume as a scalar ``time`` coordinate, so grids of several
+        volumes stack along time with ``xr.concat(grids, "time")``. Before
+        radarx 0.5 ``lat`` was 1-D along ``y`` and ``lon`` along ``x``, which is
+        wrong away from the radar (633 m in the corner of a 120 km wide grid).
 
     Raises
     ------
@@ -534,6 +632,13 @@ def grid_cones(
     ``min_weight`` (0.5), the 0.1 degree tolerance with which sweeps of equal
     elevation are identified, and the rule that cells outside the bracketing
     cones stay empty are radarx choices, not values from a paper.
+
+    Repeated sweeps. ``repeats="mean"``, ``"latest"`` and ``"nearest"`` are
+    radarx's own constructions; no publication was used for them. The repeats of
+    one elevation (within 0.1 degrees) become one cone before the vertical
+    interpolation, so a repeat adds no extra layer and no zero-thickness
+    interval. Merging by the mean after moving each repeat to the analysis time
+    assumes the steady motion of ``motion``.
 
     Velocity gridding. Interpolating radial velocity from the polar grid
     (here and in the multi-Doppler input) can leave periodic gridding
@@ -583,7 +688,12 @@ def grid_cones(
     volume_time = _volume_time(sweeps)
     gridded = {}
     for variable in data_vars:
-        selected = _select_sweeps(sweeps, variable)
+        sizes, selected = _sweep_groups(
+            sweeps,
+            variable,
+            repeats,
+            volume_time if time is None else time,
+        )
         if not selected:
             raise ValueError(f"No sweep contains {variable!r}.")
         arrays = [_sweep_arrays(ds, variable) for ds in selected]
@@ -603,6 +713,9 @@ def grid_cones(
             fill_depth=fill_depth,
             shifts=shifts,
         )
+        if repeats != "farthest":
+            options["groups"] = sizes
+            options["group_mean"] = repeats == "mean"
         site_altitude = site.get("altitude", 0.0)
         if use_compiled:
             field = _grid_compiled(x, y, z, arrays, site_altitude, n_threads, **options)
@@ -620,7 +733,7 @@ def grid_cones(
             f"each sweep moved from its own time to the analysis time with "
             f"u = {u} m/s, v = {v} m/s"
         )
-    return out.assign_coords(site_coords)
+    return _georeferenced(out, site_coords, site)
 
 
 def _check_k_e(k_e):
@@ -705,26 +818,17 @@ def _grid_compiled(x, y, z, arrays, site_altitude, n_threads, **options):
 
 def _crs_wkt(latitude, longitude):
     """The grid's azimuthal equidistant CRS as a CF ``crs_wkt`` coordinate."""
-    import pyproj
-
-    crs = pyproj.CRS.from_dict(
-        {"proj": "aeqd", "lat_0": latitude, "lon_0": longitude, "datum": "WGS84"}
-    )
-    return xr.DataArray(0, attrs=crs.to_cf())
+    return crs_variable(latitude, longitude)
 
 
 def _to_dataset(gridded, x, y, z, sweeps, site, attrs):
     """Wrap gridded fields with coordinates, site, CRS, time and attributes."""
-    lon, lat = _lonlat_axes(x, y, site["latitude"], site["longitude"])
     out = xr.Dataset(
         gridded,
         coords={
             "z": ("z", z, {"units": "m", "long_name": "height above sea level"}),
             "y": ("y", y, {"units": "m", "long_name": "distance north of the radar"}),
             "x": ("x", x, {"units": "m", "long_name": "distance east of the radar"}),
-            "lat": ("y", lat, {"units": "degrees_north"}),
-            "lon": ("x", lon, {"units": "degrees_east"}),
-            "crs_wkt": _crs_wkt(site["latitude"], site["longitude"]),
         },
     )
     times = [np.ravel(ds["time"].values) for ds in sweeps if "time" in ds]
@@ -736,3 +840,10 @@ def _to_dataset(gridded, x, y, z, sweeps, site, attrs):
     out.attrs["radar_name"] = out.attrs.get("instrument_name", "")
     out.attrs["gridding_method"] = "cone"
     return out
+
+
+def _georeferenced(out, site_coords, site):
+    """The grid with the radar site, the CRS and the CF georeferencing."""
+    out = out.assign_coords(site_coords)
+    mapping = aeqd_crs(site["latitude"], site["longitude"]).to_cf()
+    return georeference(out, mapping)

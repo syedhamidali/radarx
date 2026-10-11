@@ -40,6 +40,7 @@ __doc__ = __doc__.format("\n   ".join(__all__))
 import numpy as np
 import xarray as xr
 
+from .._gridcf import aeqd_crs, georeference
 from .._provenance import provenance
 from .._registry import accessor_method
 from . import cone
@@ -555,7 +556,9 @@ def grid_radars(
           ``radar_altitude``, ``time`` (volume time of each radar),
           ``sweep_elevation`` on ``(radar, sweep)``;
         * ``x``, ``y``, ``z``, 2-D ``lat`` and ``lon`` on ``(y, x)`` and the
-          grid's ``crs_wkt``;
+          grid's ``crs_wkt``, with ``grid_mapping`` on every field that has
+          ``x`` and ``y`` and ``standard_name``, ``units`` and ``axis`` on the
+          coordinates (CF);
         * optionally ``<field>_merged`` on ``(z, y, x)`` and ``<field>_bias``
           on ``radar``.
 
@@ -985,9 +988,8 @@ def _assemble(
         "z": ("z", z, {"units": "m", "long_name": "height above sea level"}),
         "y": ("y", y, {"units": "m", "long_name": "distance north of the origin"}),
         "x": ("x", x, {"units": "m", "long_name": "distance east of the origin"}),
-        "lat": (("y", "x"), columns["lat"], {"units": "degrees_north"}),
-        "lon": (("y", "x"), columns["lon"], {"units": "degrees_east"}),
-        "crs_wkt": cone._crs_wkt(*origin),
+        "lat": (("y", "x"), columns["lat"]),
+        "lon": (("y", "x"), columns["lon"]),
         "radar_x": (
             "radar",
             np.asarray(columns["radar_x"]),
@@ -1041,7 +1043,7 @@ def _assemble(
         "origin_longitude": origin[1],
         "comment": "multi-radar grid; heights above sea level",
     }
-    return out
+    return georeference(out, aeqd_crs(*origin).to_cf())
 
 
 def _advect_radars(out, data_vars, motion, time, engine, n_threads):
