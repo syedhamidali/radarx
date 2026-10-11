@@ -146,6 +146,7 @@ from .._dtypes import fields_as_float32
 from .._fields import VELOCITY, as_sweep
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 from ..io.sounding import _wind_from_direction
 from .coldpool import _columns, _f64, _height_of, _kernel, _per_column, _threads
 
@@ -659,7 +660,7 @@ def _sweep_rings(ds, field, min_elevation, max_elevation, max_range):
         if vr.sizes["range"] == 0:
             return None
     elevation = ds["elevation"]
-    el = float(elevation.median()) if elevation.size > 1 else float(elevation)
+    el = float(np.nanmedian(elevation.values))
     if not (min_elevation <= el <= max_elevation):
         return None
     from .vertical_profiles import _beam_height, _site_altitude
@@ -676,6 +677,7 @@ def _sweep_rings(ds, field, min_elevation, max_elevation, max_range):
     )
 
 
+@dask_support("computes", "it fits the wind to all rays of the sweeps.")
 @renamed_arguments(velocity="field")
 @provenance(
     "Wind profile by the velocity-azimuth display, after Browning and Wexler (1968)"

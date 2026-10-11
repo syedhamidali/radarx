@@ -131,6 +131,7 @@ import xarray as xr
 
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 from ._fieldtools import choose_engine
 from .vil import (
     _find_dbz,
@@ -724,6 +725,7 @@ def _compute(
 # --------------------------------------------------------------------------
 
 
+@dask_support("computes", "the result combines the gates of all sweeps of the volume.")
 @provenance(
     "Hail detection algorithm of Witt et al. (1998): SHI, MESH, POSH, HKE",
     extra_refs=("holleman-2001", "graham-nelson-1998"),
@@ -838,6 +840,7 @@ def hail_products(
 _document(hail_products)
 
 
+@dask_support("computes", "the result combines the gates of all sweeps of the volume.")
 @provenance(
     "Severe hail index of Witt et al. (1998)",
     extra_refs=("holleman-2001", "graham-nelson-1998"),
@@ -910,6 +913,7 @@ def shi(
 _document(shi, warning=False)
 
 
+@dask_support("computes", "the result combines the gates of all sweeps of the volume.")
 @provenance(
     "Maximum expected size of hail of Witt et al. (1998)",
     extra_refs=("holleman-2001", "graham-nelson-1998"),
@@ -980,6 +984,7 @@ def mesh(
 _document(mesh, warning=False)
 
 
+@dask_support("computes", "the result combines the gates of all sweeps of the volume.")
 @provenance(
     "Probability of severe hail of Witt et al. (1998)",
     extra_refs=("holleman-2001", "graham-nelson-1998"),
@@ -1055,6 +1060,7 @@ def posh(
 _document(posh)
 
 
+@dask_support("computes", "the result combines the gates of all sweeps of the volume.")
 @provenance(
     "Hail kinetic energy flux of Waldvogel et al. (1978) as used by Witt et al. (1998)",
     extra_refs=("holleman-2001", "graham-nelson-1998"),

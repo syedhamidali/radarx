@@ -134,6 +134,8 @@ References
 
 from __future__ import annotations
 
+import functools
+
 __all__ = ["echo_mask", "apply_mask"]
 
 import numpy as np
@@ -142,6 +144,14 @@ import xarray as xr
 from .._compat import renamed_arguments
 from .._fields import VELOCITY, align_like, as_sweep
 from .._provenance import provenance
+from .._sweepwise import (
+    Output,
+    Sweep,
+    apply_sweeps_many,
+    dask_support,
+    ray_coordinate,
+    ray_dimension,
+)
 from .dealias import _ray_links, _sweep_mapping
 from .kdp import _DBZH_NAMES, _PHIDP_NAMES, _RHOHV_NAMES, _find, _gate_spacing
 
@@ -678,8 +688,11 @@ def _options(limits, weights):
     return out, w
 
 
+_ALL_ROLES = ("dbzh", "zdr", "rhohv", "phidp", "snr", "vrad", "zh3")
+
+
 def _prepare_sweep(ds, fields, window):
-    """Field names and contiguous (ray, range) float64 arrays of one sweep."""
+    """Field names, the fields on (..., ray, range) and the ray links of a sweep."""
     dbzh, zdr, rhohv, phidp, snr = fields[:5]
     names = {
         "dbzh": _find(ds, dbzh, _DBZH_NAMES, True),
@@ -693,43 +706,34 @@ def _prepare_sweep(ds, fields, window):
         names["vrad"] = _find(ds, vrad, VELOCITY, vrad is not None)
         names["zh3"] = _find(ds, zh3, (), zh3 is not None)
     da = ds[names["dbzh"]]
-    if "range" not in da.dims or da.ndim != 2:
-        raise ValueError(f"{names['dbzh']!r} must be 2-D with a 'range' dimension")
-    ray_dim = da.dims[0] if da.dims[1] == "range" else da.dims[1]
+    ray_dim = ray_dimension(da)
     dr = _gate_spacing(ds["range"].values)
-
-    def arr(name):
-        if name is None:
-            return None
-        values = ds[name].transpose(ray_dim, "range").values
-        return np.ascontiguousarray(values, dtype=np.float64)
-
     if "azimuth" in ds.coords and ray_dim == "azimuth":
-        links = _ray_links(ds["azimuth"].values)
+        links = _ray_links(ray_coordinate(ds, ray_dim))
     else:
         links = np.ones(da.sizes[ray_dim], dtype=np.uint8)
         links[-1] = 0  # RHI or unknown geometry: no wrap
-    sweep = {role: arr(name) for role, name in names.items()}
-    sweep.setdefault("vrad", None)
-    sweep.setdefault("zh3", None)
-    sweep.update(
-        {
-            "ds": ds,
-            "names": names,
-            "ray_dim": ray_dim,
-            "links": np.ascontiguousarray(links, dtype=np.uint8),
-            "h": max(1, round(0.5 * float(window) / dr)),
-        }
-    )
-    return sweep
+    return {
+        "ds": ds,
+        "names": names,
+        "ray_dim": ray_dim,
+        "fields": [
+            None if names.get(role) is None else ds[names[role]] for role in _ALL_ROLES
+        ],
+        "links": np.ascontiguousarray(links, dtype=np.uint8),
+        "h": max(1, round(0.5 * float(window) / dr)),
+    }
+
+
+def _polarimetric(sweep):
+    return any(sweep["names"].get(r) is not None for r in ("zdr", "rhohv", "phidp"))
 
 
 def _wrap_sweep(sweep, score, cls, threshold, comment=None, method="radarx"):
     """Score, class and mask on the input sweep coordinates."""
     da = sweep["ds"][sweep["names"]["dbzh"]]
     dims = da.dims
-    if dims[0] != sweep["ray_dim"]:  # kernel output is (ray, range)
-        score, cls = score.T, cls.T
+    score, cls = score.data, cls.data
     used = ", ".join(n for n in sweep["names"].values() if n)
     flags = np.array(sorted(CLASSES), dtype=np.int8)
     out = xr.Dataset(
@@ -780,7 +784,7 @@ def _wrap_sweep(sweep, score, cls, threshold, comment=None, method="radarx"):
     return out
 
 
-def _run(sweeps, params, n_threads, use_compiled):
+def _classify_batch(sweeps, params, n_threads, use_compiled):
     if params.get("method") == "krause2016":
         if use_compiled:
             scores, classes = _krause_compiled(sweeps, params, n_threads)
@@ -792,16 +796,46 @@ def _run(sweeps, params, n_threads, use_compiled):
     return [_classify_numpy(sw, params) for sw in sweeps]
 
 
-def _polarimetric(sweep):
-    return any(sweep[r] is not None for r in ("zdr", "rhohv", "phidp"))
+def _core(batch, params, n_threads, use_compiled):
+    """Score and class of sweeps given as ``((links, h), fields)``."""
+    sweeps = []
+    for (links, h), arrays in batch:
+        sweep = {
+            role: None if a is None else np.ascontiguousarray(a, dtype=np.float64)
+            for role, a in zip(_ALL_ROLES, arrays)
+        }
+        sweeps.append({**sweep, "links": links, "h": h})
+    return _classify_batch(sweeps, params, n_threads, use_compiled)
+
+
+def _run(sweeps, params, n_threads, use_compiled):
+    """Score and class (DataArrays) of every prepared sweep."""
+    core = functools.partial(
+        _core, params=params, n_threads=n_threads, use_compiled=use_compiled
+    )
+    return apply_sweeps_many(
+        core,
+        [Sweep(sw["fields"], context=(sw["links"], sw["h"])) for sw in sweeps],
+        (Output(np.float32), Output(np.int8)),
+    )
 
 
 def _borrow_split_cuts(sweeps, results, tolerance=0.1):
-    """Class of Doppler cuts from the polarimetric cut at the same elevation."""
+    """Class of Doppler cuts from the polarimetric cut at the same elevation.
+
+    The classes of the two cuts are combined, so both are computed (dask
+    arrays become NumPy arrays); cuts with extra dimensions are left as they
+    are.
+    """
     angles = [_fixed_angle(sw["ds"]) for sw in sweeps]
     comments = [None] * len(sweeps)
     for i, sw in enumerate(sweeps):
-        if _polarimetric(sw) or angles[i] is None or sw["ray_dim"] != "azimuth":
+        if (
+            _polarimetric(sw)
+            or angles[i] is None
+            or sw["ray_dim"] != "azimuth"
+            or results[i][1].ndim != 2
+        ):
             continue
         cands = [
             j
@@ -809,14 +843,15 @@ def _borrow_split_cuts(sweeps, results, tolerance=0.1):
             if _polarimetric(other)
             and angles[j] is not None
             and other["ray_dim"] == "azimuth"
+            and results[j][1].ndim == 2
             and abs(angles[j] - angles[i]) <= tolerance
         ]
         if not cands:
             continue
         j = min(cands, key=lambda k: abs(k - i))
         iray, igate = _sweep_mapping(sweeps[j]["ds"], sw["ds"])
-        src_score, src_cls = results[j]
-        score, cls = results[i]
+        src_score, src_cls = (_ray_range(r, sweeps[j]) for r in results[j])
+        score, cls = (_ray_range(r, sw) for r in results[i])
         # nearest source gate of every gate (-1 outside the source sweep)
         ngs = src_cls.shape[1]
         flat = np.where(
@@ -833,9 +868,17 @@ def _borrow_split_cuts(sweeps, results, tolerance=0.1):
         idx = np.flatnonzero(has)[keep]
         cls.ravel()[idx] = take_cls[keep]
         score.ravel()[idx] = src_score.ravel()[src[keep]]
-        results[i] = (score, cls)
+        results[i] = tuple(
+            r.copy(data=v if r.dims[0] == sw["ray_dim"] else v.T)
+            for r, v in zip(results[i], (score, cls))
+        )
         comments[i] = sweeps[j]["name"]
     return results, comments
+
+
+def _ray_range(da, sweep):
+    """The values of a result on (ray, range) as a NumPy array."""
+    return da.transpose(sweep["ray_dim"], "range").values
 
 
 def _fixed_angle(ds):
@@ -847,6 +890,10 @@ def _fixed_angle(ds):
     return None  # pragma: no cover - xradar sweeps have one of the above
 
 
+@dask_support(
+    "lazy",
+    "With ``split_cuts=True`` a Doppler cut of a volume takes its classes from the polarimetric cut at the same elevation, so these two cuts are computed.",
+)
 @renamed_arguments(dbzh="dbz", vrad="field", snr_min="min_snr")
 @provenance(
     "Fuzzy-logic echo score in the manner of Gourley 2007 and Krause 2016, own memberships "
@@ -1282,7 +1329,7 @@ def echo_mask(
 
 
 def _keep_array(mask, da, name):
-    """Boolean (ray, range) array of ``mask`` in the dims order of ``da``."""
+    """Boolean DataArray of ``mask`` on the dimensions of ``da`` (lazy)."""
     if isinstance(mask, xr.Dataset):
         if "METEO_MASK" not in mask:
             raise KeyError(f"no METEO_MASK for {name!r}; pass the output of echo_mask")
@@ -1290,12 +1337,12 @@ def _keep_array(mask, da, name):
     if not isinstance(mask, xr.DataArray):
         raise TypeError("mask must be an xarray DataArray, Dataset or DataTree")
     dims = [d for d in da.dims if d in mask.dims]
-    if mask.ndim != 2 or len(dims) != 2:
+    if len(dims) != mask.ndim or "range" not in dims or len(dims) < 2:
         raise ValueError(f"the mask does not match the dimensions of {name!r}")
     keep = align_like(mask, da, f"the mask of {name!r}").transpose(*dims)
     if keep.shape != tuple(da.sizes[d] for d in dims):
         raise ValueError(f"the mask does not match the shape of {name!r}")
-    return keep.values.astype(bool)
+    return keep.astype(bool)
 
 
 def _mask_fields(ds, mask, data_vars, floors):
@@ -1305,7 +1352,7 @@ def _mask_fields(ds, mask, data_vars, floors):
         data_vars = [
             name
             for name, da in ds.data_vars.items()
-            if da.ndim == 2
+            if da.ndim >= 2
             and "range" in da.dims
             and any(d in da.dims for d in ray_dims)
             and np.issubdtype(da.dtype, np.floating)
@@ -1322,11 +1369,12 @@ def _mask_fields(ds, mask, data_vars, floors):
         floor = floors.get(name)
         if floor is not None:
             with np.errstate(invalid="ignore"):
-                keep = keep & (da.values > floor)
-        out[name] = da.where(xr.DataArray(keep, dims=da.dims)).assign_attrs(da.attrs)
+                keep = keep & (da > floor)
+        out[name] = da.where(keep).assign_attrs(da.attrs)
     return out
 
 
+@dask_support("lazy")
 @renamed_arguments(fields="data_vars")
 @provenance("Masking of non-meteorological gates with the radarx echo classification")
 def apply_mask(obj, mask=None, data_vars=None, *, nodata="auto", **kwargs):

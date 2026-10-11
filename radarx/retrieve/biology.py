@@ -94,6 +94,7 @@ from .._compat import renamed_arguments
 from .._polar import nearest_ray
 from .._provenance import provenance
 from .._registry import accessor_for
+from .._sweepwise import dask_support
 from . import _onnx_models
 from ._products import product_tree
 from .tornado import _clean, _first, _fixed_angle, _sweeps
@@ -201,6 +202,7 @@ def _select(sweeps, elevations, fields):
     return chosen
 
 
+@dask_support("computes", "the network classifies the whole volume at once.")
 @renamed_arguments(volume="obj")
 @provenance("MistNet biological echo segmentation (ONNX network)")
 def biological_echo(

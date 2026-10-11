@@ -712,7 +712,7 @@ def test_edge_cases():
         qvp(dt, sweep=7)
     with pytest.raises(ValueError, match="No sweep"):
         qvp(xr.DataTree(dt.ds))
-    with pytest.raises(ValueError, match="2-D"):
+    with pytest.raises(ValueError, match="dimensions"):
         qvp(ds.assign(bad=("range", RNG)), "bad")
     # melting layer input checks
     prof = _profiles_dataset([_melting_profile()])

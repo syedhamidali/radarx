@@ -61,6 +61,7 @@ import xarray as xr
 from .._compat import renamed_arguments
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 
 # -- input features of the network (shared with the training code) --------
 
@@ -530,6 +531,7 @@ def _with_uncertainty(out, ds, background, net, run, checked, seed, field):
 # -- public API ------------------------------------------------------------
 
 
+@dask_support("computes", "the wind is fitted to the whole grid or volume.")
 @renamed_arguments(velocity="field", reflectivity="dbz")
 @provenance(
     "Single-Doppler winds, cost structure of Gao et al. (1999) applied to one radar"

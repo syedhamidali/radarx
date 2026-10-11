@@ -215,6 +215,7 @@ from .._compat import renamed_arguments
 from .._fields import VELOCITY, as_sweep, find_field, node_dataset
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 from ..fundamentals.constants import EARTH_RADIUS
 from ..fundamentals.geometry import beam_center_height, ground_range
 from ..grid.cone import _sweep_names
@@ -1130,6 +1131,7 @@ def _per_sweep(obj, func):
     return func(obj, None)
 
 
+@dask_support("lazy_only")
 @renamed_arguments(velocity="field")
 @provenance(
     "Tropical-cyclone centre and radius of maximum wind from the GBVTD-simplex "
@@ -1431,6 +1433,7 @@ def _center_of(center, center_latlon, sweep, name):
     return x, y
 
 
+@dask_support("lazy_only")
 @renamed_arguments(velocity="field")
 @provenance(
     "Ground-based velocity track display (GBVTD) of a tropical cyclone, with the "
@@ -1698,6 +1701,7 @@ def _decompose(ds, azimuth):
     return phi, vt0, wn1, wn2, vt, vr
 
 
+@dask_support("lazy_only")
 @provenance(
     "Symmetric and wavenumber-1 and 2 asymmetric parts of the GBVTD winds on a "
     "polar grid, with the psi to azimuth mapping of the GBVTD geometry",

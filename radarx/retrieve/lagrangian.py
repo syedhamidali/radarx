@@ -188,6 +188,7 @@ import xarray as xr
 
 from .._compat import renamed_arguments
 from .._provenance import provenance
+from .._sweepwise import dask_support
 from . import _lagrangian_numpy as _np_kernel
 
 try:
@@ -597,6 +598,7 @@ def _valid_fraction(val, npts):
         return np.where(npts > 0, nvalid / np.maximum(npts, 1), np.nan)
 
 
+@dask_support("computes", "it follows trajectories through the winds of all times.")
 @renamed_arguments(reflectivity="dbz")
 @provenance("Air trajectories through gridded winds, as used by Ziegler (2013a, b)")
 def trajectories(

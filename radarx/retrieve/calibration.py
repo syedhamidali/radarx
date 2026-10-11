@@ -106,6 +106,7 @@ import xarray as xr
 from .._compat import renamed_arguments
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 from . import _fieldtools as ft
 
 try:
@@ -416,6 +417,7 @@ def _check_statistic(statistic):
         raise ValueError(f"statistic must be 'median' or 'mean', not {statistic!r}")
 
 
+@dask_support("lazy")
 @renamed_arguments(rhohv_min="min_rhohv", snr_min="min_snr")
 @provenance("Differential reflectivity offset from natural targets")
 def zdr_offset(
@@ -726,6 +728,7 @@ def _run_consistency(flat, curve, params, use_compiled, n_threads):
     return _consistency_stats_numpy(*args)
 
 
+@dask_support("lazy")
 @renamed_arguments(rhohv_min="min_rhohv", snr_min="min_snr", kdp_min="min_kdp")
 @provenance("Reflectivity offset from the self-consistency of Z, ZDR and KDP")
 def z_offset(
@@ -983,6 +986,7 @@ def _wrap(angle):
     return 180.0 - np.mod(180.0 - np.asarray(angle), 360.0)
 
 
+@dask_support("lazy")
 @renamed_arguments(rhohv_min="min_rhohv", snr_min="min_snr")
 @provenance("System differential phase offset from the first gates of each ray")
 def phidp_offset(

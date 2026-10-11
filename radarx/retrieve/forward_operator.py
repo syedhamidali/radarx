@@ -285,6 +285,7 @@ from scipy.special import gamma as _gamma
 from .._compat import renamed_arguments
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 from ..fundamentals.constants import EARTH_RADIUS
 from ..fundamentals.geometry import beam_center_height, ground_range
 from ._fieldtools import broadcast_block, choose_engine
@@ -1000,6 +1001,7 @@ def _kernel_call(compiled, n_threads, spec):
     return block
 
 
+@dask_support("lazy_only")
 @provenance(
     "Polarimetric radar forward operator: T-matrix rain and Rayleigh dry snow, "
     "hail and graupel from the mixing ratios of a numerical model, after Jung "
@@ -1437,6 +1439,7 @@ def _sweep_products(sampled, azimuth_da, range_da, elevation, site, thr, velocit
     return ds.transpose(..., _AZIMUTH, _RANGE)
 
 
+@dask_support("lazy_only")
 @renamed_arguments(fields="obj")
 @provenance(
     "Sampling of the model radar variables along the beam of a radar (4/3 "

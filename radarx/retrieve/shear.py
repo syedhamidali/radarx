@@ -82,6 +82,7 @@ __all__ = [
 
 __doc__ = __doc__.format("\n   ".join(__all__))
 
+import functools
 import warnings
 
 import numpy as np
@@ -91,6 +92,7 @@ from .._compat import renamed_arguments
 from .._fields import VELOCITY, as_sweep, find_field
 from .._provenance import provenance
 from .._registry import accessor_for
+from .._sweepwise import Output, Sweep, apply_sweeps_many, dask_support, ray_dimension
 from ._products import product_tree
 
 try:
@@ -298,26 +300,23 @@ def _as_gate_mask(mask, ds, da):
 
 
 def _sweep_arrays(ds, field, mask, exclude, floor):
-    """Velocity on (ray, range) and contiguous float64 arrays of one sweep."""
+    """Masked velocity on (..., ray, range) and the azimuth and range arrays."""
     if field not in ds:
         raise KeyError(f"{field!r} is not in the sweep")
     da = ds[field]
-    if "range" not in da.dims or da.ndim != 2:
-        raise ValueError(f"{field!r} must be 2-D with a 'range' dimension")
-    ray_dim = da.dims[0] if da.dims[1] == "range" else da.dims[1]
-    da_t = da.transpose(ray_dim, "range")
+    ray_dim = ray_dimension(da)
+    da_t = da.transpose(..., ray_dim, "range")
     if floor is not None:
         da_t = da_t.where(~(da_t <= floor))
     if mask is not None:
         da_t = da_t.where(_as_gate_mask(mask, ds, da))
     if exclude is not None:
         da_t = da_t.where(~_as_gate_mask(exclude, ds, da))
-    data = np.ascontiguousarray(da_t.values, dtype=np.float64)
     azimuth = np.ascontiguousarray(ds["azimuth"].values, dtype=np.float64)
     rng = np.ascontiguousarray(ds["range"].values, dtype=np.float64)
-    if azimuth.shape != (data.shape[0],):
+    if azimuth.shape != (da.sizes[ray_dim],):
         raise ValueError("the sweep needs one azimuth per ray")
-    return da, da_t, (data, azimuth, rng)
+    return da, da_t, (azimuth, rng)
 
 
 def _median_size(median_filter):
@@ -347,6 +346,29 @@ def _nodata_floor(ds, field, nodata, root_attrs):
     return _NEXRAD_FIELD_NODATA.get(field)
 
 
+def _llsd_core(batch, options, min_valid_fraction, median_size, n_threads, compiled):
+    """LLSD of sweeps given as ``((azimuth, range), (velocity,))``."""
+    data = [np.ascontiguousarray(arrays[0], dtype=np.float64) for _, arrays in batch]
+    azimuth = [geometry[0] for geometry, _ in batch]
+    rng = [geometry[1] for geometry, _ in batch]
+    if compiled:
+        outs = _shear.llsd(
+            data,
+            azimuth,
+            rng,
+            *options,
+            min_valid_fraction=min_valid_fraction,
+            n_threads=n_threads,
+            median_size=median_size,
+        )
+    else:
+        outs = [
+            _llsd_numpy(d, a, r, *options, min_valid_fraction, median_size)
+            for d, a, r in zip(data, azimuth, rng)
+        ]
+    return [(out[0], out[1]) for out in outs]
+
+
 def _llsd_sweeps(
     sweeps,
     field,
@@ -370,24 +392,20 @@ def _llsd_sweeps(
         for ds in sweeps
     ]
     window_range, window_azimuth = (float(w) for w in window)
-    gaussian = weights == "gaussian"
-    options = (window_range, window_azimuth, gaussian)
-    if _use_compiled(engine):
-        data, azimuth, rng = (list(a) for a in zip(*(p[2] for p in prepared)))
-        outs = _shear.llsd(
-            data,
-            azimuth,
-            rng,
-            *options,
-            min_valid_fraction=float(min_valid_fraction),
-            n_threads=int(n_threads or 0),
-            median_size=median_size,
-        )
-    else:
-        outs = [
-            _llsd_numpy(*p[2], *options, float(min_valid_fraction), median_size)
-            for p in prepared
-        ]
+    options = (window_range, window_azimuth, weights == "gaussian")
+    core = functools.partial(
+        _llsd_core,
+        options=options,
+        min_valid_fraction=float(min_valid_fraction),
+        median_size=median_size,
+        n_threads=int(n_threads or 0),
+        compiled=_use_compiled(engine),
+    )
+    outs = apply_sweeps_many(
+        core,
+        [Sweep([da_t], context=geometry) for _, da_t, geometry in prepared],
+        (Output(np.float32), Output(np.float32)),
+    )
 
     method = {
         "method": "linear least-squares derivative (LLSD)",
@@ -402,14 +420,15 @@ def _llsd_sweeps(
     results = []
     for (da, da_t, _), out in zip(prepared, outs):
         result = xr.Dataset(coords=da_t.coords)
-        for k, name in enumerate(("azimuthal_shear", "radial_divergence")):
-            result[name] = xr.DataArray(
-                out[k], dims=da_t.dims, coords=da_t.coords, attrs=_ATTRS[name] | method
-            ).transpose(*da.dims)
+        for name, values in zip(("azimuthal_shear", "radial_divergence"), out):
+            result[name] = values.assign_attrs(_ATTRS[name] | method).transpose(
+                *da.dims
+            )
         results.append(result)
     return results
 
 
+@dask_support("lazy", "The sweeps of a stack must have the same azimuths.")
 @provenance(
     "Azimuthal shear and radial divergence by LLSD (Smith and Elmore 2004)",
     extra_refs=("smith-elmore-2004",),
@@ -572,6 +591,7 @@ def llsd(
 llsd.__doc__ = llsd.__doc__.replace("{references}", _REFERENCES)
 
 
+@dask_support("lazy", "The sweeps of a stack must have the same azimuths.")
 @provenance(
     "Azimuthal shear by LLSD (Smith and Elmore 2004)", extra_refs=("smith-elmore-2004",)
 )
@@ -600,6 +620,7 @@ def azimuthal_shear(obj, field=None, window=(750.0, 2500.0), **kwargs):
     return _select(llsd(obj, field, window, **kwargs), "azimuthal_shear")
 
 
+@dask_support("lazy", "The sweeps of a stack must have the same azimuths.")
 @provenance(
     "Radial divergence by LLSD (Smith and Elmore 2004)",
     extra_refs=("smith-elmore-2004",),
@@ -840,6 +861,7 @@ def _storm_mask(ds, sweeps, dbz_name, angle, threshold, distance, n_threads, com
     return out
 
 
+@dask_support("computes", "it takes the maximum over the tilts of the volume.")
 @renamed_arguments(reflectivity="dbz", min_reflectivity="min_dbz")
 @provenance(
     "Layer-maximum azimuthal shear over the tilts of a volume (MRMS-style)",

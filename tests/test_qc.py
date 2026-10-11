@@ -251,7 +251,7 @@ def test_option_errors(monkeypatch):
         echo_mask(ds, engine="fortran")
     with pytest.raises(KeyError):
         echo_mask(ds, zdr="nope")
-    with pytest.raises(ValueError, match="2-D"):
+    with pytest.raises(ValueError, match="dimensions"):
         echo_mask(ds.isel(azimuth=0))
     with pytest.raises(ValueError, match="uniformly"):
         echo_mask(ds.isel(range=[0, 1, 5, 6]))

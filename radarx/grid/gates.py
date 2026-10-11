@@ -61,6 +61,7 @@ import xarray as xr
 from .._compat import renamed_arguments
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 from . import cone
 from .cone import K_E
 
@@ -344,6 +345,7 @@ def _describe(out, info, weighting, motion, time):
     return out
 
 
+@dask_support("computes", "the result is interpolated from the gates of all sweeps.")
 @renamed_arguments(dtree="obj", beam_width="beamwidth")
 @provenance(
     "Radius-of-influence gridding of radar gates with Cressman and Barnes weights, "
@@ -532,6 +534,7 @@ def _plane_azimuth(dtree, azimuth):
     return float(mean % 360.0)
 
 
+@dask_support("computes", "the result is interpolated from the gates of all sweeps.")
 @renamed_arguments(dtree="obj", beam_width="beamwidth")
 @provenance(
     "Radius-of-influence gridding of radar gates with Cressman and Barnes weights, "

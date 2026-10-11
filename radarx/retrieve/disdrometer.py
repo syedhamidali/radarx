@@ -260,6 +260,7 @@ from scipy.special import gammainc, gammaincc, gammaincinv, gammaln
 from .._compat import renamed_arguments
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 from ..fundamentals.geometry import beam_center_height, ground_range
 from . import _raindrop_fall
 from . import dsd as _dsdmod
@@ -670,6 +671,7 @@ def _velocity_shift_numpy(counts, lo, up, vt, step):
     return out
 
 
+@dask_support("computes", "it works on small in-memory data.")
 @renamed_arguments(ds="obj")
 @provenance("Parsivel spectra correction of Raupach and Berne (2015)")
 def raupach_berne_correction(
@@ -791,6 +793,7 @@ def raupach_berne_correction(
 # --------------------------------------------------------------------------
 
 
+@dask_support("computes", "it works on small in-memory data.")
 @renamed_arguments(ds="obj")
 @provenance("Drop number concentration N(D) after Raupach and Berne (2015)")
 def number_concentration(
@@ -939,6 +942,7 @@ def _diameter_dim(nd, dim):
     return d, w
 
 
+@dask_support("computes", "it works on small in-memory data.")
 @provenance("Integral quantities of measured drop size distributions")
 def dsd_moments(nd, dim="diameter", fall_speed="drag_balance"):
     """
@@ -1255,6 +1259,7 @@ def _truncated_quantities(logn0, mu, lam, dmin, dmax):
     return np.stack([n0, nw, d0, dm, mu, lam, rain, np.pi / 6.0 * 1.0e-3 * m3])
 
 
+@dask_support("computes", "it works on small in-memory data.")
 @provenance(
     "Gamma drop size distribution fit by moments, after Ulbrich and Atlas (1998)"
 )
@@ -1451,6 +1456,7 @@ def fit_gamma(
 _RADAR_VARS = ("DBZH", "ZDR", "KDP", "RHOHV", "AH", "ADP")
 
 
+@dask_support("computes", "it works on small in-memory data.")
 @renamed_arguments(ds="obj")
 @provenance(
     "Disdrometer processing: quality control, N(D), moments, gamma fit, radar variables"
@@ -1639,6 +1645,7 @@ def _pick_sweep(tree, sweep):
     return ds
 
 
+@dask_support("computes", "it reads the gates above one location.")
 @renamed_arguments(radar="obj", fields="data_vars")
 @provenance(
     "Radar variables in the gate above a ground location, radarx's own sampling"
@@ -1799,6 +1806,7 @@ def _window_mean(t_src, values, weights, t_lo, t_hi):
     return out, sw
 
 
+@dask_support("computes", "it pairs the spectra with the gates above one location.")
 @renamed_arguments(ds="obj", fields="data_vars")
 @provenance(
     "Pairing of disdrometer spectra with radar gates, radarx's own construction"

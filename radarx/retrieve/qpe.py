@@ -151,6 +151,7 @@ import xarray as xr
 from .._compat import renamed_arguments
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 from ._fieldtools import detach
 
 try:
@@ -718,6 +719,7 @@ def _fill(func, coefficients_doc, z_cap=True):
     func.__doc__ = func.__doc__.replace("    {common}", text)
 
 
+@dask_support("lazy")
 @provenance("Rain rate from reflectivity, R(Z) power law")
 def rain_rate_z(
     obj,
@@ -804,6 +806,7 @@ def rain_rate_z(
     )
 
 
+@dask_support("lazy")
 @provenance("Rain rate from specific differential phase, R(KDP) power law")
 def rain_rate_kdp(
     obj,
@@ -903,6 +906,7 @@ _fill(
 )
 
 
+@dask_support("lazy")
 @renamed_arguments(zdr_min="min_zdr")
 @provenance("Rain rate from reflectivity and differential reflectivity, R(Z, ZDR)")
 def rain_rate_z_zdr(
@@ -1001,6 +1005,7 @@ def rain_rate_z_zdr(
     )
 
 
+@dask_support("lazy")
 @provenance("Rain rate from specific attenuation, R(A) power law")
 def rain_rate_a(
     obj,
@@ -1312,6 +1317,7 @@ def _blend_text(
     )
 
 
+@dask_support("lazy")
 @renamed_arguments(zdr_min="min_zdr")
 @provenance("Rain rate with the relation chosen from the hydrometeor class")
 def rain_rate(

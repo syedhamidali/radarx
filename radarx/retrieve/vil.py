@@ -115,6 +115,8 @@ available an equivalent NumPy implementation is used.
 
 from __future__ import annotations
 
+import functools
+
 __all__ = ["vil", "vil_density", "echo_top", "liquid_water_content"]
 
 __doc__ = __doc__.replace("{}", "\n   ".join(__all__))
@@ -125,6 +127,7 @@ import xarray as xr
 from .._polar import beam_width, nearest_ray
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import Gates, Output, apply_gates, dask_support
 from ..fundamentals.geometry import beam_height_at_ground_range, ground_range
 from ..grid.cone import _select_sweeps, _sweep_dataset, _sweep_names
 
@@ -479,6 +482,50 @@ def _ceiling(melting, template):
 # --------------------------------------------------------------------------
 
 
+def _ceiling_input(melting, template):
+    """The ceiling as a number (NaN: none) and as a lazy DataArray, or None."""
+    if melting is None:
+        return np.nan, None
+    if isinstance(melting, xr.Dataset):
+        if "melting_layer_bottom" not in melting:
+            raise KeyError(
+                "melting must be a height or a melting_layer result with "
+                "'melting_layer_bottom'"
+            )
+        melting = melting["melting_layer_bottom"]
+    if isinstance(melting, xr.DataArray):
+        try:
+            field = melting.broadcast_like(template).transpose(*template.dims)
+        except ValueError as err:
+            raise ValueError(
+                f"melting {melting.dims} does not fit the columns {template.dims}"
+            ) from err
+        if field.shape != template.shape:
+            raise ValueError(
+                f"melting {melting.sizes} does not match the columns {template.sizes}"
+            )
+        return np.nan, field
+    return float(melting), None
+
+
+def _grid_core(batch, options, base, clear, use_compiled, n_threads):
+    """Column integrals of gates given as ``((height, ceiling), (dbz, ceiling))``."""
+    (
+        (z, ceiling),
+        (values, field),
+    ) = batch[0]
+    shape = values.shape[:-1]
+    v = np.moveaxis(values, -1, 0).reshape(z.size, -1)
+    if clear:
+        seen = np.maximum.accumulate(~np.isnan(v), axis=0)
+        v = np.where(seen & np.isnan(v), -np.inf, v)
+    ceil = np.full(v.shape[1], ceiling) if field is None else field.reshape(-1)
+    out = _columns(
+        z, _top_edges(z), v, ceil, True, options, base, use_compiled, n_threads
+    )
+    return [tuple(out[i].reshape(shape) for i in range(6))]
+
+
 def _column_products(
     obj,
     dbz,
@@ -541,8 +588,7 @@ def _column_products(
         name = _find_dbz(obj, dbz)
         da = obj[name]
         zdim = _vertical_dim(da, kind)
-        da = da.transpose(zdim, ...)
-        template = da.isel({zdim: 0}, drop=True)
+        template = da.transpose(zdim, ...).isel({zdim: 0}, drop=True)
         z = np.asarray(da[zdim].values, dtype=np.float64)
         site = obj["altitude"] if "altitude" in obj else None
         if base_height is not None:
@@ -551,23 +597,22 @@ def _column_products(
             base = float(site)
         else:
             base = 0.0
-        v = da.values.reshape(z.size, -1)
-        if clear:
-            seen = np.maximum.accumulate(~np.isnan(v), axis=0)
-            v = np.where(seen & np.isnan(v), -np.inf, v)
-        ceiling = _ceiling(melting, template).reshape(-1)
-        out = _columns(
-            z,
-            _top_edges(z),
-            v,
-            ceiling,
-            True,
-            options,
-            base,
-            use_compiled,
-            n_threads,
+        ceiling, ceiling_field = _ceiling_input(melting, template)
+        core = functools.partial(
+            _grid_core,
+            options=options,
+            base=base,
+            clear=clear,
+            use_compiled=use_compiled,
+            n_threads=n_threads,
         )
-        attrs = dict(da.attrs)
+        out = apply_gates(
+            core,
+            Gates([da, ceiling_field], context=(z, ceiling), core_dim=zdim),
+            [Output(np.float64, "gate")] * 6,
+            raw=True,
+        )
+        return out, template, base, dict(da.attrs)
     products = [out[i].reshape(template.shape) for i in range(6)]
     return products, template, base, attrs
 
@@ -602,7 +647,7 @@ def _options(
 
 
 def _wrap(template, data, name, attrs):
-    out = template.copy(data=np.asarray(data, dtype=np.float32))
+    out = template.copy(data=data.astype(np.float32))
     out.attrs = dict(attrs)
     out.name = name
     return out
@@ -685,6 +730,10 @@ _COMMON_PARAMS = """
         kernel and falls back to NumPy."""
 
 
+@dask_support(
+    "lazy",
+    "A polar volume (a DataTree) is composited on the columns of its lowest sweep and is computed; a grid or a profile stays lazy.",
+)
 @provenance("Vertically integrated liquid of Greene and Clark (1972)")
 def vil(
     obj,
@@ -892,6 +941,10 @@ def vil(
 vil.__doc__ = vil.__doc__.replace("{common}", _COMMON_PARAMS.strip("\n"))
 
 
+@dask_support(
+    "lazy",
+    "A polar volume (a DataTree) is composited on the columns of its lowest sweep and is computed; a grid or a profile stays lazy.",
+)
 @provenance("Echo-top height algorithm of Lakshmanan et al. (2013)")
 def echo_top(
     obj,
@@ -1020,6 +1073,10 @@ def echo_top(
 echo_top.__doc__ = echo_top.__doc__.replace("{common}", _COMMON_PARAMS.strip("\n"))
 
 
+@dask_support(
+    "lazy",
+    "A polar volume (a DataTree) is composited on the columns of its lowest sweep and is computed; a grid or a profile stays lazy.",
+)
 @provenance("VIL density of Amburn and Wolf (1997)")
 def vil_density(
     obj,
@@ -1176,6 +1233,7 @@ def _lwc_dsd(ds, dbz, factor, units, mask, dsd_kwargs, n_threads, engine):
     return _dsd_lwc(res["LWC"], factor, units)
 
 
+@dask_support("lazy")
 @provenance(
     "Liquid water content of rain from reflectivity or a drop size distribution"
 )

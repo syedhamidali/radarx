@@ -108,6 +108,7 @@ import xarray as xr
 
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 from . import _fieldtools as ft
 
 try:
@@ -359,6 +360,7 @@ def _noise_dataset(
     return out
 
 
+@dask_support("lazy")
 @provenance(
     "Noise level of the reflectivity of a sweep",
     extra_refs=("doviak-zrnic-1993",),
@@ -558,6 +560,9 @@ def _snr_dataarray(
     return out
 
 
+@dask_support(
+    "lazy", "The attribute ``noise_level`` is written for a sweep in memory only."
+)
 @provenance(
     "Signal-to-noise ratio from the reflectivity and the noise level",
     extra_refs=("doviak-zrnic-1993",),
@@ -723,6 +728,9 @@ def _min_snr_text(min_snr):
     return f"gates with an SNR below {min_snr:g} dB are NaN"
 
 
+@dask_support(
+    "lazy", "The attribute ``noise_level`` is written for a sweep in memory only."
+)
 @provenance("Correlation coefficient corrected for noise")
 def correct_rhohv_noise(
     obj,
@@ -877,6 +885,9 @@ def correct_rhohv_noise(
     return one(obj)
 
 
+@dask_support(
+    "lazy", "The attribute ``noise_level`` is written for a sweep in memory only."
+)
 @provenance("Differential reflectivity corrected for noise")
 def correct_zdr_noise(
     obj,

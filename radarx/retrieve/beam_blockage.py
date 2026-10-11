@@ -183,6 +183,7 @@ from scipy.special import erfc
 from .._fields import as_sweep, node_dataset
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 from ..fundamentals.constants import EARTH_RADIUS
 from ..grid.cone import _sweep_names
 from ._fieldtools import check_object, choose_engine
@@ -646,6 +647,7 @@ def _reach(sweeps, k_e):
     return 1.01 * reach + 1.0
 
 
+@dask_support("lazy_only")
 @provenance(
     "Partial and cumulative beam blockage of a Gaussian (or uniform) beam by "
     "terrain from a digital elevation model, after Bech et al. (2003)",

@@ -85,6 +85,7 @@ import xarray as xr
 
 from .._compat import renamed_arguments
 from .._provenance import provenance
+from .._sweepwise import dask_support
 
 try:
     from . import _multidoppler
@@ -654,6 +655,7 @@ def _site(dtree):
     return site
 
 
+@dask_support("computes", "it grids several volumes onto one grid.")
 @renamed_arguments(velocity="field", reflectivity="dbz")
 @provenance("Gridding of radar volumes for multi-Doppler retrieval")
 def multi_doppler_input(
@@ -1621,6 +1623,7 @@ DEFAULT_WEIGHTS = {
 }
 
 
+@dask_support("computes", "the wind is solved for all grid cells at once.")
 @renamed_arguments(velocity="field", reflectivity="dbz")
 @provenance(
     "Variational multi-Doppler winds, cost structure of Gao et al. (1999), own weights"
@@ -2162,6 +2165,7 @@ def _add_error(out, stderr, n_samples):
 _BOUNDARY_MODES = {"upward": 0, "downward": 1, "obrien": 2}
 
 
+@dask_support("computes", "the wind is solved for all grid cells at once.")
 @renamed_arguments(velocity="field", reflectivity="dbz")
 @provenance(
     "Analytic dual-Doppler winds: weighted least squares and continuity integration"
