@@ -42,8 +42,9 @@ geometry. The derivation reproduces Eqs. 5 to 11 of Liou et al. and Eq. 1 of
 Chen et al. from it. Everything that depends on the paper itself (the exact
 treatment of the angle :math:`\psi` and of the data gaps, the ring spacing) is
 *not checked against Lee et al. (1999)*. The centre finding follows the
-description of Bell and Lee (2012, section 2 and 3a, including the weights and
-the Table 1 numbers, which the NORM score reproduces); the simplex cost
+description of Bell and Lee (2012, section 2 and 3a, including the weights; the
+NORM score gives the values of their Table 1 for the best peak and a ranking
+that agrees with it, but values 0.03 to 0.06 lower for the second peak); the simplex cost
 function is the one Bell and Lee describe in words (the axisymmetric tangential
 wind of GBVTD) and the details of Lee and Marks (2000), which were not read,
 are not reproduced. The temporal steps of Bell and Lee (polynomial fits over
@@ -162,7 +163,10 @@ normalised NORM score ranks them,
     n_\sigma = \sigma_{min}/\sigma,\quad
     n_N = 1 + \ln(N_{conv}/N_{start}),
 
-which reproduces the scores of Table 1 of Bell and Lee (2012). The centre of the
+which gives the scores of Table 1 of Bell and Lee (2012) for the radii of the best
+peak (15 to 17 km) and the same ranking of the radii; for the second peak (22 to 24
+km) it gives 0.03 to 0.06 less than the table, whose printed parts do not add up to
+the printed scores with these weights. The centre of the
 best radius is the result and its spread an estimate of its uncertainty. Not
 from the paper: the use of the first guess for the range of radii (a fixed grid
 is used), the floor of 10 m for :math:`\sigma`, the convergence criterion of the
@@ -340,8 +344,7 @@ def _asymmetry(gamma_deg, spec):
 
 @provenance(
     "Analytic modified Rankine-combined vortex with a mean wind, forward-modelled "
-    "to Doppler velocity",
-    extra_refs=("liou-2005",),
+    "to Doppler velocity"
 )
 def synthetic_vortex(
     center=(60000.0, 0.0),
@@ -416,8 +419,9 @@ def synthetic_vortex(
     azimuth_step, range_step, max_range : float, optional
         Ray spacing (degrees), gate spacing and the last gate (m).
     blank_sectors : sequence of tuple, optional
-        ``(start, end)`` azimuths (degrees clockwise from north, from the
-        radar) in which there are no data, to test data gaps.
+        ``(start, end)`` azimuths (degrees clockwise from north, seen from the
+        vortex centre) in which there are no data, to test data gaps on the
+        rings.
     site : tuple of float, optional
         ``(latitude, longitude, altitude)`` of the radar (degrees, degrees, m).
     k_e : float, optional
@@ -478,8 +482,9 @@ def synthetic_vortex(
     vd = np.where(s <= 0, np.nan, vd)
     for start, end in blank_sectors:
         lo, hi = start % 360.0, end % 360.0
-        inside = (az >= lo) & (az <= hi) if lo <= hi else (az >= lo) | (az <= hi)
-        vd[inside, :] = np.nan
+        g = gamma % 360.0
+        inside = (g >= lo) & (g <= hi) if lo <= hi else (g >= lo) | (g <= hi)
+        vd = np.where(inside, np.nan, vd)
     ds = xr.Dataset(
         {
             "VRADH": (
@@ -632,9 +637,7 @@ class _NumpyGates:
         order = min(order, max_order)
         if gap > max_gap * _DEG or order < 1:
             return None
-        ncol = 2 * order + 1
-        if m < ncol:
-            return None
+        ncol = 2 * order + 1  # fewer gates than columns would leave a gap > 120 degrees
         wt = self.w[sel] * t[sel]
         val = self.v[sel]
         basis = np.empty((m, ncol))
@@ -644,8 +647,6 @@ class _NumpyGates:
             basis[:, 2 * n] = np.sin(n * psi)
         ata = (basis * wt[:, None]).T @ basis
         atb = (basis * wt[:, None]).T @ val
-        if not np.all(np.isfinite(ata)) or np.linalg.cond(ata) > 1.0e12:
-            return None
         sol = np.linalg.solve(ata, atb)
         resid = val - basis @ sol
         coef = np.zeros(_NCOEF)
@@ -1124,8 +1125,6 @@ def _per_sweep(obj, func):
         nodes = {
             name: func(node_dataset(obj[name]), name) for name in _sweep_names(obj)
         }
-        if not nodes:
-            raise ValueError("the volume has no sweeps")
         return product_tree(obj, nodes)
     return func(obj, None)
 
@@ -1390,10 +1389,9 @@ def _peak(radii, values):
     if k == 0 or k == len(values) - 1 or not (finite[k - 1] and finite[k + 1]):
         return out
     y0, y1, y2 = values[k - 1], values[k], values[k + 1]
-    denom = y0 - 2.0 * y1 + y2
+    # y1 is the first maximum, so y0 < y1 >= y2 and the denominator is negative
+    shift = 0.5 * (y0 - y2) / (y0 - 2.0 * y1 + y2)
     step = radii[k + 1] - radii[k]
-    shift = 0.5 * (y0 - y2) / denom if denom != 0 else 0.0
-    shift = float(np.clip(shift, -1.0, 1.0))
     return np.array([radii[k] + shift * step, y1 - 0.25 * (y0 - y2) * shift])
 
 
@@ -1742,6 +1740,18 @@ def tc_decompose(result, *, azimuth=None):
         If ``result`` is not a result of :func:`gbvtd`.
     TypeError
         If ``result`` is not a Dataset or a DataTree.
+
+    References
+    ----------
+    .. [1] Lee, W.-C., B. J.-D. Jou, P.-L. Chang, and S.-M. Deng, 1999: Tropical
+       cyclone kinematic structure retrieved from single-Doppler radar
+       observations. Part I: Interpretation of Doppler velocity patterns and
+       the GBVTD technique. *Mon. Wea. Rev.*, **127** (10), 2419-2439,
+       https://doi.org/10.1175/1520-0493(1999)127<2419:TCKSRF>2.0.CO;2
+    .. [2] Liou, Y.-C., T.-C. C. Wang, W.-C. Lee, and Y.-J. Chang, 2005: The
+       extended GBVTD and the recovery of the tropical cyclones asymmetric
+       structures. *Preprints, 32nd Conf. on Radar Meteorology*, Albuquerque,
+       NM, Amer. Meteor. Soc., JP2J.8 (conference paper, no DOI).
     """
     if isinstance(result, xr.DataTree):
         nodes = {

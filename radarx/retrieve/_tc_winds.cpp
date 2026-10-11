@@ -93,7 +93,7 @@ class Gates {
 public:
     Gates(const double* x, const double* y, const double* v, const double* w, int64_t n,
           double cell)
-        : x_(x), y_(y), v_(v), w_(w), n_(n), cell_(cell) {
+        : x_(x), y_(y), v_(v), w_(w), cell_(cell) {
         // the beam direction of every gate, psi = phi_center - azimuth needs atan2(y, x)
         azim_.resize(n);
         for (int64_t i = 0; i < n; ++i) azim_[i] = std::atan2(y[i], x[i]);
@@ -165,8 +165,7 @@ public:
         else if (gap <= 120.0 * kDeg) order = 1;
         order = std::min(order, s.max_order);
         if (gap > s.max_gap || order < 1) return false;
-        const int nc = 2 * order + 1;
-        if (m < nc) return false;
+        const int nc = 2 * order + 1;  // fewer gates than columns would leave a gap > 120 degrees
         double ata[kCoef][kCoef] = {}, atb[kCoef] = {};
         double basis[kCoef];
         for (int64_t i = 0; i < m; ++i) {
@@ -240,7 +239,6 @@ private:
     }
 
     const double *x_, *y_, *v_, *w_;
-    int64_t n_;
     double cell_;
     double xmin_, ymin_;
     int64_t nx_, ny_;
