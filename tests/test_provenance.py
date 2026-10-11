@@ -84,6 +84,7 @@ KEY_MARKS = {
     "ester-1996": "Ester, M., H.-P. Kriegel",
     "holleman-2001": "Holleman, I., 2001",
     "graham-nelson-1998": "Graham, R. A., and J. A. Nelson",
+    "roc-mesocyclone-detection": "WSR-88D Radar Operations Center",
 }
 
 
