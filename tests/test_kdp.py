@@ -499,3 +499,254 @@ def test_band_scales_the_defaults(engine):
         estimate_kdp(ds, band="K")
     with pytest.raises(ValueError, match="texture_method"):
         estimate_kdp(ds, texture_method="x")
+
+
+# --------------------------------------------------------------------------
+# adaptive filter window, backscatter phase and uncertainty
+# --------------------------------------------------------------------------
+
+
+def _cell(kmax, width_km, delta, sigma, nray=60, seed=7, dr=DR):
+    """A Gaussian rain cell of known KDP with a narrower backscatter bump."""
+    rnd = np.random.default_rng(seed)
+    r = (np.arange(int(60e3 / dr)) + 0.5) * dr / 1000.0
+    kdp = kmax * np.exp(-0.5 * ((r - 30.0) / width_km) ** 2)
+    phi = 2.0 * np.cumsum(kdp) * dr / 1000.0
+    bump = delta * np.exp(-0.5 * ((r - 30.0) / (0.6 * width_km)) ** 2)
+    bump *= np.sqrt(kdp / kmax)
+    psi = 30.0 + phi + bump + rnd.normal(0.0, sigma, (nray, r.size))
+    dbz = np.broadcast_to(20.0 + 30.0 * kdp / kmax, psi.shape).copy()
+    ds = xr.Dataset(
+        {
+            "PHIDP": (("azimuth", "range"), psi),
+            "RHOHV": (("azimuth", "range"), np.full(psi.shape, 0.98)),
+            "DBZH": (("azimuth", "range"), dbz),
+        },
+        coords={
+            "azimuth": np.arange(nray, dtype=float),
+            "range": r * 1000.0,
+            "elevation": ("azimuth", np.full(nray, 0.5)),
+        },
+    )
+    return ds, kdp, bump
+
+
+_X_CELL = (12.0, 4.0, 12.0, 3.0)  # Kmax, width (km), delta, noise (degrees)
+_OLD = {"filter_window": 2.0, "n_iter": 10}  # the fixed defaults before the change
+
+
+def _window(out):
+    return out.PHIDP_processed.attrs["filter_window"]
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_narrow_x_band_cell_keeps_its_peak(engine):
+    """
+    The fixed 2 km window and 10 iterations took 17 percent off the peak of
+    a narrow X-band cell; the default adapts to the largest KDP of the sweep.
+    """
+    ds, kdp, _ = _cell(*_X_CELL)
+    peak = np.argmax(kdp)
+    old = estimate_kdp(ds, engine=engine, **_OLD)
+    new = estimate_kdp(ds, engine=engine)
+    assert np.nanmean(old.KDP.values[:, peak]) < 0.88 * kdp.max()
+    assert np.nanmean(new.KDP.values[:, peak]) == pytest.approx(kdp.max(), rel=0.05)
+
+    def rmse(o):
+        return np.sqrt(np.nanmean((o.KDP.values - kdp[None]) ** 2))
+
+    assert rmse(new) < 0.8 * rmse(old)
+    assert _window(new) < 2.0
+    assert _window(old) == 2.0
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize(
+    "cell", [(1.5, 8.0, 0.0, 3.0), (5.0, 6.0, 6.0, 3.0)], ids=["S", "C"]
+)
+def test_adaptive_default_equals_the_old_one_at_low_kdp(cell, engine):
+    """S and C-band cells keep the 2 km window, so the numbers do not change."""
+    ds, *_ = _cell(*cell)
+    new = estimate_kdp(ds, engine=engine)
+    old = estimate_kdp(ds, engine=engine, **_OLD)
+    assert _window(new) == 2.0
+    xr.testing.assert_allclose(new.KDP, old.KDP, atol=0, rtol=0)
+    xr.testing.assert_allclose(new.PHIDP_processed, old.PHIDP_processed, atol=0, rtol=0)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_window_follows_noise_and_gate_spacing(engine):
+    """A noisier phase needs more gates, hence a wider window; the cap is 2 km."""
+    quiet = estimate_kdp(_cell(12.0, 4.0, 12.0, 1.0)[0], engine=engine)
+    noisy = estimate_kdp(_cell(12.0, 4.0, 12.0, 5.0)[0], engine=engine)
+    assert _window(quiet) < _window(noisy) <= 2.0
+    # the same noise on finer gates averages over more gates in the same km
+    fine = estimate_kdp(_cell(12.0, 4.0, 12.0, 3.0, dr=125.0)[0], engine=engine)
+    coarse = estimate_kdp(_cell(12.0, 4.0, 12.0, 3.0, dr=500.0)[0], engine=engine)
+    assert _window(fine) < _window(coarse) <= 2.0
+    # an explicit value is used as given
+    cell = _cell(*_X_CELL)[0]
+    assert _window(estimate_kdp(cell, engine=engine, filter_window=1.0)) == 1.0
+    with pytest.raises(ValueError, match="filter_window"):
+        estimate_kdp(cell, filter_window=-1.0)
+    with pytest.raises(ValueError, match="noise_fraction"):
+        estimate_kdp(cell, noise_fraction=0.0)
+    with pytest.raises(ValueError, match="n_iter"):
+        estimate_kdp(cell, n_iter=-1)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_monotone_and_vulpiani_keep_the_fixed_window(engine):
+    ds, *_ = _cell(*_X_CELL)
+    for method in ("monotone", "vulpiani"):
+        assert _window(estimate_kdp(ds, method=method, engine=engine)) == 2.0
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("sigma", [1.0, 3.0, 5.0])
+def test_phase_noise_estimate(sigma, engine):
+    """The noise comes from second differences: folding and the ramp do not matter."""
+    ds, *_ = _cell(8.0, 5.0, 8.0, sigma)
+    ds["PHIDP"] = (ds.PHIDP + 180.0) % 360.0 - 180.0
+    out = estimate_kdp(ds, engine=engine)
+    assert out.PHIDP_processed.attrs["phase_noise"] == pytest.approx(sigma, rel=0.05)
+
+
+@pytest.mark.skipif(not kdpmod.HAS_COMPILED_KERNEL, reason="kernel not built")
+@pytest.mark.parametrize("method", METHODS)
+def test_new_outputs_agree_between_engines(method):
+    ds, *_ = _sweep(nray=40, seed=3)
+    ds["PHIDP"][:, 300:310] = np.nan
+    ds["RHOHV"][5:10, 400:420] = 0.5
+    ds["RHOHV"][12, :] = 0.1  # ray without valid gates
+    ds["DBZH"][:, ::7] = np.nan
+    a = estimate_kdp(ds, engine="numpy", method=method)
+    b = estimate_kdp(ds, engine="compiled", method=method)
+    for name in ("PHIDP_BACKSCATTER", "KDP_UNCERTAINTY"):
+        if name not in a:
+            assert name not in b
+            continue
+        np.testing.assert_array_equal(np.isnan(a[name]), np.isnan(b[name]))
+        np.testing.assert_allclose(a[name], b[name], atol=1e-6, rtol=0)
+    for key in ("phase_noise", "filter_window", "kdp_reference"):
+        assert a.PHIDP_processed.attrs[key] == pytest.approx(
+            b.PHIDP_processed.attrs[key], rel=1e-9, nan_ok=True
+        )
+    assert np.isnan(b.KDP_UNCERTAINTY[12]).all()
+
+
+@pytest.mark.skipif(not kdpmod.HAS_COMPILED_KERNEL, reason="kernel not built")
+def test_adaptive_window_agrees_between_engines_on_a_volume():
+    """Every sweep of a volume adapts on its own noise and largest KDP."""
+    sweeps = {
+        "sweep_0": _cell(*_X_CELL, nray=30)[0],
+        "sweep_1": _cell(1.5, 8.0, 0.0, 3.0, nray=20, seed=2)[0],
+        "sweep_2": _cell(12.0, 4.0, 12.0, 5.0, nray=25, seed=3, dr=125.0)[0],
+    }
+    tree = xr.DataTree.from_dict(sweeps)
+    a = estimate_kdp(tree, engine="numpy")
+    b = estimate_kdp(tree, engine="compiled")
+    windows = []
+    for name in sweeps:
+        x, y = a[name].to_dataset(), b[name].to_dataset()
+        np.testing.assert_allclose(x.KDP, y.KDP, atol=1e-6)
+        np.testing.assert_allclose(x.KDP_UNCERTAINTY, y.KDP_UNCERTAINTY, atol=1e-9)
+        for key in ("phase_noise", "filter_window", "kdp_reference"):
+            assert x.PHIDP_processed.attrs[key] == pytest.approx(
+                y.PHIDP_processed.attrs[key], rel=1e-9
+            )
+        windows.append(_window(x))
+    assert windows[0] < 2.0 and windows[1] == 2.0 and windows[2] < 2.0
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_backscatter_phase_of_the_hubbert_filter(engine):
+    """
+    PHIDP_BACKSCATTER is the measured minus the processed phase, the part the
+    filter removed: it finds a narrow bump (about two thirds of it here), is
+    zero elsewhere, and exists for the Hubbert filter only.
+    """
+    ds, _, _, inside = _sweep(delta=10.0, nray=200)
+    r = ds.range.values / 1000.0
+    out = estimate_kdp(ds, engine=engine, offset=150.0)
+    delta = out.PHIDP_BACKSCATTER
+    assert delta.dims == out.KDP.dims
+    assert delta.attrs["units"] == "degrees"
+    measured = (ds.PHIDP.values - 150.0 + 180.0) % 360.0 - 180.0
+    resid = measured - out.PHIDP_processed.values
+    resid -= 360.0 * np.round(resid / 360.0)
+    ok = np.isfinite(delta.values)
+    np.testing.assert_allclose(delta.values[ok], resid[ok], atol=1e-9)
+    bump = 10.0 * np.exp(-0.5 * ((r - 62.0) / 1.0) ** 2)
+    centre = (r > 61.5) & (r < 62.5)
+    est = np.nanmean(delta.values[:, centre])
+    assert 0.5 * bump[centre].mean() < est < bump[centre].mean()
+    assert abs(np.nanmean(delta.values[:, (r > 20) & (r < 50)])) < 0.3
+    assert np.isnan(delta.values[:, ~inside]).all()
+    for method in ("vulpiani", "monotone"):
+        assert "PHIDP_BACKSCATTER" not in estimate_kdp(ds, method=method, engine=engine)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("method", METHODS)
+def test_kdp_uncertainty_matches_the_spread_over_rays(method, engine):
+    """
+    All rays share one truth, so the spread of KDP over the rays is the noise
+    of the estimate. The uncertainty is the white noise of the phase passed
+    through the filter and the slope; the monotone fit is not linear and
+    reduces the noise more than predicted, so its uncertainty is an upper bound.
+    """
+    ds, *_ = _cell(5.0, 6.0, 6.0, 3.0, nray=300)
+    out = estimate_kdp(ds, method=method, engine=engine)
+    spread = np.nanstd(out.KDP.values, axis=0)[30:210]
+    mean_unc = np.nanmean(out.KDP_UNCERTAINTY.values, axis=0)[30:210]
+    ratio = np.median(mean_unc / spread)
+    if method == "monotone":
+        assert 1.0 < ratio < 1.6
+    else:
+        assert ratio == pytest.approx(1.0, abs=0.2)
+    assert out.KDP_UNCERTAINTY.attrs["units"] == "degrees/km"
+    unc = out.KDP_UNCERTAINTY.values
+    np.testing.assert_array_equal(np.isnan(unc), np.isnan(out.KDP.values))
+    assert (unc[np.isfinite(unc)] > 0).all()
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_uncertainty_grows_with_noise_and_shrinks_with_the_window(engine):
+    ds, *_ = _cell(5.0, 6.0, 0.0, 2.0, nray=20)
+    noisy, *_ = _cell(5.0, 6.0, 0.0, 4.0, nray=20)
+
+    def unc(d, **kw):
+        return np.nanmedian(estimate_kdp(d, engine=engine, **kw).KDP_UNCERTAINTY.values)
+
+    assert unc(noisy, filter_window=2.0) == pytest.approx(
+        2.0 * unc(ds, filter_window=2.0), rel=0.1
+    )
+    assert unc(ds, filter_window=1.0) > unc(ds, filter_window=2.0)
+    assert unc(ds, kdp_window=(1.0, 3.0)) > unc(ds, kdp_window=(2.0, 6.0))
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_band_factors_are_parameters(engine):
+    """The factors 1, 2 and 3 are radarx choices and can be set."""
+    ds = _ramp_sweep(30.0)
+    kw = dict(
+        method="vulpiani", texture_method="detrended", phidp_sign=1, engine=engine
+    )
+    assert kdpmod.BAND_FACTORS == {"S": 1.0, "C": 2.0, "X": 3.0}
+    c = estimate_kdp(ds, band="C", **kw)
+    x2 = estimate_kdp(ds, band="X", band_factors={"X": 2.0}, **kw)
+    xr.testing.assert_identical(x2.KDP, c.KDP)
+    x3 = estimate_kdp(ds, band="X", **kw)
+    assert np.nanmedian(x3.KDP.values[:, 100:500]) == pytest.approx(30.0, rel=0.05)
+    # a factor of 1 for X gives the S-band bounds (30 deg/km is zeroed)
+    x1 = estimate_kdp(ds, band="X", band_factors={"X": 1.0}, **kw)
+    assert np.nanmedian(x1.KDP.values[:, 100:500]) < 10.0
+    # a band that is not in the table can be added
+    ku = estimate_kdp(ds, band="ku", band_factors={"Ku": 4.0}, **kw)
+    assert np.nanmedian(ku.KDP.values[:, 100:500]) == pytest.approx(30.0, rel=0.05)
+    with pytest.raises(ValueError, match="band"):
+        estimate_kdp(ds, band="Ku")
+    with pytest.raises(ValueError, match="positive"):
+        estimate_kdp(ds, band="X", band_factors={"X": 0.0})
+    assert kdpmod.BAND_FACTORS["X"] == 3.0  # the table is not modified
