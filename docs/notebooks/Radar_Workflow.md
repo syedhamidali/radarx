@@ -2233,6 +2233,11 @@ notebooks or from this index.
 | `dsd_bayesian` | `radarx.retrieve.dsd_bayes` | [core](Radar_Workflow): 7. Rain drop size distribution |
 | `dsd_prior` | `radarx.retrieve.dsd_bayes` | [core](Radar_Workflow): 7. Rain drop size distribution |
 | `forward_grid` | `radarx.retrieve.dsd_bayes` | [core](Radar_Workflow): 7. Rain drop size distribution |
+| `ensemble_retrieval` | `radarx.retrieve.ensemble` | [part 2](Radar_Workflow_Advanced): 16. Ensembles and uncertainty of the retrievals |
+| `ensemble_statistics` | `radarx.retrieve.ensemble` | [part 2](Radar_Workflow_Advanced): 16. Ensembles and uncertainty of the retrievals |
+| `measurement_error` | `radarx.retrieve.ensemble` | [part 2](Radar_Workflow_Advanced): 16. Ensembles and uncertainty of the retrievals |
+| `perturb_radar` | `radarx.retrieve.ensemble` | [part 2](Radar_Workflow_Advanced): 16. Ensembles and uncertainty of the retrievals |
+| `relation_scatter` | `radarx.retrieve.ensemble` | [part 2](Radar_Workflow_Advanced): 16. Ensembles and uncertainty of the retrievals |
 | `drop_evaporation_rate` | `radarx.retrieve.evaporation` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `evaporation` | `radarx.retrieve.evaporation` | [core](Radar_Workflow): 13. Evaporation |
 | `integrate_evaporation` | `radarx.retrieve.evaporation` | [core](Radar_Workflow): 13. Evaporation |
@@ -2359,6 +2364,8 @@ The methods of the `.radarx` accessors:
 | `.radarx.dual_doppler_analytic` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `.radarx.echo_mask` | [core](Radar_Workflow): 2. Remove non-meteorological echo |
 | `.radarx.echo_top` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
+| `.radarx.ensemble_retrieval` | [part 2](Radar_Workflow_Advanced): 16. Ensembles and uncertainty of the retrievals |
+| `.radarx.ensemble_statistics` | [part 2](Radar_Workflow_Advanced): 16. Ensembles and uncertainty of the retrievals |
 | `.radarx.estimate_motion` | [core](Radar_Workflow): 11. Storm motion, common analysis time and time interpolation |
 | `.radarx.evaporation` | [core](Radar_Workflow): 13. Evaporation |
 | `.radarx.forward_operator` | [part 2](Radar_Workflow_Advanced): 14. Forward operator for WRF and MPAS output |
@@ -2379,6 +2386,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.liquid_water_content` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.llsd` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `.radarx.mask_above_melting_layer` | [core](Radar_Workflow): 8. QVP time series and melting layer |
+| `.radarx.measurement_error` | [part 2](Radar_Workflow_Advanced): 16. Ensembles and uncertainty of the retrievals |
 | `.radarx.melting_layer` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `.radarx.melting_layer_ppi` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `.radarx.melting_snow_fall_speed` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
@@ -2388,6 +2396,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.network_bias` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `.radarx.noise_level` | [core](Radar_Workflow): 15. Noise and calibration |
 | `.radarx.parcel_diagnostics` | [core](Radar_Workflow): Parcel thermodynamics: CAPE, CIN, the lifted index and the levels |
+| `.radarx.perturb_radar` | [part 2](Radar_Workflow_Advanced): 16. Ensembles and uncertainty of the retrievals |
 | `.radarx.phidp_offset` | [core](Radar_Workflow): 15. Noise and calibration |
 | `.radarx.plot` | [core](Radar_Workflow): 10. Cone gridding, Max-CAPPI, interactive view and UGRID |
 | `.radarx.plot_cappi` | [core](Radar_Workflow): Other ways to grid, section and plot |

@@ -22,7 +22,11 @@ from radarx.retrieve import (
     beam_blockage,
     beam_path,
     correct_attenuation,
+    ensemble_retrieval,
+    ensemble_statistics,
     gbvtd,
+    measurement_error,
+    perturb_radar,
     rain_rate,
     rain_rate_a,
     rain_rate_z_zdr,
@@ -93,6 +97,15 @@ CALLS = {
         temperature="TEMP",
     ),
     "snr": lambda ds: snr(ds, noise=-30.0, dbz="DBZH"),
+    "perturb_radar": lambda ds: perturb_radar(ds, members=2),
+    "measurement_error": lambda ds: measurement_error(ds, snr=20.0),
+    "ensemble_retrieval": lambda ds: ensemble_retrieval(
+        ds, "rain_rate_z_zdr", members=2, band="S"
+    ),
+    "ensemble_retrieval_attenuation": lambda ds: ensemble_retrieval(
+        ds, "rain_rate_a", members=2, band="S"
+    ),
+    "ensemble_statistics": lambda ds: ensemble_statistics(perturb_radar(ds, members=3)),
     "correct_attenuation": lambda ds: correct_attenuation(
         ds, dbz="DBZH", zdr="ZDR", phidp="PHIDP", rhohv="RHOHV", band="S"
     ),
