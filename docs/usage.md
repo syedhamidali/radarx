@@ -48,6 +48,7 @@ notebooks/Radar_UGRID_uxarray
 :caption: Wind retrieval and kinematics
 
 notebooks/Single_Doppler_Winds
+notebooks/Tropical_Cyclone_Winds
 notebooks/Multi_Doppler
 notebooks/Azimuthal_Shear
 ```

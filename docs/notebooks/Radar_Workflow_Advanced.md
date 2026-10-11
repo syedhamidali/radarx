@@ -38,6 +38,7 @@ written on the fly).
 | 10 | machine-learning plumbing | `radarx.ml` |
 | 11 | beam blockage and terrain clutter from a digital elevation model | `beam_blockage` |
 | 12 | export to CfRadial1, CfRadial2, ODIM_H5, Zarr and CF NetCDF | `write_cfradial1`, `write_cfradial2`, `write_odim`, `write_zarr`, `write_netcdf_cf` |
+| 13 | tropical-cyclone winds from one radar: centre, GBVTD, decomposition | `tc_center`, `gbvtd`, `tc_decompose`, `synthetic_vortex`, `vortex_profile` |
 
 ```{code-cell} ipython3
 import math
@@ -113,6 +114,7 @@ from radarx.retrieve import (
     fit_gamma,
     fit_gamma_moments,
     forward_grid,
+    gbvtd,
     grid_lightning,
     lightning_jump,
     match_radar,
@@ -134,12 +136,16 @@ from radarx.retrieve import (
     single_doppler_winds,
     size_sorting,
     surface_dsd,
+    synthetic_vortex,
+    tc_center,
+    tc_decompose,
     terminal_fall_speed,
     tornado_probability,
     tornet_inputs,
     trajectories,
     trajectory_matched_times,
     vertical_source_distribution,
+    vortex_profile,
     ziegler2013_precipitation,
     ziegler2013_profiles,
 )
@@ -1640,6 +1646,55 @@ grid_exp.radarx.to_netcdf_cf(work / "grid_accessor.nc")
 grid_exp.radarx.to_zarr(work / "grid.zarr")
 with xr.open_dataset(work / "grid.nc") as cf_grid:
     print(cf_grid["DBZH"].attrs["grid_mapping"], cf_grid["lat"].dims, cf_grid.attrs["Conventions"])
+```
+
+## 13. Tropical-cyclone winds from one radar
+
+`synthetic_vortex` forward-models a modified Rankine-combined vortex
+(Chen et al. 2013) with a mean wind, a wavenumber-1 asymmetry and noise to the
+Doppler velocity of one radar 70 km away, and `vortex_profile` gives its
+axisymmetric truth. `tc_center` finds the circulation centre and the radius of
+maximum wind (the simplex consensus of Bell and Lee 2012), `gbvtd` retrieves the
+axisymmetric tangential and radial wind and the wavenumber-1 asymmetry on rings
+around it (the ground-based velocity track display, Lee et al. 1999, with the
+equations of Liou et al. 2005) and `tc_decompose` splits the result into the
+symmetric and asymmetric winds on a polar grid. The
+[tropical-cyclone notebook](Tropical_Cyclone_Winds) tests the retrieval against
+the vortex, shows the sensitivity to the centre (1, 2 and 5 km) and tries the
+Tauktae (2021) volume of the Goa radar, which is too far away to be retrieved.
+
+```{code-cell} ipython3
+tc_true = (0.0, 70000.0)  # centre, m east and north of the radar
+tc_sweep = synthetic_vortex(
+    center=tc_true, vmax=45.0, rmw=18000.0, xt=0.6, asymmetry={1: (0.2, 60.0)},
+    mean_wind=(6.0, 0.0), noise=1.5, seed=2, azimuth_step=2.0, max_range=120000.0,
+)
+tc_found = tc_center(tc_sweep, min_radius=10000.0, max_radius=30000.0, max_wavenumber=1)
+tc_acc = tc_sweep.radarx.tc_center(min_radius=10000.0, max_radius=30000.0, max_wavenumber=1)  # the accessor
+tc_radii = np.arange(4000.0, 40001.0, 2000.0)
+tc_rings = gbvtd(tc_sweep, tc_found, radii=tc_radii, mean_wind=(6.0, 0.0))
+tc_rings_acc = tc_sweep.radarx.gbvtd(tc_true, radii=tc_radii, mean_wind=(6.0, 0.0))  # the accessor
+tc_vt, _ = vortex_profile(tc_radii, 45.0, 18000.0, 0.6)
+tc_polar = tc_decompose(tc_rings, azimuth=np.arange(0.0, 360.0, 10.0))
+print(f"centre error {np.hypot(float(tc_found.CENTER_X) - tc_true[0], float(tc_found.CENTER_Y) - tc_true[1]):.0f} m, "
+      f"RMW {float(tc_found.RMW) / 1e3:.1f} km (truth 18), maximum {float(tc_found.VT_MAX):.1f} m/s (truth 45)")
+print(f"VT0 rms error {float(np.sqrt(np.nanmean((tc_rings.VT0 - tc_vt) ** 2))):.2f} m/s; "
+      f"wavenumber-1 amplitude {float(tc_rings.VT1_AMPLITUDE.sel(radius=30000.0)):.1f} m/s "
+      f"(truth {0.2 * float(tc_vt[13]):.1f}) towards {float(tc_rings.VT1_AZIMUTH.sel(radius=30000.0)):.0f} deg (truth 60)")
+print("accessors agree:", bool(np.isclose(float(tc_acc.CENTER_X), float(tc_found.CENTER_X))
+                           and np.allclose(tc_rings_acc.VT0, gbvtd(tc_sweep, tc_true, radii=tc_radii, mean_wind=(6.0, 0.0)).VT0)))
+```
+
+```{code-cell} ipython3
+fig, axes = plt.subplots(1, 2, figsize=(10, 3.8), layout="constrained")
+axes[0].plot(tc_radii / 1e3, tc_vt, "k", label="truth")
+axes[0].plot(tc_radii / 1e3, tc_rings.VT0, label="GBVTD")
+axes[0].set(xlabel="radius (km)", ylabel="axisymmetric tangential wind (m/s)")
+axes[0].legend()
+im = axes[1].pcolormesh(tc_polar.X / 1e3, tc_polar.Y / 1e3, tc_polar.VT, cmap="viridis", shading="auto")
+axes[1].set(aspect="equal", xlabel="east (km)", ylabel="north (km)", title="retrieved tangential wind")
+fig.colorbar(im, ax=axes[1], label="m/s")
+plt.show()
 ```
 
 ## References

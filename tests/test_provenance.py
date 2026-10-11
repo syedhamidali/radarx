@@ -40,9 +40,13 @@ from .test_dealias import volume as dealias_volume
 from .test_kdp import _sweep as kdp_sweep
 from .test_kdp import _volume as kdp_volume
 from .test_qc import _sweep as qc_sweep
+from .test_tc_winds import CENTER as TC_CENTER
+from .test_tc_winds import small_tc_center as tc_center_result
+from .test_tc_winds import small_vortex as tc_vortex
 from .test_vil import storm_volume
 
 ROOT = Path(__file__).resolve().parents[1]
+TC_RADII = np.array([15000.0, 20000.0, 25000.0])
 ATTRS = (METHOD, REFERENCES, VERSION)
 
 # Public functions of radarx.retrieve and radarx.grid that return plain arrays,
@@ -52,6 +56,7 @@ EXCEPTIONS = {
     "grid.make_3d_grid": "tuple of NumPy arrays",
     "ugrid.gate_corners": "tuple of NumPy arrays",
     "attenuation.attenuation_coefficients": "dict of numbers",
+    "tc_winds.vortex_profile": "tuple of NumPy arrays",
 }
 
 # Accessor methods that do not wrap a function of radarx.retrieve or
@@ -84,6 +89,7 @@ KEY_MARKS = {
     "ester-1996": "Ester, M., H.-P. Kriegel",
     "holleman-2001": "Holleman, I., 2001",
     "graham-nelson-1998": "Graham, R. A., and J. A. Nelson",
+    "liou-2005": "Liou, Y.-C., T.-C. C. Wang",
 }
 
 
@@ -334,6 +340,12 @@ def test_sweep_and_volume_results():
         ),
         "beam_blockage tree": radarx.retrieve.beam_blockage(
             bb_volume(), geographic_dem(bell())
+        ),
+        "synthetic_vortex": tc_vortex(),
+        "tc_center": tc_center_result(),
+        "gbvtd": radarx.retrieve.gbvtd(tc_vortex(), TC_CENTER, radii=TC_RADII),
+        "tc_decompose": radarx.retrieve.tc_decompose(
+            radarx.retrieve.gbvtd(tc_vortex(), TC_CENTER, radii=TC_RADII)
         ),
         "hail_products": radarx.retrieve.hail_products(
             storm_volume(), freezing_level=3000.0, minus20_level=6000.0

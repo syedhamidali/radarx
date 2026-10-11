@@ -45,6 +45,8 @@ from .test_qvp import _melting_profile, _profiles_dataset
 from .test_qvp import _volume as qvp_volume
 from .test_rain_trajectories import _source_grid
 from .test_rain_trajectories import profile as rain_profile
+from .test_tc_winds import CENTER as TC_CENTER
+from .test_tc_winds import small_tc_center, small_vortex
 from .test_tornado import rankine
 from .test_vil import storm_volume
 from .test_wind_profile import vad_sweep
@@ -193,6 +195,14 @@ PRODUCTS = {
     "radial_divergence": lambda: R.radial_divergence(_dealiased(), "VRADH"),
     "beam_blockage": lambda: R.beam_blockage(
         bb_sweep(nray=6, ngate=60), geographic_dem(bell())
+    ),
+    "synthetic_vortex": small_vortex,
+    "tc_center": small_tc_center,
+    "gbvtd": lambda: R.gbvtd(
+        small_vortex(), TC_CENTER, radii=np.array([15000.0, 20000.0, 25000.0])
+    ),
+    "tc_decompose": lambda: R.tc_decompose(
+        R.gbvtd(small_vortex(), TC_CENTER, radii=np.array([15000.0, 20000.0, 25000.0]))
     ),
     "vil": lambda: R.vil(storm_volume()),
     "echo_top": lambda: R.echo_top(storm_volume()),
