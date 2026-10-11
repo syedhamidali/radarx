@@ -1912,6 +1912,8 @@ notebooks or from this index.
 | `ground_range` | `radarx.fundamentals.geometry` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `half_power_radius` | `radarx.fundamentals.geometry` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `k_e_from_refractivity` | `radarx.fundamentals.geometry` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
+| `k_e_from_rays` | `radarx.fundamentals.refraction` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
+| `trace_rays` | `radarx.fundamentals.refraction` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `sample_volume_gaussian` | `radarx.fundamentals.geometry` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `compute_average_power` | `radarx.fundamentals.power` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `compute_min_detectable_signal` | `radarx.fundamentals.power` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
@@ -2001,6 +2003,7 @@ notebooks or from this index.
 | `open_sounding_file` | `radarx.io.sounding` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
 | `profile_to_grid` | `radarx.io.sounding` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `read_sounding` | `radarx.io.sounding` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
+| `refractivity` | `radarx.io.sounding` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `relative_humidity_from_dewpoint` | `radarx.io.sounding` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
 | `saturation_vapor_pressure` | `radarx.io.sounding` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
 | `specific_humidity_from_dewpoint` | `radarx.io.sounding` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
@@ -2026,6 +2029,7 @@ notebooks or from this index.
 | `biological_echo` | `radarx.retrieve.biology` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
 | `correct_attenuation` | `radarx.retrieve.attenuation` | [core](Radar_Workflow): 5. ΦDP processing and KDP |
 | `beam_blockage` | `radarx.retrieve.beam_blockage` | [part 2](Radar_Workflow_Advanced): 11. Beam blockage and terrain clutter |
+| `beam_path` | `radarx.retrieve.beam_path` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `zdr_offset` | `radarx.retrieve.calibration` | [core](Radar_Workflow): 15. Noise and calibration |
 | `z_offset` | `radarx.retrieve.calibration` | [core](Radar_Workflow): 15. Noise and calibration |
 | `phidp_offset` | `radarx.retrieve.calibration` | [core](Radar_Workflow): 15. Noise and calibration |
@@ -2076,6 +2080,8 @@ notebooks or from this index.
 | `shi` | `radarx.retrieve.hail` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `hid` | `radarx.retrieve.hid` | [core](Radar_Workflow): 6. Hydrometeor classification |
 | `hid_classes` | `radarx.retrieve.hid` | [core](Radar_Workflow): 6. Hydrometeor classification |
+| `hail_fall_speed` | `radarx.retrieve.ice_fall` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
+| `melting_snow_fall_speed` | `radarx.retrieve.ice_fall` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `estimate_kdp` | `radarx.retrieve.kdp` | [core](Radar_Workflow): 5. ΦDP processing and KDP |
 | `trajectories` | `radarx.retrieve.lagrangian` | [part 2](Radar_Workflow_Advanced): 9. Diabatic Lagrangian analysis |
 | `cell_flash_rate` | `radarx.retrieve.lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
@@ -2099,6 +2105,7 @@ notebooks or from this index.
 | `rain_rate_kdp` | `radarx.retrieve.qpe` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
 | `rain_rate_z` | `radarx.retrieve.qpe` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
 | `rain_rate_z_zdr` | `radarx.retrieve.qpe` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
+| `rain_shaft` | `radarx.retrieve.rain_collisions` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `rain_source_points` | `radarx.retrieve.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `rain_trajectories` | `radarx.retrieve.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `size_sorting` | `radarx.retrieve.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
@@ -2157,6 +2164,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.background` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `.radarx.baroclinic_generation` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `.radarx.beam_blockage` | [part 2](Radar_Workflow_Advanced): 11. Beam blockage and terrain clutter |
+| `.radarx.beam_path` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `.radarx.biological_echo` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
 | `.radarx.bulk_shear` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
 | `.radarx.bunkers_storm_motion` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
@@ -2182,6 +2190,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.grid_lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `.radarx.grid_radars` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `.radarx.grid_rhi` | [core](Radar_Workflow): Other ways to grid, section and plot |
+| `.radarx.hail_fall_speed` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `.radarx.hail_kinetic_energy` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.hail_products` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.hid` | [core](Radar_Workflow): 6. Hydrometeor classification |
@@ -2193,6 +2202,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.liquid_water_content` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.llsd` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `.radarx.melting_layer` | [core](Radar_Workflow): 8. QVP time series and melting layer |
+| `.radarx.melting_snow_fall_speed` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `.radarx.merge_radars` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `.radarx.mesh` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.multi_doppler` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
@@ -2214,6 +2224,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.rain_rate_kdp` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
 | `.radarx.rain_rate_z` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
 | `.radarx.rain_rate_z_zdr` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
+| `.radarx.rain_shaft` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `.radarx.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `.radarx.rotation_couplets` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
 | `.radarx.shi` | [core](Radar_Workflow): 14. VIL, echo tops and water content |

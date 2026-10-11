@@ -20,6 +20,7 @@ import xarray as xr
 import radarx  # noqa: F401
 from radarx.retrieve import (
     beam_blockage,
+    beam_path,
     correct_attenuation,
     gbvtd,
     rain_rate,
@@ -104,6 +105,14 @@ CALLS = {
     ),
     "beam_blockage": lambda ds: beam_blockage(
         ds, geographic_dem(bell()), site=(30.0, 78.0, 500.0), beamwidth=1.0
+    ),
+    "beam_path": lambda ds: beam_path(
+        ds,
+        (
+            np.arange(0.0, 12001.0, 500.0),
+            313.0 - 39.2e-3 * np.arange(0.0, 12001.0, 500.0),
+        ),
+        radar_height=500.0,
     ),
 }
 

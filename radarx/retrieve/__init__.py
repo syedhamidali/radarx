@@ -26,6 +26,7 @@ _SECTIONS = {
         "kdp",
         "attenuation",
         "beam_blockage",
+        "beam_path",
         "noise",
         "calibration",
         "advection",
@@ -44,6 +45,8 @@ _SECTIONS = {
         "qpe",
         "disdrometer",
         "evaporation",
+        "rain_collisions",
+        "ice_fall",
     ],
     "Thermodynamics and cold pools": [
         "lagrangian",

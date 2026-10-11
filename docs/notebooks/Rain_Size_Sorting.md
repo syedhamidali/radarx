@@ -34,7 +34,7 @@ bin from a radar gate, or any point of a 3-D grid, to the ground, with
 
 One compiled, multithreaded kernel integrates all drops (source points $\times$
 sizes $\times$ ensemble members) at once. Collisions and break-up are not
-modelled. This notebook uses a synthetic environment only: a sheared wind
+part of the trajectories (see `rain_shaft` and the notebook on collisions). This notebook uses a synthetic environment only: a sheared wind
 profile, a humid sounding and a moving rain cell.
 
 ```{code-cell} ipython3
@@ -440,6 +440,64 @@ ax.set_ylabel("error of the landing point (m)")
 ax.legend(frameon=False);
 ```
 
+## Hail and melting snow
+
+Above the melting layer the particles fall by other laws. Two more
+`fall_speed` options of the trajectory model give the sorting of hail and of
+melting snow with the same wind: `("hail", law)`, the size relations of
+Heymsfield et al. (2020, in the corrigendum to Heymsfield et al. 2018) for the
+maximum dimension of the stone, and `("melting_snow", liquid_fraction, a, b)`,
+the mix of the speed of the dry snowflake and of the raindrop of the same mass
+with the weight of Frick et al. (2013, after Mitra et al. 1990). The same
+laws are `hail_fall_speed` and `melting_snow_fall_speed`. Neither law has an
+air-density dependence in its source, so none is applied, and the particles
+are not melted or evaporated along the path. Hail fits are for stones above
+5 mm; the dry-snow law of the melting snow has no default and the one below is
+only an example.
+
+```{code-cell} ipython3
+from radarx.retrieve import hail_fall_speed, melting_snow_fall_speed
+
+d_hail = np.geomspace(5.0, 100.0, 120)
+fig, axes = plt.subplots(1, 4, figsize=(14.5, 3.5), constrained_layout=True)
+for law, color in (("heymsfield2020", OKABE["blue"]), ("graupel_hail_obs", OKABE["orange"])):
+    axes[0].plot(d_hail, hail_fall_speed(d_hail, law), color=color, label=law)
+axes[0].fill_between(d_hail, hail_fall_speed(d_hail, "heymsfield2020_p10"),
+                     hail_fall_speed(d_hail, "heymsfield2020_p90"), color=OKABE["blue"], alpha=0.15,
+                     label="10th to 90th percentile")
+d_rain = np.linspace(1.0, 8.0, 50)
+axes[0].plot(d_rain, terminal_fall_speed(d_rain), color=OKABE["green"], label="raindrop")
+axes[0].set(xlabel="maximum dimension (mm)", ylabel="fall speed (m s$^{-1}$)", xscale="log")
+axes[0].legend(frameon=False, fontsize=8)
+ell = np.linspace(0.0, 1.0, 101)
+for d_eq, color in ((1.0, OKABE["orange"]), (2.0, OKABE["blue"]), (4.0, OKABE["red"])):
+    axes[1].plot(ell, melting_snow_fall_speed(d_eq, xr.DataArray(ell, dims="ell"), snow=(1.0, 0.3)),
+                 color=color, label=f"{d_eq:g} mm")
+axes[1].set(xlabel="liquid water fraction", ylabel="fall speed (m s$^{-1}$)")
+axes[1].legend(title="equivalent diameter", frameon=False, fontsize=8)
+hail_sizes = np.array([8.0, 12.0, 20.0, 30.0, 45.0, 60.0])
+hail = rain_trajectories({"x": 0.0, "y": 0.0, "z": 5000.0}, hail_sizes, profile=profile,
+                         storm_motion=motion, fall_speed=("hail", "heymsfield2020")).squeeze()
+axes[2].plot(hail_sizes, np.hypot(hail.landing_x, hail.landing_y) / 1e3, "o-", color=OKABE["blue"])
+axes[2].set(xlabel="maximum dimension (mm)", ylabel="displacement (km)", title="hail from 5 km")
+snow_sizes = np.array([1.0, 2.0, 3.0, 4.0, 6.0])
+for fraction, color in ((0.2, OKABE["orange"]), (0.6, OKABE["red"])):
+    snow = rain_trajectories({"x": 0.0, "y": 0.0, "z": 3500.0}, snow_sizes, profile=profile,
+                             storm_motion=motion, fall_speed=("melting_snow", fraction, 1.0, 0.3)).squeeze()
+    axes[3].plot(snow_sizes, np.hypot(snow.landing_x, snow.landing_y) / 1e3, "s-", color=color, ms=4,
+                 label=f"liquid fraction {fraction}")
+axes[3].set(xlabel="equivalent diameter (mm)", ylabel="displacement (km)", title="melting snow from 3.5 km")
+axes[3].legend(frameon=False, fontsize=8)
+plt.show()
+print(hail.fall_speed_start.values.round(2), "m/s for", hail_sizes, "mm hail")
+```
+
+The stones fall at 6 to 28 m s$^{-1}$ and are blown 14 km (8 mm) to 3 km
+(60 mm) away from the point below the source by the 5 km of strong shear: the
+larger the stone, the shorter the drift. Melting snow falls much more slowly,
+more slowly the smaller the liquid fraction, and is displaced much further
+(17 to 43 km for these examples of an illustrative dry-snow law).
+
 ## References
 
 - Atlas, D., R. C. Srivastava, and R. S. Sekhon, 1973: Doppler radar
@@ -455,6 +513,13 @@ ax.legend(frameon=False);
   polarimetric characteristics of rain: Theoretical model and practical
   implications. *J. Appl. Meteor. Climatol.*, **49** (6), 1247–1267,
   <https://doi.org/10.1175/2010JAMC2243.1>
+- Frick, C., A. Seifert, and H. Wernli, 2013: A bulk parametrization of melting
+  snowflakes with explicit liquid water fraction for the COSMO model. *Geosci.
+  Model Dev.*, **6** (6), 1925–1939, <https://doi.org/10.5194/gmd-6-1925-2013>
+- Heymsfield, A., M. Szakáll, A. Jost, I. Giammanco, R. Wright, and J.
+  Brimelow, 2020: Corrigendum (to: A comprehensive observational study of
+  graupel and hail terminal velocity, mass flux, and kinetic energy). *J.
+  Atmos. Sci.*, **77** (1), 405–412, <https://doi.org/10.1175/JAS-D-19-0185.1>
 - Kumjian, M. R., and A. V. Ryzhkov, 2012: The impact of size sorting on the
   polarimetric radar variables. *J. Atmos. Sci.*, **69** (6), 2042–2060,
   <https://doi.org/10.1175/JAS-D-11-0125.1>
