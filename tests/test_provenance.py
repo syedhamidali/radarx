@@ -32,6 +32,9 @@ from radarx._provenance import (
 
 from .grid.test_cone import GRID
 from .grid.test_cone import _volume as cone_volume
+from .test_beam_blockage import bell, geographic_dem
+from .test_beam_blockage import make_sweep as bb_sweep
+from .test_beam_blockage import volume as bb_volume
 from .test_dealias import synthetic_sweep
 from .test_dealias import volume as dealias_volume
 from .test_kdp import _sweep as kdp_sweep
@@ -317,6 +320,12 @@ def test_sweep_and_volume_results():
         "correct_attenuation": radarx.retrieve.correct_attenuation(sweep, band="C"),
         "vil": radarx.retrieve.vil(storm_volume()),
         "echo_top": radarx.retrieve.echo_top(storm_volume()),
+        "beam_blockage": radarx.retrieve.beam_blockage(
+            bb_sweep(nray=4, ngate=40), geographic_dem(bell())
+        ),
+        "beam_blockage tree": radarx.retrieve.beam_blockage(
+            bb_volume(), geographic_dem(bell())
+        ),
     }
     for name, out in results.items():
         check_attrs(out)

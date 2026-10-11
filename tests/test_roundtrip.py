@@ -22,6 +22,8 @@ import radarx
 from .grid.test_cone import GRID
 from .grid.test_cone import _volume as cone_volume
 from .test_advection import T0, _blobs
+from .test_beam_blockage import bell, geographic_dem
+from .test_beam_blockage import make_sweep as bb_sweep
 from .test_cappi import _make_ppi_sweep
 from .test_coldpool import column, station_network
 from .test_dealias import synthetic_sweep
@@ -188,6 +190,9 @@ PRODUCTS = {
     "llsd": lambda: R.llsd(_dealiased(), "VRADH"),
     "azimuthal_shear": lambda: R.azimuthal_shear(_dealiased(), "VRADH"),
     "radial_divergence": lambda: R.radial_divergence(_dealiased(), "VRADH"),
+    "beam_blockage": lambda: R.beam_blockage(
+        bb_sweep(nray=6, ngate=60), geographic_dem(bell())
+    ),
     "vil": lambda: R.vil(storm_volume()),
     "echo_top": lambda: R.echo_top(storm_volume()),
     "grid_cones": _grid,
