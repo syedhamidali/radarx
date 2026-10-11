@@ -38,6 +38,7 @@ written on the fly).
 | 10 | machine-learning plumbing | `radarx.ml` |
 | 11 | beam blockage and terrain clutter from a digital elevation model | `beam_blockage` |
 | 12 | export to CfRadial1, CfRadial2, ODIM_H5, Zarr and CF NetCDF | `write_cfradial1`, `write_cfradial2`, `write_odim`, `write_zarr`, `write_netcdf_cf` |
+| 13 | polarimetric forward operator for WRF and MPAS model output | `wrf_state`, `mpas_state`, `forward_operator`, `to_radar_grid` |
 
 ```{code-cell} ipython3
 import math
@@ -113,10 +114,12 @@ from radarx.retrieve import (
     fit_gamma,
     fit_gamma_moments,
     forward_grid,
+    forward_operator,
     grid_lightning,
     lightning_jump,
     match_radar,
     microphysical_rates,
+    mpas_state,
     number_concentration,
     parsivel_bins,
     polarimetric_precipitation,
@@ -135,11 +138,13 @@ from radarx.retrieve import (
     size_sorting,
     surface_dsd,
     terminal_fall_speed,
+    to_radar_grid,
     tornado_probability,
     tornet_inputs,
     trajectories,
     trajectory_matched_times,
     vertical_source_distribution,
+    wrf_state,
     ziegler2013_precipitation,
     ziegler2013_profiles,
 )
@@ -1642,12 +1647,98 @@ with xr.open_dataset(work / "grid.nc") as cf_grid:
     print(cf_grid["DBZH"].attrs["grid_mapping"], cf_grid["lat"].dims, cf_grid.attrs["Conventions"])
 ```
 
+## 13. Forward operator for WRF and MPAS output
+
+A forward operator turns the microphysics state of a numerical model into the
+fields a radar measures, so that a model run is compared with the radar in radar
+space. `wrf_state` and `mpas_state` read a WRF `wrfout` Dataset or an MPAS output
+Dataset on its unstructured mesh into one standard state; `forward_operator`
+computes `DBZH`, `ZDR`, `KDP`, `RHOHV` and the fall speed on the model grid (T-matrix
+rain, and Rayleigh dry snow, hail and graupel as in Jung et al. 2008, with the
+equations of Ryzhkov et al. 2020); `to_radar_grid` samples them along the beam
+(4/3 Earth radius, site altitude in the radius) and adds the radial velocity. The
+rain size distribution of a scheme is not encoded: the intercept `n0_rain`, the
+shape `mu_rain` or the number concentration is an explicit assumption. The
+[forward operator notebook](Forward_Operator) shows a squall line, the checks
+against closed forms and `radar_from_dsd`, and the assumptions. No WRF output is
+read here: the Datasets are small synthetic ones with the variables of the two
+Registries.
+
+```{code-cell} ipython3
+def tiny_wrf(nx=40, ny=30, nz=24, dx=4000.0):
+    """A rain and snow blob with the variables of a wrfout file (flat terrain)."""
+    zi = 16000.0 * np.linspace(0, 1, nz + 1) ** 1.4
+    zm = 0.5 * (zi[:-1] + zi[1:])
+    t_k = 288.15 - 6.5e-3 * np.minimum(zm, 11000.0)
+    p_pa = 101325.0 * (t_k / 288.15) ** 5.2559
+    jj, ii = np.mgrid[0:ny, 0:nx]
+    lat = 35.0 + (jj - ny / 2) * dx / 111195.0
+    lon = -97.5 + (ii - nx / 2) * dx / (111195.0 * np.cos(np.deg2rad(35.0)))
+    blob = np.exp(-(((ii - 24) ** 2 + (jj - 15) ** 2) / 40.0))[None]
+    q_rain = np.where(t_k[:, None, None] > 273.15, 3e-3 * blob * np.exp(-zm / 3000.0)[:, None, None], 0.0)
+    q_snow = np.where(t_k[:, None, None] <= 273.15, 0.8e-3 * blob, 0.0)
+    d3 = ("Time", "bottom_top", "south_north", "west_east")
+    d3z = ("Time", "bottom_top_stag", "south_north", "west_east")
+    full = lambda a: np.broadcast_to(a, (nz, ny, nx))[None]  # noqa: E731
+    return xr.Dataset({
+        "T": (d3, full((t_k * (1e5 / p_pa) ** (287.0 / 1004.5) - 300.0)[:, None, None])),
+        "P": (d3, full(np.zeros((1, 1, 1)))), "PB": (d3, full(p_pa[:, None, None])),
+        "PH": (d3z, np.zeros((1, nz + 1, ny, nx))),
+        "PHB": (d3z, np.broadcast_to(9.81 * zi[:, None, None], (nz + 1, ny, nx))[None]),
+        "QVAPOR": (d3, full(0.008 * np.exp(-zm / 2500.0)[:, None, None])),
+        "QRAIN": (d3, q_rain[None]), "QSNOW": (d3, q_snow[None]),
+        "QNRAIN": (d3, np.where(q_rain > 0, 6.0 * q_rain / (np.pi * 1000.0 * 1.2e-3**3), 0.0)[None]),
+        "U": (("Time", "bottom_top", "south_north", "west_east_stag"), np.full((1, nz, ny, nx + 1), 12.0)),
+        "V": (("Time", "bottom_top", "south_north_stag", "west_east"), np.full((1, nz, ny + 1, nx), 3.0)),
+        "W": (d3z, np.full((1, nz + 1, ny, nx), 0.5)),
+        "XLAT": (("Time", "south_north", "west_east"), lat[None]),
+        "XLONG": (("Time", "south_north", "west_east"), lon[None]),
+    })
+
+
+fo_state = wrf_state(tiny_wrf())  # TEMPERATURE, AIR_DENSITY, HEIGHT, winds, mixing ratios
+fo_fields = forward_operator(fo_state, nrain="QNRAIN", mu_rain=2.0)  # name the rain assumption
+fo_acc = fo_state.radarx.forward_operator(nrain="QNRAIN", mu_rain=2.0, band="C")  # the accessor
+fo_sweep = to_radar_grid(fo_fields, (35.0, -98.1, 300.0), 0.5, gate_range=np.arange(500.0, 90001.0, 500.0))
+fo_volume = fo_fields.radarx.to_radar_grid((35.0, -98.1, 300.0), [0.5, 2.0], gate_range=np.arange(500.0, 90001.0, 500.0))
+print(f"model grid: DBZH up to {float(fo_fields.DBZH.max()):.1f} dBZ, ZDR up to {float(fo_fields.ZDR.max()):.2f} dB, "
+      f"KDP up to {float(fo_fields.KDP.max()):.2f} deg/km; C band ZDR {float(fo_acc.ZDR.max()):.2f} dB")
+print(f"radar space: DBZH {float(fo_sweep.DBZH.max()):.1f} dBZ, VRADH {float(fo_sweep.VRADH.min()):.1f} to "
+      f"{float(fo_sweep.VRADH.max()):.1f} m/s, volume sweeps {sorted(fo_volume.children)}")
+
+rng_mp = np.random.default_rng(0)
+n_mp, nz_mp = 300, 20
+lat_mp = 35.0 + rng_mp.uniform(-2, 2, n_mp)
+lon_mp = -97.5 + rng_mp.uniform(-2, 2, n_mp)
+zi_mp = np.repeat((15000.0 * np.linspace(0, 1, nz_mp + 1) ** 1.4)[None], n_mp, 0)
+zm_mp = 0.5 * (zi_mp[:, :-1] + zi_mp[:, 1:])
+t_mp = 288.15 - 6.5e-3 * np.minimum(zm_mp, 11000.0)
+p_mp = 101325.0 * (t_mp / 288.15) ** 5.2559
+dims_mp = ("Time", "nCells", "nVertLevels")
+mpas = xr.Dataset({
+    "qr": (dims_mp, np.where(t_mp > 273.15, 2e-3, 0.0)[None]), "qs": (dims_mp, np.where(t_mp <= 273.15, 4e-4, 0.0)[None]),
+    "rho": (dims_mp, (p_mp / (287.0 * t_mp))[None]), "theta": (dims_mp, (t_mp * (1e5 / p_mp) ** (287.0 / 1004.5))[None]),
+    "pressure": (dims_mp, p_mp[None]),
+    "uReconstructZonal": (dims_mp, np.full((1, n_mp, nz_mp), 8.0)),
+    "uReconstructMeridional": (dims_mp, np.full((1, n_mp, nz_mp), 2.0)),
+    "w": (("Time", "nCells", "nVertLevelsP1"), np.zeros((1, n_mp, nz_mp + 1))),
+})
+mpas_grid_ = xr.Dataset({"lonCell": ("nCells", np.deg2rad(lon_mp)), "latCell": ("nCells", np.deg2rad(lat_mp)),
+                         "zgrid": (("nCells", "nVertLevelsP1"), zi_mp)})
+mp_fields = forward_operator(mpas_state(mpas, mpas_grid_), n0_rain=4.0e6)  # unstructured mesh, fixed intercept
+mp_sweep = to_radar_grid(mp_fields, (35.0, -97.5, 200.0), 1.0, azimuth=np.arange(0.5, 360.0, 2.0),
+                         gate_range=np.arange(1000.0, 120001.0, 1000.0))
+print(f"MPAS-like mesh: DBZH up to {float(mp_fields.DBZH.max()):.1f} dBZ on the cells, "
+      f"{int(mp_sweep.DBZH.notnull().sum())} radar gates with echo")
+```
+
 ## References
 
 - Dawson, D., M. Biggerstaff, and S. Waugh, 2025: PERiLS_2022: Portable In Situ Precipitation Stations (PIPS) Data. Version 1.0. NSF NCAR Earth Observing Laboratory, https://doi.org/10.26023/HFBG-7W5M-WA00.
 - Bruning, E. C., and D. R. MacGorman, 2013: Theory and Observations of Controls on Lightning Flash Size Spectra. *Journal of the Atmospheric Sciences*, **70**, 4012-4029, <https://doi.org/10.1175/JAS-D-12-0289.1>
 - Fuchs, B. R., E. C. Bruning, S. A. Rutledge, L. D. Carey, P. R. Krehbiel, and W. Rison, 2016: Climatological analyses of LMA data with an open-source lightning flash-clustering algorithm. *Journal of Geophysical Research: Atmospheres*, **121**, 8625-8648, <https://doi.org/10.1002/2015JD024663>
 - Gao, J., M. Xue, A. Shapiro, and K. K. Droegemeier, 1999: A Variational Method for the Analysis of Three-Dimensional Wind Fields from Two Doppler Radars. *Monthly Weather Review*, **127**, 2128-2142, <https://doi.org/10.1175/1520-0493(1999)127<2128:AVMFTA>2.0.CO;2>
+- Jung, Y., G. Zhang, and M. Xue, 2008: Assimilation of Simulated Polarimetric Radar Data for a Convective Storm Using the Ensemble Kalman Filter. Part I: Observation Operators for Reflectivity and Polarimetric Variables. *Monthly Weather Review*, **136**, 2228-2245, <https://doi.org/10.1175/2007MWR2083.1>
 - Kumjian, M. R., and A. V. Ryzhkov, 2012: The Impact of Size Sorting on the Polarimetric Radar Variables. *Journal of the Atmospheric Sciences*, **69**, 2042-2060, <https://doi.org/10.1175/JAS-D-11-0125.1>
 - Lin, T.-Y., K. Winner, G. Bernstein, A. Mittal, A. M. Dokter, K. G. Horton, C. Nilsson, B. M. Van Doren, A. Farnsworth, F. A. La Sorte, S. Maji, and D. Sheldon, 2019: MistNet: Measuring historical bird migration in the US using archived weather radar data and convolutional neural networks. *Methods in Ecology and Evolution*, **10**, 1908-1922, <https://doi.org/10.1111/2041-210X.13280>
 - Lin, Y.-L., R. D. Farley, and H. D. Orville, 1983: Bulk Parameterization of the Snow Field in a Cloud Model. *Journal of Climate and Applied Meteorology*, **22**, 1065-1092, <https://doi.org/10.1175/1520-0450(1983)022<1065:BPOTSF>2.0.CO;2>
@@ -1657,6 +1748,7 @@ with xr.open_dataset(work / "grid.nc") as cf_grid:
 - Rison, W., R. J. Thomas, P. R. Krehbiel, T. Hamlin, and J. Harlin, 1999: A GPS-based three-dimensional lightning mapping system: Initial observations in central New Mexico. *Geophysical Research Letters*, **26**, 3573-3576, <https://doi.org/10.1029/1999GL010856>
 - Rotunno, R., J. B. Klemp, and M. L. Weisman, 1988: A Theory for Strong, Long-Lived Squall Lines. *Journal of the Atmospheric Sciences*, **45**, 463-485, <https://doi.org/10.1175/1520-0469(1988)045<0463:ATFSLL>2.0.CO;2>
 - Sandmæl, T. N., B. R. Smith, A. E. Reinhart, I. M. Schick, M. C. Ake, J. G. Madden, R. B. Steeves, S. S. Williams, K. L. Elmore, and T. C. Meyer, 2023: The Tornado Probability Algorithm: A Probabilistic Machine Learning Tornadic Circulation Detection Algorithm. *Weather and Forecasting*, **38**, 445-466, <https://doi.org/10.1175/WAF-D-22-0123.1>
+- Ryzhkov, A. V., J. Snyder, J. T. Carlin, A. Khain, and M. Pinsky, 2020: What Polarimetric Weather Radars Offer to Cloud Modelers: Forward Radar Operators and Microphysical/Thermodynamic Retrievals. *Atmosphere*, **11**, 362, <https://doi.org/10.3390/atmos11040362>
 - Schultz, C. J., W. A. Petersen, and L. D. Carey, 2009: Preliminary Development and Evaluation of Lightning Jump Algorithms for the Real-Time Detection of Severe Weather. *Journal of Applied Meteorology and Climatology*, **48**, 2543-2563, <https://doi.org/10.1175/2009JAMC2237.1>
 - Shapiro, A., 1993: The Use of an Exact Solution of the Navier-Stokes Equations in a Validation Test of a Three-Dimensional Nonhydrostatic Numerical Model. *Monthly Weather Review*, **121**, 2420-2425, <https://doi.org/10.1175/1520-0493(1993)121<2420:TUOAES>2.0.CO;2>
 - Veillette, M. S., J. M. Kurdzo, P. M. Stepanian, J. Y. N. Cho, T. Reis, S. Samsi, J. McDonald, and N. Chisler, 2025: A Benchmark Dataset for Tornado Detection and Prediction Using Full-Resolution Polarimetric Weather Radar Data. *Artificial Intelligence for the Earth Systems*, **4**, <https://doi.org/10.1175/AIES-D-24-0006.1>

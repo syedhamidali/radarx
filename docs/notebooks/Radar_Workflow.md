@@ -2005,6 +2005,10 @@ notebooks or from this index.
 | `drop_evaporation_rate` | `radarx.retrieve.evaporation` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `evaporation` | `radarx.retrieve.evaporation` | [core](Radar_Workflow): 13. Evaporation |
 | `integrate_evaporation` | `radarx.retrieve.evaporation` | [core](Radar_Workflow): 13. Evaporation |
+| `forward_operator` | `radarx.retrieve.forward_operator` | [part 2](Radar_Workflow_Advanced): 13. Forward operator for WRF and MPAS output |
+| `to_radar_grid` | `radarx.retrieve.forward_operator` | [part 2](Radar_Workflow_Advanced): 13. Forward operator for WRF and MPAS output |
+| `wrf_state` | `radarx.retrieve.forward_operator` | [part 2](Radar_Workflow_Advanced): 13. Forward operator for WRF and MPAS output |
+| `mpas_state` | `radarx.retrieve.forward_operator` | [part 2](Radar_Workflow_Advanced): 13. Forward operator for WRF and MPAS output |
 | `hail_kinetic_energy` | `radarx.retrieve.hail` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `hail_products` | `radarx.retrieve.hail` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `mesh` | `radarx.retrieve.hail` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
@@ -2105,6 +2109,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.echo_top` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.estimate_motion` | [core](Radar_Workflow): 11. Storm motion, common analysis time and time interpolation |
 | `.radarx.evaporation` | [core](Radar_Workflow): 13. Evaporation |
+| `.radarx.forward_operator` | [part 2](Radar_Workflow_Advanced): 13. Forward operator for WRF and MPAS output |
 | `.radarx.grid_lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `.radarx.grid_radars` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `.radarx.hail_kinetic_energy` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
@@ -2153,6 +2158,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.to_grid` | [core](Radar_Workflow): 10. Cone gridding, Max-CAPPI, interactive view and UGRID |
 | `.radarx.to_netcdf_cf` | [part 2](Radar_Workflow_Advanced): 12. Export to files |
 | `.radarx.to_odim` | [part 2](Radar_Workflow_Advanced): 12. Export to files |
+| `.radarx.to_radar_grid` | [part 2](Radar_Workflow_Advanced): 13. Forward operator for WRF and MPAS output |
 | `.radarx.to_uxarray` | [core](Radar_Workflow): 10. Cone gridding, Max-CAPPI, interactive view and UGRID |
 | `.radarx.to_zarr` | [part 2](Radar_Workflow_Advanced): 12. Export to files |
 | `.radarx.tornado_probability` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
