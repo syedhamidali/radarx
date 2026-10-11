@@ -1863,6 +1863,11 @@ notebooks or from this index.
 | `parsivel_classes` | `radarx.io.disdrometer` | [part 2](Radar_Workflow_Advanced): 2. Disdrometers |
 | `read_parsivel` | `radarx.io.disdrometer` | [part 2](Radar_Workflow_Advanced): 2. Disdrometers |
 | `read_pips_netcdf` | `radarx.io.disdrometer` | [part 2](Radar_Workflow_Advanced): 2. Disdrometers |
+| `write_cfradial1` | `radarx.io.export` | [part 2](Radar_Workflow_Advanced): 11. Export to files |
+| `write_cfradial2` | `radarx.io.export` | [part 2](Radar_Workflow_Advanced): 11. Export to files |
+| `write_netcdf_cf` | `radarx.io.export` | [part 2](Radar_Workflow_Advanced): 11. Export to files |
+| `write_odim` | `radarx.io.export` | [part 2](Radar_Workflow_Advanced): 11. Export to files |
+| `write_zarr` | `radarx.io.export` | [part 2](Radar_Workflow_Advanced): 11. Export to files |
 | `read_lma` | `radarx.io.lma` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `parcel_diagnostics` | `radarx.io.parcel` | [core](Radar_Workflow): Parcel thermodynamics: CAPE, CIN, the lifted index and the levels |
 | `read_mrr` | `radarx.io.profiler` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
@@ -2074,9 +2079,14 @@ The methods of the `.radarx` accessors:
 | `.radarx.sounding` | [core](Radar_Workflow): 3. Environment |
 | `.radarx.storm_relative_helicity` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
 | `.radarx.superobs` | [core](Radar_Workflow): 16. Super-observations for data assimilation |
+| `.radarx.to_cfradial1` | [part 2](Radar_Workflow_Advanced): 11. Export to files |
+| `.radarx.to_cfradial2` | [part 2](Radar_Workflow_Advanced): 11. Export to files |
 | `.radarx.to_cappi` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `.radarx.to_grid` | [core](Radar_Workflow): 10. Cone gridding, Max-CAPPI, interactive view and UGRID |
+| `.radarx.to_netcdf_cf` | [part 2](Radar_Workflow_Advanced): 11. Export to files |
+| `.radarx.to_odim` | [part 2](Radar_Workflow_Advanced): 11. Export to files |
 | `.radarx.to_uxarray` | [core](Radar_Workflow): 10. Cone gridding, Max-CAPPI, interactive view and UGRID |
+| `.radarx.to_zarr` | [part 2](Radar_Workflow_Advanced): 11. Export to files |
 | `.radarx.tornado_probability` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
 | `.radarx.trajectories` | [part 2](Radar_Workflow_Advanced): 9. Diabatic Lagrangian analysis |
 | `.radarx.vad_profile` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |

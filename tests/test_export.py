@@ -482,6 +482,40 @@ def test_cfradial1_pads_sweeps_of_different_length(tmp_path):
         assert second.isel(range=slice(None, 30)).notnull().any()
 
 
+def test_cfradial1_with_different_fields_per_sweep(volume, tmp_path):
+    # the Doppler cuts of a NEXRAD volume have no polarimetric products
+    mixed = volume.copy()
+    for name in ("KDP", "ECHO_CLASS", "PHIDP_OFFSET", "ZDR"):
+        del mixed["sweep_1"][name]
+    before = snapshot(mixed)
+    out = radarx.io.write_cfradial1(mixed, tmp_path / "mixed.nc")
+    assert repr(snapshot(mixed)) == repr(before)
+    assert "KDP" not in mixed["sweep_1"].variables
+    with xr.open_dataset(out) as flat:
+        second = flat.isel(time=slice(36, None))
+        for name in ("KDP", "ECHO_CLASS", "ZDR"):
+            assert second[name].isnull().all()
+            assert flat[name].isel(time=slice(0, 36)).notnull().any()
+        assert flat["ECHO_CLASS"].dtype.kind == "f"
+        assert (
+            flat["KDP"].attrs["radarx_method"]
+            == volume["sweep_0"]["KDP"].attrs["radarx_method"]
+        )
+        assert flat["DBZH"].isel(time=slice(36, None)).notnull().any()
+
+
+def test_harmonize_fields_leaves_a_sweep_without_fields_alone():
+    tree = xr.DataTree.from_dict(
+        {
+            "/": xr.Dataset(),
+            "sweep_0": xr.Dataset({"f": (("azimuth", "range"), np.ones((2, 2)))}),
+            "sweep_1": xr.Dataset({"s": 1}),
+        }
+    )
+    export._harmonize_fields(tree)
+    assert "f" not in tree["sweep_1"].variables
+
+
 def test_cfradial1_provenance_is_not_lost_for_cite(volume, tmp_path):
     out = radarx.io.write_cfradial1(volume, tmp_path / "v.nc")
     with xr.open_dataset(out) as flat:
@@ -826,6 +860,7 @@ def test_grid_netcdf_cf(grid, tmp_path):
         assert provenance_of(back["DBZH"].attrs) == provenance_of(grid["DBZH"].attrs)
         assert provenance_of(back.attrs) == provenance_of(grid.attrs)
         assert back.attrs["Conventions"] == "CF-1.8"
+        assert "title" not in back.attrs
         # georeferencing
         assert back["DBZH"].attrs["grid_mapping"] == "crs"
         crs = back["crs"]
@@ -860,6 +895,24 @@ def test_grid_netcdf_cf(grid, tmp_path):
         np.testing.assert_allclose(back["x_bnds"].values[0], [-41e3, -39e3])
         np.testing.assert_allclose(back["z_bnds"].values[-1], [5875.0, 6125.0])
         assert back["y_bnds"].dims == ("y", "bnds")
+
+
+def test_grid_conventions_are_added_to_the_existing_ones(grid, tmp_path):
+    tagged = grid.assign_attrs(
+        Conventions="ACDD-1.3",
+        title="None",
+        levels=np.array([1, 2]),
+        history="None\ngrid_cones()",
+    )
+    out = radarx.io.write_netcdf_cf(tagged, tmp_path / "t.nc")
+    with xr.open_dataset(out) as back:
+        assert back.attrs["Conventions"] == "ACDD-1.3 CF-1.8"
+        np.testing.assert_array_equal(back.attrs["levels"], [1, 2])
+        assert back.attrs["history"] == "grid_cones()"
+    cf = grid.assign_attrs(Conventions="CF-1.10")
+    out = radarx.io.write_netcdf_cf(cf, tmp_path / "cf.nc")
+    with xr.open_dataset(out) as back:
+        assert back.attrs["Conventions"] == "CF-1.10"
 
 
 def test_grid_without_options_and_accessor(grid, tmp_path):

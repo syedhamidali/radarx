@@ -137,6 +137,11 @@ class _Drop:
 _DROP = _Drop()
 
 
+def _is_placeholder(value):
+    """Is this the ``"None"`` string that readers write for an unknown value?"""
+    return isinstance(value, str) and value == "None"
+
+
 def _is_number(value):
     return isinstance(value, (int, float, np.integer, np.floating)) and not isinstance(
         value, (bool, np.bool_)
@@ -336,6 +341,38 @@ def _fold_provenance(tree):
 # ---------------------------------------------------------------------------
 # CfRadial1, CfRadial2, ODIM_H5
 # ---------------------------------------------------------------------------
+def _harmonize_fields(tree):
+    """
+    Give every sweep of ``tree`` the same non-scalar variables, in place.
+
+    The CfRadial1 writer of xradar stacks the sweeps along ``time``. It fails
+    with a merge error when the sweeps hold different variables, as the
+    surveillance and the Doppler cuts of a NEXRAD volume do (and the derived
+    fields radarx computes for some sweeps only). A variable that a sweep
+    lacks is added as NaN (single precision, lazy when the other fields are
+    dask arrays), with the attributes it has in the sweeps that hold it.
+    """
+    nodes = [tree[name] for name in tree.match("sweep_*")]
+    sweeps = [node.to_dataset(inherit=False) for node in nodes]
+    known = {}
+    for ds in sweeps:
+        for name, var in ds.data_vars.items():
+            if var.ndim:
+                known.setdefault(name, var)
+    for node, ds in zip(nodes, sweeps):
+        arrays = [v for v in ds.data_vars.values() if v.ndim]
+        if not arrays:
+            continue
+        reference = max(arrays, key=lambda v: v.ndim)
+        for name, var in known.items():
+            if name in ds.data_vars or not set(var.dims) <= set(reference.dims):
+                continue
+            extra = {d: 0 for d in reference.dims if d not in var.dims}
+            empty = xr.full_like(reference.isel(extra, drop=True), np.nan, "float32")
+            empty.attrs = dict(var.attrs)
+            node[name] = empty
+
+
 def write_cfradial1(dtree, path, *, calibs=True, packing="drop"):
     """
     Write a radar volume as a CfRadial1 NetCDF file.
@@ -352,9 +389,12 @@ def write_cfradial1(dtree, path, *, calibs=True, packing="drop"):
       and ``history``) of all sweeps is merged onto the global attributes
       first, so that :func:`radarx.cite` still finds it. The attributes of the variables are written as they are.
     * Sweeps with different numbers of gates are padded with NaN by xradar.
+      A field that only some sweeps hold (the Doppler cuts of a NEXRAD volume
+      have no ``KDP``) is NaN in the others, and an integer field becomes
+      floating point; xradar stops with a merge error when the sweeps hold
+      different fields, so radarx adds the missing ones as NaN first.
     * The derived fields are written as ordinary variables of ``(time,
-      range)``. A field that exists in some sweeps only (the Doppler cuts have
-      no ``KDP``) is NaN in the others.
+      range)``.
     * Booleans in attributes become the strings ``"true"`` and ``"false"``,
       ``None`` is dropped, and xradar appends ``": xradar vX CfRadial1
       export"`` to ``history``.
@@ -404,7 +444,8 @@ def write_cfradial1(dtree, path, *, calibs=True, packing="drop"):
         if node is not prepared:
             node.attrs = {}
     # the "None" placeholders of the readers are no values; xradar 0.11 keeps them
-    prepared.attrs = {k: v for k, v in prepared.attrs.items() if v != "None"}
+    prepared.attrs = {k: v for k, v in prepared.attrs.items() if not _is_placeholder(v)}
+    _harmonize_fields(prepared)
     writer(prepared, os.fspath(path), calibs=calibs)
     return _path(path)
 
@@ -582,10 +623,12 @@ def write_odim(
     path : str or os.PathLike
         File to write. An existing file is replaced.
     source : str, optional
-        Radar identifiers for ``what/source`` with at least one of ``NOD``,
-        ``RAD`` or ``WMO``, for example ``"NOD:uskbb"``. Newer xradar versions
-        build it from the root attributes of an ODIM volume when it is not
-        given; xradar 0.11 needs it.
+        Radar identifiers for ``what/source``, as ``TYP:VALUE`` pairs separated
+        by commas (ODIM_H5 2.4.1, Table 3), for example ``"NOD:fianj"``. The
+        specification makes ``NOD`` mandatory for single-site data; xradar
+        accepts ``NOD``, ``RAD`` or ``WMO``. Newer xradar versions build the
+        string from the root attributes of a volume that was read from ODIM
+        when it is not given; xradar 0.11 needs it.
     fields : sequence of str, optional
         Names of the fields to write. Default: all fields on the grid.
     optional_how : bool, optional
@@ -765,7 +808,14 @@ def _cf_grid(ds, crs, bounds, lonlat):
         for name in ("x", "y", "z"):
             if name in out.dims and out.sizes[name] > 1 and out[name].ndim == 1:
                 _bounds(out, name)
-    out.attrs.setdefault("Conventions", "CF-1.8")
+    # the readers write "None" for the attributes they do not know
+    out.attrs = {k: v for k, v in out.attrs.items() if not _is_placeholder(v)}
+    if HISTORY in out.attrs:
+        lines = str(out.attrs[HISTORY]).split("\n")
+        out.attrs[HISTORY] = "\n".join(line for line in lines if line != "None")
+    conventions = str(out.attrs.get("Conventions", ""))
+    if "CF-" not in conventions:
+        out.attrs["Conventions"] = f"{conventions} CF-1.8".strip()
     return out
 
 
@@ -792,8 +842,9 @@ def write_netcdf_cf(grid, path, *, crs=None, bounds=True, lonlat=True, **kwargs)
       ``lat(y)`` and ``lon(x)``, which are wrong away from the origin of an
       azimuthal equidistant grid (about 4 km at 230 km range, issue #265);
     * ``x_bnds``, ``y_bnds`` and ``z_bnds`` (``bounds=True``);
-    * ``Conventions = "CF-1.8"`` and the NetCDF-safe attributes of
-      :mod:`radarx.io.export`. The ``radarx_*`` provenance and ``history`` are
+    * ``Conventions = "CF-1.8"`` (added to the ones the grid has) and the
+      NetCDF-safe attributes of :mod:`radarx.io.export`, without the ``"None"``
+      placeholders that readers write. The ``radarx_*`` provenance and ``history`` are
       kept on the Dataset and on the fields.
 
     A grid without a CRS (``create_cappi``) gets one from its scalar
