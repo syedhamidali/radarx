@@ -34,6 +34,8 @@ from .test_dsd import _volume as dsd_volume
 from .test_dsd_bayes import _volume as bayes_volume
 from .test_evaporation import _profile as evap_profile
 from .test_evaporation import _series as evap_series
+from .test_forward_operator import SITE as FO_SITE
+from .test_forward_operator import synthetic_mpas, synthetic_wrf
 from .test_hid import _random_volume as hid_volume
 from .test_kdp import _sweep as kdp_sweep
 from .test_kdp import _volume as kdp_volume
@@ -203,6 +205,18 @@ PRODUCTS = {
     ),
     "tc_decompose": lambda: R.tc_decompose(
         R.gbvtd(small_vortex(), TC_CENTER, radii=np.array([15000.0, 20000.0, 25000.0]))
+    ),
+    "wrf_state": lambda: R.wrf_state(synthetic_wrf(nx=10, ny=8, nz=8)),
+    "mpas_state": lambda: R.mpas_state(*synthetic_mpas(ncell=30, nz=6)),
+    "forward_operator": lambda: R.forward_operator(
+        R.wrf_state(synthetic_wrf(nx=10, ny=8, nz=8)), nrain="QNRAIN"
+    ),
+    "to_radar_grid": lambda: R.to_radar_grid(
+        R.forward_operator(R.wrf_state(synthetic_wrf(nx=24, ny=20, nz=12))),
+        FO_SITE,
+        1.0,
+        azimuth=[10.0, 80.0, 150.0],
+        gate_range=[5000.0, 10000.0, 20000.0],
     ),
     "vil": lambda: R.vil(storm_volume()),
     "echo_top": lambda: R.echo_top(storm_volume()),

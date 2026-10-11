@@ -2364,5 +2364,50 @@
   "publisher": "American Meteorological Society",
   "pages": "JP2J.8",
   "url": "https://ams.confex.com/ams/pdfpapers/95858.pdf"
+ },
+ "10.1175/2007MWR2083.1": {
+  "authors": [
+   "Jung, Y.",
+   "Zhang, G.",
+   "Xue, M."
+  ],
+  "year": 2008,
+  "title": "Assimilation of Simulated Polarimetric Radar Data for a Convective Storm Using the Ensemble Kalman Filter. Part I: Observation Operators for Reflectivity and Polarimetric Variables",
+  "type": "article",
+  "journal": "Monthly Weather Review",
+  "volume": "136",
+  "issue": "6",
+  "pages": "2228-2245",
+  "doi": "10.1175/2007MWR2083.1"
+ },
+ "10.3390/atmos11040362": {
+  "authors": [
+   "Ryzhkov, A. V.",
+   "Snyder, J.",
+   "Carlin, J. T.",
+   "Khain, A.",
+   "Pinsky, M."
+  ],
+  "year": 2020,
+  "title": "What Polarimetric Weather Radars Offer to Cloud Modelers: Forward Radar Operators and Microphysical/Thermodynamic Retrievals",
+  "type": "article",
+  "journal": "Atmosphere",
+  "volume": "11",
+  "issue": "4",
+  "pages": "362",
+  "doi": "10.3390/atmos11040362"
+ },
+ "10.1098/rsta.1904.0024": {
+  "authors": [
+   "Maxwell Garnett, J. C."
+  ],
+  "year": 1904,
+  "title": "Colours in metal glasses and in metallic films",
+  "type": "article",
+  "journal": "Philosophical Transactions of the Royal Society of London. Series A, Containing Papers of a Mathematical or Physical Character",
+  "volume": "203",
+  "issue": "359-371",
+  "pages": "385-420",
+  "doi": "10.1098/rsta.1904.0024"
  }
 }

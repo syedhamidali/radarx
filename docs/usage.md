@@ -86,6 +86,13 @@ notebooks/Hail_Products
 
 ```{toctree}
 :maxdepth: 2
+:caption: Model verification
+
+notebooks/Forward_Operator
+```
+
+```{toctree}
+:maxdepth: 2
 :caption: Machine learning
 
 notebooks/Machine_Learning

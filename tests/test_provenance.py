@@ -37,6 +37,8 @@ from .test_beam_blockage import make_sweep as bb_sweep
 from .test_beam_blockage import volume as bb_volume
 from .test_dealias import synthetic_sweep
 from .test_dealias import volume as dealias_volume
+from .test_forward_operator import SITE as FO_SITE
+from .test_forward_operator import synthetic_mpas, synthetic_wrf
 from .test_kdp import _sweep as kdp_sweep
 from .test_kdp import _volume as kdp_volume
 from .test_qc import _sweep as qc_sweep
@@ -360,7 +362,17 @@ def test_sweep_and_volume_results():
             storm_volume(), freezing_level=3000.0, minus20_level=6000.0
         ),
         "hail_kinetic_energy": radarx.retrieve.hail_kinetic_energy(storm_volume()),
+        "wrf_state": radarx.retrieve.wrf_state(synthetic_wrf(nx=10, ny=8, nz=8)),
+        "mpas_state": radarx.retrieve.mpas_state(*synthetic_mpas(ncell=30, nz=6)),
     }
+    fo_fields = radarx.retrieve.forward_operator(results["wrf_state"], nrain="QNRAIN")
+    results["forward_operator"] = fo_fields
+    results["to_radar_grid"] = radarx.retrieve.to_radar_grid(
+        fo_fields, FO_SITE, 1.0, azimuth=[10.0], gate_range=[5000.0]
+    )
+    results["to_radar_grid tree"] = radarx.retrieve.to_radar_grid(
+        fo_fields, FO_SITE, [1.0, 2.0], azimuth=[10.0], gate_range=[5000.0]
+    )
     for name, out in results.items():
         check_attrs(out)
 

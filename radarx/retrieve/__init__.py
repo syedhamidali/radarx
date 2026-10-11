@@ -52,6 +52,7 @@ _SECTIONS = {
         "wind_profile",
     ],
     "Convective hazards": ["lightning", "tornado", "biology", "hail"],
+    "Model verification": ["forward_operator"],
 }
 
 _modules = sorted(
