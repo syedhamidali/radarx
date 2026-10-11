@@ -520,3 +520,46 @@ def test_azimuth_coverage_of_a_group_of_gates():
     one[10, 1] = True
     assert dealias._azimuth_coverage(az, one) == 0.0
     assert dealias._azimuth_coverage(az, np.zeros((360, 3), dtype=bool)) == 0.0
+
+
+def test_beam_height_uses_the_shared_helper():
+    """Gate heights are those of beam_center_height, with the site altitude
+    inside the Earth radius (a high site, long ranges)."""
+    from radarx.fundamentals.constants import EFFECTIVE_RADIUS_4_3
+    from radarx.fundamentals.geometry import beam_center_height
+
+    azimuth = np.arange(0.0, 360.0, 30.0)
+    rng = np.arange(1000.0, 300001.0, 25000.0)
+    elevation = np.linspace(0.5, 20.0, azimuth.size)
+    ds = xr.Dataset(
+        {"VRADH": (("azimuth", "range"), np.zeros((azimuth.size, rng.size)))},
+        coords={
+            "azimuth": azimuth,
+            "range": rng,
+            "elevation": ("azimuth", elevation),
+            "altitude": 3000.0,
+        },
+    )
+    got = dealias._beam_height(ds, dealias._Sweep(ds, "VRADH", 10.0))
+    # the formula written out, altitude added to the Earth radius
+    a = EFFECTIVE_RADIUS_4_3 + 3000.0
+    sin_el = np.sin(np.radians(elevation))[:, None]
+    want = (
+        np.sqrt(rng[None, :] ** 2 + a**2 + 2.0 * rng[None, :] * a * sin_el)
+        - EFFECTIVE_RADIUS_4_3
+    )
+    np.testing.assert_allclose(got, want, rtol=0, atol=1e-6)
+    np.testing.assert_allclose(
+        got,
+        beam_center_height(rng[None, :], elevation[:, None], radar_height=3000.0),
+        rtol=0,
+        atol=1e-9,
+    )
+    # a site at sea level has no altitude term
+    ds["altitude"] = 0.0
+    np.testing.assert_allclose(
+        dealias._beam_height(ds, dealias._Sweep(ds, "VRADH", 10.0)),
+        beam_center_height(rng[None, :], elevation[:, None]),
+        rtol=0,
+        atol=1e-9,
+    )
