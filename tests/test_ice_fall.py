@@ -170,6 +170,12 @@ def test_melting_snow_weight_and_limits():
     np.testing.assert_allclose(
         atlas, terminal_fall_speed(d, law="atlas1973"), rtol=1e-12
     )
+    # increasing with size at every liquid fraction (a snow law that increases)
+    dd = np.geomspace(0.3, 8.0, 200)
+    for fraction in (0.0, 0.3, 0.9, 1.0):
+        assert np.all(
+            np.diff(melting_snow_fall_speed(dd, fraction, snow=snow).values) > 0.0
+        )
     # monotone in the liquid fraction when rain falls faster than snow
     fraction = np.linspace(0.0, 1.0, 51)
     v = melting_snow_fall_speed(2.0, xr.DataArray(fraction, dims="l"), snow=snow).values
