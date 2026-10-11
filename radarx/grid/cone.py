@@ -633,6 +633,13 @@ def grid_cones(
     elevation are identified, and the rule that cells outside the bracketing
     cones stay empty are radarx choices, not values from a paper.
 
+    Repeated sweeps. ``repeats="mean"``, ``"latest"`` and ``"nearest"`` are
+    radarx's own constructions; no publication was used for them. The repeats of
+    one elevation (within 0.1 degrees) become one cone before the vertical
+    interpolation, so a repeat adds no extra layer and no zero-thickness
+    interval. Merging by the mean after moving each repeat to the analysis time
+    assumes the steady motion of ``motion``.
+
     Velocity gridding. Interpolating radial velocity from the polar grid
     (here and in the multi-Doppler input) can leave periodic gridding
     artifacts that map into spurious vertical velocities in variational
