@@ -29,6 +29,7 @@ notebooks/Echo_QC
 notebooks/Dealiasing
 notebooks/KDP
 notebooks/Attenuation_Correction
+notebooks/Beam_Blockage
 notebooks/Advection_Correction
 notebooks/Superobs_Data_Assimilation
 ```

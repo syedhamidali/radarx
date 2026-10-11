@@ -51,8 +51,8 @@ multi-radar steps.
 The [second part](Radar_Workflow_Advanced) of this notebook shows the rest of
 radarx on small open or synthetic data: the radar equation and unit helpers,
 disdrometers, raindrop trajectories, surface stations and cold pools, lightning,
-tornado detection, single-Doppler winds, the diabatic Lagrangian analysis and
-the machine-learning interface. The *Function index* at the end of this page
+tornado detection, single-Doppler winds, the diabatic Lagrangian analysis,
+the machine-learning interface and beam blockage from a digital elevation model. The *Function index* at the end of this page
 lists every function of radarx with the section where it is used.
 
 All heavy steps run in compiled, multithreaded kernels; the runtimes in the
@@ -1904,6 +1904,7 @@ notebooks or from this index.
 | `interpolate_time` | `radarx.retrieve.advection` | [core](Radar_Workflow): 11. Storm motion, common analysis time and time interpolation |
 | `biological_echo` | `radarx.retrieve.biology` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
 | `correct_attenuation` | `radarx.retrieve.attenuation` | [core](Radar_Workflow): 5. ΦDP processing and KDP |
+| `beam_blockage` | `radarx.retrieve.beam_blockage` | [part 2](Radar_Workflow_Advanced): 11. Beam blockage and terrain clutter |
 | `zdr_offset` | `radarx.retrieve.calibration` | [core](Radar_Workflow): 15. Noise and calibration |
 | `z_offset` | `radarx.retrieve.calibration` | [core](Radar_Workflow): 15. Noise and calibration |
 | `phidp_offset` | `radarx.retrieve.calibration` | [core](Radar_Workflow): 15. Noise and calibration |
@@ -2019,6 +2020,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.azimuthal_shear` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `.radarx.background` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `.radarx.baroclinic_generation` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
+| `.radarx.beam_blockage` | [part 2](Radar_Workflow_Advanced): 11. Beam blockage and terrain clutter |
 | `.radarx.biological_echo` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
 | `.radarx.bulk_shear` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
 | `.radarx.bunkers_storm_motion` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |

@@ -36,6 +36,7 @@ written on the fly).
 | 8 | wind from a single Doppler radar | `single_doppler_winds`, `radar_geometry` |
 | 9 | diabatic Lagrangian analysis | `trajectories`, `diabatic_lagrangian`, `microphysical_rates` |
 | 10 | machine-learning plumbing | `radarx.ml` |
+| 11 | beam blockage and terrain clutter from a digital elevation model | `beam_blockage` |
 
 ```{code-cell} ipython3
 import math
@@ -82,6 +83,7 @@ from radarx.io import (
 from radarx.retrieve import (
     azimuthal_shear,
     baroclinic_generation,
+    beam_blockage,
     biological_echo,
     bulk_shear,
     buoyancy,
@@ -1530,6 +1532,59 @@ for ax, (da, title, cmap, lim) in zip(
     fig.colorbar(pm, ax=ax, shrink=0.8)
     ax.set(title=title, aspect="equal", xlim=(-100, 100), ylim=(-100, 100), xlabel="east (km)")
 axes[0].set_ylabel("north (km)")
+plt.show()
+```
+
+## 11. Beam blockage and terrain clutter
+
+`beam_blockage` takes a digital elevation model (an `xarray.DataArray` of
+heights with `latitude` and `longitude`, read with `rioxarray` from SRTM or
+Copernicus DEM tiles, which radarx does not download) and returns, for every
+gate of a sweep or volume, the partial beam blockage `PBB` (the part of the
+beam power below the terrain, Bech et al. 2003, with a Gaussian beam as in Lang
+et al. 2009), the cumulative beam blockage `CBB` (the largest `PBB` along the
+ray), the terrain height under the gate and a flag for gates whose beam centre
+is at the terrain surface. The [beam blockage notebook](Beam_Blockage) tests it
+against a numerical integration of the beam cross section. Here a ridge of
+800 m, 25 km from the radar, blocks the lowest cut and the shadow stays
+behind it.
+
+```{code-cell} ipython3
+site_lat, site_lon, site_alt = 30.0, 78.0, 300.0
+glat = np.arange(site_lat - 1.0, site_lat + 1.0 + 0.001, 0.005)
+glon = np.arange(site_lon - 1.2, site_lon + 1.2 + 0.001, 0.005)
+la, lo = np.meshgrid(glat, glon, indexing="ij")
+dist_km = np.hypot((la - site_lat) * 111.2, (lo - site_lon) * 111.2 * np.cos(np.deg2rad(site_lat)))
+terrain = xr.DataArray(
+    150.0 + 800.0 * np.cos(0.5 * np.pi * np.clip((dist_km - 25.0) / 4.0, -1.0, 1.0)) ** 2,
+    dims=("latitude", "longitude"), coords={"latitude": glat, "longitude": glon},
+)
+nray, ngate = 180, 160
+bb_sweep = xr.Dataset(
+    {"DBZH": (("azimuth", "range"), np.full((nray, ngate), 30.0))},
+    coords={"azimuth": (np.arange(nray) + 0.5) * 2.0, "range": 500.0 * (np.arange(ngate) + 1),
+            "elevation": ("azimuth", np.full(nray, 0.5)),
+            "latitude": site_lat, "longitude": site_lon, "altitude": site_alt},
+)
+blocked = beam_blockage(bb_sweep, terrain, beamwidth=1.0)  # PBB, CBB, TERRAIN_HEIGHT, TERRAIN_CLUTTER
+blocked_acc = bb_sweep.radarx.beam_blockage(terrain, beamwidth=1.0, pattern="uniform")  # the accessor
+ray0 = blocked.isel(azimuth=0)
+print(f"ray at {float(ray0.azimuth):.0f} deg: PBB peaks at {float(ray0.PBB.max()):.2f}, "
+      f"CBB behind the ridge {float(ray0.CBB[-1]):.2f}, "
+      f"uniform beam {float(blocked_acc.CBB.isel(azimuth=0)[-1]):.2f}")
+kept = bb_sweep.DBZH.where(blocked.CBB < 0.5)  # use CBB as a mask; nothing is applied for you
+print(f"{int(kept.notnull().sum())} of {kept.size} gates kept")
+```
+
+```{code-cell} ipython3
+fig, axes = plt.subplots(1, 2, figsize=(10, 3.8), layout="constrained")
+r_km = bb_sweep.range / 1e3
+axes[0].fill_between(r_km, 0, ray0.TERRAIN_HEIGHT, color="0.6", label="terrain")
+axes[0].plot(r_km, geometry.beam_center_height(bb_sweep.range, 0.5, radar_height=site_alt), label="beam centre")
+axes[0].set(xlabel="range (km)", ylabel="height (m)", ylim=(0, 1500)); axes[0].legend()
+axes[1].plot(r_km, ray0.PBB, label="PBB")
+axes[1].plot(r_km, ray0.CBB, label="CBB")
+axes[1].set(xlabel="range (km)", ylabel="blockage", ylim=(-0.02, 1.02)); axes[1].legend()
 plt.show()
 ```
 
