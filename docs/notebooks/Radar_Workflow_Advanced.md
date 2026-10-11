@@ -37,6 +37,7 @@ written on the fly).
 | 9 | diabatic Lagrangian analysis | `trajectories`, `diabatic_lagrangian`, `microphysical_rates` |
 | 10 | machine-learning plumbing | `radarx.ml` |
 | 11 | beam blockage and terrain clutter from a digital elevation model | `beam_blockage` |
+| 12 | export to CfRadial1, CfRadial2, ODIM_H5, Zarr and CF NetCDF | `write_cfradial1`, `write_cfradial2`, `write_odim`, `write_zarr`, `write_netcdf_cf` |
 
 ```{code-cell} ipython3
 import math
@@ -79,6 +80,11 @@ from radarx.io import (
     read_sticknet,
     read_sticknet_locations,
     read_wind_profiler,
+    write_cfradial1,
+    write_cfradial2,
+    write_netcdf_cf,
+    write_odim,
+    write_zarr,
 )
 from radarx.retrieve import (
     azimuthal_shear,
@@ -1586,6 +1592,54 @@ axes[1].plot(r_km, ray0.PBB, label="PBB")
 axes[1].plot(r_km, ray0.CBB, label="CBB")
 axes[1].set(xlabel="range (km)", ylabel="blockage", ylim=(-0.02, 1.02)); axes[1].legend()
 plt.show()
+```
+
+## 12. Export to files
+
+`radarx.io` writes volumes and grids to files that other tools read, with the
+provenance attributes (`radarx_method`, `radarx_references`, `radarx_version`,
+`history`) kept where the format can hold them: `write_cfradial1`,
+`write_cfradial2` and `write_odim` for a `DataTree` volume (through the writers
+of xradar), `write_zarr` for any result and `write_netcdf_cf` for a grid, which
+also gets the CF georeferencing (`grid_mapping`, `standard_name`, `axis`, 2-D
+`lat` and `lon`, bounds). Each has a `.radarx.to_*` method. The
+[Exporting results](Exporting_Results) page shows what every format keeps and
+loses. Here a small NEXRAD volume with derived fields is written to each format.
+
+```{code-cell} ipython3
+from open_radar_data import DATASETS
+
+raw_exp = xd.io.open_nexradlevel2_datatree(DATASETS.fetch("KLBB20160601_150025_V06"), sweep=[0, 2])
+raw_exp = raw_exp.map_over_datasets(
+    lambda ds: ds.sel(range=slice(None, 60e3)) if "range" in ds.dims else ds
+).xradar.georeference()
+vol_exp = raw_exp.radarx.assign(raw_exp.radarx.kdp()).radarx.assign(raw_exp.radarx.echo_mask())
+
+write_zarr(vol_exp, work / "volume.zarr")
+write_cfradial2(vol_exp, work / "volume_cfradial2.nc")
+write_cfradial1(vol_exp, work / "volume_cfradial1.nc")
+write_odim(vol_exp, work / "volume.h5", source="NOD:uskbb", fields=["DBZH", "ZDR", "KDP"])
+vol_exp.radarx.to_zarr(work / "volume_accessor.zarr")
+vol_exp.radarx.to_cfradial1(work / "volume_accessor_cf1.nc")
+vol_exp.radarx.to_cfradial2(work / "volume_accessor_cf2.nc")
+vol_exp.radarx.to_odim(work / "volume_accessor.h5", source="NOD:uskbb")
+
+same = xr.open_datatree(work / "volume.zarr", engine="zarr")
+xr.testing.assert_identical(same, vol_exp)
+cf1_exp = xr.open_dataset(work / "volume_cfradial1.nc")
+print("Zarr reads back identical;", "CfRadial1 holds", sorted(cf1_exp.attrs["radarx_method"].split(" | ")))
+```
+
+```{code-cell} ipython3
+grid_exp = radarx.grid.grid_cones(
+    vol_exp, "DBZH", x=np.arange(-40e3, 40e3 + 1, 2e3), y=np.arange(-40e3, 40e3 + 1, 2e3),
+    z=np.arange(500.0, 4000.0, 500.0),
+)
+write_netcdf_cf(grid_exp, work / "grid.nc")
+grid_exp.radarx.to_netcdf_cf(work / "grid_accessor.nc")
+grid_exp.radarx.to_zarr(work / "grid.zarr")
+with xr.open_dataset(work / "grid.nc") as cf_grid:
+    print(cf_grid["DBZH"].attrs["grid_mapping"], cf_grid["lat"].dims, cf_grid.attrs["Conventions"])
 ```
 
 ## References
