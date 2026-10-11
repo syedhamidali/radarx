@@ -829,23 +829,22 @@ def _set_attrs(var, defaults):
         var.attrs.setdefault(key, value)
 
 
-def _cf_grid(ds, crs, bounds, lonlat):
-    """Copy of a gridded Dataset with CF georeferencing."""
-    if "x" not in ds.dims or "y" not in ds.dims:
-        raise ValueError("write_netcdf_cf needs a grid with x and y dimensions")
-    out = _prepare_dataset(ds, "netcdf", "drop")
-    mapping = _find_crs(ds, crs)
-    out = out.drop_vars([n for n in _CRS_NAMES if n in out.variables])
-
+def _axis_attrs(out):
+    """Default attributes of the x, y and z axes."""
     for name, attrs in _AXES.items():
-        if name in out.coords:
-            _set_attrs(out[name], attrs)
-            if (
-                name == "z"
-                and "sea level" in str(out[name].attrs.get("long_name", ""))
-                and out[name].ndim == 1
-            ):
-                _set_attrs(out[name], {"standard_name": "altitude"})
+        if name not in out.coords:
+            continue
+        _set_attrs(out[name], attrs)
+        if (
+            name == "z"
+            and "sea level" in str(out[name].attrs.get("long_name", ""))
+            and out[name].ndim == 1
+        ):
+            _set_attrs(out[name], {"standard_name": "altitude"})
+
+
+def _time_and_position_attrs(out):
+    """Default attributes of the time axis and of the radar position."""
     if "time" in out.coords:
         _set_attrs(out["time"], {"standard_name": "time", "axis": "T"})
     for name, units in (
@@ -856,31 +855,49 @@ def _cf_grid(ds, crs, bounds, lonlat):
         if name in out.coords:
             _set_attrs(out[name], {"units": units, "long_name": f"{name} of the radar"})
 
-    if mapping is not None:
-        out["crs"] = xr.DataArray(0, attrs=mapping)
-        if lonlat and (
-            out.coords.get("lat") is None
-            or out["lat"].ndim == 1
-            or out.coords.get("lon") is None
-            or out["lon"].ndim == 1
-        ):
-            lon, lat = _lonlat(mapping, out["x"].values, out["y"].values)
-            out = out.drop_vars(["lat", "lon"], errors="ignore")
-            out = out.assign_coords(lat=(("y", "x"), lat), lon=(("y", "x"), lon))
-        for var in out.data_vars.values():
-            if "x" in var.dims and "y" in var.dims:
-                var.attrs["grid_mapping"] = "crs"
-        out = out.reset_coords("crs")
+
+def _needs_lonlat(out):
+    """Whether the grid has no 2-D lat and lon yet."""
+    return (
+        out.coords.get("lat") is None
+        or out["lat"].ndim == 1
+        or out.coords.get("lon") is None
+        or out["lon"].ndim == 1
+    )
+
+
+def _add_crs(out, mapping, lonlat):
+    """Add the ``crs`` variable, the grid mapping and the 2-D lat and lon."""
+    out["crs"] = xr.DataArray(0, attrs=mapping)
+    if lonlat and _needs_lonlat(out):
+        lon, lat = _lonlat(mapping, out["x"].values, out["y"].values)
+        out = out.drop_vars(["lat", "lon"], errors="ignore")
+        out = out.assign_coords(lat=(("y", "x"), lat), lon=(("y", "x"), lon))
+    for var in out.data_vars.values():
+        if "x" in var.dims and "y" in var.dims:
+            var.attrs["grid_mapping"] = "crs"
+    return out.reset_coords("crs")
+
+
+def _lonlat_attrs(out):
+    """Default attributes of the lat and lon coordinates."""
     for name, units, standard in (
         ("lat", "degrees_north", "latitude"),
         ("lon", "degrees_east", "longitude"),
     ):
         if name in out.coords:
             _set_attrs(out[name], {"units": units, "standard_name": standard})
-    if bounds:
-        for name in ("x", "y", "z"):
-            if name in out.dims and out.sizes[name] > 1 and out[name].ndim == 1:
-                _bounds(out, name)
+
+
+def _add_bounds(out):
+    """Cell bounds of the x, y and z axes that have more than one point."""
+    for name in ("x", "y", "z"):
+        if name in out.dims and out.sizes[name] > 1 and out[name].ndim == 1:
+            _bounds(out, name)
+
+
+def _global_attrs(out):
+    """Drop the placeholder attributes and add the CF convention."""
     # the readers write "None" for the attributes they do not know
     out.attrs = {k: v for k, v in out.attrs.items() if not _is_placeholder(v)}
     if HISTORY in out.attrs:
@@ -889,6 +906,23 @@ def _cf_grid(ds, crs, bounds, lonlat):
     conventions = str(out.attrs.get("Conventions", ""))
     if "CF-" not in conventions:
         out.attrs["Conventions"] = f"{conventions} CF-1.8".strip()
+
+
+def _cf_grid(ds, crs, bounds, lonlat):
+    """Copy of a gridded Dataset with CF georeferencing."""
+    if "x" not in ds.dims or "y" not in ds.dims:
+        raise ValueError("write_netcdf_cf needs a grid with x and y dimensions")
+    out = _prepare_dataset(ds, "netcdf", "drop")
+    mapping = _find_crs(ds, crs)
+    out = out.drop_vars([n for n in _CRS_NAMES if n in out.variables])
+    _axis_attrs(out)
+    _time_and_position_attrs(out)
+    if mapping is not None:
+        out = _add_crs(out, mapping, lonlat)
+    _lonlat_attrs(out)
+    if bounds:
+        _add_bounds(out)
+    _global_attrs(out)
     return out
 
 
