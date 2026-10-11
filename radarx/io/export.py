@@ -399,6 +399,12 @@ def write_cfradial1(dtree, path, *, calibs=True, packing="drop"):
     writer = _xradar_writer("to_cfradial1")
     prepared = _prepare_tree(dtree, "netcdf", packing)
     _fold_provenance(prepared)
+    # CfRadial1 has no sweep attributes; xradar 0.11 stops when they differ
+    for node in prepared.subtree:
+        if node is not prepared:
+            node.attrs = {}
+    # the "None" placeholders of the readers are no values; xradar 0.11 keeps them
+    prepared.attrs = {k: v for k, v in prepared.attrs.items() if v != "None"}
     writer(prepared, os.fspath(path), calibs=calibs)
     return _path(path)
 
@@ -446,6 +452,8 @@ def write_cfradial2(dtree, path, *, engine=None, packing="drop"):
     writer = _xradar_writer("to_cfradial2")
     prepared = _prepare_tree(dtree, "netcdf", packing)
     _fold_provenance(prepared)
+    # xradar 0.11 does not set these
+    prepared.attrs = {**prepared.attrs, "Conventions": "Cf/Radial", "version": "2.0"}
     writer(prepared, os.fspath(path), engine=engine)
     return _path(path)
 
