@@ -873,3 +873,15 @@ def test_delta_v_ignores_radial_gradients():
     # the azimuth; a max - min over a circle picked up 12 m/s of it
     ramp = ds.assign(VRADH=ds.VRADH + 8e-3 * (ds.range - 21e3))
     assert float(rotation_couplets(ramp).delta_v[0]) == pytest.approx(base, abs=1.0)
+
+
+def test_heatmap_stride_is_found_from_the_shape():
+    # four 2 x 2 poolings of the 120 x 240 chip give 8 x 15 cells of 16 gates
+    assert tor_mod._heatmap_stride((8, 15), 120, 240) == 16
+    # fewer stages in a small network
+    assert tor_mod._heatmap_stride((30, 60), 120, 240) == 4
+    assert tor_mod._heatmap_stride((120, 240), 120, 240) == 1
+    # ceil mode: a chip that is not a multiple of the stride
+    assert tor_mod._heatmap_stride((8, 8), 121, 121) == 16
+    # a shape that no power of two gives: the stride of the TorNet CNN
+    assert tor_mod._heatmap_stride((7, 7), 120, 240) == tor_mod._HEATMAP_STRIDE

@@ -502,3 +502,21 @@ def test_anchor_of_a_volume():
         out = dealias_velocity(dtree)
     assert out["sweep_0"]["VRADH_dealiased"].attrs["dealias_anchor"] == "zero_mean"
     assert out["sweep_1"]["VRADH_dealiased"].attrs["dealias_anchor"] == "sweep_below"
+
+
+def test_azimuth_coverage_of_a_group_of_gates():
+    az = np.arange(0.0, 360.0, 1.0)
+    full = np.ones((360, 3), dtype=bool)
+    assert dealias._azimuth_coverage(az, full) == pytest.approx(360.0)
+    half = np.zeros((360, 3), dtype=bool)
+    half[:180] = True
+    assert dealias._azimuth_coverage(az, half) == pytest.approx(180.0)
+    # a sector that wraps through north is the same width
+    wrap = np.zeros((360, 3), dtype=bool)
+    wrap[[*range(330, 360), *range(0, 31)]] = True
+    assert dealias._azimuth_coverage(az, wrap) == pytest.approx(61.0)
+    # one ray (or none) covers no azimuth
+    one = np.zeros((360, 3), dtype=bool)
+    one[10, 1] = True
+    assert dealias._azimuth_coverage(az, one) == 0.0
+    assert dealias._azimuth_coverage(az, np.zeros((360, 3), dtype=bool)) == 0.0
