@@ -361,11 +361,45 @@ DArray gradient_py(DArray f, DArray x, DArray y, int n_threads) {
 // --------------------------------------------------------------------------
 // velocity-azimuth display: least-squares fit of
 // vr = a0 + b1 sin(az) + b2 cos(az) on every range ring (Browning and Wexler
-// 1968); u = b1 / cos(el), v = b2 / cos(el)
+// 1968); u = b1 / cos(el), v = b2 / cos(el). Rows 5-7 hold a second fit of
+// the same ring with the second harmonic added,
+// vr = a0 + b1 sin(az) + b2 cos(az) + c1 sin(2 az) + c2 cos(2 az): its offset
+// a0, c1 and c2. The first fit (rows 0-4) does not depend on it.
+
+constexpr int kVadRows = 8;
+
+// Solves the 4x4 system G x = r in place by Gaussian elimination with partial
+// pivoting; returns the determinant of G (0 when singular).
+double solve4(double G[4][4], double r[4]) {
+    double det = 1.0;
+    for (int c = 0; c < 4; ++c) {
+        int piv = c;
+        for (int i = c + 1; i < 4; ++i)
+            if (std::fabs(G[i][c]) > std::fabs(G[piv][c])) piv = i;
+        if (G[piv][c] == 0.0) return 0.0;
+        if (piv != c) {
+            for (int j = 0; j < 4; ++j) std::swap(G[c][j], G[piv][j]);
+            std::swap(r[c], r[piv]);
+            det = -det;
+        }
+        det *= G[c][c];
+        for (int i = c + 1; i < 4; ++i) {
+            const double f = G[i][c] / G[c][c];
+            for (int j = c; j < 4; ++j) G[i][j] -= f * G[c][j];
+            r[i] -= f * r[c];
+        }
+    }
+    for (int i = 3; i >= 0; --i) {
+        double t = r[i];
+        for (int j = i + 1; j < 4; ++j) t -= G[i][j] * r[j];
+        r[i] = t / G[i][i];
+    }
+    return det;
+}
 
 void vad_ring(const double* vr, const double* az, int64_t naz, double cos_el,
               int64_t min_gates, double min_spread, double* o, int64_t stride) {
-    for (int j = 0; j < 5; ++j) o[j * stride] = kNaN;
+    for (int j = 0; j < kVadRows; ++j) o[j * stride] = kNaN;
     double n = 0, ss = 0, sc = 0, sv = 0;
     for (int64_t k = 0; k < naz; ++k) {
         if (!std::isfinite(vr[k]) || !std::isfinite(az[k])) continue;
@@ -403,6 +437,34 @@ void vad_ring(const double* vr, const double* az, int64_t naz, double cos_el,
     o[stride] = b2 / cos_el;
     o[2 * stride] = a0;
     o[3 * stride] = std::sqrt(sse / n);
+
+    // second harmonic: determinant of the covariance of (sin, cos, sin 2, cos 2)
+    // is 1/16 for a full circle; the ring needs min_spread / 4 of it (the same
+    // fraction of the full-circle value as for the first harmonic)
+    double m2 = 0, m3 = 0;
+    for (int64_t k = 0; k < naz; ++k) {
+        if (!std::isfinite(vr[k]) || !std::isfinite(az[k])) continue;
+        m2 += std::sin(2.0 * az[k]);
+        m3 += std::cos(2.0 * az[k]);
+    }
+    m2 /= n;
+    m3 /= n;
+    double G[4][4] = {}, r[4] = {};
+    for (int64_t k = 0; k < naz; ++k) {
+        if (!std::isfinite(vr[k]) || !std::isfinite(az[k])) continue;
+        const double x[4] = {std::sin(az[k]) - ms, std::cos(az[k]) - mc,
+                             std::sin(2.0 * az[k]) - m2, std::cos(2.0 * az[k]) - m3};
+        const double dv = vr[k] - mv;
+        for (int i = 0; i < 4; ++i) {
+            for (int j = 0; j < 4; ++j) G[i][j] += x[i] * x[j];
+            r[i] += x[i] * dv;
+        }
+    }
+    const double det4 = solve4(G, r);
+    if (!(det4 / (n * n * n * n) >= 0.25 * min_spread)) return;
+    o[5 * stride] = mv - r[0] * ms - r[1] * mc - r[2] * m2 - r[3] * m3;
+    o[6 * stride] = r[2];
+    o[7 * stride] = r[3];
 }
 
 DArray vad_py(DArray vr, DArray az, DArray cos_el, int64_t min_gates, double min_spread,
@@ -411,7 +473,7 @@ DArray vad_py(DArray vr, DArray az, DArray cos_el, int64_t min_gates, double min
     const int64_t nring = vr.shape(0), naz = vr.shape(1);
     if (az.shape(0) != nring || az.shape(1) != naz || cos_el.size() != nring)
         throw std::invalid_argument("shape mismatch");
-    DArray out({static_cast<py::ssize_t>(5), static_cast<py::ssize_t>(nring)});
+    DArray out({static_cast<py::ssize_t>(kVadRows), static_cast<py::ssize_t>(nring)});
     const double* V = vr.data();
     const double* A = az.data();
     const double* C = cos_el.data();

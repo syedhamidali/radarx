@@ -49,6 +49,32 @@ Definitions
   (azimuth :math:`\\alpha`, elevation :math:`\\phi`), assuming a horizontally
   uniform wind across the ring; :func:`vad_profile` averages the ring winds
   of all sweeps in height bins into a profile usable by the functions here.
+  The same fit with the second harmonic added,
+  :math:`v_r = a_0 + b_1 \\sin\\alpha + b_2 \\cos\\alpha + c_1 \\sin 2\\alpha +
+  c_2 \\cos 2\\alpha`, gives the horizontal divergence and the deformation
+  of a wind field that is linear across the ring,
+  :math:`u = u_0 + u_x x + u_y y`, :math:`v = v_0 + v_x x + v_y y`. With the
+  ring of ground range :math:`r = R \\cos\\phi` (slant range :math:`R`), the
+  radial velocity is
+
+  .. math::
+
+      v_r = \\cos\\phi\\,(u_0 \\sin\\alpha + v_0 \\cos\\alpha)
+      + \\frac{r\\cos\\phi}{2}\\left[(u_x + v_y)
+      + (v_y - u_x)\\cos 2\\alpha + (u_y + v_x)\\sin 2\\alpha\\right]
+      + (w - v_t)\\sin\\phi,
+
+  so that :math:`\\nabla_h\\cdot\\mathbf{V} = 2 a_0 / (R\\cos^2\\phi)`, the
+  stretching deformation :math:`u_x - v_y = -2 c_2 / (R\\cos^2\\phi)` and the
+  shearing deformation :math:`u_y + v_x = 2 c_1 / (R\\cos^2\\phi)`. The
+  vorticity :math:`v_x - u_y` does not enter the radial velocity. These
+  relations are derived here from the stated linear field; the paper's
+  equations are not checked. Vertical motion :math:`w` and fall speed
+  :math:`v_t` enter the zeroth harmonic only as :math:`(w - v_t)\\sin\\phi`
+  and are not separated from the divergence (as in the first-harmonic fit, where
+  they stay in :math:`a_0`): the divergence is biased by
+  :math:`2 (w - v_t)\\sin\\phi / (R\\cos^2\\phi)`, small at low elevations
+  and far rings.
   The defaults of :func:`vad_profile` (at least 50 gates per ring, azimuthal
   spread 0.1, 100-m bins up to 12 km, 1-45 degree elevations) are radarx
   choices; none comes from Browning and Wexler [1]_.
@@ -616,7 +642,7 @@ _VELOCITY_NAMES = VELOCITY
 
 
 def _sweep_rings(ds, velocity, min_elevation, max_elevation, max_range):
-    """Range rings (vr, azimuth, cos elevation, height) of one sweep or None."""
+    """Range rings (vr, azimuth, cos elevation, height, R cos^2) of one sweep or None."""
     name = velocity
     if name is None:
         name = next((n for n in _VELOCITY_NAMES if n in ds), None)
@@ -644,6 +670,7 @@ def _sweep_rings(ds, velocity, min_elevation, max_elevation, max_range):
         _f64(az),
         np.full(rng.size, np.cos(np.radians(el))),
         np.asarray(z, dtype=np.float64),
+        np.asarray(rng, dtype=np.float64) * np.cos(np.radians(el)) ** 2,
     )
 
 
@@ -667,9 +694,10 @@ def vad_profile(
     """
     Wind profile from radar radial velocities by the velocity-azimuth display.
 
-    The ring fit is the linear VAD of Browning and Wexler [1]_ (uniform wind
-    across the ring, first harmonic only; the paper's equation numbers are
-    not checked). The sweep selection and rejection thresholds
+    The ring fit is the linear VAD of Browning and Wexler [1]_ (a wind that is
+    linear across the ring; first harmonic for the wind, zeroth and second harmonics
+    for divergence and deformation; the paper's equation numbers are not
+    checked). The sweep selection and rejection thresholds
     (``min_gates``, ``min_spread``, ``max_rms``, elevation limits) and the
     height binning are radarx choices, not values from that paper.
 
@@ -713,7 +741,18 @@ def vad_profile(
         ``u``, ``v``, ``wind_speed``, ``wind_direction``, ``vad_rms`` (mean
         fit residual) and ``vad_rings`` (rings per bin) on ``height`` (bin
         centres, m above sea level), with the radar ``latitude``,
-        ``longitude`` and ``altitude``.
+        ``longitude`` and ``altitude``; and, from the second-harmonic fit
+        described in the module docstring, ``divergence``,
+        ``stretching_deformation`` (:math:`u_x - v_y`),
+        ``shearing_deformation`` (:math:`u_y + v_x`) and ``deformation``
+        (their root sum of squares), all in s-1, with ``vad_rings_harmonics``
+        (rings per bin that have it). The second-harmonic fit needs a wider
+        azimuth coverage than the wind: the determinant of the covariance of
+        :math:`(\\sin\\alpha, \\cos\\alpha, \\sin 2\\alpha, \\cos
+        2\\alpha)` must be at least ``min_spread / 4`` (1/16 for a full circle);
+        rings short of it keep their wind but give NaN for the four new
+        variables. The wind variables do not depend on the second harmonic.
+        The divergence neglects :math:`(w - v_t)\\sin\\phi`.
 
     References
     ----------
@@ -754,12 +793,18 @@ def vad_profile(
     az = _f64(np.concatenate([pad(r[1]) for r in rings]))
     cos_el = _f64(np.concatenate([r[2] for r in rings]))
     z = np.concatenate([r[3] for r in rings])
+    scale = np.concatenate([r[4] for r in rings])
     res = np.asarray(
         _kernel(engine).vad(
             vr, az, cos_el, int(min_gates), float(min_spread), _threads(n_threads)
         )
     )
-    u, v, _, rms, n = res
+    u, v, _, rms, n = res[:5]
+    # rings with a second-harmonic fit; divergence and deformation of the ring
+    with np.errstate(invalid="ignore", divide="ignore"):
+        div = 2.0 * res[5] / scale
+        stretch = -2.0 * res[7] / scale
+        shear = 2.0 * res[6] / scale
     good = np.isfinite(u)
     if max_rms is not None:
         good &= rms <= max_rms
@@ -772,10 +817,15 @@ def vad_profile(
     nb = edges.size - 1
     w = np.where(good, n, 0.0)
     sw = np.bincount(k[good], w[good], nb)
+    good2 = good & np.isfinite(div)
+    sw2 = np.bincount(k[good2], w[good2], nb)
     with np.errstate(invalid="ignore", divide="ignore"):
         um = np.bincount(k[good], (w * u)[good], nb) / sw
         vm = np.bincount(k[good], (w * v)[good], nb) / sw
         rm = np.bincount(k[good], (w * rms)[good], nb) / sw
+        dm = np.bincount(k[good2], (w * div)[good2], nb) / sw2
+        stm = np.bincount(k[good2], (w * stretch)[good2], nb) / sw2
+        shm = np.bincount(k[good2], (w * shear)[good2], nb) / sw2
     centres = 0.5 * (edges[1:] + edges[:-1])
     coords = {
         "height": (
@@ -806,12 +856,35 @@ def vad_profile(
     out["wind_direction"] = _wind_from_direction(uda, vda, calm=np.nan).assign_attrs(
         standard_name="wind_from_direction", units="degree"
     )
+    out["divergence"] = xr.DataArray(dm, dims="height", coords=coords).assign_attrs(
+        long_name="Horizontal divergence (VAD, zeroth harmonic)", units="s-1"
+    )
+    out["stretching_deformation"] = xr.DataArray(
+        stm, dims="height", coords=coords
+    ).assign_attrs(
+        long_name="Stretching deformation du/dx - dv/dy (VAD, second harmonic)",
+        units="s-1",
+    )
+    out["shearing_deformation"] = xr.DataArray(
+        shm, dims="height", coords=coords
+    ).assign_attrs(
+        long_name="Shearing deformation du/dy + dv/dx (VAD, second harmonic)",
+        units="s-1",
+    )
+    out["deformation"] = np.hypot(out["stretching_deformation"], shm).assign_attrs(
+        long_name="Total deformation (VAD, second harmonic)", units="s-1"
+    )
     out["vad_rms"] = xr.DataArray(rm, dims="height", coords=coords).assign_attrs(
         long_name="Mean r.m.s. residual of the VAD fits", units="m s-1"
     )
     out["vad_rings"] = xr.DataArray(
         np.bincount(k[good], minlength=nb)[:nb], dims="height", coords=coords
     ).assign_attrs(long_name="Number of range rings averaged", units="1")
+    out["vad_rings_harmonics"] = xr.DataArray(
+        np.bincount(k[good2], minlength=nb)[:nb], dims="height", coords=coords
+    ).assign_attrs(
+        long_name="Number of range rings with a second-harmonic fit", units="1"
+    )
     out.attrs.update(source="VAD (Browning and Wexler 1968)")
     if "time" in site.coords or "time" in site:
         t = np.ravel(site["time"].values)

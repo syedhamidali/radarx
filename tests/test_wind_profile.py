@@ -265,6 +265,109 @@ def test_vad_synthetic(engine):
     assert np.isnan(rej.u).all()
 
 
+def linear_field_sweep(
+    u0, v0, ux, uy, vx, vy, elevation, w=0.0, vt=0.0, gaps=0, rng_max=21000.0
+):
+    """Sweep of a wind field linear in the ground distance (x east, y north)."""
+    az = np.arange(0.5, 360.0, 1.0)
+    rng = np.arange(1000.0, rng_max, 500.0)
+    a = np.radians(az)[:, None]
+    el = np.radians(elevation)
+    x = rng[None, :] * np.cos(el) * np.sin(a)
+    y = rng[None, :] * np.cos(el) * np.cos(a)
+    u = u0 + ux * x + uy * y
+    v = v0 + vx * x + vy * y
+    vr = (u * np.sin(a) + v * np.cos(a)) * np.cos(el) + (w - vt) * np.sin(el)
+    if gaps:
+        vr[:gaps, :] = np.nan
+    return xr.Dataset(
+        {"VRADH": (("azimuth", "range"), vr)},
+        coords={
+            "azimuth": az,
+            "range": rng,
+            "elevation": ("azimuth", np.full(az.size, float(elevation))),
+            "altitude": 100.0,
+        },
+    )
+
+
+# (ux, uy, vx, vy): divergence, stretching, shearing and vorticity fields
+LINEAR_FIELDS = {
+    "uniform": (0.0, 0.0, 0.0, 0.0),
+    "divergence": (5e-5, 0.0, 0.0, 5e-5),
+    "stretching": (1e-4, 0.0, 0.0, -1e-4),
+    "shearing and vorticity": (0.0, 1e-4, 2e-4, 0.0),
+    "vorticity": (0.0, -1e-4, 1e-4, 0.0),
+    "all terms": (6e-5, -4e-5, 3e-5, 5e-5),
+}
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize("name", LINEAR_FIELDS)
+@pytest.mark.parametrize("elevation", [2.0, 8.0])
+def test_vad_divergence_and_deformation_analytic(engine, name, elevation):
+    ux, uy, vx, vy = LINEAR_FIELDS[name]
+    ds = linear_field_sweep(8.0, -3.0, ux, uy, vx, vy, elevation)
+    out = wp.vad_profile(
+        ds, height_bins=[0.0, 5000.0], min_elevation=0.5, engine=engine
+    )
+    # no vertical motion: exact for the linear field
+    np.testing.assert_allclose(out.u, 8.0, atol=1e-9)
+    np.testing.assert_allclose(out.v, -3.0, atol=1e-9)
+    np.testing.assert_allclose(out.divergence, ux + vy, atol=1e-12)
+    np.testing.assert_allclose(out.stretching_deformation, ux - vy, atol=1e-12)
+    np.testing.assert_allclose(out.shearing_deformation, uy + vx, atol=1e-12)
+    np.testing.assert_allclose(out.deformation, np.hypot(ux - vy, uy + vx), atol=1e-12)
+    assert out.divergence.attrs["units"] == "s-1"
+    assert out.vad_rings_harmonics.item() == out.vad_rings.item() > 0
+
+
+def test_vad_divergence_vertical_motion_bias_is_documented():
+    """w - vt enters the zeroth harmonic as (w - vt) sin(el)."""
+    ux, uy, vx, vy = LINEAR_FIELDS["all terms"]
+    el = 4.0
+    ds = linear_field_sweep(8.0, -3.0, ux, uy, vx, vy, el, w=0.5, vt=3.0)
+    out = wp.vad_profile(ds, height_bins=[0.0, 5000.0], min_elevation=0.5)
+    # the wind and the deformation do not see it
+    np.testing.assert_allclose(out.u, 8.0, atol=1e-9)
+    np.testing.assert_allclose(out.stretching_deformation, ux - vy, atol=1e-12)
+    np.testing.assert_allclose(out.shearing_deformation, uy + vx, atol=1e-12)
+    rng = np.arange(1000.0, 21000.0, 500.0)
+    scale = rng * np.cos(np.radians(el)) ** 2
+    bias = 2.0 * (0.5 - 3.0) * np.sin(np.radians(el)) / scale
+    np.testing.assert_allclose(out.divergence, ux + vy + bias.mean(), rtol=1e-9)
+
+
+def test_vad_harmonics_engines_agree():
+    if "compiled" not in ENGINES:  # pragma: no cover
+        pytest.skip("compiled kernel not built")
+    ds = linear_field_sweep(8.0, -3.0, *LINEAR_FIELDS["all terms"], 3.0, w=0.4)
+    ds["VRADH"] = ds.VRADH + np.random.default_rng(1).normal(0, 1, ds.VRADH.shape)
+    a = wp.vad_profile(ds, engine="compiled")
+    b = wp.vad_profile(ds, engine="numpy")
+    for name in a.data_vars:
+        np.testing.assert_allclose(a[name], b[name], rtol=1e-9, atol=1e-12)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_vad_second_harmonic_needs_wide_coverage(engine):
+    """A sector of 250 degrees keeps the wind but not the deformation."""
+    ds = linear_field_sweep(8.0, -3.0, *LINEAR_FIELDS["divergence"], 4.0, gaps=110)
+    out = wp.vad_profile(
+        ds, height_bins=[0.0, 5000.0], min_elevation=0.5, engine=engine
+    )
+    np.testing.assert_allclose(out.u, 8.0, atol=1e-9)
+    assert np.isnan(out.divergence).all() and np.isnan(out.deformation).all()
+    assert out.vad_rings.item() > 0 and out.vad_rings_harmonics.item() == 0
+    # a 300 degree sector is enough
+    ds = linear_field_sweep(8.0, -3.0, *LINEAR_FIELDS["all terms"], 4.0, gaps=60)
+    out = wp.vad_profile(
+        ds, height_bins=[0.0, 5000.0], min_elevation=0.5, engine=engine
+    )
+    ux, uy, vx, vy = LINEAR_FIELDS["all terms"]
+    np.testing.assert_allclose(out.divergence, ux + vy, atol=1e-12)
+
+
 def test_vad_datatree_skips_sweeps_without_velocity_and_high_elevations():
     tree = xr.DataTree.from_dict(
         {
