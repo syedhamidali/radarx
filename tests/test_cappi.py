@@ -415,6 +415,34 @@ def test_plot_rhi_with_existing_axis(tmp_path):
     plt.close(fig)
 
 
+@pytest.mark.parametrize("show_figure", [False, True])
+def test_plot_with_user_axis_keeps_figure(mocker, show_figure):
+    """A caller's figure is neither closed nor shown (issue #198)."""
+    show = mocker.patch("matplotlib.pyplot.show")
+    ppi = _make_ppi_sweep(1.0, "2024-01-01T00:00:00")
+    rhi = _make_rhi_dataset()
+    fig, axes = plt.subplots(1, 3)
+    plot_ppi(ppi, "DBZH", ax=axes[0], show_figure=show_figure)
+    plot_cappi(ppi, "DBZH", ax=axes[1], show_figure=show_figure)
+    rhi.radarx.plot_rhi("DBZH", ax=axes[2], show_figure=show_figure)
+    try:
+        assert plt.fignum_exists(fig.number)
+        show.assert_not_called()
+    finally:
+        plt.close(fig)
+
+
+def test_plot_without_axis_closes_or_shows_own_figure(mocker):
+    show = mocker.patch("matplotlib.pyplot.show")
+    ppi = _make_ppi_sweep(1.0, "2024-01-01T00:00:00")
+    ax = plot_ppi(ppi, "DBZH", show_figure=False)
+    assert not plt.fignum_exists(ax.figure.number)
+    show.assert_not_called()
+    ax = plot_ppi(ppi, "DBZH", show_figure=True)
+    show.assert_called_once()
+    plt.close(ax.figure)
+
+
 def test_plot_cappi_function(synthetic_volume, tmp_path):
     ds = synthetic_volume.radarx.to_cappi(
         height=150.0,

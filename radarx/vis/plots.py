@@ -72,7 +72,15 @@ def _get_radar_name(ds):
 
 
 def _finalize_plot(
-    fig, ax, ds, title, savedir=None, dpi=100, show_figure=True, add_slogan=False
+    fig,
+    ax,
+    ds,
+    title,
+    savedir=None,
+    dpi=100,
+    show_figure=True,
+    add_slogan=False,
+    owns_figure=True,
 ):
     if add_slogan:
         fig.text(
@@ -89,10 +97,13 @@ def _finalize_plot(
         filepath = os.path.join(savedir, filename)
         fig.savefig(filepath, dpi=dpi, bbox_inches="tight")
 
-    if show_figure:
-        plt.show()
-    else:
-        plt.close(fig)
+    # A figure that belongs to the caller (a user-supplied ``ax``) is never
+    # shown or closed here.
+    if owns_figure:
+        if show_figure:
+            plt.show()
+        else:
+            plt.close(fig)
 
     return ax
 
@@ -118,6 +129,7 @@ def _plot_plan_view(
 
     kwargs.setdefault("shading", "nearest")
 
+    owns_figure = ax is None
     fig, ax = _get_figure_and_axis(ax=ax)
     mesh = ax.pcolormesh(
         x, y, np.asarray(da.values), cmap=cmap, vmin=vmin, vmax=vmax, **kwargs
@@ -140,6 +152,7 @@ def _plot_plan_view(
         dpi=dpi,
         show_figure=show_figure,
         add_slogan=add_slogan,
+        owns_figure=owns_figure,
     )
 
 
@@ -272,6 +285,7 @@ def plot_rhi(
     height = z / 1000.0
     kwargs.setdefault("shading", "auto")
 
+    owns_figure = ax is None
     fig, ax = _get_figure_and_axis(ax=ax)
     mesh = ax.pcolormesh(
         ground_range,
@@ -299,4 +313,5 @@ def plot_rhi(
         dpi=dpi,
         show_figure=show_figure,
         add_slogan=add_slogan,
+        owns_figure=owns_figure,
     )
