@@ -717,8 +717,8 @@ def single_doppler_winds(
     that comes from the truth not satisfying those weak constraints, or from
     errors of the fall speed, the beam geometry or the advection correction,
     and the default errors are radarx choices that should be set to the
-    errors of the data at hand. In unobserved places (no velocity) the spread
-    is that of the background error alone.
+    errors of the data at hand. Where no velocity is observed the spread comes
+    from the background error only.
 
     References
     ----------
@@ -877,7 +877,7 @@ def _single_doppler_winds_accessor(self, background=None, **kwargs):
         Background on the grid (``grid.radarx.background()``).
     **kwargs
         Options of :func:`radarx.retrieve.single_doppler_winds` (``model``,
-        ``refine``, and ``x``, ``y``, ``z`` for a volume).
+        ``refine``, ``uncertainty``, and ``x``, ``y``, ``z`` for a volume).
 
     Returns
     -------

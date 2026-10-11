@@ -2710,11 +2710,12 @@ def melting_layer_ppi(
        Automatic designation of the melting layer with a polarimetric
        prototype of the WSR-88D radar. *J. Appl. Meteor. Climatol.*, **47**
        (5), 1354-1364, https://doi.org/10.1175/2007JAMC1634.1
-    .. [2] Giangrande, S. E., A. V. Ryzhkov, and J. Krause, 2007: Automatic
+    .. [2] Giangrande, S. E., A. V. Ryzhkov, and J. Krause: Automatic
        detection of the melting layer with a polarimetric prototype of the
-       WSR-88D radar. Preprints, 33rd Conf. on Radar Meteorology, Cairns,
-       Australia, Amer. Meteor. Soc., 11R.2 (conference version, read in
-       full; no DOI).
+       WSR-88D radar. Preprint 11R.2, Conf. on Radar Meteorology, Amer. Meteor.
+       Soc. (conference version of the journal paper; no DOI; the edition and
+       year of the conference are not given in the preprint),
+       https://ams.confex.com/ams/pdfpapers/95894.pdf
     .. [3] Ryzhkov, A., and J. Krause, 2022: New polarimetric radar algorithm
        for melting-layer detection and determination of its height. *J.
        Atmos. Oceanic Technol.*, **39** (5), 529-543,
@@ -3076,7 +3077,8 @@ def mask_above_melting_layer(
         :func:`melting_layer` or :func:`melting_layer_ppi` (variable
         ``bottom``), a DataArray, or a number. A DataArray or variable on
         ``azimuth`` is matched to the azimuths of the rays (nearest, circular);
-        one without dimensions applies to all gates.
+        one without dimensions applies to all gates. Select one time of a
+        time series first (``isel(time=...)``).
     bottom : str, optional
         Variable of a Dataset that holds the bottom. Default
         ``"melting_layer_bottom"``.

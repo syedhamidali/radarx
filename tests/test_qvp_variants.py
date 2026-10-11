@@ -549,7 +549,9 @@ def test_rhi_qvp_series_volume_and_errors():
     spread = make_rhi()
     spread["DBZH"] = (
         spread["DBZH"] + 10.0 * np.sin(np.arange(spread.sizes["azimuth"]))[:, None]
-    )
+    ).assign_attrs(
+        units="dBZ"
+    )  # arithmetic drops the attributes in older xarray
     lin = rhi_qvp(spread, ["DBZH"], dz=2000.0)
     avg = rhi_qvp(spread, ["DBZH"], dz=2000.0, linear=[])
     assert np.nanmax(lin.DBZH.values - avg.DBZH.values) > 0.5
