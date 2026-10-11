@@ -192,7 +192,7 @@ def test_clean_attrs_for_netcdf():
         "float16": np.float16(1.5),
         "datetime": np.datetime64("2024-01-01T00:00"),
         "stamp": pd.Timestamp("2024-01-02"),
-        "dict": {"b": 1, "a": np.float32(2.0), "c": np.arange(2)},
+        "dict": {"b": 1, "a": np.float32(2.0), "c": np.arange(2), "d": Stamp()},
         "ints": [1, 2, 3],
         "words": ("a", "b"),
         "empty": [],
@@ -214,7 +214,7 @@ def test_clean_attrs_for_netcdf():
     assert out["float16"] == np.float32(1.5) and out["float16"].dtype == np.float32
     assert out["datetime"].startswith("2024-01-01T00:00")
     assert out["stamp"] == "2024-01-02T00:00:00"
-    assert json.loads(out["dict"]) == {"a": 2.0, "b": 1, "c": [0, 1]}
+    assert json.loads(out["dict"]) == {"a": 2.0, "b": 1, "c": [0, 1], "d": "stamp"}
     np.testing.assert_array_equal(out["ints"], [1, 2, 3])
     assert out["words"] == ["a", "b"] and out["empty"] == ""
     assert json.loads(out["mixed"]) == [1, "a", "true"]
