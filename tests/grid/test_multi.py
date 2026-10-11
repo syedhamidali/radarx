@@ -896,3 +896,37 @@ def test_advect_sweeps_engines_agree(network):
         a.DBZH.values, b.DBZH.values, rtol=1e-6, atol=1e-3, equal_nan=True
     )
     np.testing.assert_array_equal(a.coverage.values, b.coverage.values)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_network_bias_valid_range_of_a_field_that_is_not_reflectivity(network, engine):
+    out = multi.grid_radars(
+        network, **GRID, origin=ORIGIN, data_vars=["DBZH", "ZDR"], engine=engine
+    )
+    # the ZDR of the field spans 0.2 to 1.8 dB: keep the middle part of both radars
+    wide = multi.network_bias(out, "ZDR", reference=1, engine=engine)
+    narrow = multi.network_bias(
+        out, "ZDR", reference=1, valid_range=(0.6, 1.4), engine=engine
+    )
+    np.testing.assert_allclose(narrow.bias.values, [0.3, 0.0, 0.5], atol=0.02)
+    n_wide = int(wide.pair_count.sel(radar="AAA", other="BBB"))
+    n_narrow = int(narrow.pair_count.sel(radar="AAA", other="BBB"))
+    assert 0 < n_narrow < 0.5 * n_wide
+    # a range that holds no ZDR leaves no pairs and no bias
+    none = multi.network_bias(
+        out, "ZDR", reference=1, valid_range=(10.0, 20.0), engine=engine
+    )
+    assert int(none.pair_count.sum()) == 0
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_merge_no_echo_false_is_the_same_as_none(engine):
+    radars = _two_radars_with_sensitivity_gap(threshold=20.0, bias=-8.0)
+    out = multi.grid_radars(
+        radars, **GRID, origin=ORIGIN, data_vars="DBZH", engine=engine
+    )
+    skipped = multi.merge_radars(out, "DBZH", no_echo=None, engine=engine)
+    off = multi.merge_radars(out, "DBZH", no_echo=False, engine=engine)
+    xr.testing.assert_allclose(off.DBZH, skipped.DBZH)
+    default = multi.merge_radars(out, "DBZH", engine=engine)
+    assert not np.allclose(default.DBZH.values, off.DBZH.values, equal_nan=True)

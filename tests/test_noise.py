@@ -479,6 +479,82 @@ def test_errors():
         snr(np.zeros(3))
 
 
+def test_noise_level_argument_ranges():
+    ds = synthetic_sweep()
+    with pytest.raises(ValueError, match="n_samples must be positive"):
+        noise_level(ds, n_samples=0.0)
+    with pytest.raises(ValueError, match="percentile must be between 0 and 100"):
+        noise_level(ds, method="floor", percentile=101.0)
+    with pytest.raises(ValueError, match="percentile must be between 0 and 100"):
+        noise_level(ds, method="floor", percentile=-1.0)
+    # n_samples is not used by the floor method
+    out = noise_level(ds, method="floor", n_samples=0.0, min_count=20)
+    assert np.isfinite(float(out.NOISE_LEVEL))
+
+
+@pytest.mark.parametrize("method", ["hildebrand", "floor"])
+def test_too_few_gates_give_nan_with_both_engines(method):
+    ds = xr.Dataset(
+        {"DBZH": (("azimuth", "range"), np.full((3, 10), -30.0))},
+        coords={"azimuth": [0.0, 1.0, 2.0], "range": 1000.0 + 250.0 * np.arange(10)},
+    )
+    out = noise_level(ds, method=method, min_count=100, engine="numpy")
+    assert np.isnan(float(out.NOISE_LEVEL))
+    assert int(out.NOISE_SAMPLES) == 0
+    if method == "floor":  # all 30 gates are used once the minimum allows it
+        ok = noise_level(ds, method=method, min_count=30, engine="numpy")
+        assert int(ok.NOISE_SAMPLES) == 30
+        corrected = -30.0 - 20 * np.log10(ds.range.values / 1000.0)
+        assert float(ok.NOISE_LEVEL) == pytest.approx(
+            np.percentile(np.tile(corrected, 3), 1.0), abs=1e-5
+        )
+
+
+def test_compiled_engine_needs_the_kernel(monkeypatch):
+    ds = synthetic_sweep()
+    monkeypatch.setattr(noisemod, "HAS_COMPILED_KERNEL", False)
+    with pytest.raises(ImportError, match="compiled noise kernel"):
+        noise_level(ds, engine="compiled")
+    assert np.isfinite(float(noise_level(ds, engine="auto").NOISE_LEVEL))
+
+
+def test_snr_and_correction_inputs_by_dataset_array_or_name():
+    ds = corrected_inputs()
+    ref = correct_rhohv_noise(ds)
+    # SNR from a Dataset that holds it
+    from_ds = correct_rhohv_noise(ds.drop_vars("SNR"), snr=xr.Dataset({"SNR": ds.SNR}))
+    xr.testing.assert_allclose(from_ds, ref)
+    # a name that is not in the sweep
+    with pytest.raises(KeyError, match="'SNR_USER' is not in the dataset"):
+        correct_rhohv_noise(ds, snr="SNR_USER")
+    named = correct_rhohv_noise(ds.rename(SNR="SNR_USER"), snr="SNR_USER")
+    xr.testing.assert_allclose(named, ref)
+    # a DataArray of ZDR with the reflectivity and the noise
+    z = correct_zdr_noise(ds.ZDR, dbz=ds.DBZH, noise=ZN)
+    xr.testing.assert_allclose(z, correct_zdr_noise(ds, noise=ZN))
+    # a named SNR together with a noise level is not accepted
+    with pytest.raises(KeyError, match="is not in the dataset"):
+        correct_rhohv_noise(ds, snr="SNR", noise=ZN)
+    # a DataArray and no way to find the SNR
+    with pytest.raises(ValueError, match="pass snr as a DataArray"):
+        correct_zdr_noise(ds.ZDR)
+
+
+def test_rhohv_zdr_correction_fields():
+    ds = corrected_inputs()
+    base = correct_rhohv_noise(ds, zdr=True)
+    by_name = correct_rhohv_noise(ds, zdr="ZDR")
+    by_array = correct_rhohv_noise(ds, zdr=ds.ZDR)
+    xr.testing.assert_allclose(by_name, base)
+    xr.testing.assert_allclose(by_array, base)
+    # the ZDR changes the result compared with none (ratio 1)
+    assert float(abs(base - correct_rhohv_noise(ds)).max()) > 1e-4
+    with pytest.raises(ValueError, match="pass ZDR as a DataArray"):
+        correct_rhohv_noise(ds.RHOHV, snr=ds.SNR, zdr=True)
+    with pytest.raises(KeyError):
+        correct_rhohv_noise(ds, zdr="ZDR_NONE")
+
+
 # --------------------------------------------------------------------------
 # provenance
 # --------------------------------------------------------------------------

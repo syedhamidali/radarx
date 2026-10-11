@@ -170,3 +170,15 @@ def test_hitschfeld_bordan_checks_its_input():
         reflectivity.hitschfeld_bordan_correction(
             dbz, rng, a=A, b=B, max_correction_db=np.inf
         )
+
+
+def test_hitschfeld_bordan_dataarray_needs_its_range_dimension():
+    import xarray as xr
+
+    rng, dbz = _storm(n=10)
+    da = xr.DataArray(dbz, dims="gate", coords={"gate": rng})
+    with pytest.raises(ValueError, match="'range' is not a dimension of dbz"):
+        reflectivity.hitschfeld_bordan_correction(da, a=A, b=B)
+    out = reflectivity.hitschfeld_bordan_correction(da, a=A, b=B, range_dim="gate")
+    expected = reflectivity.hitschfeld_bordan_correction(dbz, rng, a=A, b=B)
+    np.testing.assert_allclose(out.values, expected)

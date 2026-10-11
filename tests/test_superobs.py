@@ -910,3 +910,85 @@ def test_named_fields_apply_to_the_sweeps_that_have_them():
         superobs(tree, 8.0, vel="NOPE")
     with pytest.raises(KeyError, match="NOPE"):
         superobs(tree, 8.0, rho_min=0.8, rho="NOPE")
+
+
+# --------------------------------------------------------------------------
+# inputs and empty results
+# --------------------------------------------------------------------------
+
+
+def test_compiled_kernel_is_required_when_asked(monkeypatch):
+    monkeypatch.setattr(mod, "HAS_COMPILED_KERNEL", False)
+    with pytest.raises(ImportError, match="compiled super-observation kernel"):
+        superobs(sweep(), 5.0, engine="compiled")
+    assert superobs(sweep(), 5.0, engine="auto").sizes["obs"] > 0
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_no_gates_to_bin_gives_an_empty_result(engine):
+    ds = sweep()
+    # every gate is farther than the range limit
+    none = superobs(ds, 5.0, max_range=500.0, engine=engine)
+    assert none.sizes["obs"] == 0 and none.reflectivity.size == 0
+    # a model grid 20 degrees away from the radar holds no gate
+    lat, lon = model_grid(n=20, dx=3000.0, lat0=LAT0 + 20.0)
+    terrain = np.full(lat.shape, 5.0)
+    far = superobs(ds, (lat, lon), terrain=terrain, engine=engine)
+    assert far.sizes["obs"] == 0
+    assert far.terrain_height.shape == (0,)
+    # and the same grid with the radar at its centre does
+    near = superobs(ds, model_grid(n=20, dx=3000.0), engine=engine)
+    assert near.sizes["obs"] > 0
+
+
+def test_radar_position_must_be_a_single_value():
+    ds = sweep()
+    moving = ds.assign_coords(latitude=("azimuth", np.full(ds.sizes["azimuth"], LAT0)))
+    with pytest.raises(ValueError, match="'latitude' must be a single value"):
+        superobs(moving, 5.0)
+
+
+def test_time_of_the_volume_and_the_name_of_the_radar():
+    ds = sweep()
+    timed = superobs(ds, 8.0)
+    assert not np.isnat(timed.radar_time.values[0])
+    # a sweep without ray times gives NaT
+    untimed = superobs(ds.drop_vars("time"), 8.0)
+    assert np.isnat(untimed.radar_time.values[0])
+    np.testing.assert_allclose(untimed.reflectivity, timed.reflectivity)
+    # the instrument name of the root of a larger tree names the radar
+    outer = xr.DataTree(xr.Dataset(attrs={"instrument_name": "ROOT"}), name="all")
+    outer["site/sweep_0"] = xr.DataTree(sweep(elevation=0.5, seed=0))
+    outer["site/sweep_1"] = xr.DataTree(sweep(elevation=1.5, seed=1))
+    assert "instrument_name" not in outer["site"].attrs
+    assert list(superobs(outer["site"], 8.0).radar_name.values) == ["ROOT"]
+    # a name of the node itself wins over the root, and a name given over both
+    outer["site"].attrs["instrument_name"] = "SITE"
+    assert list(superobs(outer["site"], 8.0).radar_name.values) == ["SITE"]
+    assert list(superobs({"GIVEN": outer["site"]}, 8.0).radar_name.values) == ["GIVEN"]
+
+
+def test_input_type_and_layout_errors():
+    with pytest.raises(ValueError, match="No sweep groups found"):
+        superobs(xr.DataTree(xr.Dataset()), 5.0)
+    with pytest.raises(TypeError, match="items must be"):
+        superobs([sweep(), 42], 5.0)
+    with pytest.raises(TypeError, match="items must be"):
+        superobs({"A": 42}, 5.0)
+    ds = sweep()
+    lat, lon = model_grid(n=20, dx=3000.0)
+    with pytest.raises(ValueError, match="terrain must have the shape"):
+        superobs(ds, (lat, lon), terrain=np.zeros((3, 3)))
+    with pytest.raises(ValueError, match="layers and top must be positive"):
+        superobs(ds, 5.0, layers=0.0)
+    with pytest.raises(ValueError, match="layers and top must be positive"):
+        superobs(ds, 5.0, top=-1.0)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_sweep_elevation_from_the_fixed_angle(engine):
+    ds = sweep(elevation=1.0)
+    ref = superobs(ds, 8.0, engine=engine)
+    fixed = ds.drop_vars("elevation").assign_coords(sweep_fixed_angle=1.0)
+    got = superobs(fixed, 8.0, engine=engine)
+    xr.testing.assert_allclose(got.drop_attrs(), ref.drop_attrs())

@@ -915,3 +915,19 @@ def test_cluster_new_argument_errors():
         cluster_flashes(ds, max_duration=-1.0)
     with pytest.raises(ValueError, match="noise"):
         cluster_flashes(ds, noise="remove")
+
+
+def test_split_long_flashes_edge_cases():
+    # no sources at all
+    empty = L._split_long_flashes(np.zeros(0, dtype=np.int64), np.zeros(0), 1.0)
+    assert empty.size == 0 and empty.dtype == np.int64
+    # two flashes; a piece ends at the first source more than 2 s after its start
+    labels = np.array([0, 0, 1, 0, 0, 0, 0, 1])
+    t = np.array([0.0, 1.0, 1.5, 2.5, 3.0, 4.5, 5.0, 5.5])
+    out = L._split_long_flashes(labels, t, 2.0)
+    # flash 0 (0, 1, 2.5, 3, 4.5, 5 s): pieces {0, 1}, {2.5, 3, 4.5} (4.5 is
+    # exactly 2 s after 2.5) and {5}; flash 1 (1.5, 5.5 s): {1.5} and {5.5};
+    # the pieces are numbered by their first source
+    np.testing.assert_array_equal(out, [0, 0, 1, 2, 2, 2, 3, 4])
+    # nothing is longer than the limit: the labels are unchanged
+    np.testing.assert_array_equal(L._split_long_flashes(labels, t, 10.0), labels)

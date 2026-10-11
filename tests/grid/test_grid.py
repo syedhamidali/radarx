@@ -209,3 +209,65 @@ def test_grid_radar_passes_fill_depth_and_k_e(mock_dtree):
     assert np.isfinite(old["DBZH"].values[:2]).sum() > 0
     assert limited.attrs["k_e"] == pytest.approx(4 / 3)
     assert grid_radar(mock_dtree, k_e=1.2, **kw).attrs["k_e"] == pytest.approx(1.2)
+
+
+def test_grid_radar_barnes_arguments_and_layout(mock_dtree, monkeypatch):
+    """What the Barnes branch hands to fast-barnes-py, without the package.
+
+    A stand-in for ``fastbarnes`` records the call and returns the mean of the
+    gate values on every cell, so the lattice (origin, steps, size), the
+    smoothing lengths, the gates passed and the layout of the output are
+    checked independently of the interpolation itself.
+    """
+    import sys
+    import types
+
+    calls = []
+
+    def barnes(xyz, values, sigma, x0, steps, size, max_dist):
+        calls.append((xyz, values, sigma, x0, steps, size, max_dist))
+        return np.full(tuple(size)[::-1], values.mean())
+
+    interp = types.ModuleType("fastbarnes.interpolation")
+    interp.barnes = barnes
+    interp.get_half_kernel_size = lambda sigma, steps, num_iter: 1
+    package = types.ModuleType("fastbarnes")
+    package.interpolation = interp
+    monkeypatch.setitem(sys.modules, "fastbarnes", package)
+    monkeypatch.setitem(sys.modules, "fastbarnes.interpolation", interp)
+
+    out = grid_radar(
+        mock_dtree,
+        data_vars=["DBZH"],
+        pseudo_cappi=False,
+        x_lim=(-20e3, 20e3),
+        y_lim=(-10e3, 10e3),
+        z_lim=(1000, 3000),
+        x_step=2000,
+        y_step=2000,
+        z_step=500,
+        x_smth=0.5,
+        y_smth=0.25,
+        z_smth=2,
+        method="barnes",
+    )
+    ((xyz, values, sigma, x0, steps, size, max_dist),) = calls
+    assert size == (21, 11, 5) and max_dist == 4
+    np.testing.assert_allclose(steps, [2000.0, 2000.0, 500.0])
+    np.testing.assert_allclose(x0, [-20e3, -10e3, 1000.0])
+    np.testing.assert_allclose(sigma, [0.5 * 2000.0, 0.25 * 2000.0, 2 * 500.0])
+    # the gates of the two sweeps with a value, in metres from the radar
+    stacked = stack_data(mock_dtree, data_vars=["DBZH"], geo=False)
+    n_valid = int(np.isfinite(stacked["DBZH"].values).sum())
+    assert values.size == n_valid and xyz.shape == (n_valid, 3)
+    assert np.isfinite(values).all()
+    np.testing.assert_allclose(out["x"], np.arange(-20e3, 20e3 + 1, 2000.0))
+    np.testing.assert_allclose(out["y"], np.arange(-10e3, 10e3 + 1, 2000.0))
+    np.testing.assert_allclose(out["z"], np.arange(1000.0, 3000.1, 500.0))
+    assert out["DBZH"].dims == ("z", "y", "x") and out["DBZH"].shape == (5, 11, 21)
+    np.testing.assert_allclose(out["DBZH"], values.mean())
+    assert out["lat"].dims == out["lon"].dims == ("y", "x")
+    assert out["lat"].attrs["units"] == "degrees_north"
+    assert out["lon"].attrs["units"] == "degrees_east"
+    assert out.attrs["radar_name"] == out.attrs.get("instrument_name", "")
+    assert out["time"].ndim == 0

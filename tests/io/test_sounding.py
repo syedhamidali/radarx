@@ -915,8 +915,31 @@ def test_era5_arco_request(tmp_path, monkeypatch):
     assert seen["request"]["area"] == [34.0, -89.0, 33.0, -88.0]
 
 
-def test_era5_gcs_lazy_selection(tmp_path, monkeypatch):
-    monkeypatch.setenv("RADARX_CACHE_DIR", str(tmp_path))
+def test_era5_arco_surface_requests(tmp_path, monkeypatch):
+    seen = []
+
+    def fake_retrieve(dataset, request, path):
+        seen.append((dataset, request))
+        return path
+
+    monkeypatch.setattr(sounding, "_cds_retrieve", fake_retrieve)
+    when = [np.datetime64("2022-03-30T23:00"), np.datetime64("2022-03-31T01:00")]
+    # a box wider than one grid cell is requested as an area
+    sounding._era5_arco_surface((33.0, 34.0, -89.0, -88.0), when, tmp_path / "a.nc")
+    dataset, request = seen[-1]
+    assert dataset == sounding.CDS_ARCO_SINGLE_LEVELS
+    assert request["area"] == [34.0, -89.0, 33.0, -88.0] and "location" not in request
+    assert request["date"] == ["2022-03-30/2022-03-31"]
+    assert request["variable"] == sounding._ERA5_SURFACE_VARIABLES
+    # a point is requested as a location, at the centre of the box
+    sounding._era5_arco_surface((33.9, 34.0, -88.4, -88.3), when, tmp_path / "b.nc")
+    request = seen[-1][1]
+    assert request["location"] == {"latitude": 33.95, "longitude": -88.35}
+    assert "area" not in request
+
+
+def _fake_gcs_store(monkeypatch):
+    """Replace ``xarray.open_zarr`` by a small store; the returned list holds its calls."""
     times = np.array(
         ["2022-03-30T23:00", "2022-03-31T00:00", "2022-03-31T01:00"],
         dtype="datetime64[ns]",
@@ -941,6 +964,12 @@ def test_era5_gcs_lazy_selection(tmp_path, monkeypatch):
         return store
 
     monkeypatch.setattr(xr, "open_zarr", fake_open_zarr)
+    return calls
+
+
+def test_era5_gcs_lazy_selection(tmp_path, monkeypatch):
+    monkeypatch.setenv("RADARX_CACHE_DIR", str(tmp_path))
+    calls = _fake_gcs_store(monkeypatch)
     prof = sounding.era5_profile(33.9, -88.33, "2022-03-31T00:00", source="gcs")
     assert calls[0][0] == sounding.ARCO_ERA5_ZARR
     assert calls[0][0].startswith("https://storage.googleapis.com/")
@@ -951,6 +980,29 @@ def test_era5_gcs_lazy_selection(tmp_path, monkeypatch):
     assert len(calls) == 1
     speed = np.hypot(bg["u"], bg["v"]).isel(z=0)
     np.testing.assert_allclose(speed, np.hypot(5, 2), rtol=1e-5)
+
+
+def test_era5_gcs_cache_from_before_the_surface_fields_is_read_again(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("RADARX_CACHE_DIR", str(tmp_path))
+    calls = _fake_gcs_store(monkeypatch)
+    box = (33.0, 34.0, -89.0, -88.0)
+    when = [np.datetime64("2022-03-31T00:00")]
+    # a region cached without the surface fields has no 'era5_surface_checked'
+    levels_only = sounding._era5_fields("gcs", box, when, surface=False)
+    assert len(calls) == 1
+    cached = sounding._gcs_cached(box, when[0])
+    assert cached is not None and "era5_surface_checked" not in cached.attrs
+    # asking for the surface fields cannot use it: the store is read again
+    with_surface = sounding._era5_fields("gcs", box, when, surface=True)
+    assert len(calls) == 2
+    np.testing.assert_allclose(with_surface["temperature"], levels_only["temperature"])
+    # the region cached then is marked and serves the next request
+    assert "era5_surface_checked" in sounding._gcs_cached(box, when[0]).attrs
+    sounding._era5_fields("gcs", box, when, surface=True)
+    sounding._era5_fields("gcs", box, when, surface=False)
+    assert len(calls) == 2
 
 
 def test_cds_available(monkeypatch, tmp_path):

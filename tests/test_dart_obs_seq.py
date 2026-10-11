@@ -415,3 +415,77 @@ def test_wrfda_formatters_give_identical_bytes(tmp_path):
     assert stats["columns"] > 2048
     with pytest.raises(ValueError, match="engine"):
         write_wrfda_radar(so, tmp_path / "x", engine="gpu")
+
+
+def _wrfda_example(n_radars):
+    """One velocity box for each of ``n_radars`` radars, in the layout of superobs."""
+    k = np.arange(n_radars)
+    return xr.Dataset(
+        {
+            "reflectivity": ("obs", np.full(n_radars, 25.0)),
+            "velocity": ("obs", np.full(n_radars, 5.0)),
+            "reflectivity_error": ("obs", np.full(n_radars, 5.0)),
+            "velocity_error": ("obs", np.full(n_radars, 2.0)),
+            "nonprecip": ("obs", np.zeros(n_radars, bool)),
+            "latitude": ("obs", np.full(n_radars, 35.0)),
+            "longitude": ("obs", np.full(n_radars, -97.0)),
+            "level": ("obs", np.zeros(n_radars, np.int64)),
+            "radar_index": ("obs", k),
+            "column": ("obs", np.zeros(n_radars, np.int64)),
+            "radar_name": ("radar", np.array([f"R{i:03d}" for i in k])),
+            "radar_latitude": ("radar", np.full(n_radars, 35.5)),
+            "radar_longitude": ("radar", np.full(n_radars, -97.5)),
+            "radar_altitude": ("radar", np.full(n_radars, 100.0)),
+            "level_edges": ("edge", np.array([0.0, 500.0, 1000.0])),
+        }
+    )
+
+
+def test_compiled_formatter_is_required_when_asked(tmp_path, monkeypatch):
+    from radarx.io import wrfda
+
+    so = _wrfda_example(1)
+    stamp = "2022-03-31_00:00:00"
+    monkeypatch.setattr(dart, "HAS_COMPILED_FORMATTER", False)
+    monkeypatch.setattr(wrfda, "HAS_COMPILED_FORMATTER", False)
+    with pytest.raises(ImportError, match="compiled formatter is not available"):
+        write_dart_obs_seq(example(), tmp_path / "a", engine="compiled")
+    with pytest.raises(ImportError, match="compiled formatter is not available"):
+        write_wrfda_radar(so, tmp_path / "b", time=stamp, engine="compiled")
+    # 'auto' falls back to the Python formatter
+    write_dart_obs_seq(example(), tmp_path / "c")
+    write_wrfda_radar(so, tmp_path / "d", time=stamp)
+    assert (tmp_path / "d").read_text().startswith("TOTAL NUMBER =  1")
+
+
+def test_wrfda_holds_at_most_999_radars(tmp_path):
+    stamp = "2022-03-31_00:00:00"
+    write_wrfda_radar(_wrfda_example(999), tmp_path / "ok", time=stamp, engine="python")
+    with pytest.raises(ValueError, match="at most 999 radars"):
+        write_wrfda_radar(
+            _wrfda_example(1000), tmp_path / "x", time=stamp, engine="python"
+        )
+
+
+def test_dart_checks_every_value_it_needs(tmp_path):
+    ds = example()
+    # a reflectivity without an error estimate (box 0 has a reflectivity)
+    no_err = ds.copy(deep=True)
+    no_err["reflectivity_error"].values[0] = np.nan
+    with pytest.raises(ValueError, match="a reflectivity has no error estimate"):
+        write_dart_obs_seq(no_err, tmp_path / "x")
+    # the clear-air box (1) needs its error only when clear air is written
+    clear = ds.copy(deep=True)
+    clear["reflectivity_error"].values[1] = np.nan
+    with pytest.raises(ValueError, match="a reflectivity has no error estimate"):
+        write_dart_obs_seq(clear, tmp_path / "x")
+    write_dart_obs_seq(clear, tmp_path / "ok", clear_air=False)
+    for name in ("latitude", "longitude", "height"):
+        bad = ds.copy(deep=True)
+        bad[name].values[2] = np.nan
+        with pytest.raises(ValueError, match=f"every box needs a finite {name}"):
+            write_dart_obs_seq(bad, tmp_path / "x")
+    no_beam = ds.copy(deep=True)
+    no_beam["radial_east"].values[0] = np.nan
+    with pytest.raises(ValueError, match="velocity has no radial unit vector"):
+        write_dart_obs_seq(no_beam, tmp_path / "x")

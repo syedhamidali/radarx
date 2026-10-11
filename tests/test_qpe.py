@@ -1015,3 +1015,71 @@ def test_real_c_band_blend():
     assert (flag == 3).sum() > 1000  # not classified
     assert np.isfinite(out.RAIN_RATE.values[flag == 0]).all()
     assert np.isnan(out.RAIN_RATE.values[flag != 0]).all()
+
+
+def rain_like_sweep(seed):
+    """A sweep with rain-like fields and a high correlation coefficient."""
+    ds = sweep(10, 12, seed=seed)
+    rng = np.random.default_rng(seed)
+    dims, shape = ("azimuth", "range"), ds.DBZH.shape
+    return ds.assign(
+        DBZH=(dims, rng.uniform(25, 45, shape)),
+        ZDR=(dims, rng.uniform(0.5, 2.0, shape)),
+        KDP=(dims, rng.uniform(0.0, 1.0, shape)),
+        RHOHV=(dims, np.full(shape, 0.99)),
+    )
+
+
+def test_blend_datatree_computes_the_classification_once():
+    nodes = {
+        "/": xr.Dataset(),
+        "sweep_0": rain_like_sweep(1),
+        "sweep_1": rain_like_sweep(2),
+        # no ZDR and RHOHV: the classification has no such sweep
+        "sweep_2": rain_like_sweep(3).drop_vars(["ZDR", "RHOHV"]),
+    }
+    tree = xr.DataTree.from_dict(nodes)
+    out = rain_rate(tree, band="S", hid_kwargs={"scores": False})
+    assert set(out.children) == {"sweep_0", "sweep_1"}
+    classified = hid(tree, band="S", scores=False)
+    for name in ("sweep_0", "sweep_1"):
+        ds = tree[name].to_dataset().assign(HID=classified[name].to_dataset()["HID"])
+        same(out[name].to_dataset(), rain_rate(ds, band="S"))
+        assert (out[name]["RAIN_RATE_FLAG"] == 0).any()
+
+
+def test_blend_coefficients_and_class_field_checks():
+    ds = sweep(10, 12)
+    h = classes(ds)
+    with pytest.raises(ValueError, match=r"unknown relations \['zz'\] in coefficients"):
+        rain_rate(ds, hid=h, coefficients={"zz": (300.0, 1.4)})
+    short = h.copy()
+    short.attrs["flag_values"] = short.attrs["flag_values"][:-1]
+    with pytest.raises(ValueError, match="differ in length"):
+        rain_rate(ds, hid=short)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_blend_with_a_float_class_field(engine):
+    """NaN in a float class field is class 0 (unclassified)."""
+    ds = sweep(10, 12)
+    h = classes(ds)
+    as_float = h.astype(np.float64)
+    as_float.values[2:4, :] = np.nan
+    as_int = h.copy()
+    as_int.values[2:4, :] = 0
+    got = rain_rate(ds, hid=as_float, engine=engine)
+    want = rain_rate(ds, hid=as_int, engine=engine)
+    same(got, want)
+    assert (got.RAIN_RATE_FLAG.values[2:4] != 0).all()
+
+
+def test_compiled_kernel_is_required_when_asked(monkeypatch):
+    ds = sweep(3, 3)
+    monkeypatch.setattr(qpe, "HAS_COMPILED_KERNEL", False)
+    with pytest.raises(ImportError, match="compiled QPE kernel is not available"):
+        rain_rate_z(ds, engine="compiled")
+    with pytest.raises(ImportError, match="compiled QPE kernel is not available"):
+        rain_rate(ds, hid=classes(ds), engine="compiled")
+    # the NumPy implementation is used without the kernel
+    assert rain_rate_z(ds, engine="auto").name == "RAIN_RATE_Z"

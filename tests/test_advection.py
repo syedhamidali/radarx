@@ -585,3 +585,32 @@ def test_dataarray_accessors():
     mid = T0 + np.timedelta64(150, "s")
     frames = da0.radarx.interpolate_time(da1, [mid], motion=motion)
     assert frames.sizes["time"] == 1
+
+
+def test_correlate_without_a_usable_overlap_or_next_to_an_unusable_one():
+    ny, nx = 24, 40
+    everywhere = np.ones((ny, nx), dtype=bool)
+    # echo only on the corner pixel, where the window of the correlation is
+    # zero: there is nothing to correlate, however much echo there is
+    a = np.zeros((ny, nx))
+    a[0, 0] = 30.0
+    b = np.zeros((ny, nx))
+    b[10:14, 10:14] = 30.0
+    dy, dx, quality = advection._correlate(
+        a, b, everywhere, everywhere, 5.0, None, (4, 4)
+    )
+    assert np.isnan(dy) and np.isnan(dx) and quality == 0.0
+
+    # an echo moved by 3 cells within a strip 8 cells wide that is the only
+    # area observed: the overlap of the strips is too small at the next shift
+    # for the peak to be refined, so the whole-cell shift is returned
+    strip = np.zeros((ny, nx), dtype=bool)
+    strip[:, :8] = True
+    ramp = 30.0 + np.arange(3)[None, :]
+    a = np.zeros((ny, nx))
+    b = np.zeros((ny, nx))
+    a[8:16, 0:3] = ramp
+    b[8:16, 3:6] = ramp
+    dy, dx, quality = advection._correlate(a, b, strip, strip, 5.0, None, (4, 14))
+    assert dy == 0.0 and dx == 3.0
+    assert quality == pytest.approx(1.0, abs=1e-9)

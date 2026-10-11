@@ -884,3 +884,52 @@ def test_create_cappi_linear_units(synthetic_volume, method):
 def test_create_cappi_warns_for_velocity(synthetic_volume, method):
     with pytest.warns(UserWarning, match="VRADH"):
         create_cappi(synthetic_volume, height=200.0, method=method)
+
+
+def test_reference_ground_range():
+    from radarx.retrieve.cappi import _reference_ground_range
+
+    az = np.arange(0.0, 360.0, 90.0)
+    r = np.array([1000.0, 2000.0, 3000.0])
+    ang = np.deg2rad(az)[:, None]
+    x, y = r[None, :] * np.sin(ang), r[None, :] * np.cos(ang)
+    dims = ("azimuth", "range")
+    ref = xr.Dataset(coords={"x": (dims, x), "y": (dims, y)})
+    # the median over the rays of the distance from the radar
+    np.testing.assert_allclose(_reference_ground_range(ref), r)
+    # no x or y: the slant range is kept
+    assert _reference_ground_range(ref.drop_vars("y")) is None
+    assert _reference_ground_range(xr.Dataset()) is None
+    # x and y that are not (ray, gate) fields of the same shape
+    flat = xr.Dataset(coords={"x": ("range", r), "y": ("range", r)})
+    assert _reference_ground_range(flat) is None
+    mismatch = xr.Dataset(
+        coords={"x": (dims, x), "y": (("azimuth", "other"), y[:, :2] + 0.0)}
+    )
+    assert _reference_ground_range(mismatch) is None
+    # a distance that does not increase with range, or is not finite
+    back = xr.Dataset(coords={"x": (dims, x[:, ::-1]), "y": (dims, y[:, ::-1])})
+    assert _reference_ground_range(back) is None
+    holes = x.copy()
+    holes[:, 1] = np.nan
+    gap = xr.Dataset(coords={"x": (dims, holes), "y": (dims, y)})
+    with pytest.warns(RuntimeWarning, match="All-NaN"):
+        assert _reference_ground_range(gap) is None
+
+
+def test_onto_ground_range_needs_two_gates_per_ray():
+    from radarx.retrieve.cappi import _onto_ground_range
+
+    ground_ref = np.array([1000.0, 2000.0, 3000.0])
+    values = np.array([[1.0, 2.0, 3.0], [5.0, 6.0, 7.0], [9.0, 9.0, 9.0]])
+    ground = np.array(
+        [
+            [1000.0, 2000.0, 3000.0],  # the same positions: unchanged
+            [1500.0, 2500.0, 3500.0],  # shifted by half a gate: interpolated
+            [np.nan, np.nan, 3000.0],  # a single gate with a distance: no row
+        ]
+    )
+    out = _onto_ground_range(values, ground, ground_ref)
+    np.testing.assert_allclose(out[0], [1.0, 2.0, 3.0])
+    np.testing.assert_allclose(out[1], [np.nan, 5.5, 6.5])
+    assert np.isnan(out[2]).all()
