@@ -61,6 +61,16 @@ m\\ :sup:`-3` (dry air at 1013.25 hPa and 20 °C, a radarx choice).
 :math:`\\sum_k c_k D^k`, so that other published relations can be used by
 giving their coefficients. The relations of Beard (1976) and Gunn and Kinzer
 (1949) are not included.
+``fall_speed=("hail", law)`` gives the terminal speed of hail from its maximum
+dimension with the size relations of Heymsfield et al. (2020, corrigendum), and
+``fall_speed=("melting_snow", liquid_fraction, a, b)`` the speed of melting
+snow, the mix of the dry snow law :math:`a D^b` and the raindrop speed of the
+same mass with the weight of Frick et al. (2013, Eqs. 14 and 15), for a liquid
+fraction that is constant along the path; both are described, with their
+validity ranges, in :mod:`radarx.retrieve.ice_fall`. They are laws of the
+fall speed only: the particle is not melted or evaporated along the way,
+there is no air-density correction, and ``evaporation`` must be off. The
+density correction of the rain laws is the one described above.
 
 Wind
 ----
@@ -157,11 +167,14 @@ generalised to variable winds and evaporation.
 
 Not included
 ------------
-Collisional growth and breakup are not modelled: they change the number of
-drops in each size bin through the interaction of all sizes in the same
-volume, which independent per-size trajectories do not carry (it takes a
-bin-microphysics column or grid model). Melting is not modelled either, so
-sources must be in rain below the melting layer. The horizontal convergence
+Collisions, coalescence and breakup are not part of the trajectories: they
+change the number of drops in each size bin through the interaction of all
+sizes in the same volume, which independent per-size trajectories do not carry.
+:func:`radarx.retrieve.rain_shaft` is the collisional model of a column of
+still air (Low and List 1982), with the same fall-speed laws and density
+correction. Melting is not modelled either: the melting layer enters only
+through the fall-speed law ``("melting_snow", ...)`` with a fixed liquid
+fraction, and drops that start in rain stay rain. The horizontal convergence
 of the drop flow is accounted for only through ``wind_divergence`` and
 :func:`surface_dsd`. The surface is a horizontal plane (``surface_height``) or a height field on
 a regular ``(y, x)`` grid (``terrain``); it has no other effect on the wind.
@@ -229,6 +242,15 @@ Applications for conventional and Doppler radar analysis. *J. Atmos. Sci.*,
 **39** (10), 2279-2300,
 https://doi.org/10.1175/1520-0469(1982)039<2279:EIFAMF>2.0.CO;2
 
+Heymsfield, A., M. Szakall, A. Jost, I. Giammanco, R. Wright, and J. Brimelow,
+2020: Corrigendum (to: A comprehensive observational study of graupel and hail
+terminal velocity, mass flux, and kinetic energy). *J. Atmos. Sci.*, **77**
+(1), 405-412, https://doi.org/10.1175/JAS-D-19-0185.1
+
+Frick, C., A. Seifert, and H. Wernli, 2013: A bulk parametrization of melting
+snowflakes with explicit liquid water fraction for the COSMO model. *Geosci.
+Model Dev.*, **6** (6), 1925-1939, https://doi.org/10.5194/gmd-6-1925-2013
+
 .. autosummary::
    :nosignatures:
    :toctree: generated/
@@ -259,8 +281,8 @@ import xarray as xr
 
 from .._provenance import provenance
 from .._registry import accessor_method
+from . import _ice_fall, _raindrop_fall
 from . import _rain_trajectories_numpy as _ref
-from . import _raindrop_fall
 
 try:
     from . import _rain_trajectories
@@ -309,24 +331,42 @@ def _f64(x):
 
 def _fall(fall_speed):
     """(kind, coefficients) of a fall-speed specification."""
+    options = (
+        "'drag_balance', 'atlas1973', (a, b, f), ('polynomial', c0, c1, ...), "
+        "('hail', law) or ('melting_snow', liquid_fraction, a, b)"
+    )
     if isinstance(fall_speed, str):
         if fall_speed == "atlas1973":
             return 0, np.zeros(1)
         if fall_speed == "drag_balance":
             return 3, _f64([_raindrop_fall.D_JOIN])
-        raise ValueError(
-            f"fall_speed must be 'drag_balance', 'atlas1973', (a, b, f) or "
-            f"('polynomial', c0, c1, ...), not {fall_speed!r}"
-        )
+        raise ValueError(f"fall_speed must be {options}, not {fall_speed!r}")
     seq = list(fall_speed)
     if seq and isinstance(seq[0], str):
+        if seq[0] == "hail":
+            if len(seq) != 2:
+                raise ValueError("fall_speed hail needs ('hail', law)")
+            breaks, a, b = _ice_fall.hail_segments(seq[1])
+            coeffs = [float(a.size), *breaks, *np.ravel(np.column_stack([a, b]))]
+            return 4, _f64(coeffs)
+        if seq[0] == "melting_snow":
+            if len(seq) != 4:
+                raise ValueError(
+                    "fall_speed melting snow needs ('melting_snow', liquid_fraction, a, b)"
+                )
+            ell, a, b = (float(v) for v in seq[1:])
+            if not 0.0 <= ell <= 1.0:
+                raise ValueError(
+                    "the liquid fraction of melting snow must be in [0, 1]"
+                )
+            if not (a > 0 and b > -1):
+                raise ValueError("fall_speed melting snow needs a > 0 and b > -1")
+            return 5, _f64([_ice_fall.psi(ell), a, b, _raindrop_fall.D_JOIN])
         if seq[0] != "polynomial" or len(seq) < 2:
             raise ValueError("fall_speed polynomial needs ('polynomial', c0, ...)")
         return 2, _f64([float(c) for c in seq[1:]])
     if len(seq) != 3:
-        raise ValueError(
-            "fall_speed must be 'drag_balance', 'atlas1973', (a, b, f) or a polynomial"
-        )
+        raise ValueError(f"fall_speed must be {options}")
     a, b, f = (float(v) for v in seq)
     if not (a > 0 and b > -1 and f >= 0):
         raise ValueError("fall_speed (a, b, f) needs a > 0, b > -1 and f >= 0")
@@ -610,7 +650,12 @@ def _setup(
     else:
         ez, et, elnp, erh, humid = _standard_atmosphere()
     if evaporation is None:
-        evaporation = humid
+        evaporation = humid and kind < 4
+    if evaporation and kind >= 4:
+        raise ValueError(
+            "evaporation is modelled for raindrops only, not for hail or melting "
+            "snow: pass evaporation=False"
+        )
     if evaporation and not humid:
         raise ValueError(
             "evaporation needs humidity (relative_humidity, specific_humidity or "
@@ -1061,8 +1106,16 @@ def rain_trajectories(
         the radar in the frame of the wind grid.
     evaporation : bool, optional
         Evaporate the drops. Default: if the profile has humidity.
-    fall_speed : "drag_balance", "atlas1973", (a, b, f) or ("polynomial", c0, c1, ...)
-        Sea-level terminal speed law (see the module description).
+    fall_speed : str or tuple, optional
+        Sea-level terminal speed law (see the module description):
+        ``"drag_balance"`` (default), ``"atlas1973"``, ``(a, b, f)``,
+        ``("polynomial", c0, c1, ...)``, ``("hail", law)`` with a law of
+        :func:`radarx.retrieve.hail_fall_speed`, or
+        ``("melting_snow", liquid_fraction, a, b)`` of
+        :func:`radarx.retrieve.melting_snow_fall_speed`. The last two take the
+        diameter as maximum dimension (hail) or as diameter of the raindrop of
+        the same mass (melting snow), have no density correction and no
+        evaporation (``evaporation=True`` is an error).
     density_correction : bool, optional
         Multiply by :math:`(\\rho_0/\\rho)^{0.4}`. Default True.
     wind_divergence : bool, optional
@@ -1157,6 +1210,17 @@ def rain_trajectories(
     Applications for conventional and Doppler radar analysis. *J. Atmos.
     Sci.*, **39** (10), 2279-2300,
     https://doi.org/10.1175/1520-0469(1982)039<2279:EIFAMF>2.0.CO;2
+
+    Heymsfield, A., M. Szakall, A. Jost, I. Giammanco, R. Wright, and J.
+    Brimelow, 2020: Corrigendum (to: A comprehensive observational study of
+    graupel and hail terminal velocity, mass flux, and kinetic energy). *J.
+    Atmos. Sci.*, **77** (1), 405-412,
+    https://doi.org/10.1175/JAS-D-19-0185.1
+
+    Frick, C., A. Seifert, and H. Wernli, 2013: A bulk parametrization of
+    melting snowflakes with explicit liquid water fraction for the COSMO
+    model. *Geosci. Model Dev.*, **6** (6), 1925-1939,
+    https://doi.org/10.5194/gmd-6-1925-2013
 
     Examples
     --------

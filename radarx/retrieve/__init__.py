@@ -41,6 +41,7 @@ _SECTIONS = {
         "disdrometer",
         "evaporation",
         "rain_collisions",
+        "ice_fall",
     ],
     "Thermodynamics and cold pools": [
         "lagrangian",
