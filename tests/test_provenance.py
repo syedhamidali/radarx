@@ -72,6 +72,8 @@ KEY_MARKS = {
     "smith-elmore-2004": "Smith, T. M., and K. L. Elmore",
     "maesaka-2012": "Maesaka, T., K. Iwanami",
     "ester-1996": "Ester, M., H.-P. Kriegel",
+    "holleman-2001": "Holleman, I., 2001",
+    "graham-nelson-1998": "Graham, R. A., and J. A. Nelson",
 }
 
 
@@ -317,6 +319,19 @@ def test_sweep_and_volume_results():
         "correct_attenuation": radarx.retrieve.correct_attenuation(sweep, band="C"),
         "vil": radarx.retrieve.vil(storm_volume()),
         "echo_top": radarx.retrieve.echo_top(storm_volume()),
+        "hail_products": radarx.retrieve.hail_products(
+            storm_volume(), freezing_level=3000.0, minus20_level=6000.0
+        ),
+        "shi": radarx.retrieve.shi(
+            storm_volume(), freezing_level=3000.0, minus20_level=6000.0
+        ),
+        "mesh": radarx.retrieve.mesh(
+            storm_volume(), freezing_level=3000.0, minus20_level=6000.0
+        ),
+        "posh": radarx.retrieve.posh(
+            storm_volume(), freezing_level=3000.0, minus20_level=6000.0
+        ),
+        "hail_kinetic_energy": radarx.retrieve.hail_kinetic_energy(storm_volume()),
     }
     for name, out in results.items():
         check_attrs(out)
@@ -519,6 +534,12 @@ def test_accessor_methods_set_the_attributes():
     volume = storm_volume()
     check_attrs(volume.radarx.vil())
     check_attrs(volume.radarx.echo_top())
+    levels = {"freezing_level": 3000.0, "minus20_level": 6000.0}
+    check_attrs(volume.radarx.hail_products(**levels))
+    check_attrs(volume.radarx.shi(**levels))
+    check_attrs(volume.radarx.mesh(**levels))
+    check_attrs(volume.radarx.posh(**levels))
+    check_attrs(volume.radarx.hail_kinetic_energy())
 
 
 # merging products into the input

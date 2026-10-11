@@ -45,7 +45,7 @@ _SECTIONS = {
         "coldpool",
         "wind_profile",
     ],
-    "Convective hazards": ["lightning", "tornado", "biology"],
+    "Convective hazards": ["lightning", "tornado", "biology", "hail"],
 }
 
 _modules = sorted(
