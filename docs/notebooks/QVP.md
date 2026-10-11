@@ -188,6 +188,100 @@ axes[0].legend(loc="upper right", ncols=2)
 fig.tight_layout()
 ```
 
+## Profiles that do not need a high sweep
+
+A QVP needs a sweep at 10° or more and is centred on the radar. Two variants use
+the other sweeps of the volume.
+
+`rd_qvp` is the range-defined QVP of
+[Tobin and Kumjian (2017)](https://doi.org/10.1175/WAF-D-17-0054.1): the
+azimuthal means of all sweeps, from the gates within `rmax` (50 km) of the radar,
+are combined on a regular height grid with weights that fall with the distance
+from the radar, so the profile reaches the ground. That paper is not open access;
+the function follows the description of
+[Murphy et al. (2020)](https://doi.org/10.1175/JTECH-D-20-0011.1), and the form
+of the weight (`ground_range ** -power`) is radarx's own.
+
+`cvp` is the columnar vertical profile of Murphy et al. (2020): the sweeps are
+reduced over a sector (here 20 km in range and 20° in azimuth) around a chosen
+point, each sweep contributes only between the beams half-way to the sweeps
+above and below, and the samples are averaged on a 50 m grid with Cressman
+weights (100 m radius).
+
+```{code-cell} ipython3
+from radarx.retrieve import cvp, rd_qvp
+
+fields3 = ["DBZH", "ZDR", "RHOHV"]
+rd = rd_qvp(volumes[0], fields3)
+column = volumes[0].radarx.cvp(fields3, azimuth=180.0, ground_range=40e3)
+fig, axes = plt.subplots(1, 3, figsize=(12, 4), sharey=True)
+for ax, name in zip(axes, fields3):
+    profile[name].plot(ax=ax, y="height", label="QVP, 12°")
+    rd[name].plot(ax=ax, y="height", label="RD-QVP, 50 km")
+    column[name].plot(ax=ax, y="height", label="CVP, 180°, 40 km")
+    ax.set_title(name)
+    ax.set_ylim(0, 10e3)
+axes[0].legend(fontsize=8)
+fig.tight_layout()
+```
+
+## Melting layer from the PPIs
+
+`melting_layer` works on QVPs, which average the whole circle. On the PPIs between
+4° and 10° the layer is a ring of low ρhv, and the radial-profile method of
+[Giangrande et al. (2008)](https://doi.org/10.1175/2007JAMC1634.1) keeps the
+azimuth: on every ray, the gates with 0.90 < ρhv < 0.97 below 6 km whose
+500 m window above has a Z maximum of 30 to 47 dBZ and a ZDR maximum of 0.8 to
+2.5 dB are layer points, and the top and bottom are the 80th and 20th percentile of
+their heights within a 20° window ([Ryzhkov and Krause 2022](https://doi.org/10.1175/JTECH-D-21-0130.1)
+describe this designation). `melting_layer_ppi` does this for the sweeps
+between 4° and 10° together. The method was tuned for S band and does not
+correct for the beam width.
+
+```{code-cell} ipython3
+from radarx.retrieve import melting_layer_ppi
+
+subset = volumes[::4]
+ppi = melting_layer_ppi(subset)
+qvp_ml = melting_layer(qvp_timeseries(subset, fields, elevation=12.0))
+frame = (
+    ppi[["melting_layer_bottom_all", "melting_layer_top_all"]]
+    .to_dataframe()
+    .rename(columns=lambda c: "PPI " + c.split("_")[2])
+)
+frame["QVP bottom"] = qvp_ml.melting_layer_bottom.values
+frame["QVP top"] = qvp_ml.melting_layer_top.values
+print(frame.round(0).to_string())
+print(f"median top: PPI {frame['PPI top'].median():.0f} m, QVP {frame['QVP top'].median():.0f} m; "
+      f"median bottom: PPI {frame['PPI bottom'].median():.0f} m, QVP {frame['QVP bottom'].median():.0f} m")
+```
+
+On these ARMOR volumes (C band, convective rain) the medians of the tops differ by
+about 100 m (over all 25 volumes: median difference 16 m, standard deviation 394 m,
+correlation 0.26), but the PPI bottom is lower than the QVP bottom (356 m in the
+median here, 556 m over all 25 volumes): the thresholds of Giangrande et al. (2008)
+flag the rain below the layer too, where ρhv is below 0.97 at C band. In the stratiform rain behind the KGWX squall
+line of 31 March 2022 (S band, 5 volumes with a layer, 00:06 to 01:51 UTC), the PPI top
+is on average 78 m above the onset top of the QVP of the 19.5° sweep (median 140 m,
+standard deviation 95 m) and the PPI bottom 227 m above its onset bottom. The layer
+on the PPIs also depends on the azimuth:
+
+```{code-cell} ipython3
+fig, ax = plt.subplots(figsize=(8, 3.5))
+ppi.melting_layer_top.isel(time=0).plot(ax=ax, label="top (80th percentile)")
+ppi.melting_layer_bottom.isel(time=0).plot(ax=ax, label="bottom (20th percentile)")
+ax.set_ylabel("height above sea level [m]")
+ax.legend()
+fig.tight_layout()
+```
+
+## Rain-only products below the layer
+
+`mask_above_melting_layer` sets the rain rates and the drop size parameters to NaN
+above the bottom of the layer (plus an optional margin), from the output of
+`melting_layer` or `melting_layer_ppi`; see the end of the first workflow
+notebook for an example on a rain rate.
+
 ## References
 
 - Ryzhkov, A., P. Zhang, H. Reeves, M. Kumjian, T. Tschallener, S. Trömel, and
@@ -205,6 +299,19 @@ fig.tight_layout()
   analysis of ice microphysical processes in melting layers of winter storms
   using S-band quasi-vertical profiles. *J. Appl. Meteor. Climatol.*, **59**,
   751–767, <https://doi.org/10.1175/JAMC-D-19-0128.1>
+- Tobin, D. M., and M. R. Kumjian, 2017: Polarimetric radar and surface-based
+  precipitation-type observations of ice pellet to freezing rain transitions.
+  *Wea. Forecasting*, **32**, 2065–2082, <https://doi.org/10.1175/WAF-D-17-0054.1>
+- Murphy, A. M., A. Ryzhkov, and P. Zhang, 2020: Columnar vertical profile (CVP)
+  methodology for validating polarimetric radar retrievals in ice using in situ
+  aircraft measurements. *J. Atmos. Oceanic Technol.*, **37**, 1623–1642,
+  <https://doi.org/10.1175/JTECH-D-20-0011.1>
+- Allabakash, S., S. Lim, and B.-J. Jang, 2019: Melting layer detection and
+  characterization based on range height indicator–quasi vertical profiles.
+  *Remote Sens.*, **11**, 2848, <https://doi.org/10.3390/rs11232848>
+- Cressman, G. P., 1959: An operational objective analysis system. *Mon. Wea.
+  Rev.*, **87**, 367–374,
+  <https://doi.org/10.1175/1520-0493(1959)087<0367:AOOAS>2.0.CO;2>
 - Ryzhkov, A., and J. Krause, 2022: New polarimetric radar algorithm for
   melting-layer detection and determination of its height. *J. Atmos.
   Oceanic Technol.*, **39**, 529–543, <https://doi.org/10.1175/JTECH-D-21-0130.1>

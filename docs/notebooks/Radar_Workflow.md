@@ -36,7 +36,7 @@ multi-radar steps.
 | 6 | hydrometeor classes | `dtree.radarx.hid` |
 | 7 | rain drop size distribution and rain rate, with the Bayesian posterior | `ds.radarx.dsd`, `dsd_bayesian` |
 | 7c | rain rate from $Z_H$, $Z_{DR}$, $K_{DP}$ and $A$, and from the hydrometeor class | `dtree.radarx.rain_rate`, `rain_rate_z`, `rain_rate_kdp`, `rain_rate_z_zdr`, `rain_rate_a` |
-| 8 | QVP time series and melting layer | `qvp_timeseries`, `melting_layer` |
+| 8 | QVP time series and melting layer, range-defined and columnar profiles, RHI profile, melting layer on PPIs, rain products capped at the melting layer | `qvp_timeseries`, `melting_layer`, `rd_qvp`, `cvp`, `rhi_qvp`, `melting_layer_ppi`, `mask_above_melting_layer` |
 | 9 | azimuthal shear and radial divergence | `dtree.radarx.llsd` |
 | 10 | 3D grid, Max-CAPPI, other gridding functions, plotting functions, interactive view, UGRID | `dtree.radarx.to_grid`, `grid_cones`, `plot_ppi`, `to_uxarray` |
 | 11 | storm motion, common analysis time, time interpolation | `estimate_motion`, `advect`, `interpolate_time` |
@@ -120,6 +120,7 @@ from radarx.retrieve import (
     correct_rhohv_noise,
     correct_zdr_noise,
     create_cappi,
+    cvp,
     dealias_velocity,
     dsd_bayesian,
     dsd_prior,
@@ -138,7 +139,9 @@ from radarx.retrieve import (
     layer_mean_wind,
     liquid_water_content,
     llsd,
+    mask_above_melting_layer,
     melting_layer,
+    melting_layer_ppi,
     mesh,
     multi_doppler_input,
     noise_level,
@@ -146,6 +149,7 @@ from radarx.retrieve import (
     posh,
     qvp,
     qvp_timeseries,
+    rd_qvp,
     radar_geometry,
     radial_divergence,
     rain_rate,
@@ -153,6 +157,7 @@ from radarx.retrieve import (
     rain_rate_kdp,
     rain_rate_z,
     rain_rate_z_zdr,
+    rhi_qvp,
     shi,
     snr,
     storm_relative_helicity,
@@ -962,6 +967,101 @@ print("same profile as the time series:",
       bool(np.allclose(single.DBZH.squeeze(), tqvp.DBZH.isel(time=1), equal_nan=True)),
       bool(np.allclose(single_acc.DBZH, single.DBZH, equal_nan=True)),
       "| melting layer from the accessor:", bool(ml_acc.melting_layer_peak.equals(ml.melting_layer_peak)))
+```
+
++++
+
+### Range-defined and columnar profiles, and the melting layer on PPIs
+
+The QVP needs a high sweep. `rd_qvp` (Tobin and Kumjian 2017) combines the
+azimuthal means of all sweeps within 50 km of the radar, so that the profile
+reaches the ground, and `cvp` (Murphy et al. 2020) profiles a sector of the
+volume (here 20 km by 20 degrees) around a chosen point from the sweeps that
+see it. Both put the profile on a regular height grid. `melting_layer_ppi`
+finds the melting layer on the PPIs between 4 and 10 degrees, with the
+radial-profile rules of Giangrande et al. (2008), as the 80th and 20th
+percentile of the heights of its points, for every azimuth.
+
+```{code-cell} ipython3
+fields = ["DBZH", "ZDR", "RHOHV"]
+with timed("8b. range-defined, columnar and PPI profiles"):
+    rd = rd_qvp(volumes[1], fields, rmax=50e3)
+    # the azimuth with the strongest echo at 40 km on the lowest sweep
+    sweep0 = volumes[1]["sweep_0"].to_dataset()
+    az0 = float(sweep0.DBZH.sel(range=slice(35e3, 45e3)).mean("range").idxmax("azimuth"))
+    column = cvp(volumes[1], fields, azimuth=az0, ground_range=40e3)
+    ml_ppi = melting_layer_ppi(volumes)
+rd_acc = volumes[1].radarx.rd_qvp(fields, rmax=50e3)
+column_acc = volumes[1].radarx.cvp(fields, azimuth=az0, ground_range=40e3)
+ml_ppi_acc = volumes[1].radarx.melting_layer_ppi()
+print("accessors agree:", bool(rd_acc.DBZH.equals(rd.DBZH)), bool(column_acc.DBZH.equals(column.DBZH)),
+      bool(ml_ppi_acc.melting_layer_top_all.equals(ml_ppi.melting_layer_top_all.isel(time=1))))
+fig, axes = plt.subplots(1, 3, figsize=(13, 4.5), sharey=True, layout="constrained")
+for ax, name in zip(axes, fields):
+    ax.plot(tqvp[name].isel(time=1), tqvp.height / 1e3, label="QVP, 19.5°")
+    ax.plot(rd[name], rd.height / 1e3, label="RD-QVP, 50 km")
+    ax.plot(column[name], column.height / 1e3, label=f"CVP, {az0:.0f}°, 40 km")
+    ax.set_xlabel(name)
+axes[0].set_ylim(0, 12)
+axes[0].set_ylabel("height above sea level (km)")
+axes[0].legend(fontsize=8)
+plt.show()
+top, bottom = ml_ppi.melting_layer_top_all.isel(time=1), ml_ppi.melting_layer_bottom_all.isel(time=1)
+print(f"melting layer in the PPIs, all azimuths: {float(bottom):.0f} to {float(top):.0f} m "
+      f"({int(ml_ppi.melting_layer_points_all.isel(time=1))} points); "
+      f"top between {float(ml_ppi.melting_layer_top.isel(time=1).min()):.0f} and "
+      f"{float(ml_ppi.melting_layer_top.isel(time=1).max()):.0f} m depending on the azimuth")
+```
+
+The rain rates of the lowest sweep hold in rain only. `mask_above_melting_layer`
+sets them (and the other rain-only products) to NaN above the bottom of the
+melting layer, here the azimuth-dependent one of the PPIs, and flags the
+removed gates in `RAIN_RATE_FLAG`:
+
+```{code-cell} ipython3
+rain_sweep = rain_blend.assign_coords(altitude=float(volumes[1].altitude))
+capped = mask_above_melting_layer(rain_sweep, ml_ppi.isel(time=1))
+capped_acc = rain_sweep.radarx.mask_above_melting_layer(ml_ppi.isel(time=1), margin=0.0)
+removed = int((capped.RAIN_RATE_FLAG == 4).sum())
+print(f"{removed} of {int(rain_blend.RAIN_RATE.notnull().sum())} rain rates removed above the melting layer;",
+      "accessor agrees:", bool(capped_acc.RAIN_RATE.equals(capped.RAIN_RATE)))
+```
+
+A scan in range-height (RHI) form has a profile of its own. `rhi_qvp` converts the
+range of every gate to its height and averages the gates of all elevations in 100 m
+bins (Allabakash et al. 2019). Here an RHI is simulated by sampling the QVP of
+this volume along an RHI geometry, so that the profile it returns can be compared
+with the one it came from; `melting_layer` works on the result as on a QVP:
+
+```{code-cell} ipython3
+from xradar.georeference import antenna_to_cartesian
+
+rhi_range = np.arange(250.0, 40e3, 250.0)
+rhi_elevation = np.arange(1.0, 60.0, 0.5)
+_, _, rhi_height = antenna_to_cartesian(
+    rhi_range[None, :], 0.0, rhi_elevation[:, None], earth_radius=6371000.0, site_altitude=float(volumes[1].altitude)
+)
+prof = tqvp.isel(time=1)
+rhi = xr.Dataset(
+    {
+        name: (("azimuth", "range"), np.interp(rhi_height, prof.height, prof[name]).astype("float32"), {"units": unit})
+        for name, unit in (("DBZH", "dBZ"), ("ZDR", "dB"), ("RHOHV", "1"))
+    },
+    coords={
+        "azimuth": np.full(rhi_elevation.size, 109.0),
+        "range": rhi_range,
+        "elevation": ("azimuth", rhi_elevation),
+        "altitude": float(volumes[1].altitude),
+    },
+)
+rhi_profile = rhi_qvp(rhi, fields, rmin=2e3, rmax=30e3)
+rhi_acc = rhi.radarx.rhi_qvp(fields, rmin=2e3, rmax=30e3)
+ok = rhi_profile.DBZH.notnull()
+diff = rhi_profile.DBZH - np.interp(rhi_profile.height, prof.height, prof.DBZH)
+print(f"RHI profile: {int(ok.sum())} bins of 100 m, RMS difference from the profile it was "
+      f"sampled from {float(np.sqrt((diff.where(ok) ** 2).mean())):.2f} dB; accessor agrees:",
+      bool(rhi_acc.DBZH.equals(rhi_profile.DBZH)))
+melting_layer(rhi_profile)[["melting_layer_bottom", "melting_layer_top"]]
 ```
 
 ## 9. Azimuthal shear and radial divergence
@@ -2048,9 +2148,14 @@ notebooks or from this index.
 | `rotation_couplets` | `radarx.retrieve.tornado` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
 | `tornado_probability` | `radarx.retrieve.tornado` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
 | `tornet_inputs` | `radarx.retrieve.tornado` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
+| `cvp` | `radarx.retrieve.vertical_profiles` | [core](Radar_Workflow): 8. QVP time series and melting layer |
+| `mask_above_melting_layer` | `radarx.retrieve.vertical_profiles` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `melting_layer` | `radarx.retrieve.vertical_profiles` | [core](Radar_Workflow): 8. QVP time series and melting layer |
+| `melting_layer_ppi` | `radarx.retrieve.vertical_profiles` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `qvp` | `radarx.retrieve.vertical_profiles` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `qvp_timeseries` | `radarx.retrieve.vertical_profiles` | [core](Radar_Workflow): 8. QVP time series and melting layer |
+| `rd_qvp` | `radarx.retrieve.vertical_profiles` | [core](Radar_Workflow): 8. QVP time series and melting layer |
+| `rhi_qvp` | `radarx.retrieve.vertical_profiles` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `echo_top` | `radarx.retrieve.vil` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `liquid_water_content` | `radarx.retrieve.vil` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `vil` | `radarx.retrieve.vil` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
@@ -2096,6 +2201,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.correct_rhohv_noise` | [core](Radar_Workflow): 15. Noise and calibration |
 | `.radarx.correct_zdr_noise` | [core](Radar_Workflow): 15. Noise and calibration |
 | `.radarx.create_cappi` | [core](Radar_Workflow): Other ways to grid, section and plot |
+| `.radarx.cvp` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `.radarx.dealias` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
 | `.radarx.diabatic_lagrangian` | [part 2](Radar_Workflow_Advanced): 9. Diabatic Lagrangian analysis |
 | `.radarx.disdrometer` | [part 2](Radar_Workflow_Advanced): 2. Disdrometers |
@@ -2117,7 +2223,9 @@ The methods of the `.radarx` accessors:
 | `.radarx.lightning_jump` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `.radarx.liquid_water_content` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.llsd` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
+| `.radarx.mask_above_melting_layer` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `.radarx.melting_layer` | [core](Radar_Workflow): 8. QVP time series and melting layer |
+| `.radarx.melting_layer_ppi` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `.radarx.merge_radars` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `.radarx.mesh` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.multi_doppler` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
@@ -2140,6 +2248,8 @@ The methods of the `.radarx` accessors:
 | `.radarx.rain_rate_z` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
 | `.radarx.rain_rate_z_zdr` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
 | `.radarx.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
+| `.radarx.rd_qvp` | [core](Radar_Workflow): 8. QVP time series and melting layer |
+| `.radarx.rhi_qvp` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `.radarx.rotation_couplets` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
 | `.radarx.shi` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.single_doppler_winds` | [part 2](Radar_Workflow_Advanced): 8. Wind from a single Doppler radar |
@@ -2147,9 +2257,9 @@ The methods of the `.radarx` accessors:
 | `.radarx.sounding` | [core](Radar_Workflow): 3. Environment |
 | `.radarx.storm_relative_helicity` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
 | `.radarx.superobs` | [core](Radar_Workflow): 16. Super-observations for data assimilation |
+| `.radarx.to_cappi` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `.radarx.to_cfradial1` | [part 2](Radar_Workflow_Advanced): 12. Export to files |
 | `.radarx.to_cfradial2` | [part 2](Radar_Workflow_Advanced): 12. Export to files |
-| `.radarx.to_cappi` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `.radarx.to_grid` | [core](Radar_Workflow): 10. Cone gridding, Max-CAPPI, interactive view and UGRID |
 | `.radarx.to_netcdf_cf` | [part 2](Radar_Workflow_Advanced): 12. Export to files |
 | `.radarx.to_odim` | [part 2](Radar_Workflow_Advanced): 12. Export to files |
