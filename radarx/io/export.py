@@ -387,7 +387,10 @@ def write_cfradial1(dtree, path, *, calibs=True, packing="drop"):
     * It has no sweep groups, so the attributes of a sweep are lost. The
       provenance (``radarx_method``, ``radarx_references``, ``radarx_version``
       and ``history``) of all sweeps is merged onto the global attributes
-      first, so that :func:`radarx.cite` still finds it. The attributes of the variables are written as they are.
+      first, so that :func:`radarx.cite` still finds it. The attributes of
+      the variables are written as they are.
+    * The georeferenced ``x``, ``y`` and ``z`` are not written, and
+      ``sweep_fixed_angle`` is called ``fixed_angle``.
     * Sweeps with different numbers of gates are padded with NaN by xradar.
       A field that only some sweeps hold (the Doppler cuts of a NEXRAD volume
       have no ``KDP``) is NaN in the others, and an integer field becomes
@@ -455,18 +458,27 @@ def write_cfradial2(dtree, path, *, engine=None, packing="drop"):
     Write a radar volume as a CfRadial2 NetCDF file.
 
     The file is written by :func:`xradar.io.to_cfradial2`: the root and every
-    sweep are NetCDF groups, so the attributes of the sweeps (the provenance
-    of the derived fields included), the coordinates and the fields are kept.
-    radarx prepares a copy of ``dtree`` first (see :mod:`radarx.io.export`),
-    which xradar 0.11 also needs because its writer changes the tree it is
-    given.
+    sweep are NetCDF groups. radarx prepares a copy of ``dtree`` first (see
+    :mod:`radarx.io.export`), which xradar 0.11 also needs because its writer
+    changes the tree it is given.
 
-    What does not survive an exact round trip: booleans in attributes become
-    the strings ``"true"`` and ``"false"``, ``None`` is dropped, the integer
-    packing of a field is replaced by floats (``packing="drop"``), and xradar
-    appends ``": xradar vX CfRadial2 export"`` to the root ``history``. The
-    sweeps are conformed to the CfRadial2 sweep layout by xradar, which adds
-    the optional-free mandatory variables when they are missing.
+    xradar conforms every sweep to the CfRadial2 layout, which drops content
+    (found by reading the files back):
+
+    * the attributes of the sweeps. The provenance of the sweeps is merged onto
+      the root attributes first, so that :func:`radarx.cite` still finds it;
+      the attributes of the fields are kept;
+    * the variables that have no ``range`` dimension, such as the per-ray
+      ``PHIDP_OFFSET`` of :func:`radarx.retrieve.estimate_kdp`, and the
+      georeferenced ``x``, ``y`` and ``z``;
+    * the ray dimension: ``azimuth`` becomes ``time`` (the values are the
+      same).
+
+    Also lost in an exact round trip: booleans in attributes become the
+    strings ``"true"`` and ``"false"``, ``None`` is dropped, the integer
+    packing of a field is replaced by floats (``packing="drop"``), and newer
+    xradar appends ``": xradar vX CfRadial2 export"`` to the root ``history``.
+    Use :func:`write_zarr` when nothing may be lost.
 
     Parameters
     ----------
