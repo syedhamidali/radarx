@@ -37,6 +37,8 @@ from .test_beam_blockage import make_sweep as bb_sweep
 from .test_beam_blockage import volume as bb_volume
 from .test_dealias import synthetic_sweep
 from .test_dealias import volume as dealias_volume
+from .test_ensemble import _rain_ds as ensemble_sweep
+from .test_ensemble import _volume as ensemble_volume
 from .test_forward_operator import SITE as FO_SITE
 from .test_forward_operator import synthetic_mpas, synthetic_wrf
 from .test_kdp import _sweep as kdp_sweep
@@ -93,6 +95,8 @@ KEY_MARKS = {
     "graham-nelson-1998": "Graham, R. A., and J. A. Nelson",
     "liou-2005": "Liou, Y.-C., T.-C. C. Wang",
     "roc-mesocyclone-detection": "WSR-88D Radar Operations Center",
+    "melnikov-2004": "Melnikov, V. M., and D. S. Zrni",
+    "giangrande-2004": "Giangrande, S. E., A. V. Ryzhkov, V. M. Melnikov",
 }
 
 
@@ -338,6 +342,18 @@ def test_sweep_and_volume_results():
         "correct_attenuation": radarx.retrieve.correct_attenuation(sweep, band="C"),
         "vil": radarx.retrieve.vil(storm_volume()),
         "echo_top": radarx.retrieve.echo_top(storm_volume()),
+        "perturb_radar": radarx.retrieve.perturb_radar(ensemble_sweep(), members=3),
+        "measurement_error": radarx.retrieve.measurement_error(ensemble_sweep()),
+        "ensemble_retrieval": radarx.retrieve.ensemble_retrieval(
+            ensemble_sweep(), "rain_rate_z", members=3
+        ),
+        "ensemble_retrieval tree": radarx.retrieve.ensemble_retrieval(
+            ensemble_volume(), "rain_rate_z", members=3
+        ),
+        "ensemble_statistics": radarx.retrieve.ensemble_statistics(
+            radarx.retrieve.perturb_radar(ensemble_sweep(), members=3)
+        ),
+        "relation_scatter": radarx.retrieve.relation_scatter("S"),
         "beam_blockage": radarx.retrieve.beam_blockage(
             bb_sweep(nray=4, ngate=40), geographic_dem(bell())
         ),
@@ -575,6 +591,12 @@ def test_accessor_methods_set_the_attributes():
     volume = storm_volume()
     check_attrs(volume.radarx.vil())
     check_attrs(volume.radarx.echo_top())
+    check_attrs(ensemble_sweep().radarx.perturb_radar(members=2))
+    check_attrs(ensemble_sweep().radarx.measurement_error())
+    check_attrs(ensemble_sweep().radarx.ensemble_retrieval("rain_rate_z", members=2))
+    check_attrs(
+        ensemble_sweep().radarx.perturb_radar(members=2).radarx.ensemble_statistics()
+    )
     levels = {"freezing_level": 3000.0, "minus20_level": 6000.0}
     check_attrs(volume.radarx.hail_products(**levels))
     check_attrs(volume.radarx.shi(**levels))

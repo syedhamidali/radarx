@@ -37,6 +37,7 @@ from .test_disdrometer import _station
 from .test_dsd import _sweep as dsd_sweep
 from .test_dsd import _volume as dsd_volume
 from .test_dsd_bayes import _volume as bayes_volume
+from .test_ensemble import _rain_ds as ensemble_sweep
 from .test_evaporation import _profile as evap_profile
 from .test_evaporation import _series as evap_series
 from .test_forward_operator import SITE as FO_SITE
@@ -358,6 +359,18 @@ PRODUCTS = {
     "rain_trajectories": _rain_trajectories,
     "size_sorting": lambda: R.size_sorting(_rain_trajectories()),
     "rkw_ratio": lambda: R.rkw_ratio(xr.DataArray([10.0, 12.0]), 15.0),
+    "perturb_radar": lambda: R.perturb_radar(ensemble_sweep(), members=3, snr="SNR"),
+    "measurement_error": lambda: R.measurement_error(ensemble_sweep(), snr="SNR"),
+    "ensemble_retrieval": lambda: R.ensemble_retrieval(
+        ensemble_sweep(), "rain_rate_z", members=3, keep_members=True
+    ),
+    "ensemble_retrieval (hid)": lambda: R.ensemble_retrieval(
+        ensemble_sweep(), "hid", members=3, options={"temperature": "TEMP", "band": "S"}
+    ),
+    "ensemble_statistics": lambda: R.ensemble_statistics(
+        R.perturb_radar(ensemble_sweep(), members=3)
+    ),
+    "relation_scatter": lambda: R.relation_scatter("S"),
 }
 
 

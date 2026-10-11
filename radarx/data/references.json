@@ -2676,5 +2676,47 @@
   "journal": "WSR-88D algorithm description NX-DR-03-002/34",
   "publisher": "NOAA Radar Operations Center",
   "url": "https://www2.mmm.ucar.edu/episodes/ROC/WSR-88D_algorithms/pdfs/mesocyclone_detection.pdf"
+ },
+ "10.1145/2063384.2063405": {
+  "authors": [
+   "Salmon, J. K.",
+   "Moraes, M. A.",
+   "Dror, R. O.",
+   "Shaw, D. E."
+  ],
+  "year": 2011,
+  "title": "Parallel random numbers: as easy as 1, 2, 3",
+  "type": "inproceedings",
+  "journal": "Proceedings of 2011 International Conference for High Performance Computing, Networking, Storage and Analysis",
+  "publisher": "ACM",
+  "pages": "1-12",
+  "doi": "10.1145/2063384.2063405"
+ },
+ "melnikov-2004": {
+  "authors": [
+   "Melnikov, V. M.",
+   "Zrnić, D. S."
+  ],
+  "year": 2004,
+  "title": "Simultaneous transmission mode for the polarimetric WSR-88D: Statistical biases and standard deviations of polarimetric variables",
+  "type": "report",
+  "journal": "NOAA/NSSL report, 84 pp.",
+  "publisher": "Cooperative Institute for Mesoscale Meteorological Studies, University of Oklahoma, and National Severe Storms Laboratory",
+  "url": "https://www.nssl.noaa.gov/publications/wsr88d_reports/SHV_statistics.pdf"
+ },
+ "giangrande-2004": {
+  "authors": [
+   "Giangrande, S. E.",
+   "Ryzhkov, A. V.",
+   "Melnikov, V. M.",
+   "Krause, J."
+  ],
+  "year": 2004,
+  "title": "Calibration of the polarimetric NEXRAD radar using meteorological signals",
+  "type": "inproceedings",
+  "journal": "Preprints, 11th Conference on Aviation, Range, and Aerospace Meteorology",
+  "publisher": "American Meteorological Society",
+  "pages": "P5.15",
+  "url": "https://ams.confex.com/ams/11aram22sls/techprogram/paper_81811.htm"
  }
 }
