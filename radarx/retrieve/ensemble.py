@@ -226,7 +226,7 @@ _CANONICAL = {
 _ERROR_UNITS = {
     "dbz": "dB",
     "zdr": "dB",
-    "phidp": "degrees",
+    "phidp": "degree",
     "rhohv": "1",
     "vel": "m s-1",
 }
@@ -1368,7 +1368,7 @@ def _chain_dsd(ds, run, draws):
     res = run.call(_dsd, ds, options=options, **run.band_kw())
     with np.errstate(divide="ignore", invalid="ignore"):
         res["LOG10_NW"] = np.log10(res["NW"]).assign_attrs(
-            long_name="log10 of the normalized intercept", units="log10(m-3 mm-1)"
+            long_name="log10 of the normalized intercept", units="1"
         )
     return res
 
@@ -1809,7 +1809,9 @@ def ensemble_retrieval(
 # --------------------------------------------------------------------------
 
 
-@accessor_method("dataarray", "dataset", "datatree", name="perturb_radar")
+@accessor_method(
+    "dataarray", "dataset", "datatree", name="perturb_radar", wraps=perturb_radar
+)
 def _perturb_radar_accessor(self, **kwargs):
     """
     Radar fields with random calibration and measurement errors.
@@ -1824,7 +1826,13 @@ def _perturb_radar_accessor(self, **kwargs):
     return perturb_radar(self.xarray_obj, **kwargs)
 
 
-@accessor_method("dataarray", "dataset", "datatree", name="measurement_error")
+@accessor_method(
+    "dataarray",
+    "dataset",
+    "datatree",
+    name="measurement_error",
+    wraps=measurement_error,
+)
 def _measurement_error_accessor(self, **kwargs):
     """
     Standard deviation of the measurement errors of the radar variables.
@@ -1839,7 +1847,13 @@ def _measurement_error_accessor(self, **kwargs):
     return measurement_error(self.xarray_obj, **kwargs)
 
 
-@accessor_method("dataarray", "dataset", "datatree", name="ensemble_retrieval")
+@accessor_method(
+    "dataarray",
+    "dataset",
+    "datatree",
+    name="ensemble_retrieval",
+    wraps=ensemble_retrieval,
+)
 def _ensemble_retrieval_accessor(self, retrieval, **kwargs):
     """
     Statistics of a retrieval over perturbed radar data.
@@ -1855,7 +1869,13 @@ def _ensemble_retrieval_accessor(self, retrieval, **kwargs):
     return ensemble_retrieval(self.xarray_obj, retrieval, **kwargs)
 
 
-@accessor_method("dataarray", "dataset", "datatree", name="ensemble_statistics")
+@accessor_method(
+    "dataarray",
+    "dataset",
+    "datatree",
+    name="ensemble_statistics",
+    wraps=ensemble_statistics,
+)
 def _ensemble_statistics_accessor(self, **kwargs):
     """
     Mean, spread and percentiles over the members of an ensemble.

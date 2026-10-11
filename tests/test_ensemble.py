@@ -258,7 +258,7 @@ def test_high_snr_limits():
     assert units == {
         "DBZH_error": "dB",
         "ZDR_error": "dB",
-        "PHIDP_error": "degrees",
+        "PHIDP_error": "degree",
         "RHOHV_error": "1",
         "VRADH_error": "m s-1",
     }
