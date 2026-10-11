@@ -31,6 +31,9 @@ from radarx.io import _parcel_numpy as ref
 from radarx.io import parcel as pc
 from radarx.io import parcel_diagnostics
 
+# numpy 2 renamed trapz to trapezoid; the tests run with both
+_trapezoid = getattr(np, "trapezoid", None) or np.trapz
+
 ENGINES = ["numpy"] + (["compiled"] if pc.HAS_COMPILED_KERNEL else [])
 needs_kernel = pytest.mark.skipif(
     not pc.HAS_COMPILED_KERNEL, reason="compiled kernel not built"
@@ -204,10 +207,8 @@ def reference_parcel_diagnostics(z, p, t, td):
     pos = bf > 0
     lfc = zf[above & pos][0]
     el = zf[above & pos][-1]
-    cape = np.trapezoid(
-        np.where((zf >= lfc) & (zf <= el), np.maximum(bf, 0.0), 0.0), zf
-    )
-    cin = np.trapezoid(np.where(zf < lfc, np.minimum(bf, 0.0), 0.0), zf)
+    cape = _trapezoid(np.where((zf >= lfc) & (zf <= el), np.maximum(bf, 0.0), 0.0), zf)
+    cin = _trapezoid(np.where(zf < lfc, np.minimum(bf, 0.0), 0.0), zf)
     lcl_z = np.interp(np.log(parcel.pl), np.log(p)[::-1], z[::-1])
     return dict(cape=cape, cin=cin, lcl_z=lcl_z, lfc_z=lfc, el_z=el, lcl_p=parcel.pl)
 

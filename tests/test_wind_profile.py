@@ -15,6 +15,9 @@ from radarx.io import sounding
 from radarx.retrieve import coldpool
 from radarx.retrieve import wind_profile as wp
 
+# numpy 2 renamed trapz to trapezoid; the tests run with both
+_trapezoid = getattr(np, "trapezoid", None) or np.trapz
+
 ENGINES = ["numpy"] + (["compiled"] if coldpool.HAS_COMPILED_KERNEL else [])
 DATA = Path(__file__).parent / "io" / "data"
 
@@ -165,8 +168,8 @@ def test_srh_vs_metpy_on_real_sounding():
     def mean(lo, hi):
         zz = np.concatenate([[lo], z[(z > lo) & (z < hi)], [hi]])
         return (
-            np.trapezoid(np.interp(zz, z, u), zz) / (hi - lo),
-            np.trapezoid(np.interp(zz, z, v), zz) / (hi - lo),
+            _trapezoid(np.interp(zz, z, u), zz) / (hi - lo),
+            _trapezoid(np.interp(zz, z, v), zz) / (hi - lo),
         )
 
     m, low, high = mean(0, 6000), mean(0, 500), mean(5500, 6000)

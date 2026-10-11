@@ -961,7 +961,8 @@ def test_real_c_band_sweep_reproduces_the_cmac_rain_rate():
 
     path = DATASETS.fetch("corcsapr2cmacppiM1.c1.20181111.030003.nc")
     sw = xd.io.open_cfradial1_datatree(path)["sweep_0"].to_dataset()
-    before = sw.copy(deep=True)
+    # a second read of the file: a deep copy loses coordinate attributes in xarray 2024.10
+    before = xd.io.open_cfradial1_datatree(path)["sweep_0"].to_dataset()
     est = rain_rate_a(sw, a="specific_attenuation", band="C", temperature=20.0)
     ref = sw["rain_rate_A"]
     ok = np.isfinite(est.values) & np.isfinite(ref.values) & (ref.values > 1.0)
