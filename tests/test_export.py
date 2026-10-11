@@ -875,6 +875,8 @@ def test_grid_netcdf_cf(grid, tmp_path):
         assert back["z"].attrs["standard_name"] == "altitude"
         assert back["time"].attrs["standard_name"] == "time"
         assert back["latitude"].attrs["units"] == "degrees_north"
+        assert back["altitude"].attrs["units"] == "m"
+        assert "_FillValue" not in back["x_bnds"].encoding
         # 2-D lat and lon, equal to the 1-D ones along the axes through the origin
         assert back["lat"].dims == ("y", "x") and back["lon"].dims == ("y", "x")
         ix, iy = grid.sizes["x"] // 2, grid.sizes["y"] // 2

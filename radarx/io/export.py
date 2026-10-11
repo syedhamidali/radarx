@@ -688,9 +688,19 @@ def write_odim(
 # ---------------------------------------------------------------------------
 _CRS_NAMES = ("crs_wkt", "spatial_ref", "crs")
 _AXES = {
-    "x": {"standard_name": "projection_x_coordinate", "axis": "X", "units": "m"},
-    "y": {"standard_name": "projection_y_coordinate", "axis": "Y", "units": "m"},
-    "z": {"axis": "Z", "positive": "up", "units": "m"},
+    "x": {
+        "standard_name": "projection_x_coordinate",
+        "long_name": "x coordinate of the projection",
+        "axis": "X",
+        "units": "m",
+    },
+    "y": {
+        "standard_name": "projection_y_coordinate",
+        "long_name": "y coordinate of the projection",
+        "axis": "Y",
+        "units": "m",
+    },
+    "z": {"long_name": "height", "axis": "Z", "positive": "up", "units": "m"},
 }
 
 
@@ -752,6 +762,7 @@ def _bounds(ds, name):
         dims=(name, "bnds"),
         attrs={"long_name": f"cell bounds of {name}"},
     )
+    ds[f"{name}_bnds"].encoding["_FillValue"] = None
     ds[name].attrs["bounds"] = f"{name}_bnds"
 
 
@@ -779,7 +790,11 @@ def _cf_grid(ds, crs, bounds, lonlat):
                 _set_attrs(out[name], {"standard_name": "altitude"})
     if "time" in out.coords:
         _set_attrs(out["time"], {"standard_name": "time", "axis": "T"})
-    for name, units in (("latitude", "degrees_north"), ("longitude", "degrees_east")):
+    for name, units in (
+        ("latitude", "degrees_north"),
+        ("longitude", "degrees_east"),
+        ("altitude", "m"),
+    ):
         if name in out.coords:
             _set_attrs(out[name], {"units": units, "long_name": f"{name} of the radar"})
 
@@ -857,8 +872,10 @@ def write_netcdf_cf(grid, path, *, crs=None, bounds=True, lonlat=True, **kwargs)
     The values of the fields are written as they are. Reading the file back
     with ``xarray.open_dataset`` gives the same fields, attributes and
     coordinates; the added ``crs`` and bounds variables are new, and 1-D
-    ``lat`` and ``lon`` are 2-D. This was checked with xarray, not with a CF
-    checker.
+    ``lat`` and ``lon`` are 2-D. The files of a ``grid_cones`` grid and of a
+    CAPPI pass the CF checker 4.1.0 against CF-1.8 without errors; it warns
+    when a field has neither ``standard_name`` nor ``long_name``, which
+    radarx does not invent.
 
     Parameters
     ----------

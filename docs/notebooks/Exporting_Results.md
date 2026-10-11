@@ -288,6 +288,9 @@ with xr.open_dataset(path) as back:
   attributes of a volume that was read from ODIM, xradar 0.11 does not).
 - Zarr 3 stores need xarray 2025.1 or newer; with an older xarray pass
   `zarr_format=2`.
-- None of the formats is checked against a validator here: the files are read
-  back with xarray, h5py and xradar, which the tests do for every format
-  (`tests/test_export.py`).
+- Only the CF NetCDF of a grid was checked with a validator (the CF checker
+  4.1.0 against CF-1.8: no errors, a warning for a field without
+  `long_name`). CfRadial1, CfRadial2 and ODIM_H5 files were read back with
+  xarray, h5py and xradar, which the tests do for every format
+  (`tests/test_export.py`); the CfRadial and ODIM_H5 specifications were not
+  used to validate them.
