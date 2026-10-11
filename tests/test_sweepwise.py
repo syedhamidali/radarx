@@ -392,3 +392,12 @@ def test_dask_support_registers_and_checks():
     for kind, why in (("never", ""), ("computes", ""), ("eager", "")):
         with pytest.raises(ValueError):
             sw.dask_support(kind, why)
+
+
+def test_gates_align_fields_with_different_coordinates():
+    a = field()
+    b = field(seed=1).assign_coords(azimuth=a.azimuth + 60.0)
+    gates = sw.Gates([a, b])
+    assert gates.dims == a.dims
+    assert gates.reference.sizes["azimuth"] == NRAY + 1  # the union of the rays
+    assert np.isnan(gates.fields[0].values).any()
