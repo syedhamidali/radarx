@@ -592,6 +592,14 @@ def test_layer_max_kernel_errors():
         )
 
 
+def test_layer_max_ignores_children_that_are_not_sweeps(volume):
+    nodes = {"/": xr.Dataset(), "radar_parameters": xr.Dataset({"x": 1.0})}
+    nodes.update({n: volume[n].to_dataset() for n in ("sweep_0", "sweep_1")})
+    tree = xr.DataTree.from_dict(nodes)
+    out = azimuthal_shear_layer_max(tree, engine="numpy")
+    assert out["azimuthal_shear_layer_max"].attrs["tilts_used"] == 2
+
+
 def test_effective_radius_default():
     # the layer maximum uses the same 4/3 Earth as the geometry module
     assert EFFECTIVE_RADIUS_4_3 == pytest.approx(6371000.0 * 4.0 / 3.0)

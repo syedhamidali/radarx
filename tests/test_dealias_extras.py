@@ -563,6 +563,27 @@ def test_dealias_velocity_with_confidence_on_a_volume():
     xr.testing.assert_identical(acc2, dealias_confidence(merged, engine="numpy"))
 
 
+@pytest.mark.parametrize("engine", ENGINES)
+def test_confidence_of_a_sector_does_not_wrap_and_keeps_the_dimension_order(engine):
+    """The first and last ray of a sector are not neighbours; range-first sweeps work."""
+    vel = np.zeros((30, 20))
+    vel[0, 5] = 30.0  # at the edge of the sector
+    ds = xr.Dataset(
+        {"V": (("azimuth", "range"), vel, {"nyquist_velocity": 10.0})},
+        coords={"azimuth": np.arange(30) * 1.0, "range": 500.0 * (1 + np.arange(20))},
+    )
+    conf = dealias_confidence(ds, "V", engine=engine)
+    # the edge ray has five neighbours, all too far: confidence 0; the last ray has none too far
+    assert conf.values[0, 5] == 0.0
+    assert conf.values[29, 5] == 1.0
+    assert conf.values[1, 5] == pytest.approx(1 - 1 / 8)
+    flipped = dealias_confidence(ds.transpose("range", "azimuth"), "V", engine=engine)
+    assert flipped.dims == ("range", "azimuth")
+    np.testing.assert_array_equal(
+        flipped.transpose("azimuth", "range").values, conf.values
+    )
+
+
 def test_confidence_errors(solved):
     ds, _, dea = solved
     both = ds.assign(VRADH_dealiased=dea)
