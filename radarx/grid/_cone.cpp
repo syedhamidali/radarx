@@ -10,6 +10,9 @@
 // interpolated linearly in height between the two cones that bracket it.
 // Optionally every cone is sampled at the position displaced by its own shift
 // (the advection of the storm from the time of the sweep to the analysis time).
+// Sweeps of the same elevation (repeated low tilts, SAILS) can be merged into
+// one cone first: the mean of the repeats that have a value, or the first repeat
+// that has one when they are ordered by priority (latest, or nearest in time).
 // Levels below the lowest or above the highest cone, or between cones where
 // one has no value, stay NaN (optionally the lowest cone fills below itself).
 //
@@ -17,6 +20,17 @@
 // the radar; grid_columns grids many fields of many radars in one call onto
 // columns given by their ground distance and azimuth from each radar
 // (multi-radar gridding on a shared grid).
+//
+// grid_gates is a different scheme, the radius of influence mapping of
+// objective analysis: every valid gate is placed in Cartesian space (the same
+// beam geometry), the gates are sorted into a coarse 3-D bucket grid, and every
+// output point takes the weighted mean of the gates closer than its radius of
+// influence R. The weights are Cressman (1959), (R^2 - d^2) / (R^2 + d^2), or
+// Barnes (1964), exp(-4 d^2 / R^2), with d the Cartesian distance between the
+// gate and the point; "nearest" takes the closest gate. R grows linearly with the
+// distance from the radar and the height above it (the "dist" function of
+// Py-ART). Scan geometry plays no role, so PPI, RHI, sector and repeated sweeps
+// are handled alike.
 //
 // Beam geometry follows xradar.georeference.antenna_to_cartesian (effective
 // Earth radius k_e * a, k_e = 4/3 by default; Doviak and Zrnic 1993, Doppler
@@ -162,7 +176,8 @@ Sweep prepare(const Array& data, const DArray& azimuth, const DArray& elevation,
 void grid_column(const std::vector<Sweep>& sweeps, double sc, double ac, const double* pz,
                  int64_t nz, double R, double sr, double max_gap, double min_weight,
                  bool fill_below, double fill_depth, std::vector<double>& vals,
-                 std::vector<double>& hts, float* out, int64_t stride) {
+                 std::vector<double>& hts, float* out, int64_t stride,
+                 const std::vector<int64_t>& groups, bool group_mean) {
     const size_t nk = sweeps.size();
     for (size_t k = 0; k < nk; ++k) {
         vals[k] = kNaN;
@@ -203,10 +218,49 @@ void grid_column(const std::vector<Sweep>& sweeps, double sc, double ac, const d
         if (den >= min_weight) vals[k] = num / den;
     }
 
+    // Sweeps of one elevation (repeated low tilts) form a group, which becomes one
+    // cone: the mean of the members that have a value, or the first member that
+    // has one (the members come ordered by priority).
+    size_t nu = nk;
+    if (!groups.empty()) {
+        nu = groups.size();
+        size_t k0 = 0;
+        for (size_t g = 0; g < nu; ++g) {
+            const size_t k1 = k0 + static_cast<size_t>(groups[g]);
+            double v = kNaN, h = kNaN;
+            if (group_mean) {
+                double sv = 0.0, sh = 0.0;
+                int nv = 0, nh = 0;
+                for (size_t k = k0; k < k1; ++k) {
+                    if (!std::isnan(vals[k])) {
+                        sv += vals[k];
+                        ++nv;
+                    }
+                    if (!std::isnan(hts[k])) {
+                        sh += hts[k];
+                        ++nh;
+                    }
+                }
+                if (nv) v = sv / nv;
+                if (nh) h = sh / nh;
+            } else {
+                for (size_t k = k0; k < k1; ++k) {
+                    if (std::isnan(v) && (!std::isnan(vals[k]) || std::isnan(h))) {
+                        v = vals[k];
+                        h = hts[k];
+                    }
+                }
+            }
+            vals[g] = v;
+            hts[g] = h;
+            k0 = k1;
+        }
+    }
+
     // Only cones that reach this column take part; low tilts can start
     // farther out than high ones, so compact them first.
     int64_t nc = 0;
-    for (size_t k = 0; k < nk; ++k) {
+    for (size_t k = 0; k < nu; ++k) {
         if (std::isnan(hts[k])) continue;
         hts[nc] = hts[k];
         vals[nc] = vals[k];
@@ -290,11 +344,21 @@ py::array_t<float> grid_cones(const DArray& x, const DArray& y, const DArray& z,
                                const std::vector<DArray>& range, double site_altitude,
                                double earth_radius, double max_gap, double min_weight,
                                bool fill_below, int n_threads, double k_e, double fill_depth,
-                               const std::vector<double>& shift) {
+                               const std::vector<double>& shift,
+                               const std::vector<int64_t>& groups, bool group_mean) {
     const double R = earth_radius * k_e;
     const double sr = R + site_altitude;
     std::vector<Sweep> sweeps = prepare_all(data, azimuth, elevation, range, R, sr);
     const size_t nk = sweeps.size();
+    if (!groups.empty()) {
+        int64_t total = 0;
+        for (int64_t g : groups) {
+            if (g < 1) throw std::invalid_argument("every group needs at least one sweep");
+            total += g;
+        }
+        if (total != static_cast<int64_t>(nk))
+            throw std::invalid_argument("the group sizes must add up to the number of sweeps");
+    }
     if (!shift.empty() && shift.size() != 2 * nk)
         throw std::invalid_argument("shift needs a (dx, dy) pair per sweep");
     for (size_t k = 0; k < shift.size() / 2; ++k) {
@@ -328,7 +392,7 @@ py::array_t<float> grid_cones(const DArray& x, const DArray& y, const DArray& z,
                     double ac = std::atan2(xc, yc) / kDeg;
                     if (ac < 0) ac += 360.0;
                     grid_column(sweeps, sc, ac, pz, nz, R, sr, max_gap, min_weight, fill_below,
-                                fill_depth, vals, hts, out + c, ncol);
+                                fill_depth, vals, hts, out + c, ncol, groups, group_mean);
                 }
             }
         };
@@ -387,6 +451,7 @@ std::vector<py::array_t<float>> grid_columns(
         }
     }
     const int64_t nz = z.size();
+    const std::vector<int64_t> no_groups;
     std::vector<py::ssize_t> shape(ground[0].shape(), ground[0].shape() + ground[0].ndim());
     shape.insert(shape.begin(), static_cast<py::ssize_t>(nz));
     std::vector<py::array_t<float>> results;
@@ -424,7 +489,7 @@ std::vector<py::array_t<float>> grid_columns(
                     if (ac < 0) ac += 360.0;
                     grid_column(sweeps[t], pg[r][c], ac, pz, nz, R, srs[t], max_gap,
                                 min_weight, fill_below, fill_depth, vals, hts, outs[t] + c,
-                                ncol);
+                                ncol, no_groups, false);
                 }
             }
         };
@@ -436,6 +501,256 @@ std::vector<py::array_t<float>> grid_columns(
     return results;
 }
 
+// ---------------------------------------------------------------------------
+// Radius of influence gridding of gates
+// ---------------------------------------------------------------------------
+namespace {
+
+enum Weighting { kCressman = 0, kBarnes = 1, kNearest = 2 };
+
+struct GateCloud {
+    std::vector<double> x, y, z, v;
+    void append(const GateCloud& o) {
+        x.insert(x.end(), o.x.begin(), o.x.end());
+        y.insert(y.end(), o.y.begin(), o.y.end());
+        z.insert(z.end(), o.z.begin(), o.z.end());
+        v.insert(v.end(), o.v.begin(), o.v.end());
+    }
+};
+
+struct GateSweep {
+    const double* data;
+    int64_t nray, ngate;
+    const double* azimuth;
+    const double* elevation;
+    const double* range;
+    double dx, dy;
+};
+
+}  // namespace
+
+py::array_t<float> grid_gates(const DArray& cx, const DArray& cy, const DArray& z,
+                              const std::vector<DArray>& data,
+                              const std::vector<DArray>& azimuth,
+                              const std::vector<DArray>& elevation,
+                              const std::vector<DArray>& range, double site_altitude,
+                              double earth_radius, double k_e, int weighting, double roi,
+                              double roi_range_factor, double roi_height_factor,
+                              int64_t min_gates, int n_threads,
+                              const std::vector<double>& shift) {
+    const size_t nk = data.size();
+    if (azimuth.size() != nk || elevation.size() != nk || range.size() != nk)
+        throw std::invalid_argument("need the same number of data/azimuth/elevation/range arrays");
+    if (!shift.empty() && shift.size() != 2 * nk)
+        throw std::invalid_argument("shift needs a (dx, dy) pair per sweep");
+    if (weighting < kCressman || weighting > kNearest)
+        throw std::invalid_argument("unknown weighting");
+    if (!(roi > 0.0) || roi_range_factor < 0.0 || roi_height_factor < 0.0)
+        throw std::invalid_argument("roi must be positive and the factors not negative");
+    if (min_gates < 1) throw std::invalid_argument("min_gates must be at least 1");
+    const int64_t ncol = cx.size(), nz = z.size();
+    if (cy.size() != ncol) throw std::invalid_argument("cx and cy differ in length");
+
+    std::vector<GateSweep> sweeps(nk);
+    for (size_t k = 0; k < nk; ++k) {
+        if (data[k].ndim() != 2) throw std::invalid_argument("sweep data must be 2-D (ray, gate)");
+        const int64_t nray = data[k].shape(0), ngate = data[k].shape(1);
+        if (azimuth[k].size() != nray || elevation[k].size() != nray || range[k].size() != ngate)
+            throw std::invalid_argument("azimuth/elevation/range do not match sweep data shape");
+        sweeps[k] = {data[k].data(),      nray,
+                     ngate,               azimuth[k].data(),
+                     elevation[k].data(), range[k].data(),
+                     shift.empty() ? 0.0 : shift[2 * k], shift.empty() ? 0.0 : shift[2 * k + 1]};
+    }
+
+    const double R = earth_radius * k_e;
+    const double sr = R + site_altitude;
+    const double* pcx = cx.data();
+    const double* pcy = cy.data();
+    const double* pz = z.data();
+    py::array_t<float> result({nz, ncol});
+    float* out = result.mutable_data();
+    if (ncol == 0 || nz == 0) return result;
+
+    {
+        py::gil_scoped_release release;
+        const int nt = thread_count(n_threads);
+
+        // Extent of the output points and the largest radius of influence.
+        double xmin = pcx[0], xmax = pcx[0], ymin = pcy[0], ymax = pcy[0], smax = 0.0;
+        for (int64_t c = 0; c < ncol; ++c) {
+            xmin = std::min(xmin, pcx[c]);
+            xmax = std::max(xmax, pcx[c]);
+            ymin = std::min(ymin, pcy[c]);
+            ymax = std::max(ymax, pcy[c]);
+            smax = std::max(smax, std::hypot(pcx[c], pcy[c]));
+        }
+        double zmin = pz[0], zmax = pz[0];
+        for (int64_t k = 0; k < nz; ++k) {
+            zmin = std::min(zmin, pz[k]);
+            zmax = std::max(zmax, pz[k]);
+        }
+        const double rmax =
+            std::max(roi, roi_range_factor * smax +
+                              roi_height_factor * std::max(zmax - site_altitude, 0.0));
+        const double x0 = xmin - rmax, y0 = ymin - rmax, z0 = zmin - rmax;
+        const double ex = xmax + rmax - x0, ey = ymax + rmax - y0, ez = zmax + rmax - z0;
+
+        // Gates, in chunks of rays so that the order does not depend on the threads.
+        struct Chunk {
+            size_t sweep;
+            int64_t r0, r1;
+        };
+        std::vector<Chunk> chunks;
+        const int64_t rays_per_chunk = 32;
+        for (size_t k = 0; k < nk; ++k)
+            for (int64_t r0 = 0; r0 < sweeps[k].nray; r0 += rays_per_chunk)
+                chunks.push_back({k, r0, std::min(sweeps[k].nray, r0 + rays_per_chunk)});
+        std::vector<GateCloud> parts(chunks.size());
+        {
+            std::atomic<int64_t> next{0};
+            auto worker = [&]() {
+                for (;;) {
+                    const int64_t w = next.fetch_add(1);
+                    if (w >= static_cast<int64_t>(chunks.size())) break;
+                    const Chunk& ch = chunks[w];
+                    const GateSweep& sw = sweeps[ch.sweep];
+                    GateCloud& cloud = parts[w];
+                    for (int64_t q = ch.r0; q < ch.r1; ++q) {
+                        const double el = sw.elevation[q] * kDeg, az = sw.azimuth[q] * kDeg;
+                        if (!std::isfinite(el) || !std::isfinite(az)) continue;
+                        const double sin_el = std::sin(el), cos_el = std::cos(el);
+                        const double sin_az = std::sin(az), cos_az = std::cos(az);
+                        for (int64_t g = 0; g < sw.ngate; ++g) {
+                            const double val = sw.data[q * sw.ngate + g];
+                            if (std::isnan(val)) continue;
+                            const double r = sw.range[g];
+                            const double b =
+                                std::sqrt(2.0 * sin_el * r * sr + r * r + sr * sr);
+                            const double gs = R * std::asin(r * cos_el / b);
+                            const double gx = gs * sin_az + sw.dx, gy = gs * cos_az + sw.dy;
+                            const double gz = b - R;
+                            if (!(gx >= x0 && gx <= x0 + ex && gy >= y0 && gy <= y0 + ey &&
+                                  gz >= z0 && gz <= z0 + ez))
+                                continue;
+                            cloud.x.push_back(gx);
+                            cloud.y.push_back(gy);
+                            cloud.z.push_back(gz);
+                            cloud.v.push_back(val);
+                        }
+                    }
+                }
+            };
+            std::vector<std::thread> pool;
+            for (int t = 1; t < nt; ++t) pool.emplace_back(worker);
+            worker();
+            for (auto& th : pool) th.join();
+        }
+        GateCloud cloud;
+        size_t total = 0;
+        for (const auto& p : parts) total += p.x.size();
+        cloud.x.reserve(total);
+        cloud.y.reserve(total);
+        cloud.z.reserve(total);
+        cloud.v.reserve(total);
+        for (auto& p : parts) {
+            cloud.append(p);
+            p = GateCloud();
+        }
+
+        // Bucket grid: the cell is at least the largest radius, and coarser when the
+        // domain would need too many buckets.
+        double h = rmax;
+        auto nb = [&](double e) { return static_cast<int64_t>(std::floor(e / h)) + 1; };
+        while (static_cast<double>(nb(ex)) * nb(ey) * nb(ez) > 8.0e6) h *= 1.5;
+        const int64_t nbx = nb(ex), nby = nb(ey), nbz = nb(ez);
+        auto bucket = [&](double v, double v0, int64_t n) {
+            return std::min(n - 1, std::max<int64_t>(0, static_cast<int64_t>((v - v0) / h)));
+        };
+        const size_t ng = cloud.x.size();
+        std::vector<int64_t> start(static_cast<size_t>(nbx * nby * nbz) + 1, 0);
+        std::vector<int64_t> key(ng);
+        for (size_t i = 0; i < ng; ++i) {
+            key[i] = (bucket(cloud.z[i], z0, nbz) * nby + bucket(cloud.y[i], y0, nby)) * nbx +
+                     bucket(cloud.x[i], x0, nbx);
+            ++start[key[i] + 1];
+        }
+        for (size_t b = 1; b < start.size(); ++b) start[b] += start[b - 1];
+        std::vector<double> sx(ng), sy(ng), sz(ng), sv(ng);
+        {
+            std::vector<int64_t> fill(start.begin(), start.end() - 1);
+            for (size_t i = 0; i < ng; ++i) {
+                const int64_t at = fill[key[i]]++;
+                sx[at] = cloud.x[i];
+                sy[at] = cloud.y[i];
+                sz[at] = cloud.z[i];
+                sv[at] = cloud.v[i];
+            }
+        }
+
+        std::atomic<int64_t> next{0};
+        const int64_t block = 256;
+        auto worker = [&]() {
+            for (;;) {
+                const int64_t c0 = next.fetch_add(block);
+                if (c0 >= ncol) break;
+                const int64_t c1 = std::min(ncol, c0 + block);
+                for (int64_t c = c0; c < c1; ++c) {
+                    const double xc = pcx[c], yc = pcy[c];
+                    const double sc = std::hypot(xc, yc);
+                    for (int64_t k = 0; k < nz; ++k) {
+                        const double zc = pz[k];
+                        const double rad = std::max(
+                            roi, roi_range_factor * sc + roi_height_factor * (zc - site_altitude));
+                        const double r2 = rad * rad;
+                        const int64_t ix0 = bucket(xc - rad, x0, nbx), ix1 = bucket(xc + rad, x0, nbx);
+                        const int64_t iy0 = bucket(yc - rad, y0, nby), iy1 = bucket(yc + rad, y0, nby);
+                        const int64_t iz0 = bucket(zc - rad, z0, nbz), iz1 = bucket(zc + rad, z0, nbz);
+                        double num = 0.0, den = 0.0, best = r2, nearest = kNaN;
+                        int64_t count = 0;
+                        for (int64_t iz = iz0; iz <= iz1; ++iz)
+                            for (int64_t iy = iy0; iy <= iy1; ++iy) {
+                                const int64_t row = (iz * nby + iy) * nbx;
+                                for (int64_t i = start[row + ix0]; i < start[row + ix1 + 1]; ++i) {
+                                    const double ddx = sx[i] - xc, ddy = sy[i] - yc,
+                                                 ddz = sz[i] - zc;
+                                    const double d2 = ddx * ddx + ddy * ddy + ddz * ddz;
+                                    if (!(d2 < r2)) continue;
+                                    ++count;
+                                    if (weighting == kNearest) {
+                                        if (d2 < best) {
+                                            best = d2;
+                                            nearest = sv[i];
+                                        }
+                                    } else {
+                                        const double w = weighting == kCressman
+                                                             ? (r2 - d2) / (r2 + d2)
+                                                             : std::exp(-4.0 * d2 / r2);
+                                        num += w * sv[i];
+                                        den += w;
+                                    }
+                                }
+                            }
+                        double res = kNaN;
+                        if (count >= min_gates) {
+                            if (weighting == kNearest)
+                                res = nearest;
+                            else if (den > 0.0)
+                                res = num / den;
+                        }
+                        out[k * ncol + c] = static_cast<float>(res);
+                    }
+                }
+            }
+        };
+        std::vector<std::thread> pool;
+        for (int t = 1; t < nt; ++t) pool.emplace_back(worker);
+        worker();
+        for (auto& th : pool) th.join();
+    }
+    return result;
+}
+
 PYBIND11_MODULE(_cone, m) {
     m.doc() = "Compiled cone gridding kernel for radarx.";
     m.def("grid_cones", &grid_cones, py::arg("x"), py::arg("y"), py::arg("z"), py::arg("data"),
@@ -444,6 +759,14 @@ PYBIND11_MODULE(_cone, m) {
           py::arg("max_gap") = 2.0, py::arg("min_weight") = 0.5, py::arg("fill_below") = false,
           py::arg("n_threads") = 0, py::arg("k_e") = 4.0 / 3.0,
           py::arg("fill_depth") = std::numeric_limits<double>::infinity(),
+          py::arg("shift") = std::vector<double>(),
+          py::arg("groups") = std::vector<int64_t>(), py::arg("group_mean") = false);
+    m.def("grid_gates", &grid_gates, py::arg("cx"), py::arg("cy"), py::arg("z"),
+          py::arg("data"), py::arg("azimuth"), py::arg("elevation"), py::arg("range"),
+          py::arg("site_altitude"), py::arg("earth_radius") = 6371000.0,
+          py::arg("k_e") = 4.0 / 3.0, py::arg("weighting") = 0, py::arg("roi") = 1000.0,
+          py::arg("roi_range_factor") = 0.0, py::arg("roi_height_factor") = 0.0,
+          py::arg("min_gates") = 1, py::arg("n_threads") = 0,
           py::arg("shift") = std::vector<double>());
     m.def("grid_columns", &grid_columns, py::arg("ground"), py::arg("column_azimuth"),
           py::arg("z"), py::arg("radar"), py::arg("data"), py::arg("azimuth"),

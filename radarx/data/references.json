@@ -576,6 +576,33 @@
   "pages": "396-409",
   "doi": "10.1175/1520-0450(1964)003<0396:ATFMDI>2.0.CO;2"
  },
+ "10.1175/1520-0493(1959)087<0367:AOOAS>2.0.CO;2": {
+  "authors": [
+   "Cressman, G. P."
+  ],
+  "year": 1959,
+  "title": "An Operational Objective Analysis System",
+  "type": "article",
+  "journal": "Monthly Weather Review",
+  "volume": "87",
+  "issue": "10",
+  "pages": "367-374",
+  "doi": "10.1175/1520-0493(1959)087<0367:AOOAS>2.0.CO;2"
+ },
+ "10.5334/jors.119": {
+  "authors": [
+   "Helmus, J. J.",
+   "Collis, S. M."
+  ],
+  "year": 2016,
+  "title": "The Python ARM Radar Toolkit (Py-ART), a Library for Working with Weather Radar Data in the Python Programming Language",
+  "type": "article",
+  "journal": "Journal of Open Research Software",
+  "volume": "4",
+  "issue": "1",
+  "pages": "e25",
+  "doi": "10.5334/jors.119"
+ },
  "10.1175/1520-0450(1968)007<0105:TDOKPO>2.0.CO;2": {
   "authors": [
    "Browning, K. A.",
