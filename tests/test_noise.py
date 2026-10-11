@@ -436,6 +436,9 @@ def test_dask_stays_lazy():
         correct_rhohv_noise(lazy).compute(), correct_rhohv_noise(ds)
     )
     xr.testing.assert_allclose(snr(lazy, noise=ZN).compute(), snr(ds, noise=ZN))
+    # a noise level estimated lazily is a dask scalar; its value is recorded
+    est = snr(lazy)
+    assert est.attrs["noise_level"] == pytest.approx(float(noise_level(ds).NOISE_LEVEL))
     nl = noise_level(lazy)
     assert nl.NOISE_LEVEL.chunks is not None
     assert float(nl.NOISE_LEVEL.compute()) == pytest.approx(
@@ -533,8 +536,13 @@ def test_snr_and_correction_inputs_by_dataset_array_or_name():
     z = correct_zdr_noise(ds.ZDR, dbz=ds.DBZH, noise=ZN)
     xr.testing.assert_allclose(z, correct_zdr_noise(ds, noise=ZN))
     # a named SNR together with a noise level is not accepted
-    with pytest.raises(KeyError, match="is not in the dataset"):
+    with pytest.raises(ValueError, match="exclusive"):
         correct_rhohv_noise(ds, snr="SNR", noise=ZN)
+    with pytest.raises(ValueError, match="exclusive"):
+        correct_zdr_noise(ds, snr="SNR", noise=ZN)
+    # a name that is not there is still reported as missing
+    with pytest.raises(KeyError, match="'SNR_USER' is not in the dataset"):
+        correct_rhohv_noise(ds, snr="SNR_USER", noise=ZN)
     # a DataArray and no way to find the SNR
     with pytest.raises(ValueError, match="pass snr as a DataArray"):
         correct_zdr_noise(ds.ZDR)

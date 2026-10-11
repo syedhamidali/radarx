@@ -425,11 +425,40 @@ def _profiles(
 
 
 _KDP_NAMES = {n.lower() for n in _ZH_ROLES[3]}
+_ZDR_LOWER = {n.lower() for n in _ZDR_NAMES}
 _LOW_ELEVATION = 10.0
 
 
+def _zdr_to_horizontal(zdr, elevation):
+    """
+    ZDR (dB) that the scatterers would show at 0 degrees elevation, from the
+    ZDR (dB) measured at ``elevation`` (degrees).
+
+    The inverse of the relation of :func:`radarx.retrieve.zdr_offset`
+    (``ZDR(t) = ZDR0 - 20 log10(10**(ZDR0/20) sin(t)**2 + cos(t)**2)``,
+    Rayleigh scattering by spheroids with a vertical axis and no canting,
+    derived in radarx and not checked against a paper):
+    ``ZDR0 = ZDR(t) + 20 log10(cos(t)**2) - 20 log10(1 - 10**(ZDR(t)/20) sin(t)**2)``.
+    NaN where the measured ZDR is outside what the relation can produce.
+    """
+    t = np.deg2rad(elevation)
+    r = np.power(10.0, 0.05 * np.asarray(zdr, dtype=np.float64))
+    s2, c2 = np.sin(t) ** 2, np.cos(t) ** 2
+    denom = 1.0 - r * s2
+    with np.errstate(invalid="ignore", divide="ignore"):
+        out = (
+            zdr
+            + 20.0 * np.log10(c2)
+            - 20.0 * np.log10(np.where(denom > 0, denom, np.nan))
+        )
+    return out
+
+
 def _check_elevation(sweeps, data_vars, values, correct):
-    """Warn for low sweeps; scale KDP by 1 / cos(elevation)**2 if asked."""
+    """
+    Warn for low sweeps; if asked, scale KDP by 1 / cos(elevation)**2 and
+    refer ZDR to 0 degrees elevation.
+    """
     low = []
     for i, ds in enumerate(sweeps):
         el = float(np.nanmedian(ds["elevation"].values))
@@ -439,20 +468,26 @@ def _check_elevation(sweeps, data_vars, values, correct):
             for v, name in enumerate(data_vars):
                 if name.lower() in _KDP_NAMES:
                     values[i][v] = values[i][v] / np.cos(np.deg2rad(el)) ** 2
+                elif name.lower() in _ZDR_LOWER:
+                    values[i][v] = _zdr_to_horizontal(values[i][v], el)
     if low:
         warnings.warn(
             f"QVP of a sweep at {min(low):.1f} degrees elevation: the method "
             "assumes high elevations (more than 10 to 20 degrees, Ryzhkov et al. "
             "2016), and the azimuthal means of ZDR and KDP are lower than "
             "their values at the horizontal (KDP by about cos(elevation)**2; "
-            "elevation_correction=True scales KDP, ZDR is not corrected)",
+            "elevation_correction=True corrects KDP and ZDR)",
             UserWarning,
             stacklevel=4,
         )
 
 
-def _var_attrs(ds, name, mode, filters, min_count):
+def _var_attrs(ds, name, mode, filters, min_count, correct=False):
     attrs = dict(ds[name].attrs)
+    if correct and name.lower() in _KDP_NAMES:
+        attrs["elevation_correction"] = "divided by cos(elevation)**2"
+    elif correct and name.lower() in _ZDR_LOWER:
+        attrs["elevation_correction"] = "referred to 0 degrees elevation"
     method = "median" if mode == _MODES["median"] else "mean"
     attrs["cell_methods"] = f"azimuth: {method}"
     if mode == _MODES["mean_db"]:
@@ -549,11 +584,19 @@ _QVP_PARAMS = """
     counts : bool, optional
         Also return ``<name>_count``, the number of valid gates per height.
     elevation_correction : bool, optional
-        Divide KDP by ``cos(elevation)**2``, the factor by which its
-        azimuthal mean at the elevation of the sweep is lower than at the
-        horizontal (approximate scaling for small oblate scatterers; not checked
-        against a paper). Differential reflectivity is not corrected. Default
-        False. Sweeps below 10 degrees raise a warning either way.
+        Refer KDP and ZDR to the horizontal. KDP is divided by
+        ``cos(elevation)**2``, the factor by which its azimuthal mean at the
+        elevation of the sweep is lower than at the horizontal (approximate
+        scaling for small oblate scatterers; not checked against a paper).
+        ZDR (dB) is corrected with the inverse of the relation used by
+        :func:`radarx.retrieve.zdr_offset`,
+        ``ZDR0 = ZDR + 20 log10(cos(e)**2) - 20 log10(1 - 10**(ZDR/20)
+        sin(e)**2)`` for the elevation ``e``: Rayleigh scattering by spheroids
+        with a vertical axis and no canting. That formula is derived in
+        radarx, not checked against a paper, and applied to the azimuthal
+        mean of ZDR. Canted or tumbling particles (and ice with a
+        horizontal-axis preference) do not follow it. Default False. Sweeps
+        below 10 degrees raise a warning either way.
     n_threads : int, optional
         Threads for the compiled kernel. Default: all cores.
     engine : {"auto", "compiled", "numpy"}, optional
@@ -664,7 +707,7 @@ def qvp(
         out[name] = (
             "height",
             values[0][v].astype(np.float32),
-            _var_attrs(ds, name, mode, filters, min_count),
+            _var_attrs(ds, name, mode, filters, min_count, elevation_correction),
         )
         if counts:
             out[f"{name}_count"] = (
@@ -801,7 +844,7 @@ def qvp_timeseries(
         out[name] = (
             ("time", "height"),
             stacked[v],
-            _var_attrs(sweeps[0], name, mode, filters, min_count),
+            _var_attrs(sweeps[0], name, mode, filters, min_count, elevation_correction),
         )
         if counts:
             out[f"{name}_count"] = (

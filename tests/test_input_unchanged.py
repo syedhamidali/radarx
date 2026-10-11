@@ -19,6 +19,7 @@ import xarray as xr
 
 import radarx  # noqa: F401
 from radarx.retrieve import (
+    beam_blockage,
     correct_attenuation,
     rain_rate,
     rain_rate_a,
@@ -26,6 +27,8 @@ from radarx.retrieve import (
     snr,
     z_offset,
 )
+
+from .test_beam_blockage import bell, geographic_dem
 
 NAZ, NRNG = 12, 60
 
@@ -90,6 +93,9 @@ CALLS = {
         ds, dbzh="DBZH", zdr="ZDR", phidp="PHIDP", rhohv="RHOHV", band="S"
     ),
     "z_offset": lambda ds: z_offset(ds, dbz="DBZH", zdr="ZDR", kdp="KDP", band="S"),
+    "beam_blockage": lambda ds: beam_blockage(
+        ds, geographic_dem(bell()), site=(30.0, 78.0, 500.0), beamwidth=1.0
+    ),
 }
 
 

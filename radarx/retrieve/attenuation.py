@@ -422,7 +422,7 @@ def _block(
     z = np.ascontiguousarray(dbz.reshape(-1, n), dtype=np.float64)
     p = np.ascontiguousarray(phidp.reshape(-1, n), dtype=np.float64)
     v = np.ascontiguousarray(valid.reshape(-1, n), dtype=np.uint8)
-    if z.shape[0] == 0 or n == 0:
+    if z.shape[0] == 0:
         empty = np.zeros(shape)
         return empty, empty.copy(), np.zeros(shape[:-1])
     cap = np.nan if max_pia is None else float(max_pia)

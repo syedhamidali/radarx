@@ -32,6 +32,9 @@ from radarx._provenance import (
 
 from .grid.test_cone import GRID
 from .grid.test_cone import _volume as cone_volume
+from .test_beam_blockage import bell, geographic_dem
+from .test_beam_blockage import make_sweep as bb_sweep
+from .test_beam_blockage import volume as bb_volume
 from .test_dealias import synthetic_sweep
 from .test_dealias import volume as dealias_volume
 from .test_kdp import _sweep as kdp_sweep
@@ -52,12 +55,19 @@ EXCEPTIONS = {
 }
 
 # Accessor methods that do not wrap a function of radarx.retrieve or
-# radarx.grid: they merge, read soundings (radarx.io) or draw figures.
+# radarx.grid: they merge, read soundings (radarx.io), write files
+# (radarx.io.export, which keep the attributes and return the path) or draw
+# figures.
 ACCESSOR_EXCEPTIONS = {
     "assign": "merges products into a sweep or volume",
     "background": "radarx.io.sounding",
     "interpolate_profile": "radarx.io.sounding",
     "sounding": "radarx.io.sounding",
+    "to_cfradial1": "radarx.io.export, writes a file",
+    "to_cfradial2": "radarx.io.export, writes a file",
+    "to_netcdf_cf": "radarx.io.export, writes a file",
+    "to_odim": "radarx.io.export, writes a file",
+    "to_zarr": "radarx.io.export, writes a file",
     "plot_cappi": "returns a figure",
     "plot_max_cappi": "returns a figure",
     "plot_ppi": "returns a figure",
@@ -72,6 +82,8 @@ KEY_MARKS = {
     "smith-elmore-2004": "Smith, T. M., and K. L. Elmore",
     "maesaka-2012": "Maesaka, T., K. Iwanami",
     "ester-1996": "Ester, M., H.-P. Kriegel",
+    "holleman-2001": "Holleman, I., 2001",
+    "graham-nelson-1998": "Graham, R. A., and J. A. Nelson",
 }
 
 
@@ -317,6 +329,25 @@ def test_sweep_and_volume_results():
         "correct_attenuation": radarx.retrieve.correct_attenuation(sweep, band="C"),
         "vil": radarx.retrieve.vil(storm_volume()),
         "echo_top": radarx.retrieve.echo_top(storm_volume()),
+        "beam_blockage": radarx.retrieve.beam_blockage(
+            bb_sweep(nray=4, ngate=40), geographic_dem(bell())
+        ),
+        "beam_blockage tree": radarx.retrieve.beam_blockage(
+            bb_volume(), geographic_dem(bell())
+        ),
+        "hail_products": radarx.retrieve.hail_products(
+            storm_volume(), freezing_level=3000.0, minus20_level=6000.0
+        ),
+        "shi": radarx.retrieve.shi(
+            storm_volume(), freezing_level=3000.0, minus20_level=6000.0
+        ),
+        "mesh": radarx.retrieve.mesh(
+            storm_volume(), freezing_level=3000.0, minus20_level=6000.0
+        ),
+        "posh": radarx.retrieve.posh(
+            storm_volume(), freezing_level=3000.0, minus20_level=6000.0
+        ),
+        "hail_kinetic_energy": radarx.retrieve.hail_kinetic_energy(storm_volume()),
     }
     for name, out in results.items():
         check_attrs(out)
@@ -519,6 +550,12 @@ def test_accessor_methods_set_the_attributes():
     volume = storm_volume()
     check_attrs(volume.radarx.vil())
     check_attrs(volume.radarx.echo_top())
+    levels = {"freezing_level": 3000.0, "minus20_level": 6000.0}
+    check_attrs(volume.radarx.hail_products(**levels))
+    check_attrs(volume.radarx.shi(**levels))
+    check_attrs(volume.radarx.mesh(**levels))
+    check_attrs(volume.radarx.posh(**levels))
+    check_attrs(volume.radarx.hail_kinetic_energy())
 
 
 # merging products into the input

@@ -36,6 +36,8 @@ written on the fly).
 | 8 | wind from a single Doppler radar | `single_doppler_winds`, `radar_geometry` |
 | 9 | diabatic Lagrangian analysis | `trajectories`, `diabatic_lagrangian`, `microphysical_rates` |
 | 10 | machine-learning plumbing | `radarx.ml` |
+| 11 | beam blockage and terrain clutter from a digital elevation model | `beam_blockage` |
+| 12 | export to CfRadial1, CfRadial2, ODIM_H5, Zarr and CF NetCDF | `write_cfradial1`, `write_cfradial2`, `write_odim`, `write_zarr`, `write_netcdf_cf` |
 
 ```{code-cell} ipython3
 import math
@@ -78,10 +80,16 @@ from radarx.io import (
     read_sticknet,
     read_sticknet_locations,
     read_wind_profiler,
+    write_cfradial1,
+    write_cfradial2,
+    write_netcdf_cf,
+    write_odim,
+    write_zarr,
 )
 from radarx.retrieve import (
     azimuthal_shear,
     baroclinic_generation,
+    beam_blockage,
     biological_echo,
     bulk_shear,
     buoyancy,
@@ -1531,6 +1539,107 @@ for ax, (da, title, cmap, lim) in zip(
     ax.set(title=title, aspect="equal", xlim=(-100, 100), ylim=(-100, 100), xlabel="east (km)")
 axes[0].set_ylabel("north (km)")
 plt.show()
+```
+
+## 11. Beam blockage and terrain clutter
+
+`beam_blockage` takes a digital elevation model (an `xarray.DataArray` of
+heights with `latitude` and `longitude`, read with `rioxarray` from SRTM or
+Copernicus DEM tiles, which radarx does not download) and returns, for every
+gate of a sweep or volume, the partial beam blockage `PBB` (the part of the
+beam power below the terrain, Bech et al. 2003, with a Gaussian beam as in Lang
+et al. 2009), the cumulative beam blockage `CBB` (the largest `PBB` along the
+ray), the terrain height under the gate and a flag for gates whose beam centre
+is at the terrain surface. The [beam blockage notebook](Beam_Blockage) tests it
+against a numerical integration of the beam cross section. Here a ridge of
+800 m, 25 km from the radar, blocks the lowest cut and the shadow stays
+behind it.
+
+```{code-cell} ipython3
+site_lat, site_lon, site_alt = 30.0, 78.0, 300.0
+glat = np.arange(site_lat - 1.0, site_lat + 1.0 + 0.001, 0.005)
+glon = np.arange(site_lon - 1.2, site_lon + 1.2 + 0.001, 0.005)
+la, lo = np.meshgrid(glat, glon, indexing="ij")
+dist_km = np.hypot((la - site_lat) * 111.2, (lo - site_lon) * 111.2 * np.cos(np.deg2rad(site_lat)))
+terrain = xr.DataArray(
+    150.0 + 800.0 * np.cos(0.5 * np.pi * np.clip((dist_km - 25.0) / 4.0, -1.0, 1.0)) ** 2,
+    dims=("latitude", "longitude"), coords={"latitude": glat, "longitude": glon},
+)
+nray, ngate = 180, 160
+bb_sweep = xr.Dataset(
+    {"DBZH": (("azimuth", "range"), np.full((nray, ngate), 30.0))},
+    coords={"azimuth": (np.arange(nray) + 0.5) * 2.0, "range": 500.0 * (np.arange(ngate) + 1),
+            "elevation": ("azimuth", np.full(nray, 0.5)),
+            "latitude": site_lat, "longitude": site_lon, "altitude": site_alt},
+)
+blocked = beam_blockage(bb_sweep, terrain, beamwidth=1.0)  # PBB, CBB, TERRAIN_HEIGHT, TERRAIN_CLUTTER
+blocked_acc = bb_sweep.radarx.beam_blockage(terrain, beamwidth=1.0, pattern="uniform")  # the accessor
+ray0 = blocked.isel(azimuth=0)
+print(f"ray at {float(ray0.azimuth):.0f} deg: PBB peaks at {float(ray0.PBB.max()):.2f}, "
+      f"CBB behind the ridge {float(ray0.CBB[-1]):.2f}, "
+      f"uniform beam {float(blocked_acc.CBB.isel(azimuth=0)[-1]):.2f}")
+kept = bb_sweep.DBZH.where(blocked.CBB < 0.5)  # use CBB as a mask; nothing is applied for you
+print(f"{int(kept.notnull().sum())} of {kept.size} gates kept")
+```
+
+```{code-cell} ipython3
+fig, axes = plt.subplots(1, 2, figsize=(10, 3.8), layout="constrained")
+r_km = bb_sweep.range / 1e3
+axes[0].fill_between(r_km, 0, ray0.TERRAIN_HEIGHT, color="0.6", label="terrain")
+axes[0].plot(r_km, geometry.beam_center_height(bb_sweep.range, 0.5, radar_height=site_alt), label="beam centre")
+axes[0].set(xlabel="range (km)", ylabel="height (m)", ylim=(0, 1500)); axes[0].legend()
+axes[1].plot(r_km, ray0.PBB, label="PBB")
+axes[1].plot(r_km, ray0.CBB, label="CBB")
+axes[1].set(xlabel="range (km)", ylabel="blockage", ylim=(-0.02, 1.02)); axes[1].legend()
+plt.show()
+```
+
+## 12. Export to files
+
+`radarx.io` writes volumes and grids to files that other tools read, with the
+provenance attributes (`radarx_method`, `radarx_references`, `radarx_version`,
+`history`) kept where the format can hold them: `write_cfradial1`,
+`write_cfradial2` and `write_odim` for a `DataTree` volume (through the writers
+of xradar), `write_zarr` for any result and `write_netcdf_cf` for a grid, which
+also gets the CF georeferencing (`grid_mapping`, `standard_name`, `axis`, 2-D
+`lat` and `lon`, bounds). Each has a `.radarx.to_*` method. The
+[Exporting results](Exporting_Results) page shows what every format keeps and
+loses. Here a small NEXRAD volume with derived fields is written to each format.
+
+```{code-cell} ipython3
+from open_radar_data import DATASETS
+
+raw_exp = xd.io.open_nexradlevel2_datatree(DATASETS.fetch("KLBB20160601_150025_V06"), sweep=[0, 2])
+raw_exp = raw_exp.map_over_datasets(
+    lambda ds: ds.sel(range=slice(None, 60e3)) if "range" in ds.dims else ds
+).xradar.georeference()
+vol_exp = raw_exp.radarx.assign(raw_exp.radarx.kdp()).radarx.assign(raw_exp.radarx.echo_mask())
+
+write_zarr(vol_exp, work / "volume.zarr")
+write_cfradial2(vol_exp, work / "volume_cfradial2.nc")
+write_cfradial1(vol_exp, work / "volume_cfradial1.nc")
+write_odim(vol_exp, work / "volume.h5", source="NOD:uskbb", fields=["DBZH", "ZDR", "KDP"])
+vol_exp.radarx.to_zarr(work / "volume_accessor.zarr")
+vol_exp.radarx.to_cfradial1(work / "volume_accessor_cf1.nc")
+vol_exp.radarx.to_cfradial2(work / "volume_accessor_cf2.nc")
+vol_exp.radarx.to_odim(work / "volume_accessor.h5", source="NOD:uskbb")
+
+same = xr.open_datatree(work / "volume.zarr", engine="zarr")
+xr.testing.assert_identical(same, vol_exp)
+cf1_exp = xr.open_dataset(work / "volume_cfradial1.nc")
+print("Zarr reads back identical;", "CfRadial1 holds", sorted(cf1_exp.attrs["radarx_method"].split(" | ")))
+```
+
+```{code-cell} ipython3
+grid_exp = radarx.grid.grid_cones(
+    vol_exp, "DBZH", x=np.arange(-40e3, 40e3 + 1, 2e3), y=np.arange(-40e3, 40e3 + 1, 2e3),
+    z=np.arange(500.0, 4000.0, 500.0),
+)
+write_netcdf_cf(grid_exp, work / "grid.nc")
+grid_exp.radarx.to_netcdf_cf(work / "grid_accessor.nc")
+grid_exp.radarx.to_zarr(work / "grid.zarr")
+with xr.open_dataset(work / "grid.nc") as cf_grid:
+    print(cf_grid["DBZH"].attrs["grid_mapping"], cf_grid["lat"].dims, cf_grid.attrs["Conventions"])
 ```
 
 ## References

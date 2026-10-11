@@ -25,6 +25,7 @@ _SECTIONS = {
         "dealias",
         "kdp",
         "attenuation",
+        "beam_blockage",
         "noise",
         "calibration",
         "advection",
@@ -45,7 +46,7 @@ _SECTIONS = {
         "coldpool",
         "wind_profile",
     ],
-    "Convective hazards": ["lightning", "tornado", "biology"],
+    "Convective hazards": ["lightning", "tornado", "biology", "hail"],
 }
 
 _modules = sorted(

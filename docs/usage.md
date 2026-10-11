@@ -19,6 +19,7 @@ notebooks/Grid_Radar
 notebooks/aws_data
 notebooks/IMD_Radar_Data
 notebooks/Interactive_Plots
+notebooks/Exporting_Results
 ```
 
 ```{toctree}
@@ -29,6 +30,7 @@ notebooks/Echo_QC
 notebooks/Dealiasing
 notebooks/KDP
 notebooks/Attenuation_Correction
+notebooks/Beam_Blockage
 notebooks/Advection_Correction
 notebooks/Superobs_Data_Assimilation
 ```
@@ -78,6 +80,7 @@ notebooks/Cold_Pools_and_Wind_Profiles
 
 notebooks/Lightning
 notebooks/Tornado_Detection
+notebooks/Hail_Products
 ```
 
 ```{toctree}

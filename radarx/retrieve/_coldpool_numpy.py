@@ -203,7 +203,11 @@ def gradient(f, x, y, n_threads=0):
 
 
 def vad(vr, az, cos_el, min_gates, min_spread, n_threads=0):
-    """VAD fit u, v, offset, rms residual and gate count (rows) per ring."""
+    """
+    VAD fit per ring, rows: u, v, offset, rms residual, gate count, then the
+    offset and the sin(2 az), cos(2 az) coefficients of the fit with the second
+    harmonic added.
+    """
     vr, az = np.asarray(vr, np.float64), np.asarray(az, np.float64)
     cos_el = np.asarray(cos_el, np.float64)
     ok = np.isfinite(vr) & np.isfinite(az)
@@ -211,7 +215,7 @@ def vad(vr, az, cos_el, min_gates, min_spread, n_threads=0):
     s = np.where(ok, np.sin(az), 0.0)
     c = np.where(ok, np.cos(az), 0.0)
     v = np.where(ok, vr, 0.0)
-    out = np.full((5, vr.shape[0]), np.nan)
+    out = np.full((8, vr.shape[0]), np.nan)
     out[4] = n
     with np.errstate(invalid="ignore", divide="ignore"):
         ms, mc, mv = s.sum(1) / n, c.sum(1) / n, v.sum(1) / n
@@ -231,4 +235,32 @@ def vad(vr, az, cos_el, min_gates, min_spread, n_threads=0):
     out[1] = np.where(good, b2 / cos_el, np.nan)
     out[2] = np.where(good, a0, np.nan)
     out[3] = np.where(good, rms, np.nan)
+    # second harmonic: covariance of (sin, cos, sin 2, cos 2) is 1/16 in
+    # determinant for a full circle; needs min_spread / 4 of it
+    with np.errstate(invalid="ignore", divide="ignore"):
+        s2, c2 = np.where(ok, np.sin(2 * az), 0.0), np.where(ok, np.cos(2 * az), 0.0)
+        m2, m3 = s2.sum(1) / n, c2.sum(1) / n
+        x = np.stack(
+            [
+                ds,
+                dc,
+                np.where(ok, s2 - m2[:, None], 0.0),
+                np.where(ok, c2 - m3[:, None], 0.0),
+            ],
+            axis=1,
+        )
+        gram = np.einsum("rik,rjk->rij", x, x)
+        rhs = np.einsum("rik,rk->ri", x, dv)
+        good2 = good & (np.linalg.det(gram) / n**4 >= 0.25 * min_spread)
+    if good2.any():
+        coef = np.linalg.solve(gram[good2], rhs[good2][..., None])[..., 0]
+        out[5, good2] = (
+            mv[good2]
+            - coef[:, 0] * ms[good2]
+            - coef[:, 1] * mc[good2]
+            - coef[:, 2] * m2[good2]
+            - coef[:, 3] * m3[good2]
+        )
+        out[6, good2] = coef[:, 2]
+        out[7, good2] = coef[:, 3]
     return out

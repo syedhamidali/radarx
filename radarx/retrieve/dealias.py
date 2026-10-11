@@ -98,6 +98,7 @@ import xarray as xr
 
 from .._fields import VELOCITY, as_sweep, find_field
 from .._provenance import provenance
+from ..fundamentals.geometry import beam_center_height
 from ._products import product_tree
 
 try:
@@ -108,7 +109,6 @@ except ImportError:  # pragma: no cover - depends on the build
     _dealias = None
     HAS_COMPILED_KERNEL = False
 
-EARTH_RADIUS = 6371000.0
 _SCALE = 1 << 20  # fixed point for velocity jumps in units of 2 Vn
 # The constants below are radarx's own choices, not values from a paper.
 _NYQUIST_TOLERANCE = 1.01  # values beyond this times Vn are flags, not data
@@ -415,10 +415,8 @@ def _beam_height(ds, sweep):
     """Gate heights above sea level (4/3 Earth) on (ray, range)."""
     rng = ds["range"].values.astype(np.float64)[None, :]
     elev = np.broadcast_to(ds["elevation"].values, ds[sweep.ray].shape)
-    sin_el = np.sin(np.deg2rad(elev.astype(np.float64)))[:, None]
     alt = float(ds["altitude"]) if "altitude" in ds.variables else 0.0
-    r_eff = EARTH_RADIUS * 4.0 / 3.0
-    return np.sqrt(rng**2 + r_eff**2 + 2.0 * rng * r_eff * sin_el) - r_eff + alt
+    return beam_center_height(rng, elev.astype(np.float64)[:, None], radar_height=alt)
 
 
 def _wind_reference(ds, sweep, wind_profile):

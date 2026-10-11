@@ -781,3 +781,59 @@ def test_low_elevation_warning_and_kdp_correction(engine):
     with warnings.catch_warnings():
         warnings.simplefilter("error", UserWarning)
         qvp(high, engine=engine)
+
+
+def _zdr_at_elevation(zdr0, elevation):
+    """ZDR (dB) at the elevation for ``zdr0`` at 0 degrees (zdr_offset's relation)."""
+    t = np.deg2rad(elevation)
+    return zdr0 - 20.0 * np.log10(10 ** (zdr0 / 20.0) * np.sin(t) ** 2 + np.cos(t) ** 2)
+
+
+def test_zdr_elevation_relation_is_the_one_of_zdr_offset():
+    """The correction inverts the relation that zdr_offset applies."""
+    from radarx.retrieve import zdr_offset
+
+    for zdr0 in (0.2, 1.5, 3.0):
+        for el in (10.0, 20.0, 45.0, 80.0):
+            measured = _zdr_at_elevation(zdr0, el)
+            assert vp._zdr_to_horizontal(measured, el) == pytest.approx(zdr0, abs=1e-9)
+            ds = xr.Dataset(
+                {
+                    "ZDR": (("azimuth", "range"), np.full((20, 40), measured)),
+                    "DBZH": (("azimuth", "range"), np.full((20, 40), 20.0)),
+                    "RHOHV": (("azimuth", "range"), np.full((20, 40), 0.99)),
+                },
+                coords={"elevation": ("azimuth", np.full(20, el))},
+            )
+            off = zdr_offset(ds, "dry_snow", reference=zdr0, min_count=10)
+            assert float(off["ZDR_OFFSET"]) == pytest.approx(0.0, abs=1e-6)
+    # ZDR measured at 20 degrees is about 12 percent below that at 0 degrees
+    assert _zdr_at_elevation(2.0, 20.0) / 2.0 == pytest.approx(0.88, abs=0.03)
+    assert np.isnan(vp._zdr_to_horizontal(60.0, 30.0))
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_elevation_correction_covers_zdr_and_kdp(engine):
+    ds, *_ = _sweep(elevation=20.0)
+    zdr0 = 1.5
+    measured = _zdr_at_elevation(zdr0, 20.0)
+    ds["ZDR"] = ds["ZDR"] * 0 + np.float32(measured)
+    ds["KDP"] = ds["DBZH"] * 0 + 1.0
+    plain = qvp(ds, ["ZDR", "KDP"], engine=engine)
+    fixed = qvp(ds, ["ZDR", "KDP"], elevation_correction=True, engine=engine)
+    # the mean of a constant is the constant, so the test is exact
+    np.testing.assert_allclose(plain["ZDR"], measured, atol=1e-4)
+    np.testing.assert_allclose(fixed["ZDR"], zdr0, atol=1e-3)
+    np.testing.assert_allclose(
+        fixed["KDP"], 1.0 / np.cos(np.deg2rad(20.0)) ** 2, atol=1e-4
+    )
+    assert "elevation_correction" not in plain["ZDR"].attrs
+    assert "0 degrees" in fixed["ZDR"].attrs["elevation_correction"]
+    assert "cos" in fixed["KDP"].attrs["elevation_correction"]
+    # other variables are left alone
+    plain2 = qvp(ds, ["DBZH", "RHOHV"], engine=engine)
+    fixed2 = qvp(ds, ["DBZH", "RHOHV"], elevation_correction=True, engine=engine)
+    xr.testing.assert_equal(plain2, fixed2)
+    # the time series does the same
+    ts = qvp_timeseries([ds, ds], ["ZDR"], elevation_correction=True, engine=engine)
+    np.testing.assert_allclose(ts["ZDR"], zdr0, atol=1e-3)

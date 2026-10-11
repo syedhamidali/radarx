@@ -11,7 +11,9 @@ echo (insects, birds, ground clutter, anomalous propagation, sea clutter,
 second-trip echo, noise) gate by gate, before KDP, hydrometeor
 classification, rain rates or gridding.
 
-The classification is a weighted fuzzy-logic scheme in the spirit of
+Two methods are available (option ``method`` of :func:`echo_mask`).
+
+``method="radarx"`` (default) is a weighted fuzzy-logic scheme in the manner of
 Gourley et al. (2007) [1] and Krause (2016) [2]: local features of the
 polarimetric variables and of the reflectivity are mapped to a membership in
 [0, 1] ("how meteorological"), and the weighted mean of the memberships is
@@ -22,8 +24,18 @@ Only the form of the aggregation, :math:`A = \\sum_j W_j P_j / \\sum_j W_j`
 are taken from them. The membership corners, weights, threshold, window,
 smoothing and speckle filter are radarx's own choices; see the Notes of
 :func:`echo_mask` for the number-by-number comparison with the two papers.
-Every feature is computed along the ray over a window of ``window`` km
-centred on the gate:
+
+``method="krause2016"`` is the MetSignal algorithm of Krause (2016) [2]:
+the six memberships of its Fig. 2, the weights of its Table 1, standard
+deviations over nine range bins, the threshold of 0.8 (warm season) or 0.7
+(cold season) and the post-processing rules of its Sect. 2. The Notes of
+:func:`echo_mask` list what the paper specifies and what radarx had to choose.
+The method of Gourley et al. (2007) [1] is not implemented, because its
+membership functions are density estimates of C-band data of one radar that
+the paper shows in a figure only (see the Notes).
+
+For ``method="radarx"``, every feature is computed along the ray over a
+window of ``window`` km centred on the gate:
 
 ``rhohv``
     Mean copolar correlation coefficient. Precipitation has a mode of
@@ -127,7 +139,7 @@ __all__ = ["echo_mask", "apply_mask"]
 import numpy as np
 import xarray as xr
 
-from .._fields import align_like, as_sweep
+from .._fields import VELOCITY, align_like, as_sweep
 from .._provenance import provenance
 from .dealias import _ray_links, _sweep_mapping
 from .kdp import _DBZH_NAMES, _PHIDP_NAMES, _RHOHV_NAMES, _find, _gate_spacing
@@ -149,6 +161,9 @@ _SNR_NAMES = ("SNRH", "SNR", "signal_to_noise_ratio")
 
 #: Echo classes of ``ECHO_CLASS``.
 CLASSES = {0: "no_echo", 1: "meteorological", 2: "non_meteorological", 3: "speckle"}
+
+#: Values of the ``method`` option of :func:`echo_mask`.
+METHODS = ("radarx", "krause2016")
 
 #: Features in the order of the kernel.
 FEATURES = (
@@ -213,6 +228,9 @@ _NEXRAD_FIELD_NODATA = {
 }
 
 _ROLES = ("dbzh", "zdr", "rhohv", "phidp")
+#: The no-data code of the radial velocity of NEXRAD Level II data (method
+#: ``"krause2016"`` only).
+_NEXRAD_VEL_FLOOR = -63.9
 
 
 # --------------------------------------------------------------------------
@@ -463,6 +481,134 @@ def _classify_compiled(sweeps, p, n_threads):
 
 
 # --------------------------------------------------------------------------
+# MetSignal of Krause (2016), NumPy reference (same steps as classify_krause)
+# --------------------------------------------------------------------------
+
+#: Membership corners ``(a, b, c, d)`` of the MetSignal algorithm, read from
+#: Fig. 2 of Krause (2016) (p. 1877). The velocity membership is 1 minus the
+#: inverted trapezoid (p. 1876).
+KRAUSE_LIMITS = {
+    "dbzh": (10.0, 30.0, _INF, _INF),
+    "rhohv": (0.75, 0.90, _INF, _INF),
+    "vrad": (-1.5, -1.0, 1.0, 1.5),
+    "phidp_sd": (-_INF, -_INF, 10.0, 20.0),
+    "zdr_sd": (-_INF, -_INF, 1.0, 2.0),
+    "rhohv_sd": (-_INF, -_INF, 0.03, 0.04),
+}
+#: Weights of the MetSignal algorithm, Table 1 of Krause (2016) (p. 1876).
+KRAUSE_WEIGHTS = {
+    "dbzh": 1.0,
+    "rhohv": 1.0,
+    "vrad": 1.0,
+    "phidp_sd": 2.0,
+    "zdr_sd": 2.0,
+    "rhohv_sd": 1.0,
+}
+#: Post-processing of Krause (2016) (pp. 1875-1876): gates with abs(ZDR) above
+#: ``zdr_max`` (dB) or rhohv below ``rhohv_min`` are non-meteorological, gates
+#: whose reflectivity at 3 km (previous volume) is at least ``override_dbz``
+#: are meteorological.
+KRAUSE_RULES = {"zdr_max": 4.5, "rhohv_min": 0.65, "override_dbz": 11.0}
+#: Thresholds of the aggregation value (p. 1876): warm and cold season.
+KRAUSE_THRESHOLDS = {"warm": 0.8, "cold": 0.7}
+#: Half length of the window of the standard deviations: nine range bins
+#: centred on the gate (p. 1876).
+KRAUSE_HALF_WINDOW = 4
+
+
+def _krause_numpy(sweep, p):
+    """Aggregation value and class of one sweep (NumPy reference)."""
+    z = sweep["dbzh"]
+    nray, ng = z.shape
+    floors = p["floors"]
+    with np.errstate(invalid="ignore"):
+        echo = np.isfinite(z) & (z > floors[0])
+        if sweep["snr"] is not None:
+            echo &= sweep["snr"] >= p["snr_min"]
+    g = np.arange(ng)
+    lo = np.broadcast_to(np.maximum(g - KRAUSE_HALF_WINDOW, 0), (nray, ng))
+    hi = np.broadcast_to(np.minimum(g + KRAUSE_HALF_WINDOW, ng - 1) + 1, (nray, ng))
+    num = np.zeros((nray, ng))
+    den = np.zeros((nray, ng))
+
+    def add(name, value, defined):
+        w = KRAUSE_WEIGHTS[name]
+        m = _trapezoid(np.where(defined, value, 0.0), KRAUSE_LIMITS[name])
+        num[:] = num + np.where(defined, w * m, 0.0)
+        den[:] = den + np.where(defined, w, 0.0)
+
+    add("dbzh", z, echo)
+    rho, zdr, phi, vel = sweep["rhohv"], sweep["zdr"], sweep["phidp"], sweep["vrad"]
+    ok_rho = _valid(rho, floors[2], echo)
+    ok_zdr = _valid(zdr, floors[1], echo)
+    ok_phi = _valid(phi, floors[3], echo)
+    ok_vel = _valid(vel, floors[4], echo)
+    if ok_rho is not None:
+        add("rhohv", rho, ok_rho)
+    if ok_vel is not None:
+        m = 1.0 - _trapezoid(np.where(ok_vel, vel, 0.0), KRAUSE_LIMITS["vrad"])
+        num[:] = num + np.where(ok_vel, KRAUSE_WEIGHTS["vrad"] * m, 0.0)
+        den[:] = den + np.where(ok_vel, KRAUSE_WEIGHTS["vrad"], 0.0)
+    if ok_phi is not None:
+        rad = np.deg2rad(np.where(ok_phi, phi, 0.0))
+        n = _span(_prefix(ok_phi.astype(np.float64)), lo, hi)
+        c = _span(_prefix(np.where(ok_phi, np.cos(rad), 0.0)), lo, hi)
+        s = _span(_prefix(np.where(ok_phi, np.sin(rad), 0.0)), lo, hi)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            r2 = np.clip((c * c + s * s) / (n * n), 1e-300, 1.0)
+            sd = np.sqrt(-np.log(r2)) * (180.0 / np.pi)
+        add("phidp_sd", sd, n >= 3)
+    for name, x, ok in (("zdr_sd", zdr, ok_zdr), ("rhohv_sd", rho, ok_rho)):
+        if ok is None:
+            continue
+        v = np.where(ok, x, 0.0)
+        n = _span(_prefix(ok.astype(np.float64)), lo, hi)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            mean = _span(_prefix(v), lo, hi) / n
+            var = _span(_prefix(v * v), lo, hi) / n - mean * mean
+        add(name, np.sqrt(np.maximum(var, 0.0)), n >= 3)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        agg = (num / den).astype(np.float32)
+    agg = np.where(echo, agg, np.float32(np.nan))
+    meteo = agg >= np.float32(p["threshold"])
+    if ok_zdr is not None:
+        meteo &= ~(
+            ok_zdr & (np.abs(np.where(ok_zdr, zdr, 0.0)) > KRAUSE_RULES["zdr_max"])
+        )
+    if ok_rho is not None:
+        meteo &= ~(ok_rho & (np.where(ok_rho, rho, 1.0) < KRAUSE_RULES["rhohv_min"]))
+    if sweep["zh3"] is not None:
+        with np.errstate(invalid="ignore"):
+            meteo |= np.isfinite(sweep["zh3"]) & (
+                sweep["zh3"] >= KRAUSE_RULES["override_dbz"]
+            )
+    cls = np.where(echo, np.where(meteo, 1, 2), 0).astype(np.int8)
+    if p["min_size"] > 1:
+        size = _components(cls == 1, sweep["links"])
+        cls[(cls == 1) & (size < p["min_size"])] = 3
+    return agg, cls
+
+
+def _krause_compiled(sweeps, p, n_threads):
+    """Run the C++ kernel of the MetSignal algorithm on all sweeps at once."""
+    return _qc.classify_krause(
+        [sw["dbzh"] for sw in sweeps],
+        [sw["zdr"] for sw in sweeps],
+        [sw["rhohv"] for sw in sweeps],
+        [sw["phidp"] for sw in sweeps],
+        [sw["vrad"] for sw in sweeps],
+        [sw["zh3"] for sw in sweeps],
+        [sw["snr"] for sw in sweeps],
+        [sw["links"] for sw in sweeps],
+        np.asarray(p["floors"], dtype=np.float64),
+        float(p["snr_min"]),
+        float(p["threshold"]),
+        int(p["min_size"]),
+        int(n_threads or 0),
+    )
+
+
+# --------------------------------------------------------------------------
 # xarray layer
 # --------------------------------------------------------------------------
 
@@ -486,26 +632,28 @@ def _is_nexrad(ds, root_attrs=None):
     return isinstance(scan, str) and scan.upper().startswith("VCP")
 
 
-def _floors(nodata, nexrad):
-    """No-data floors of (dbzh, zdr, rhohv, phidp)."""
+def _floors(nodata, nexrad, roles=_ROLES):
+    """No-data floors of ``roles`` ((dbzh, zdr, rhohv, phidp), plus vrad)."""
     if isinstance(nodata, str):
         if nodata not in ("auto", "nexrad"):
             raise ValueError(
                 f"nodata must be 'auto', 'nexrad', None or a dict, not {nodata!r}"
             )
         table = NEXRAD_NODATA if (nodata == "nexrad" or nexrad) else {}
+        if table:
+            table = {**table, "vrad": _NEXRAD_VEL_FLOOR}
     elif nodata is None:
         table = {}
     elif isinstance(nodata, dict):
-        unknown = set(nodata) - set(_ROLES)
+        unknown = set(nodata) - set(roles)
         if unknown:
-            raise ValueError(f"unknown nodata keys {sorted(unknown)}; use {_ROLES}")
+            raise ValueError(f"unknown nodata keys {sorted(unknown)}; use {roles}")
         table = nodata
     else:
         raise ValueError(
             f"nodata must be 'auto', 'nexrad', None or a dict, not {nodata!r}"
         )
-    return [float(table.get(role, -_INF)) for role in _ROLES]
+    return [float(table.get(role, -_INF)) for role in roles]
 
 
 def _options(limits, weights):
@@ -531,7 +679,7 @@ def _options(limits, weights):
 
 def _prepare_sweep(ds, fields, window):
     """Field names and contiguous (ray, range) float64 arrays of one sweep."""
-    dbzh, zdr, rhohv, phidp, snr = fields
+    dbzh, zdr, rhohv, phidp, snr = fields[:5]
     names = {
         "dbzh": _find(ds, dbzh, _DBZH_NAMES, True),
         "zdr": _find(ds, zdr, _ZDR_NAMES, zdr is not None),
@@ -539,6 +687,10 @@ def _prepare_sweep(ds, fields, window):
         "phidp": _find(ds, phidp, _PHIDP_NAMES, phidp is not None),
         "snr": _find(ds, snr, _SNR_NAMES, snr is not None),
     }
+    if len(fields) > 5:  # method "krause2016": radial velocity, Zh at 3 km
+        vrad, zh3 = fields[5:]
+        names["vrad"] = _find(ds, vrad, VELOCITY, vrad is not None)
+        names["zh3"] = _find(ds, zh3, (), zh3 is not None)
     da = ds[names["dbzh"]]
     if "range" not in da.dims or da.ndim != 2:
         raise ValueError(f"{names['dbzh']!r} must be 2-D with a 'range' dimension")
@@ -557,6 +709,8 @@ def _prepare_sweep(ds, fields, window):
         links = np.ones(da.sizes[ray_dim], dtype=np.uint8)
         links[-1] = 0  # RHI or unknown geometry: no wrap
     sweep = {role: arr(name) for role, name in names.items()}
+    sweep.setdefault("vrad", None)
+    sweep.setdefault("zh3", None)
     sweep.update(
         {
             "ds": ds,
@@ -569,7 +723,7 @@ def _prepare_sweep(ds, fields, window):
     return sweep
 
 
-def _wrap_sweep(sweep, score, cls, threshold, comment=None):
+def _wrap_sweep(sweep, score, cls, threshold, comment=None, method="radarx"):
     """Score, class and mask on the input sweep coordinates."""
     da = sweep["ds"][sweep["names"]["dbzh"]]
     dims = da.dims
@@ -595,8 +749,14 @@ def _wrap_sweep(sweep, score, cls, threshold, comment=None):
                 {
                     "long_name": "Meteorological echo score",
                     "units": "1",
-                    "comment": "weighted mean fuzzy membership, 3 x 3 average; "
-                    f"meteorological at >= {threshold}",
+                    "comment": (
+                        "weighted mean fuzzy membership, 3 x 3 average; "
+                        f"meteorological at >= {threshold}"
+                        if method == "radarx"
+                        else "aggregation value A of Krause (2016), the weighted "
+                        "mean of the memberships; meteorological at "
+                        f"A >= {threshold} after the post-processing rules"
+                    ),
                 },
             ),
             "METEO_MASK": (
@@ -620,6 +780,11 @@ def _wrap_sweep(sweep, score, cls, threshold, comment=None):
 
 
 def _run(sweeps, params, n_threads, use_compiled):
+    if params.get("method") == "krause2016":
+        if use_compiled:
+            scores, classes = _krause_compiled(sweeps, params, n_threads)
+            return list(zip(scores, classes))
+        return [_krause_numpy(sw, params) for sw in sweeps]
     if use_compiled:
         scores, classes = _classify_compiled(sweeps, params, n_threads)
         return list(zip(scores, classes))
@@ -682,7 +847,8 @@ def _fixed_angle(ds):
 
 
 @provenance(
-    "Fuzzy-logic echo score in the manner of Gourley 2007 and Krause 2016, own memberships and weights"
+    "Fuzzy-logic echo score in the manner of Gourley 2007 and Krause 2016, own memberships "
+    "and weights (method='krause2016': the MetSignal algorithm of Krause 2016)"
 )
 def echo_mask(
     obj,
@@ -692,12 +858,15 @@ def echo_mask(
     phidp=None,
     snr=None,
     *,
-    window=1.5,
-    threshold=0.6,
+    method="radarx",
+    vrad=None,
+    zh_3km=None,
+    window=None,
+    threshold=None,
     limits=None,
     weights=None,
     spin_threshold=2.0,
-    min_size=10,
+    min_size=None,
     snr_min=3.0,
     phidp_texture="circular",
     nodata="auto",
@@ -726,15 +895,43 @@ def echo_mask(
         ``PHIDP``, ``uncorrected_differential_phase``, ``differential_phase``,
         ``PHI``; ``SNRH``, ``SNR``, ``signal_to_noise_ratio``. Missing
         optional fields are left out of the classification.
+    method : {"radarx", "krause2016"}, optional
+        ``"radarx"`` (default) is the scheme described above, in the manner of
+        Gourley et al. (2007) [1] and Krause (2016) [2] with memberships and
+        weights of radarx. ``"krause2016"`` is the MetSignal algorithm of
+        Krause (2016) [2] with the memberships of its Fig. 2, the weights of
+        its Table 1, nine-gate standard deviations and its post-processing
+        rules (see Notes). With ``"krause2016"``, ``limits``, ``weights`` and
+        ``window`` are not accepted, ``spin_threshold`` and
+        ``phidp_texture`` are not used, and the score ``METEO_SCORE`` is the
+        aggregation value A of the paper, not averaged over 3 x 3 gates.
+    vrad : str, optional
+        Radial velocity field (m/s) of ``method="krause2016"``. By default the
+        first of ``VRADH``, ``VRAD``, ``VRADV``, ``VEL``, ``VELOCITY``,
+        ``velocity``, ``radial_velocity`` that a sweep holds. Where it is
+        missing, as in the surveillance cut of a NEXRAD split cut, the
+        velocity term is left out of the weighted mean. Not valid for
+        ``method="radarx"``, which does not use velocity.
+    zh_3km : str, optional
+        Name of a field of the sweeps with the reflectivity (dBZ) at 3 km
+        height of the previous volume scan on the same gates, for the
+        override rule of ``method="krause2016"`` (gates with at least 11 dBZ
+        are meteorological). Krause (2016) builds it as a constant-altitude
+        PPI from the previous volume (p. 1882); radarx does not compute it.
+        Not valid for ``method="radarx"``.
     window : float, optional
         Length (km) of the window along the ray for the features. Default 1.5
         (radarx choice; Krause 2016 [2] uses nine range bins, p. 1876).
+        Only for ``method="radarx"``; ``method="krause2016"`` always uses
+        nine range bins.
     threshold : float, optional
-        Gates whose score (weighted mean membership, averaged over 3 x 3
-        gates) is at least this are meteorological. Default 0.6, radarx's
-        own choice, lower than the 0.8 (warm season) and 0.7 (cold season) of
-        Krause (2016) [2] (p. 1876), whose memberships and weights differ
-        (see Notes).
+        Gates whose score are at least this are meteorological. Default for
+        ``method="radarx"``: 0.6 (the weighted mean membership averaged over
+        3 x 3 gates), radarx's own choice, lower than the 0.8 (warm season)
+        and 0.7 (cold season) of Krause (2016) [2] (p. 1876), whose
+        memberships and weights differ (see Notes). Default for
+        ``method="krause2016"``: 0.8, the warm-season value; pass 0.7 for the
+        cold season.
     limits : dict, optional
         Trapezoid ``(a, b, c, d)`` of any of the features ``"rhohv"``,
         ``"zdr"`` (dB), ``"zdr_texture"`` (dB), ``"phidp_texture"``
@@ -750,8 +947,9 @@ def echo_mask(
         2002 [4]).
     min_size : int, optional
         Connected meteorological regions with fewer gates are speckle.
-        Default 10 (radarx choice, not from the cited papers); 1 or less
-        disables the filter.
+        Default 10 for ``method="radarx"`` (radarx choice, not from the cited
+        papers) and 1 for ``method="krause2016"``, which has no speckle
+        filter; 1 or less disables the filter.
     phidp_texture : {"circular", "detrended"}, optional
         ``"circular"`` (default) is the circular standard deviation of the
         phase along the ray, which includes the rain ramp (about 0.58
@@ -873,9 +1071,11 @@ def echo_mask(
     from these papers. They have not been tuned against the published
     algorithms or a labelled data set.
 
-    Behavioural differences from the two papers (documented, not changed
-    here; see the open issues on the weights, the threshold, the missing
-    rules and the aggregation):
+    Behavioural differences of ``method="radarx"`` from the two papers. They
+    are documented and not changed, so that existing results keep their
+    numbers; ``method="krause2016"`` has none of the differences with Krause
+    (2016) listed below except the choices named under "Method
+    ``krause2016``":
 
     - Weights. All polarimetric features have weight 1.0, the same as
       rhohv. Krause (2016) gives SD(PhiDP) and SD(ZDR) twice the weight of
@@ -901,6 +1101,57 @@ def echo_mask(
       precipitation, ground clutter and clear air (their Eq. 3); their
       suppression thresholds (Table 1, p. 1446) and their despeckling of
       precipitation pixels on a 1 km grid (p. 1446) have no counterpart.
+
+    Method ``krause2016``. From the paper (Krause 2016 [2], Sect. 2, Table 1,
+    Fig. 2, Sect. 4): the inputs :math:`Z_h`, :math:`\\rho_{hv}`, radial
+    velocity V, SD(:math:`\\Phi_{DP}`), SD(:math:`Z_{DR}`) and
+    SD(:math:`\\rho_{hv}`), the standard deviations over nine range bins
+    centred on the gate; the weights 1, 1, 1, 2, 2, 1; the single-sided
+    trapezoid memberships :math:`Z_h` 0 at 10 and 1 at 30 dBZ,
+    :math:`\\rho_{hv}` 0 at 0.75 and 1 at 0.90, SD(:math:`\\Phi_{DP}`) 1 up to
+    10 and 0 at 20 degrees, SD(:math:`Z_{DR}`) 1 up to 1 and 0 at 2 dB,
+    SD(:math:`\\rho_{hv}`) 1 up to 0.03 and 0 at 0.04, and the velocity
+    membership 1 minus the inverted trapezoid that is 1 between -1.0 and
+    1.0 m/s and 0 beyond :math:`\\pm` 1.5 m/s (the corners are read from the
+    dashed lines of Fig. 2 against its axes, the text gives none); the
+    aggregation
+    :math:`A = \\sum_j W_j P_j / \\sum_j W_j` compared with 0.8 (warm season)
+    or 0.7 (cold season); the mean :math:`Z_{DR}` is not a term; then
+    gates with :math:`|Z_{DR}| > 4.5` dB or :math:`\\rho_{hv} < 0.65` are
+    non-meteorological, and gates whose :math:`Z_h` at 3 km height in the
+    previous volume exceeds 11 dBZ are meteorological. The paper does not
+    state, and radarx chooses: the standard deviation is the population
+    standard deviation of the gates with echo and data in the window (the
+    circular standard deviation for :math:`\\Phi_{DP}`, which equals the
+    ordinary one for small spread and is safe at the wrap of the phase), at
+    least three such gates are needed (else the term is left out), the window
+    is cut at the ends of the ray, a field that is missing at a gate drops
+    its term from the weighted mean, the comparisons are ``A >= threshold``
+    and ``Zh_3km >= 11``, the override is applied after the two rules, the
+    rules use the value of the gate itself, and no speckle filter is applied
+    (``min_size`` defaults to 1). The paper gives neither the gate spacing of
+    its data nor how the 3 km field is built beyond "the elevation closest to
+    the constant altitude of 3 km" of the previous volume, so ``zh_3km`` must
+    be built by the caller. The standard deviations depend on the gate
+    spacing: over nine gates of 250 m a phase ramp of rain alone gives
+    SD(:math:`\\Phi_{DP}`) of 1.3 degrees per degree/km of KDP, so that the
+    membership starts to fall at a KDP of 7.7 degrees/km. A volume of NEXRAD data has no velocity in the
+    surveillance cut of a split cut, so that cut is classified without the
+    velocity term (weights 7 instead of 8).
+
+    Gourley et al. (2007) [1] is not implemented as a method. The paper was
+    read in full, but its three-class classifier rests on membership
+    functions that are Gaussian-kernel density estimates of C-band data of
+    one radar (Trappes, Fig. 3 and Eq. 2) published as plots only; the text
+    gives the modes (:math:`\\rho_{hv}` 0.97, 0.92 and 0.42 for precipitation,
+    ground clutter and clear air; texture of :math:`Z_{DR}` 0.4, 5.2 and 2.5
+    dB; texture of :math:`\\Phi_{DP}` 4, 125 and 35 degrees), the overlap
+    areas of the weights (0.243, 0.203, 0.081 giving 1 : 1.20 : 3.00 by
+    Eq. 4) and one membership example, not the curves. The slope of the
+    range correction of the texture (Eq. 1, Fig. 2) and the pulse-to-pulse
+    variability of Z of Table 1 are not available either. Curves digitised
+    from the figure would be an invention at S band. The method is built to
+    be refitted for each radar and wavelength.
 
     References
     ----------
@@ -932,7 +1183,34 @@ def echo_mask(
     --------
     >>> qc = radarx.retrieve.echo_mask(dtree)  # doctest: +SKIP
     >>> clean = dtree.radarx.apply_mask(qc)  # doctest: +SKIP
+
+    The MetSignal algorithm of Krause (2016), with the reflectivity at 3 km of
+    the previous volume as a field ``ZH3KM`` of the sweep:
+
+    >>> qc = radarx.retrieve.echo_mask(
+    ...     sweep, method="krause2016", zh_3km="ZH3KM"
+    ... )  # doctest: +SKIP
     """
+    if method not in METHODS:
+        raise ValueError(f"method must be one of {METHODS}, not {method!r}")
+    krause = method == "krause2016"
+    if krause:
+        taken = {"limits": limits, "weights": weights, "window": window}
+        given = [k for k, v in taken.items() if v is not None]
+        if given:
+            raise ValueError(
+                f"method='krause2016' uses the membership functions, weights and "
+                f"nine-gate window of the paper; {given} are options of "
+                "method='radarx'"
+            )
+    elif vrad is not None or zh_3km is not None:
+        raise ValueError("vrad and zh_3km are used by method='krause2016' only")
+    if threshold is None:
+        threshold = KRAUSE_THRESHOLDS["warm"] if krause else 0.6
+    if min_size is None:
+        min_size = 1 if krause else 10
+    if window is None:
+        window = 1.5
     if not window > 0:
         raise ValueError("window must be positive")
     if phidp_texture not in ("circular", "detrended"):
@@ -942,10 +1220,21 @@ def echo_mask(
     lim, wts = _options(limits, weights)
     use_compiled = _use_compiled(engine)
     fields = (dbzh, zdr, rhohv, phidp, snr)
+    if krause:
+        fields += (vrad, zh_3km)
     obj = as_sweep(obj)
 
     def params(nexrad):
+        if krause:
+            return {
+                "method": method,
+                "floors": _floors(nodata, nexrad, _ROLES + ("vrad",)),
+                "snr_min": float(snr_min),
+                "threshold": float(threshold),
+                "min_size": int(min_size),
+            }
         return {
+            "method": method,
             "floors": _floors(nodata, nexrad),
             "snr_min": float(snr_min),
             "limits": lim,
@@ -960,7 +1249,7 @@ def echo_mask(
         sweep = _prepare_sweep(obj, fields, window)
         p = params(_is_nexrad(obj))
         score, cls = _run([sweep], p, n_threads, use_compiled)[0]
-        return _wrap_sweep(sweep, score, cls, threshold)
+        return _wrap_sweep(sweep, score, cls, threshold, method=method)
 
     from ..grid.cone import _sweep_names
 
@@ -984,7 +1273,9 @@ def echo_mask(
         results, comments = _borrow_split_cuts(sweeps, results)
     nodes = {"/": obj.root.to_dataset(inherit=False)}
     for sweep, (score, cls), comment in zip(sweeps, results, comments):
-        nodes[sweep["name"]] = _wrap_sweep(sweep, score, cls, threshold, comment)
+        nodes[sweep["name"]] = _wrap_sweep(
+            sweep, score, cls, threshold, comment, method
+        )
     return xr.DataTree.from_dict(nodes)
 
 

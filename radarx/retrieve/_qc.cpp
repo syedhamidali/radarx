@@ -23,6 +23,10 @@
 // Prefix sums make every window O(1), so each pass is O(N) in the number of
 // gates. Every step follows the NumPy reference in radarx/retrieve/qc.py, in
 // the same order of operations.
+//
+// classify_krause implements the MetSignal algorithm of Krause (2016) in one
+// pass per ray: six memberships (Fig. 2), weights (Table 1), the aggregation
+// value, the threshold and the post-processing rules (see krause_ray).
 
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
@@ -48,12 +52,14 @@ constexpr double kPi = 3.14159265358979323846;  // M_PI is not standard (MSVC)
 constexpr double kDegToRad = kPi / 180.0;
 constexpr double kRadToDeg = 180.0 / kPi;
 constexpr int kFeatures = 6;  // rhohv, zdr, zdr_texture, phidp_texture, dbz_texture, spin
+constexpr double kInfD = std::numeric_limits<double>::infinity();
 constexpr float kNaNf = std::numeric_limits<float>::quiet_NaN();
 
 enum Class : int8_t { kNoEcho = 0, kMeteo = 1, kNonMeteo = 2, kSpeckle = 3 };
 
 struct Params {
     double floor_z, floor_zdr, floor_rho, floor_phi;  // no-data floors
+    double floor_vel;  // Krause 2016 only
     double snr_min;
     double lim[kFeatures][4];
     double w[kFeatures];
@@ -69,6 +75,8 @@ struct Sweep {
     const double* rho = nullptr;
     const double* phi = nullptr;
     const double* snr = nullptr;
+    const double* vel = nullptr;  // Krause 2016 only
+    const double* zh3 = nullptr;  // reflectivity at 3 km of the previous volume, idem
     const uint8_t* links = nullptr;
     float* raw = nullptr;
     float* score = nullptr;
@@ -120,7 +128,7 @@ inline double span(const double* p, int64_t lo, int64_t hi) {
 
 // Per-thread prefix arrays (ngate + 1 each).
 struct RayScratch {
-    enum { kEcho, kPair, kDz2, kTrip, kFlip, kZn, kZ1, kZ2, kRn, kR1, kPn, kPc, kPs, kQ, kQn, kN };
+    enum { kEcho, kPair, kDz2, kTrip, kFlip, kZn, kZ1, kZ2, kRn, kR1, kPn, kPc, kPs, kQ, kQn, kR2, kN };
     std::vector<double> buf;
     std::vector<uint8_t> echo;
     std::vector<double> dz;
@@ -405,6 +413,129 @@ void despeckle(const Params& P, const Sweep& sw, std::vector<int64_t>& parent,
     }
 }
 
+
+// ---------------------------------------------------------------------------
+// MetSignal of Krause (2016, J. Atmos. Oceanic Technol. 33, 1875-1885)
+// ---------------------------------------------------------------------------
+
+// Membership corners (a, b, c, d) read from Fig. 2 (p. 1877). The velocity
+// membership is 1 minus an inverted trapezoid (p. 1876).
+constexpr double kKrZh[4] = {10.0, 30.0, kInfD, kInfD};
+constexpr double kKrRho[4] = {0.75, 0.90, kInfD, kInfD};
+constexpr double kKrVel[4] = {-1.5, -1.0, 1.0, 1.5};
+constexpr double kKrPhi[4] = {-kInfD, -kInfD, 10.0, 20.0};
+constexpr double kKrZdr[4] = {-kInfD, -kInfD, 1.0, 2.0};
+constexpr double kKrRhoSd[4] = {-kInfD, -kInfD, 0.03, 0.04};
+// Weights, Table 1 (p. 1876).
+constexpr double kKrWeightZh = 1.0, kKrWeightRho = 1.0, kKrWeightVel = 1.0;
+constexpr double kKrWeightPhi = 2.0, kKrWeightZdr = 2.0, kKrWeightRhoSd = 1.0;
+// Post-processing (pp. 1875-1876).
+constexpr double kKrZdrMax = 4.5, kKrRhoMin = 0.65, kKrOverrideDbz = 11.0;
+constexpr int64_t kKrHalfWindow = 4;  // nine range bins centred on the gate
+
+// Prefix sums of the quantities of the standard deviations: ZDR, rhohv
+// (values as measured) and the circular PhiDP sums.
+void krause_prefixes(const Params& P, const Ray& ray, RayScratch& s) {
+    const uint8_t* echo = s.echo.data();
+    double* pe = s.p(RayScratch::kEcho);
+    double* zn = s.p(RayScratch::kZn);
+    double* z1 = s.p(RayScratch::kZ1);
+    double* z2 = s.p(RayScratch::kZ2);
+    double* rn = s.p(RayScratch::kRn);
+    double* r1 = s.p(RayScratch::kR1);
+    double* r2 = s.p(RayScratch::kR2);
+    double* pn = s.p(RayScratch::kPn);
+    double* pc = s.p(RayScratch::kPc);
+    double* ps = s.p(RayScratch::kPs);
+    for (int64_t g = 0; g < ray.ng; ++g) {
+        const bool e = echo[g] != 0;
+        pe[g + 1] = pe[g] + (e ? 1.0 : 0.0);
+        const bool okd = e && valid(ray.zdr, g, P.floor_zdr);
+        const double vd = okd ? ray.zdr[g] : 0.0;
+        zn[g + 1] = zn[g] + (okd ? 1.0 : 0.0);
+        z1[g + 1] = z1[g] + vd;
+        z2[g + 1] = z2[g] + vd * vd;
+        const bool okr = e && valid(ray.rho, g, P.floor_rho);
+        const double vr = okr ? ray.rho[g] : 0.0;
+        rn[g + 1] = rn[g] + (okr ? 1.0 : 0.0);
+        r1[g + 1] = r1[g] + vr;
+        r2[g + 1] = r2[g] + vr * vr;
+        const bool okp = e && valid(ray.phi, g, P.floor_phi);
+        const double rad = (okp ? ray.phi[g] : 0.0) * kDegToRad;
+        pn[g + 1] = pn[g] + (okp ? 1.0 : 0.0);
+        pc[g + 1] = pc[g] + (okp ? std::cos(rad) : 0.0);
+        ps[g + 1] = ps[g] + (okp ? std::sin(rad) : 0.0);
+    }
+}
+
+// Score and class of one ray. Terms whose field is missing (or has no data at
+// the gate) are left out of the weighted mean.
+void krause_ray(const Params& P, const Sweep& sw, int64_t r, RayScratch& s) {
+    const int64_t ng = sw.ngate, off = r * ng;
+    const Ray ray{sw.z + off,
+                  sw.zdr ? sw.zdr + off : nullptr,
+                  sw.rho ? sw.rho + off : nullptr,
+                  sw.phi ? sw.phi + off : nullptr,
+                  sw.snr ? sw.snr + off : nullptr,
+                  ng};
+    const double* vel = sw.vel ? sw.vel + off : nullptr;
+    const double* zh3 = sw.zh3 ? sw.zh3 + off : nullptr;
+    for (int k = 0; k < RayScratch::kN; ++k) s.p(k)[0] = 0.0;
+    mark_echo(P, ray, s);
+    krause_prefixes(P, ray, s);
+    float* score = sw.score + off;
+    int8_t* cls = sw.cls + off;
+    for (int64_t g = 0; g < ng; ++g) {
+        if (!s.echo[g]) {
+            score[g] = kNaNf;
+            cls[g] = kNoEcho;
+            continue;
+        }
+        double num = 0.0, den = 0.0;
+        auto add = [&](double w, double m) {
+            num = num + w * m;
+            den = den + w;
+        };
+        add(kKrWeightZh, trapezoid(ray.z[g], kKrZh));
+        if (valid(ray.rho, g, P.floor_rho)) add(kKrWeightRho, trapezoid(ray.rho[g], kKrRho));
+        if (valid(vel, g, P.floor_vel)) add(kKrWeightVel, 1.0 - trapezoid(vel[g], kKrVel));
+        const int64_t lo = std::max<int64_t>(g - kKrHalfWindow, 0);
+        const int64_t hi = std::min<int64_t>(g + kKrHalfWindow, ng - 1) + 1;
+        if (ray.phi != nullptr) {
+            const double n = span(s.p(RayScratch::kPn), lo, hi);
+            if (n >= 3) {
+                const double c = span(s.p(RayScratch::kPc), lo, hi);
+                const double sn = span(s.p(RayScratch::kPs), lo, hi);
+                const double r2 = std::min(std::max((c * c + sn * sn) / (n * n), 1e-300), 1.0);
+                add(kKrWeightPhi, trapezoid(std::sqrt(-std::log(r2)) * kRadToDeg, kKrPhi));
+            }
+        }
+        if (ray.zdr != nullptr) {
+            const double n = span(s.p(RayScratch::kZn), lo, hi);
+            if (n >= 3) {
+                const double mean = span(s.p(RayScratch::kZ1), lo, hi) / n;
+                const double var = span(s.p(RayScratch::kZ2), lo, hi) / n - mean * mean;
+                add(kKrWeightZdr, trapezoid(std::sqrt(std::max(var, 0.0)), kKrZdr));
+            }
+        }
+        if (ray.rho != nullptr) {
+            const double n = span(s.p(RayScratch::kRn), lo, hi);
+            if (n >= 3) {
+                const double mean = span(s.p(RayScratch::kR1), lo, hi) / n;
+                const double var = span(s.p(RayScratch::kR2), lo, hi) / n - mean * mean;
+                add(kKrWeightRhoSd, trapezoid(std::sqrt(std::max(var, 0.0)), kKrRhoSd));
+            }
+        }
+        const float a = static_cast<float>(num / den);  // den >= 1: Zh is always a term
+        score[g] = a;
+        bool meteo = a >= P.threshold;
+        if (valid(ray.zdr, g, P.floor_zdr) && std::fabs(ray.zdr[g]) > kKrZdrMax) meteo = false;
+        if (valid(ray.rho, g, P.floor_rho) && ray.rho[g] < kKrRhoMin) meteo = false;
+        if (zh3 != nullptr && std::isfinite(zh3[g]) && zh3[g] >= kKrOverrideDbz) meteo = true;
+        cls[g] = meteo ? kMeteo : kNonMeteo;
+    }
+}
+
 const double* optional_data(const py::object& obj, const DArray& ref, DArray& keep,
                             const char* name) {
     if (obj.is_none()) return nullptr;
@@ -530,6 +661,97 @@ py::tuple classify(const std::vector<DArray>& dbz, const std::vector<py::object>
     return py::make_tuple(score_list, class_list);
 }
 
+// Classify the sweeps of a volume with the MetSignal algorithm of Krause
+// (2016). Per sweep: reflectivity (ray, gate), optional zdr, rhohv, phidp,
+// radial velocity, reflectivity at 3 km of the previous volume and snr of the
+// same shape (or None) and the ray links. floors: no-data floors of dbzh,
+// zdr, rhohv, phidp and velocity. Returns lists of the aggregation value
+// (float32) and the class (int8) of every gate.
+py::tuple classify_krause(const std::vector<DArray>& dbz, const std::vector<py::object>& zdr,
+                          const std::vector<py::object>& rho, const std::vector<py::object>& phi,
+                          const std::vector<py::object>& vel, const std::vector<py::object>& zh3,
+                          const std::vector<py::object>& snr, const std::vector<UArray>& links,
+                          const DArray& floors, double snr_min, double threshold,
+                          int64_t min_size, int n_threads) {
+    const size_t ns = dbz.size();
+    if (zdr.size() != ns || rho.size() != ns || phi.size() != ns || vel.size() != ns ||
+        zh3.size() != ns || snr.size() != ns || links.size() != ns)
+        throw std::invalid_argument("need one entry per sweep in every list");
+    if (floors.size() != 5) throw std::invalid_argument("need five no-data floors");
+    Params P{};
+    const double* fl = floors.data();
+    P.floor_z = fl[0];
+    P.floor_zdr = fl[1];
+    P.floor_rho = fl[2];
+    P.floor_phi = fl[3];
+    P.floor_vel = fl[4];
+    P.snr_min = snr_min;
+    P.threshold = static_cast<float>(threshold);
+    P.min_size = min_size;
+
+    std::vector<DArray> keep(6 * ns);
+    std::vector<py::array_t<float>> scores;
+    std::vector<py::array_t<int8_t>> classes;
+    std::vector<Sweep> sweeps(ns);
+    int64_t first = 0, max_ng = 1, max_n = 1;
+    for (size_t i = 0; i < ns; ++i) {
+        if (dbz[i].ndim() != 2) throw std::invalid_argument("dbzh must be 2-D (ray, gate)");
+        Sweep& sw = sweeps[i];
+        sw.nray = dbz[i].shape(0);
+        sw.ngate = dbz[i].shape(1);
+        if (links[i].ndim() != 1 || links[i].shape(0) != sw.nray)
+            throw std::invalid_argument("need one link per ray");
+        sw.z = dbz[i].data();
+        sw.zdr = optional_data(zdr[i], dbz[i], keep[6 * i], "zdr");
+        sw.rho = optional_data(rho[i], dbz[i], keep[6 * i + 1], "rhohv");
+        sw.phi = optional_data(phi[i], dbz[i], keep[6 * i + 2], "phidp");
+        sw.vel = optional_data(vel[i], dbz[i], keep[6 * i + 3], "vrad");
+        sw.zh3 = optional_data(zh3[i], dbz[i], keep[6 * i + 4], "zh_3km");
+        sw.snr = optional_data(snr[i], dbz[i], keep[6 * i + 5], "snr");
+        sw.links = links[i].data();
+        sw.h = kKrHalfWindow;
+        sw.first_ray = first;
+        first += sw.nray;
+        max_ng = std::max(max_ng, sw.ngate);
+        max_n = std::max(max_n, sw.nray * sw.ngate);
+        scores.emplace_back(std::vector<py::ssize_t>{sw.nray, sw.ngate});
+        classes.emplace_back(std::vector<py::ssize_t>{sw.nray, sw.ngate});
+        sw.score = scores.back().mutable_data();
+        sw.cls = classes.back().mutable_data();
+    }
+    const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
+    const int nt = n_threads > 0 ? n_threads : static_cast<int>(hw);
+    {
+        py::gil_scoped_release release;
+        parallel_rays(
+            sweeps, nt, [&] { return RayScratch(max_ng); },
+            [&](const Sweep& sw, int64_t r, RayScratch& s) { krause_ray(P, sw, r, s); });
+        if (P.min_size > 1 && ns > 0) {
+            const int ntp = std::max(1, std::min(nt, static_cast<int>(ns)));
+            std::atomic<size_t> next{0};
+            auto worker = [&]() {
+                std::vector<int64_t> parent(static_cast<size_t>(max_n));
+                std::vector<int64_t> size(static_cast<size_t>(max_n));
+                for (;;) {
+                    const size_t i = next.fetch_add(1);
+                    if (i >= ns) break;
+                    despeckle(P, sweeps[i], parent, size);
+                }
+            };
+            std::vector<std::thread> pool;
+            for (int t = 1; t < ntp; ++t) pool.emplace_back(worker);
+            worker();
+            for (auto& th : pool) th.join();
+        }
+    }
+    py::list score_list, class_list;
+    for (size_t i = 0; i < ns; ++i) {
+        score_list.append(scores[i]);
+        class_list.append(classes[i]);
+    }
+    return py::make_tuple(score_list, class_list);
+}
+
 PYBIND11_MODULE(_qc, m) {
     m.doc() = "Compiled non-meteorological echo classification kernel for radarx.";
     m.def("classify", &classify, py::arg("dbzh"), py::arg("zdr"), py::arg("rhohv"),
@@ -537,4 +759,8 @@ PYBIND11_MODULE(_qc, m) {
           py::arg("floors"), py::arg("snr_min"), py::arg("limits"), py::arg("weights"),
           py::arg("spin_threshold"), py::arg("threshold"), py::arg("min_size"),
           py::arg("phidp_detrended") = false, py::arg("n_threads") = 0);
+    m.def("classify_krause", &classify_krause, py::arg("dbzh"), py::arg("zdr"),
+          py::arg("rhohv"), py::arg("phidp"), py::arg("vrad"), py::arg("zh_3km"),
+          py::arg("snr"), py::arg("links"), py::arg("floors"), py::arg("snr_min"),
+          py::arg("threshold"), py::arg("min_size"), py::arg("n_threads") = 0);
 }

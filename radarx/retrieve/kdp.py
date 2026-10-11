@@ -69,9 +69,10 @@ Methods
     here is three passes of a moving average of length ``filter_window`` (a
     cubic B-spline kernel, close to a Gaussian), each computed with running
     sums in O(N); it is radarx's substitute for the published filter and not
-    the published coefficients. The defaults ``n_iter=10``,
-    ``delta_threshold=4`` degrees and ``filter_window=2`` km are radarx's
-    own (not checked against Hubbert and Bringi 1995 [1]).
+    the published coefficients. The defaults ``n_iter=10`` and
+    ``delta_threshold=4`` degrees are radarx's own (not checked against
+    Hubbert and Bringi 1995 [1]). The filter window adapts to the data (see
+    "Adaptive filter window" below) and is at most the former fixed 2 km.
 ``"vulpiani"``
     Iterative :math:`K_{DP}` estimation in the manner of Vulpiani et al.
     (2012) [4]: :math:`K_{DP}` is estimated from :math:`\\Phi_{DP}`, values
@@ -111,6 +112,48 @@ Methods
     :math:`K_{DP}` by construction. The trained weights are not distributed
     yet: register a model with :func:`radarx.ml.register_model` or pass a
     loaded model as ``model``.
+
+Adaptive filter window
+----------------------
+Repeated smoothing with a wide filter erodes narrow KDP peaks (a narrow
+X-band cell lost 17 percent of its peak with the fixed 2 km window and 10
+iterations). With ``filter_window=None`` (default) the ``"hubbert"`` filter
+takes, for each sweep, the narrowest window (at most 2 km) for which the
+noise of :math:`K_{DP}` stays below ``noise_fraction`` (default 0.04) of the
+largest :math:`K_{DP}` of the sweep. The phase noise :math:`\\sigma_\\Phi` is
+estimated per ray as :math:`1.4826\\,\\mathrm{median}|d^2\\Psi|/\\sqrt{6}` from the
+second differences of the wrapped phase over valid gates (zero for a ramp of
+any slope, folded or not; the median ignores the few gates with a
+backscatter phase) and the median of the rays is the noise of the sweep. The
+largest :math:`K_{DP}` is the 99th percentile of the least-squares slope of
+the unfiltered phase over the long KDP window. The noise of :math:`K_{DP}` is
+:math:`\\sigma_\\Phi` propagated as white noise through the three-pass filter
+and the short least-squares window of ``kdp_window``. Where the largest
+:math:`K_{DP}` is small (S band, light rain) the window stays at 2 km and the
+results equal those of the fixed window; at C and X band, where
+:math:`K_{DP}` is larger for the same phase noise, it narrows. The rule and
+``noise_fraction`` are radarx choices, not taken from a paper. Pass
+``filter_window=2.0`` for the former fixed behaviour (``"monotone"`` always
+uses the fixed 2 km; ``"vulpiani"`` has no filter window).
+
+Backscatter phase and uncertainty
+---------------------------------
+The ``"hubbert"`` method also returns ``PHIDP_BACKSCATTER``, the measured
+(unfolded, offset removed) phase minus ``PHIDP_processed`` at valid gates.
+That is the part of :math:`\\delta` the filter removed, plus the phase noise,
+so it is a lower bound that is best averaged over gates or rays (about two
+thirds of a 10 degree bump of 1 km width in the tests); a bump much wider
+than the filter stays in ``PHIDP_processed``. ``"vulpiani"`` and
+``"monotone"`` do not define a backscatter phase and return none.
+Every method returns ``KDP_UNCERTAINTY``, the standard deviation of
+:math:`K_{DP}` from the phase noise of the ray propagated as white noise
+through the linear steps (the filter, the least-squares slope, and for
+``"vulpiani"`` the repeated slope of the rebuilt phase). It does not include
+the bias of the resolution and ignores the replacement of gates (``"hubbert"``)
+and the monotone fit (``"monotone"``, for which it is an upper bound). On
+synthetic rays with known truth the ratio of the estimate to the spread of
+:math:`K_{DP}` over 300 rays was 0.86 to 0.93 (``"hubbert"``), 0.99 to 1.00
+(``"vulpiani"``) and 1.1 to 1.6 (``"monotone"``).
 
 The work is done by a compiled C++ kernel, multithreaded over rays; if it is
 not available, an equivalent NumPy implementation is used.
@@ -172,8 +215,16 @@ TEXTURES = {"circular": 0, "detrended": 1}
 _DEFAULT_N_ITER = {"hubbert": 10, "vulpiani": 4, "monotone": 0}
 # Multiplier of the S-band defaults of texture_max, delta_threshold and the
 # upper kdp_bounds for each band: the order of the frequency ratio, since KDP
-# scales roughly with frequency. A radarx choice, not taken from a paper.
-_BAND_SCALE = {"S": 1.0, "C": 2.0, "X": 3.0}
+# scales roughly with frequency. A radarx choice, not taken from a paper; the
+# estimate_kdp argument ``band_factors`` replaces them.
+BAND_FACTORS = {"S": 1.0, "C": 2.0, "X": 3.0}
+# Adaptive filter window of the Hubbert filter (filter_window=None): the widest
+# window, the fewest second differences for a noise estimate, and the share of
+# the largest KDP that the noise of KDP may reach. radarx choices.
+_FILTER_WINDOW_MAX = 2.0  # km, the former fixed default
+_MIN_NOISE_GATES = 30
+_NOISE_FRACTION = 0.04
+_MAD_TO_SIGMA = 1.482602218505602  # 1 / Phi^-1(0.75)
 # The two constants below are radarx's own choices, not from a paper.
 _UNFOLD_MEMORY = 5  # unfolding reference: mean of this many previous gates
 _MIN_VALID = 3  # rays with fewer valid gates are left empty
@@ -385,8 +436,85 @@ def _isotonic(y):
     return np.repeat(mean, count)
 
 
+def _ray_noise(phi, valid):
+    """
+    Phase noise (degrees) of every ray: the median absolute second difference
+    of the wrapped phase over runs of three valid gates, scaled to the standard
+    deviation of white noise (var(d2) = 6 sigma^2). NaN with fewer than
+    ``_MIN_NOISE_GATES`` second differences. The median ignores the few gates
+    with a backscatter phase or a spike, and the second difference of a ramp
+    is zero, folded or not.
+    """
+    x = np.where(valid, phi, 0.0)
+    d2 = _wrap180(_wrap180(x[:, 2:] - x[:, 1:-1]) - _wrap180(x[:, 1:-1] - x[:, :-2]))
+    ok = valid[:, :-2] & valid[:, 1:-1] & valid[:, 2:]
+    sigma = np.full(phi.shape[0], np.nan)
+    for i in range(phi.shape[0]):
+        a = np.abs(d2[i, ok[i]])
+        if a.size >= _MIN_NOISE_GATES:
+            sigma[i] = _MAD_TO_SIGMA * np.median(a) / np.sqrt(6.0)
+    return sigma
+
+
+def _lowpass_kernel(h):
+    """Kernel of ``_smooth``: three moving averages of 2h+1 gates (sum 1)."""
+    box = np.full(2 * h + 1, 1.0 / (2 * h + 1))
+    k = np.ones(1)
+    for _ in range(3):
+        k = np.convolve(k, box)
+    return k
+
+
+def _adaptive_hf(sigma, kdp_ref, cap, hk_short, dr, fraction):
+    """
+    Narrowest filter (half window in gates, at most ``cap``) for which the
+    noise of KDP over the short window is at most ``fraction`` of the largest
+    KDP ``kdp_ref``, for a phase noise ``sigma``.
+    """
+    if not (np.isfinite(sigma) and np.isfinite(kdp_ref) and kdp_ref > 0):
+        return cap
+    for h in range(1, cap):
+        if sigma * _kdp_noise_factor(h, hk_short, dr, 0) <= fraction * kdp_ref:
+            return h
+    return cap
+
+
+def _kdp_noise_factor(hpre, hk, dr, n_pass=0):
+    """
+    Standard deviation of KDP (degrees/km) per degree of white phase noise:
+    half the least-squares slope over 2*hk+1 gates of a phase filtered with
+    ``_smooth(., hpre)`` (hpre 0: not filtered). ``n_pass``: the slope of the
+    phase rebuilt by integrating KDP (Vulpiani) applied that many more times;
+    each pass smooths KDP with the tail sums of the slope weights.
+    """
+    k = _lowpass_kernel(hpre) if hpre > 0 else np.ones(1)
+    j = np.arange(2 * hk + 1) - hk
+    w = j / np.sum(j * j.astype(float))
+    k = np.convolve(k, w)
+    tail = np.cumsum(w[::-1])[::-1]
+    for _ in range(n_pass):
+        k = np.convolve(k, tail)
+    return 0.5 * np.sqrt(np.sum(k**2)) / dr
+
+
+def _sweep_noise(sigma_rays):
+    """Phase noise of a sweep: the median over its rays."""
+    finite = sigma_rays[np.isfinite(sigma_rays)]
+    return float(np.median(finite)) if finite.size else np.nan
+
+
+def _largest_kdp(pilot):
+    """99th percentile (lower index) of the pilot KDP at the valid gates."""
+    vals = pilot[np.isfinite(pilot)]
+    if vals.size == 0:
+        return np.nan
+    return float(
+        np.partition(vals, (99 * (vals.size - 1)) // 100)[(99 * (vals.size - 1)) // 100]
+    )
+
+
 def _mask_numpy(phi, rho, z, p):
-    """Gate mask, phasors and sign-test statistics of one sweep."""
+    """Gate mask, phasors, sign-test statistics and ray noise of one sweep."""
     tex_limit = np.exp(-np.deg2rad(p["texture_max"]) ** 2)
     valid, c, s = _valid_mask(
         phi,
@@ -397,12 +525,12 @@ def _mask_numpy(phi, rho, z, p):
         TEXTURES[p.get("texture_method", "circular")],
         p["texture_max"],
     )
-    return valid, c, s, _sign_stats(phi, valid, rho, z)
+    return valid, c, s, _sign_stats(phi, valid, rho, z), _ray_noise(phi, valid)
 
 
 def _process_numpy(phi, mask, z, dr, p, sign):
     """NumPy implementation of the compiled kernel (same results)."""
-    valid, c, s, _ = mask
+    valid, c, s, _, _ = mask
     valid = valid.copy()
     offset = _offsets(valid, c, s, p["n_offset"], p["offset_mode"], p["offset"])
     x = _unfold(sign * phi, valid, sign * offset)
@@ -410,6 +538,17 @@ def _process_numpy(phi, mask, z, dr, p, sign):
     valid &= good[:, None]
     y0 = _fill(x, valid)
     ng = phi.shape[1]
+    hf, kdp_ref = p["hf"], np.nan
+    if hf == 0:  # adapt the filter window to the phase noise and the largest KDP
+        pilot = np.where(
+            valid,
+            0.5 * _slope(np.where(good[:, None], y0, 0.0), p["hk_long"], dr),
+            np.nan,
+        )
+        kdp_ref = _largest_kdp(pilot)
+        hf = _adaptive_hf(
+            p["sigma"], kdp_ref, p["hf_cap"], p["hk_short"], dr, p["noise_fraction"]
+        )
     if z is not None:
         with np.errstate(invalid="ignore"):
             heavy = z >= p["z_threshold"]
@@ -427,10 +566,10 @@ def _process_numpy(phi, mask, z, dr, p, sign):
     if method == METHODS["hubbert"]:
         y = y0g.copy()
         for _ in range(p["n_iter"]):
-            f = _smooth(y, p["hf"])
+            f = _smooth(y, hf)
             keep = valid & (np.abs(y0g - f) <= p["delta_threshold"])
             y = np.where(keep, y0g, f)
-        out = _smooth(y, p["hf"])
+        out = _smooth(y, hf)
         kdp = kdp_of(out)
     elif method == METHODS["vulpiani"]:
         out = y0g.copy()
@@ -454,7 +593,7 @@ def _process_numpy(phi, mask, z, dr, p, sign):
             idx = gates[valid[i]]
             fit = _isotonic(x[i, idx])
             mono[i] = np.interp(gates, idx, fit)
-        out = _smooth(mono, p["hf"])
+        out = _smooth(mono, hf)
         kdp = kdp_of(out)
     out = np.where(good[:, None], out, np.nan)
     # KDP only at valid gates whose window holds enough valid gates
@@ -466,7 +605,19 @@ def _process_numpy(phi, mask, z, dr, p, sign):
         ok = nv[:, hi] - nv[:, lo] >= p["min_valid_fraction"] * (hi - lo)
         enough = np.where(hk == h, ok, enough)
     kdp = np.where(valid & enough, kdp, np.nan)
-    return out, kdp, offset
+    # backscatter phase: measured minus processed phase at the valid gates
+    delta = np.where(valid, x - out, np.nan)
+    # standard deviation of KDP: the noise of the ray times the factor of the
+    # window used at the gate
+    hpre = hf if method != METHODS["vulpiani"] else 0
+    n_pass = max(p["n_iter"], 1) - 1 if method == METHODS["vulpiani"] else 0
+    f_short = _kdp_noise_factor(hpre, p["hk_short"], dr, n_pass)
+    f_long = _kdp_noise_factor(hpre, p["hk_long"], dr, n_pass)
+    sig = np.where(np.isfinite(p["sigma_rays"]), p["sigma_rays"], p["sigma"])
+    unc = np.where(
+        np.isfinite(kdp), sig[:, None] * np.where(heavy, f_short, f_long), np.nan
+    )
+    return out, kdp, offset, delta, unc, (hf, kdp_ref)
 
 
 def _process_compiled(sweeps, params, n_threads):
@@ -496,6 +647,8 @@ def _process_compiled(sweeps, params, n_threads):
         TEXTURES[params.get("texture_method", "circular")],
         params["texture_max"],
         int(n_threads or 0),
+        [sw["hf_cap"] for sw in sweeps],
+        float(params["noise_fraction"]),
     )
 
 
@@ -767,7 +920,20 @@ def _prepare_sweep(ds, fields, params):
         "z": arr(dbzh),
         "dr": dr,
         "htex": _half_gates(params["texture_window"], dr),
-        "hf": _half_gates(params["filter_window"], dr),
+        # 0: adapt to the phase noise, at most hf_cap
+        "hf": (
+            0
+            if params["filter_window"] is None
+            else _half_gates(params["filter_window"], dr)
+        ),
+        "hf_cap": _half_gates(
+            (
+                _FILTER_WINDOW_MAX
+                if params["filter_window"] is None
+                else params["filter_window"]
+            ),
+            dr,
+        ),
         "hk_short": _half_gates(short, dr),
         "hk_long": _half_gates(long_, dr),
     }
@@ -776,8 +942,12 @@ def _prepare_sweep(ds, fields, params):
     return sweep
 
 
-def _wrap_sweep(sweep, out, kdp, offset, method, sign):
-    """Processed PHIDP, KDP and the offset on the input sweep coordinates."""
+def _wrap_sweep(sweep, out, kdp, offset, method, sign, extra=None):
+    """
+    Processed PHIDP, KDP and the offset on the input sweep coordinates; with
+    ``extra = (delta, uncertainty, (noise, hf, largest KDP))`` also the backscatter
+    phase and the standard deviation of KDP.
+    """
     da = sweep["ds"][sweep["name"]]
     ray_dim = sweep["ray_dim"]
     dims = (ray_dim, "range")
@@ -813,8 +983,47 @@ def _wrap_sweep(sweep, out, kdp, offset, method, sign):
         },
         coords=dict(da.coords),
     )
-    for name in ("PHIDP_processed", "KDP"):
-        out_ds[name] = out_ds[name].transpose(*da.dims)
+    if extra is not None:
+        delta, unc, (sigma, hf, kdp_ref) = extra
+        if method == "hubbert":
+            out_ds["PHIDP_BACKSCATTER"] = (
+                dims,
+                delta,
+                {
+                    "long_name": "Backscatter differential phase",
+                    "units": "degrees",
+                    "comment": (
+                        "measured phase (unfolded, offset removed) minus the "
+                        "processed phase at the valid gates: the part of the "
+                        "backscatter phase that the filter removed (a bump wider "
+                        "than the filter stays in PHIDP_processed) plus the phase "
+                        "noise, so average it over gates or rays"
+                    ),
+                },
+            )
+        out_ds["KDP_UNCERTAINTY"] = (
+            dims,
+            unc,
+            {
+                "long_name": "Standard deviation of the specific differential phase",
+                "units": "degrees/km",
+                "comment": (
+                    "phase noise of the ray (median absolute second difference) "
+                    "propagated as white noise through the filter and the "
+                    "least-squares slope; the bias of the resolution is not included"
+                ),
+            },
+        )
+        out_ds["PHIDP_processed"].attrs.update(
+            {
+                "phase_noise": float(sigma),
+                "filter_window": float(2 * hf * sweep["dr"]),
+                "kdp_reference": float(kdp_ref),
+            }
+        )
+    for name in ("PHIDP_processed", "KDP", "PHIDP_BACKSCATTER", "KDP_UNCERTAINTY"):
+        if name in out_ds:
+            out_ds[name] = out_ds[name].transpose(*da.dims)
     return out_ds
 
 
@@ -822,21 +1031,29 @@ def _run(datasets, fields, params, n_threads, use_compiled):
     """Process a list of sweep datasets; all rays in one kernel call."""
     sweeps = [_prepare_sweep(ds, fields, params) for ds in datasets]
     if use_compiled:
-        outs, kdps, offsets, sign = _process_compiled(sweeps, params, n_threads)
-        results = zip(outs, kdps, offsets)
+        outs, kdps, offsets, sign, deltas, uncs, infos = _process_compiled(
+            sweeps, params, n_threads
+        )
+        results = zip(outs, kdps, offsets, deltas, uncs, infos)
     else:
         masks = [
             _mask_numpy(sw["phi"], sw["rho"], sw["z"], {**params, **sw})
             for sw in sweeps
         ]
         sign = _decide_sign([m[3] for m in masks], params["phidp_sign"])
-        results = [
-            _process_numpy(sw["phi"], m, sw["z"], sw["dr"], {**params, **sw}, sign)
-            for sw, m in zip(sweeps, masks)
-        ]
+        results = []
+        for sw, m in zip(sweeps, masks):
+            sigma = _sweep_noise(m[4])
+            p = {**params, **sw, "sigma": sigma, "sigma_rays": m[4]}
+            out, kdp, offset, delta, unc, (hf, kdp_ref) = _process_numpy(
+                sw["phi"], m, sw["z"], sw["dr"], p, sign
+            )
+            results.append((out, kdp, offset, delta, unc, (sigma, hf, kdp_ref)))
     return [
-        _wrap_sweep(sw, out, kdp, offset, params["method_name"], sign)
-        for sw, (out, kdp, offset) in zip(sweeps, results)
+        _wrap_sweep(
+            sw, out, kdp, offset, params["method_name"], sign, (delta, unc, info)
+        )
+        for sw, (out, kdp, offset, delta, unc, info) in zip(sweeps, results)
     ]
 
 
@@ -856,9 +1073,11 @@ def estimate_kdp(
     texture_max=None,
     texture_method="circular",
     band=None,
+    band_factors=None,
     n_offset=10,
     offset="sweep",
-    filter_window=2.0,
+    filter_window=None,
+    noise_fraction=_NOISE_FRACTION,
     n_iter=None,
     delta_threshold=None,
     kdp_window=(2.0, 6.0),
@@ -919,15 +1138,21 @@ def estimate_kdp(
         texture; ``texture_max`` then limits that standard deviation. No
         published detrending rule was found, so both rules and the limit are
         radarx choices.
-    band : {"S", "C", "X"} or None, optional
-        Radar band. The defaults of ``texture_max``, ``delta_threshold`` and
-        the upper ``kdp_bounds`` are S-band values (20 degrees, 4 degrees and
-        20 degrees/km). With ``"C"`` or ``"X"`` they are multiplied by 2 or 3
-        (KDP and the backscatter phase grow with frequency; the factors are
-        radarx choices and the backscatter phase values at C and X band were
-        not checked against a reference). Values you pass are used as given.
-        The windows and the 40 dBZ switch are not changed. Default None: S
-        band values, the same as ``"S"``.
+    band : str or None, optional
+        Radar band, a key of ``band_factors`` (``"S"``, ``"C"`` or ``"X"``).
+        The defaults of ``texture_max``, ``delta_threshold`` and the upper
+        ``kdp_bounds`` are S-band values (20 degrees, 4 degrees and 20
+        degrees/km); they are multiplied by the factor of the band. Values you
+        pass are used as given. The windows and the 40 dBZ switch are not
+        changed. Default None: S band values, the same as ``"S"``.
+    band_factors : dict, optional
+        Factors by band that update the table ``BAND_FACTORS`` of this module
+        (``{"S": 1, "C": 2, "X": 3}``), for example ``{"X": 2.0}`` or a new
+        band ``{"Ku": 4.0}``. The factors 1, 2 and 3 are radarx choices, about
+        the ratio of the frequencies (KDP grows with frequency); they are not
+        taken from a paper, and the backscatter phase and the KDP values at C
+        and X band have not been checked against a reference. Set them for
+        your radar.
     n_offset : int, optional
         Number of first valid gates used for the system offset. Default 10
         (radarx choice).
@@ -935,12 +1160,18 @@ def estimate_kdp(
         ``"sweep"`` (default) pools the first gates of all rays, ``"ray"``
         estimates one offset per ray, a number is used as the offset in
         degrees.
-    filter_window : float, optional
+    filter_window : float or None, optional
         Length (km) of each of the three moving-average passes of the
-        low-pass filter (``"hubbert"`` and ``"monotone"``). Default 2 (radarx
-        choice; the filter is a substitute for the FIR filter of Hubbert and
-        Bringi 1995 [1]); the combined kernel has a standard deviation of
-        about half this length.
+        low-pass filter (``"hubbert"`` and ``"monotone"``; the filter is a
+        substitute for the FIR filter of Hubbert and Bringi 1995 [1]); the
+        combined kernel has a standard deviation of about half this length.
+        Default None: ``"hubbert"`` adapts the window to the phase noise, the
+        gate spacing and the largest KDP of each sweep, at most 2 km (see
+        :mod:`radarx.retrieve.kdp`), and ``"monotone"`` uses 2 km. A number
+        is used as given (2.0 is the fixed window of earlier versions).
+    noise_fraction : float, optional
+        Adaptive window only: the share of the largest KDP of the sweep that
+        the noise of KDP may reach. Default 0.04 (radarx choice).
     n_iter : int, optional
         Iterations: default 10 for ``"hubbert"`` and 4 for ``"vulpiani"``
         (radarx choices, not checked against the papers [1], [4]).
@@ -991,11 +1222,16 @@ def estimate_kdp(
         For a sweep, a Dataset with the processed differential phase
         ``PHIDP_processed`` (degrees, increasing with range in rain; masked gates are
         bridged and gates beyond the first and last valid gate hold the end
-        values), ``KDP`` (degrees/km; NaN at non-meteorological gates) and
-        the system offset ``PHIDP_OFFSET`` per ray (in the convention of the
-        input phase), on the input coordinates. ``method="ml"`` adds the
-        backscatter phase ``PHIDP_BACKSCATTER`` and the standard deviation
-        ``KDP_UNCERTAINTY`` of KDP, and the attributes ``ml_model``,
+        values), ``KDP`` (degrees/km; NaN at non-meteorological gates), the
+        system offset ``PHIDP_OFFSET`` per ray (in the convention of the
+        input phase) and the standard deviation ``KDP_UNCERTAINTY`` of KDP,
+        on the input coordinates. ``method="hubbert"`` adds the backscatter
+        phase ``PHIDP_BACKSCATTER``, and the attributes ``phase_noise``
+        (degrees), ``filter_window`` (km) and ``kdp_reference`` (the largest
+        KDP of the sweep; NaN if the window was given) of
+        ``PHIDP_processed`` hold the values used (all methods but ``"ml"``).
+        ``method="ml"`` returns ``PHIDP_BACKSCATTER`` and ``KDP_UNCERTAINTY``
+        from the network and the attributes ``ml_model``,
         ``ml_model_version`` and ``ml_model_licence``. For a volume, a DataTree
         with one such node per sweep that has the differential phase, and the
         root of the input. Merge the products into the input with
@@ -1020,7 +1256,8 @@ def estimate_kdp(
     marked "radarx choice" above are not taken from the papers. The windows
     and the 40 dBZ switch are those of Park et al. (2009) [3]. Wang and
     Chandrasekar (2009) [2] is cited for the resolution/noise trade-off of
-    the KDP window; its algorithm is not implemented.
+    the KDP window; its algorithm is not implemented, because neither the
+    paper nor an open description of it could be read.
 
     References
     ----------
@@ -1077,13 +1314,31 @@ def estimate_kdp(
         raise ValueError(f"phidp_sign must be 'auto', 1 or -1, not {phidp_sign!r}")
     if n_iter is None:
         n_iter = _DEFAULT_N_ITER.get(method, 0)
+    elif int(n_iter) < 0:
+        raise ValueError(f"n_iter must be at least 0, not {n_iter!r}")
+    if filter_window is None and method != "hubbert":
+        filter_window = _FILTER_WINDOW_MAX  # only the Hubbert filter adapts
+    if filter_window is not None and not filter_window > 0:
+        raise ValueError(
+            f"filter_window must be positive or None, not {filter_window!r}"
+        )
+    if not noise_fraction > 0:
+        raise ValueError(f"noise_fraction must be positive, not {noise_fraction!r}")
     if texture_method not in TEXTURES:
         raise ValueError(
             f"texture_method must be one of {sorted(TEXTURES)}, not {texture_method!r}"
         )
-    scale = _BAND_SCALE.get("S" if band is None else str(band).upper())
+    factors = {**BAND_FACTORS}
+    for key, value in (band_factors or {}).items():
+        factors[str(key).upper()] = float(value)
+    scale = factors.get("S" if band is None else str(band).upper())
     if scale is None:
-        raise ValueError(f"band must be 'S', 'C' or 'X', not {band!r}")
+        raise ValueError(
+            f"band must be one of {sorted(factors)} (or add it to band_factors), "
+            f"not {band!r}"
+        )
+    if not scale > 0:
+        raise ValueError(f"the band factor must be positive, not {scale!r}")
     if texture_max is None:
         texture_max = 20.0 * scale
     if delta_threshold is None:
@@ -1102,6 +1357,7 @@ def estimate_kdp(
         "offset_mode": offset_mode,
         "offset": offset_value,
         "filter_window": filter_window,
+        "noise_fraction": float(noise_fraction),
         "n_iter": int(n_iter),
         "delta_threshold": float(delta_threshold),
         "kdp_window": tuple(kdp_window),

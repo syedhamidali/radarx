@@ -554,10 +554,7 @@ def _snr_dataarray(
         ),
     }
     if not isinstance(level, xr.DataArray) or level.ndim == 0:
-        try:
-            out.attrs["noise_level"] = float(level)
-        except TypeError:  # dask scalar
-            pass
+        out.attrs["noise_level"] = float(level)
     return out
 
 
@@ -663,16 +660,13 @@ def snr(
 # --------------------------------------------------------------------------
 
 
-def _field(ds, value, candidates, what, required=True):
+def _field(ds, value, candidates, what):
     """A DataArray from a name, a DataArray or the default candidates."""
     if isinstance(value, xr.DataArray):
         return value
     if isinstance(ds, xr.DataArray):
-        if required:
-            raise ValueError(f"with a DataArray as obj, pass {what} as a DataArray")
-        return None
-    name = ft.find_field(ds, value, candidates, what, required=required)
-    return None if name is None else ds[name]
+        raise ValueError(f"with a DataArray as obj, pass {what} as a DataArray")
+    return ds[ft.find_field(ds, value, candidates, what)]
 
 
 def _resolve_snr(
@@ -694,10 +688,13 @@ def _resolve_snr(
         return snr_arg[ft.find_field(snr_arg, None, ft.SNR_NAMES, "SNR")]
     if isinstance(ds, xr.Dataset):
         have = ft.find_field(ds, snr_arg, ft.SNR_NAMES, "SNR", required=False)
+        if snr_arg is not None and noise is not None:
+            raise ValueError(
+                f"snr={snr_arg!r} and noise are exclusive: pass the SNR field "
+                "or the noise level to compute it from, not both"
+            )
         if have is not None and noise is None:
             return ds[have]
-        if snr_arg is not None:
-            raise ft.MissingField(f"{snr_arg!r} is not in the dataset")
         da = ds[ft.find_field(ds, dbz, ft.DBZ_NAMES, "reflectivity")]
     elif isinstance(dbz, xr.DataArray):
         da = dbz
@@ -768,7 +765,8 @@ def correct_rhohv_noise(
         The SNR of the horizontal channel in dB (a field name, an array, the
         result of :func:`snr`). By default the field ``SNR`` if there is one
         (and ``noise`` is not given), else it is computed from the
-        reflectivity (``dbz``) and the noise level.
+        reflectivity (``dbz``) and the noise level. A field name together with
+        ``noise`` raises ``ValueError``: pass one or the other.
     zdr : bool, str or xarray.DataArray, optional
         The differential reflectivity (dB) that gives the SNR of the vertical
         channel: ``True`` for the default field, a name or an array. By
