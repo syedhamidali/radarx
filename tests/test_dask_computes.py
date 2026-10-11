@@ -32,6 +32,7 @@ from . import (
     test_shear_layer,
     test_wind_profile,
 )
+from .sweepwise_helpers import assert_tree_allclose
 
 pytest.importorskip("dask")
 
@@ -180,7 +181,9 @@ def assert_same(result, expected):
         assert len(result) == len(expected)
         for r, e in zip(result, expected):
             assert_same(r, e)
-    elif isinstance(expected, (xr.DataArray, xr.Dataset, xr.DataTree)):
+    elif isinstance(expected, xr.DataTree):
+        assert_tree_allclose(result.compute(), expected)
+    elif isinstance(expected, (xr.DataArray, xr.Dataset)):
         xr.testing.assert_allclose(result.compute(), expected)
     else:
         np.testing.assert_allclose(result, expected)

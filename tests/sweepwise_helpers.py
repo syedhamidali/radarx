@@ -36,6 +36,17 @@ def same_dims(obj, expected):
     return obj.assign({k: obj[k].transpose(*expected[k].dims) for k in obj.data_vars})
 
 
+def assert_tree_allclose(result, expected):
+    """Node by node ``xarray.testing.assert_allclose`` (old xarray has none for trees)."""
+    paths = [node.path for node in expected.subtree]
+    assert [node.path for node in result.subtree] == paths
+    for path in paths:
+        xr.testing.assert_allclose(
+            result[path].to_dataset(inherit=False),
+            expected[path].to_dataset(inherit=False),
+        )
+
+
 def assert_lazy(obj):
     """Every data variable of ``obj`` is a dask array."""
     for da in data_arrays(obj):
@@ -120,5 +131,5 @@ def check_volume(func, make, n=2, **kwargs):
         if node is lazy or not node.has_data:
             continue
         assert_lazy(node.to_dataset(inherit=False))
-    xr.testing.assert_allclose(lazy.compute(), expected)
+    assert_tree_allclose(lazy.compute(), expected)
     return expected, lazy
