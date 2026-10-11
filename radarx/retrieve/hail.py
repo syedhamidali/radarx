@@ -674,9 +674,11 @@ def _document(func, warning=True, levels=True):
         parts.append(_P_RADAR)
     parts.append(_P_RUN)
     func.__doc__ = (
-        func.__doc__.replace("{params}", "\n".join(p.strip("\n") for p in parts))
-        .replace("{raises}", _RAISES.strip("\n"))
-        .replace("{references}", _REFERENCES.strip("\n"))
+        func.__doc__.replace(
+            "{params}", "\n".join(p.strip("\n") for p in parts).strip()
+        )
+        .replace("{raises}", _RAISES.strip())
+        .replace("{references}", _REFERENCES.strip())
     )
     return func
 
