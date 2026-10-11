@@ -28,8 +28,11 @@ from .test_beam_blockage import bell, geographic_dem
 from .test_beam_blockage import make_sweep as bb_sweep
 from .test_cappi import _make_ppi_sweep
 from .test_coldpool import column, station_network
+from .test_couplets_vertical import COLUMN
+from .test_couplets_vertical import volume as couplet_volume
 from .test_dealias import synthetic_sweep
 from .test_dealias import volume as dealias_volume
+from .test_dealias_extras import VH, VL, dual_prf_sweep
 from .test_disdrometer import _station
 from .test_dsd import _sweep as dsd_sweep
 from .test_dsd import _volume as dsd_volume
@@ -49,6 +52,7 @@ from .test_qvp import _melting_profile, _profiles_dataset
 from .test_qvp import _volume as qvp_volume
 from .test_rain_trajectories import _source_grid
 from .test_rain_trajectories import profile as rain_profile
+from .test_shear_layer import column_volume
 from .test_tc_winds import CENTER as TC_CENTER
 from .test_tc_winds import small_tc_center, small_vortex
 from .test_tornado import rankine
@@ -319,6 +323,23 @@ PRODUCTS = {
         _flashes(), lightning_grid(), interval="1min"
     ),
     "rotation_couplets": lambda: R.rotation_couplets(rankine()),
+    "rotation_couplets (min_tilts)": lambda: R.rotation_couplets(
+        couplet_volume({"sweep_0": (0.5, [COLUMN]), "sweep_1": (1.5, [COLUMN])}),
+        min_tilts=2,
+    ),
+    "azimuthal_shear_layer_max": lambda: R.azimuthal_shear_layer_max(
+        column_volume(elevations=(0.5, 1.5, 3.0), n_az=90), min_reflectivity=20.0
+    ),
+    "correct_dual_prf": lambda: R.correct_dual_prf(
+        dual_prf_sweep(nray=60, ngate=40)[0], nyquist_high=VH, nyquist_low=VL
+    ),
+    "dealias_confidence": lambda: R.dealias_confidence(
+        R.dealias_velocity(_dealiased(), nyquist_velocity=10.0).to_dataset(),
+        nyquist_velocity=10.0,
+    ),
+    "dealias_velocity (confidence)": lambda: R.dealias_velocity(
+        _dealiased(), nyquist_velocity=10.0, confidence=True
+    ),
     "lightning_jump": lambda: R.lightning_jump(
         _rate([12, 12, 13, 12, 13, 12, 12, 13, 12, 12, 13, 12, 12, 12] + [20, 30, 34])
     ),

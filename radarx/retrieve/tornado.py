@@ -32,7 +32,8 @@ Two independent tornado diagnostics on WSR-88D volumes:
     appendix on feature extraction) apply to the azimuthal shear field of
     their non-deep-learning baselines; radarx also attributes it to the NWS
     Tornado Probability Algorithm (Sandmæl et al. 2023 [2]_), not
-    checked against that paper.
+    checked against that paper. With ``min_tilts`` a couplet must also be
+    vertically continuous: it must exist on at least that many tilts.
 
 What is taken from the TorNet paper and what is not. Checked against the
 arXiv preprint of Veillette et al. (arXiv:2401.16437v1, January 2024); the
@@ -713,15 +714,23 @@ def _delta_v(vel, az, rng, peak, diameter):
 
 
 def _couplets_sweep(
-    ds, field, threshold, window, min_area, diameter, min_reflectivity, rotation
+    ds,
+    field,
+    threshold,
+    window,
+    min_area,
+    diameter,
+    min_reflectivity,
+    rotation,
+    median_filter=None,
 ):
-    from .shear import llsd
+    from .shear import _median_size, llsd
 
     da = ds[field]
     ray_dim = [d for d in da.dims if d != "range"][0]
     vel = da.transpose(ray_dim, "range").values.astype(np.float64)
     shear = (
-        llsd(ds, field, window)["azimuthal_shear"]
+        llsd(ds, field, window, median_filter=median_filter)["azimuthal_shear"]
         .transpose(ray_dim, "range")
         .values.astype(np.float64)
     )
@@ -776,6 +785,8 @@ def _couplets_sweep(
         "window_azimuth_m": float(window[1]),
         "diameter_m": float(diameter),
     }
+    if _median_size(median_filter):
+        method["median_filter_size"] = _median_size(median_filter)
     out = xr.Dataset(
         {
             "azimuthal_shear": (
@@ -816,8 +827,89 @@ def _couplets_sweep(
     return out
 
 
+def _walk(i, step, x, y, sign, level, by_level, link_distance, max_skip):
+    """
+    Tilts reached from couplet ``i`` going up (``step=1``) or down (``-1``).
+
+    From the current couplet the nearest couplet of the same sense of rotation
+    within ``link_distance`` on the next tilt level is taken, and if there is
+    none, on the levels beyond it, at most ``max_skip`` of them; the walk
+    continues from the couplet found and stops when there is none.
+    """
+    count, here = 0, i
+    while True:
+        for k in range(1, max_skip + 2):
+            cand = by_level.get(level[here] + step * k)
+            if cand is None:
+                continue
+            dist = np.hypot(x[cand] - x[here], y[cand] - y[here])
+            ok = (dist <= link_distance) & (sign[cand] == sign[here])
+            if ok.any():
+                here = int(cand[np.flatnonzero(ok)[np.argmin(dist[ok])]])
+                count += 1
+                break
+        else:
+            return count
+
+
+def _vertical_continuity(nodes, link_distance, max_skip):
+    """
+    Number of tilts each couplet is continuous over.
+
+    The tilts are the distinct elevation angles of the sweeps of ``nodes``
+    (a dict name -> couplet Dataset), rounded to 0.1 degree; repeated cuts of
+    one angle are one tilt. For every couplet the chain of couplets above and
+    below it is followed with :func:`_walk` and the number of tilts of the
+    chain, the couplet's own included, is returned for each sweep.
+    """
+    from ..fundamentals.geometry import ground_range
+
+    angles = {n: _fixed_angle(ds) for n, ds in nodes.items()}
+    ordered = sorted({round(v, 1) for v in angles.values()})
+    x, y, sign, level, owner = [], [], [], [], []
+    for name, ds in nodes.items():
+        s = ground_range(ds["range"].values, angles[name])
+        az = np.radians(ds["azimuth"].values)
+        x += list(s * np.sin(az))
+        y += list(s * np.cos(az))
+        sign += list(np.sign(ds["azimuthal_shear"].values))
+        level += [ordered.index(round(angles[name], 1))] * ds.sizes["couplet"]
+        owner += [name] * ds.sizes["couplet"]
+    x, y, sign, level = (np.asarray(v) for v in (x, y, sign, level))
+    by_level = {k: np.flatnonzero(level == k) for k in set(level.tolist())}
+    options = (x, y, sign, level, by_level, link_distance, max_skip)
+    result = {name: [] for name in nodes}
+    for i, name in enumerate(owner):
+        result[name].append(1 + _walk(i, 1, *options) + _walk(i, -1, *options))
+    return result
+
+
+def _keep_continuous(nodes, min_tilts, link_distance, max_skip):
+    """Add ``n_tilts`` to the couplets and keep those on at least ``min_tilts`` tilts."""
+    found = _vertical_continuity(nodes, link_distance, max_skip)
+    out = {}
+    for name, ds in nodes.items():
+        n_tilts = np.asarray(found[name], dtype=np.int64)
+        ds = ds.assign(
+            n_tilts=(
+                "couplet",
+                n_tilts,
+                {"long_name": "tilts of the vertical chain of couplets"},
+            )
+        )
+        ds.attrs = dict(
+            ds.attrs,
+            min_tilts=int(min_tilts),
+            link_distance_m=float(link_distance),
+            max_skip=max_skip,
+        )
+        out[name] = ds.isel(couplet=np.flatnonzero(n_tilts >= min_tilts))
+    return out
+
+
 @provenance(
-    "Rotation couplets from LLSD azimuthal shear, radarx's own simple detection"
+    "Rotation couplets from LLSD azimuthal shear, radarx's own simple detection",
+    extra_refs=("roc-mesocyclone-detection",),
 )
 def rotation_couplets(
     obj,
@@ -829,6 +921,10 @@ def rotation_couplets(
     diameter=5000.0,
     min_reflectivity=None,
     rotation="cyclonic",
+    min_tilts=None,
+    link_distance=5000.0,
+    max_skip=0,
+    median_filter=None,
 ):
     """
     Rotation couplets: compact maxima of LLSD azimuthal shear.
@@ -868,6 +964,29 @@ def rotation_couplets(
         mesocyclones in the Southern Hemisphere (and of anticyclonic
         tornadoes in the north); ``"both"`` uses the magnitude of the shear.
         The reported ``azimuthal_shear`` keeps its sign.
+    min_tilts : int, optional
+        Vertical continuity (volumes only): keep the couplets that are part of
+        a chain of couplets on at least this many tilts, that is on this many
+        distinct elevation angles (repeated cuts of one angle count once).
+        Default None: every couplet is kept, as before. The variable
+        ``n_tilts``, the number of tilts of the chain through the couplet, is
+        added when it is given.
+    link_distance : float, optional
+        Largest horizontal distance (m) between the peaks of two couplets of
+        the same sense of rotation on neighbouring tilts for them to be linked.
+        Default 5000, a radarx choice (the NSSL Mesocyclone
+        Detection Algorithm derives a maximum feature distance from the sizes
+        of the two features; the formula could not be read reliably in the
+        copy of the algorithm description that was available).
+    max_skip : int, optional
+        Tilts that may be missing between two linked couplets: when no couplet
+        of the tilt directly below matches, up to ``max_skip`` tilts further
+        down are searched, as the algorithm description does for one tilt.
+        Default 0: couplets must be on consecutive tilts.
+    median_filter : None, True or int, optional
+        Median filter of the velocity before the LLSD fit, see
+        :func:`radarx.retrieve.llsd` (Smith and Elmore 2004). Default None:
+        none.
 
     Returns
     -------
@@ -877,7 +996,7 @@ def rotation_couplets(
         (``delta_v / 2``) and ``area``, with the ``azimuth``, ``range`` (and
         ``x``, ``y`` if the sweep is georeferenced) of the peak. A DataTree
         input gives a DataTree with one such node per sweep that has
-        ``field``.
+        ``field``. With ``min_tilts``, also ``n_tilts``.
 
     Notes
     -----
@@ -894,6 +1013,25 @@ def rotation_couplets(
     learning model on LLSD-derived features; the region extraction, minimum
     area, ``delta_v`` measurement and all sizes other than the 0.006 s⁻¹
     threshold are radarx choices.
+
+    Vertical continuity (``min_tilts``). The tilts of the volume are ordered by
+    elevation angle. From a couplet the chain is followed up and down: on the
+    next tilt the nearest couplet of the same sense of rotation within
+    ``link_distance`` of the current peak is taken, and the chain goes on from
+    it. The couplet is kept when its chain spans ``min_tilts`` tilts. This
+    follows the association of shear features across elevation angles of the
+    WSR-88D Mesocyclone Detection Algorithm as described in its algorithm
+    description [4]_: a feature at one elevation angle is correlated with a
+    feature at the previous angle when their centres are closer than a maximum
+    feature distance (the description takes the first match in its list; the
+    nearest is taken here), and a second previous angle is tried when the
+    first has no match; a vortex with two or more features is "3-D shear" or a
+    mesocyclone. Not taken from it: the distance (the formula of the copy
+    read is garbled), the thresholds on shear, momentum and aspect of its
+    features, and the time continuity it also requires. The published
+    algorithm papers (Stumpf et al. 1998; Mitchell et al. 1998) were not
+    read. The association is made on the (few) couplets in Python: the
+    numerical work is the LLSD.
 
     References
     ----------
@@ -912,11 +1050,18 @@ def rotation_couplets(
        for tornado detection and prediction using full-resolution
        polarimetric weather radar data. *Artif. Intell. Earth Syst.*, **4**
        (1), https://doi.org/10.1175/AIES-D-24-0006.1
+    .. [4] WSR-88D Radar Operations Center, 2003: Mesocyclone Detection
+       Algorithm Description, NX-DR-03-002/34 (algorithm description, no DOI),
+       https://www2.mmm.ucar.edu/episodes/ROC/WSR-88D_algorithms/pdfs/mesocyclone_detection.pdf
     """
     if rotation not in ("cyclonic", "anticyclonic", "both"):
         raise ValueError(
             f"rotation must be 'cyclonic', 'anticyclonic' or 'both', not {rotation!r}"
         )
+    if min_tilts is not None and (int(min_tilts) != min_tilts or min_tilts < 1):
+        raise ValueError(f"min_tilts must be a positive integer, not {min_tilts!r}")
+    if link_distance <= 0 or int(max_skip) != max_skip or max_skip < 0:
+        raise ValueError("link_distance must be positive and max_skip a count")
     options = (
         field,
         threshold,
@@ -925,8 +1070,11 @@ def rotation_couplets(
         diameter,
         min_reflectivity,
         rotation,
+        median_filter,
     )
     if isinstance(obj, xr.Dataset):
+        if min_tilts is not None:
+            raise ValueError("min_tilts needs a volume (a DataTree of sweeps)")
         if field not in obj:
             raise KeyError(f"{field!r} is not in the sweep")
         return _couplets_sweep(obj, *options)
@@ -938,6 +1086,8 @@ def rotation_couplets(
         }
         if not nodes:
             raise ValueError(f"No sweep contains {field!r}.")
+        if min_tilts is not None:
+            nodes = _keep_continuous(nodes, min_tilts, link_distance, int(max_skip))
         return product_tree(obj, nodes)
     raise TypeError("rotation_couplets needs an xarray.Dataset or xarray.DataTree")
 

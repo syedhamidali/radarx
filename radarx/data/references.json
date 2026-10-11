@@ -2611,5 +2611,70 @@
   "issue": "23",
   "pages": "2848",
   "doi": "10.3390/rs11232848"
+ },
+ "10.1175/1520-0426(2003)20<443:AACODP>2.0.CO;2": {
+  "authors": [
+   "Holleman, I.",
+   "Beekhuis, H."
+  ],
+  "year": 2003,
+  "title": "Analysis and Correction of Dual PRF Velocity Data",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "20",
+  "issue": "4",
+  "pages": "443-453",
+  "doi": "10.1175/1520-0426(2003)20<443:AACODP>2.0.CO;2"
+ },
+ "10.1175/BAMS-D-14-00173.1": {
+  "authors": [
+   "Smith, T. M.",
+   "Lakshmanan, V.",
+   "Stumpf, G. J.",
+   "Ortega, K. L.",
+   "Hondl, K.",
+   "Cooper, K.",
+   "Calhoun, K. M.",
+   "Kingfield, D. M.",
+   "Manross, K. L.",
+   "Toomey, R.",
+   "Brogden, J."
+  ],
+  "year": 2016,
+  "title": "Multi-Radar Multi-Sensor (MRMS) Severe Weather and Aviation Products: Initial Operating Capabilities",
+  "type": "article",
+  "journal": "Bulletin of the American Meteorological Society",
+  "volume": "97",
+  "issue": "9",
+  "pages": "1617-1630",
+  "doi": "10.1175/BAMS-D-14-00173.1"
+ },
+ "10.1175/JTECH-D-19-0020.1": {
+  "authors": [
+   "Louf, V.",
+   "Protat, A.",
+   "Jackson, R. C.",
+   "Collis, S. M.",
+   "Helmus, J."
+  ],
+  "year": 2020,
+  "title": "UNRAVEL: A Robust Modular Velocity Dealiasing Technique for Doppler Radar",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "37",
+  "issue": "5",
+  "pages": "741-758",
+  "doi": "10.1175/JTECH-D-19-0020.1"
+ },
+ "roc-mesocyclone-detection": {
+  "authors": [
+   "WSR-88D Radar Operations Center"
+  ],
+  "year": 2003,
+  "title": "Mesocyclone Detection Algorithm Description (NX-DR-03-002/34)",
+  "type": "report",
+  "journal": "WSR-88D algorithm description NX-DR-03-002/34",
+  "publisher": "NOAA Radar Operations Center",
+  "url": "https://www2.mmm.ucar.edu/episodes/ROC/WSR-88D_algorithms/pdfs/mesocyclone_detection.pdf"
  }
 }
