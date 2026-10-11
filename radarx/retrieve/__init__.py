@@ -31,7 +31,12 @@ _SECTIONS = {
         "advection",
     ],
     "Products and profiles": ["cappi", "vertical_profiles"],
-    "Wind retrieval and kinematics": ["single_doppler", "multidoppler", "shear"],
+    "Wind retrieval and kinematics": [
+        "single_doppler",
+        "multidoppler",
+        "shear",
+        "tc_winds",
+    ],
     "Precipitation microphysics": [
         "hid",
         "dsd",

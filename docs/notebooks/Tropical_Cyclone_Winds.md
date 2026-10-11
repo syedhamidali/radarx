@@ -254,9 +254,13 @@ print("azimuth of the wavenumber-1 maximum (truth 45 deg), clockwise from north:
 ```
 
 The wavenumber-1 and 2 amplitudes are retrieved to within 10 percent of the
-tangential wind, with the geometric distortion that GBVTD has because the Fourier
-series is in the angle $\psi$ and not in the azimuth around the centre (Lee et
-al. 2006). A real asymmetric *radial* wind is assumed zero by the closure and
+tangential wind, and the axisymmetric wind is too low by a few m/s at large radii
+where the mean wind is removed. Both are the geometric distortion that GBVTD has
+because the Fourier series is in the angle $\psi$ and not in the azimuth around
+the centre (Lee et al. 2006): from the geometry, a wavenumber-1 tangential wind of
+relative amplitude $A$ puts a wavenumber-0 term of the order of
+$A\,V_{T0}\sin\alpha_{max}/2$ into the series in $\psi$ (derived here, not taken
+from Lee et al.), 1.7 m/s at 40 km for $A = 0.2$ and a 33 m/s wind. A real asymmetric *radial* wind is assumed zero by the closure and
 leaks into the wavenumber-1 tangential wind: add `radial_asymmetry={1: (3.0, 120.0)}`
 to `synthetic_vortex` to see a few m/s of it.
 
@@ -374,13 +378,13 @@ print("same centre:", all(np.isclose(float(results["compiled"][k]), float(result
 
 The IMD C-band radar at Goa saw Tauktae on 15 May 2021, 00:58 UTC (the test data
 of radarx, sweeps at 0.9 and 1.4 degrees). The position is the IBTrACS best track
-interpolated to the time of the scan (the file has no best-track metadata). The
-cyclone was then about 310 km away, so the beam is 10 km above the surface, the
-Nyquist velocity is only 6.7 m/s and the velocity echoes do not reach the core.
-`gbvtd` therefore returns nothing at the best-track position: every ring has gaps
-of more than 120 degrees. This is the honest result, and it shows what the
-function needs: complete velocity coverage around the eyewall, within about
-200 km.
+interpolated to the time of the scan (NOAA NCEI IBTrACS v04r01, which has 3-hourly positions; the file has no best-track metadata). The
+cyclone was then about 310 km away, so the beam is more than 10 km above the
+surface, the Nyquist velocity is only 6.7 m/s and the velocity echoes do not reach
+the core. `gbvtd` therefore returns nothing at the best-track position: no ring
+has velocity data around enough of its circle (the largest gap must be at most 120
+degrees). This is the result, and it shows what the function needs: velocity
+coverage around the eyewall from a radar that is close enough to see it.
 
 ```{code-cell} ipython3
 import pooch
