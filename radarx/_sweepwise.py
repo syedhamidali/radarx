@@ -33,6 +33,9 @@ import numpy as np
 import xarray as xr
 
 __all__ = [
+    "Gates",
+    "apply_gates",
+    "apply_gates_many",
     "Output",
     "Sweep",
     "apply_sweeps",
@@ -48,7 +51,7 @@ RANGE = "range"
 RAY_DIMS = ("azimuth", "elevation")
 
 # kinds of result and the dimensions they have besides the extra ones
-KINDS = ("sweep", "ray", "range", "scalar")
+KINDS = ("sweep", "ray", "range", "scalar", "gate")
 
 
 def is_dask(obj):
@@ -120,26 +123,33 @@ class Output:
     ----------
     dtype : numpy.dtype or str
         Type of the result.
-    kind : {"sweep", "ray", "range", "scalar"}
+    kind : {"sweep", "ray", "range", "scalar", "gate"}
         Shape of the result of one sweep: ``(ray, range)``, ``(ray,)``,
         ``(range,)`` or a number. The extra dimensions of the input are
-        added in front.
+        added in front. ``"gate"`` is the shape of the fields of a
+        :class:`Gates` input.
+    new_dims : dict, optional
+        Name and length of dimensions that the result has after the others
+        (the classes of a score, say). The core returns them last.
     """
 
-    def __init__(self, dtype, kind="sweep"):
+    def __init__(self, dtype, kind="sweep", new_dims=None):
         if kind not in KINDS:
             raise ValueError(f"kind must be one of {KINDS}, not {kind!r}")
         self.dtype = np.dtype(dtype)
         self.kind = kind
+        self.new_dims = dict(new_dims or {})
 
     def core_dims(self, ray):
         """Dimensions of the result of one sweep."""
-        return {
+        base = {
             "sweep": (ray, RANGE),
             "ray": (ray,),
             "range": (RANGE,),
             "scalar": (),
+            "gate": (),
         }[self.kind]
+        return base + tuple(self.new_dims)
 
     def __repr__(self):
         return f"Output({self.dtype}, {self.kind!r})"
@@ -160,6 +170,8 @@ class Sweep:
         window lengths: anything the core needs besides the fields).
     """
 
+    sliced = True
+
     def __init__(self, fields, context=None):
         self.fields = list(fields)
         self.context = context
@@ -169,6 +181,7 @@ class Sweep:
         self.reference = present[0]
         self.ray = ray_dimension(self.reference)
         self.extra = extra_dims(self.reference)
+        self.core_dims = (self.ray, RANGE)
         for field in present[1:]:
             if set(field.dims) - set(self.reference.dims) or (
                 ray_dimension(field) != self.ray
@@ -191,6 +204,50 @@ class Sweep:
         )
 
 
+class Gates:
+    """
+    The inputs of a gate-wise core: fields broadcast against each other.
+
+    Unlike a :class:`Sweep`, the core sees all dimensions of the fields at
+    once, so the fields may be a sweep, a grid, a profile or a stack of them.
+
+    Parameters
+    ----------
+    fields : sequence of xarray.DataArray or None
+        The fields; the first one that is not None gives the dimensions,
+        coordinates and order of the results. The others are broadcast to it
+        (aligned by their coordinates) and must not have other dimensions.
+    context : object, optional
+        Passed to the core.
+    """
+
+    sliced = False
+    ray = None
+    core_dims = ()
+
+    def __init__(self, fields, context=None):
+        present = [f for f in fields if f is not None]
+        if not present:
+            raise ValueError("a gate-wise function needs at least one field")
+        self.reference = present[0]
+        dims = self.reference.dims
+        broadcast = iter(xr.broadcast(*present))
+        self.fields = [
+            None if f is None else next(broadcast).transpose(*dims) for f in fields
+        ]
+        self.reference = next(f for f in self.fields if f is not None)
+        self.context = context
+
+    @property
+    def plain(self):
+        """Whether no field is a dask array."""
+        return not any(is_dask(f) for f in self.fields if f is not None)
+
+    def arrays(self):
+        """The broadcast fields as NumPy arrays."""
+        return tuple(None if f is None else f.values for f in self.fields)
+
+
 def _as_dataarray(variable, sweep, name=None):
     """A result Variable on the coordinates of the reference field."""
     ref = sweep.reference
@@ -207,10 +264,12 @@ def _plain_results(sweep, results, outputs):
     out = []
     for value, spec in zip(results, outputs):
         dims = spec.core_dims(sweep.ray)
+        if spec.kind == "gate":
+            dims = sweep.reference.dims + dims
         var = xr.Variable(dims, np.asarray(value, dtype=spec.dtype))
         da = _as_dataarray(var, sweep)
-        if spec.kind == "sweep":
-            da = da.transpose(*sweep.reference.dims)
+        if spec.kind in ("sweep", "gate"):
+            da = da.transpose(*sweep.reference.dims, *spec.new_dims)
         out.append(da)
     return out
 
@@ -250,28 +309,50 @@ def _block(core, context, outputs, present, n_fields, one_by_one):
     return run
 
 
+def _whole_block(core, context, outputs, present, n_fields):
+    """The function that ``apply_ufunc`` applies to blocks of gate fields."""
+
+    def run(*blocks):
+        arrays = [None] * n_fields
+        for slot, block in zip(present, blocks):
+            arrays[slot] = block
+        (res,) = core([(context, tuple(arrays))])
+        results = tuple(np.asarray(v, dtype=o.dtype) for v, o in zip(res, outputs))
+        return results if len(results) > 1 else results[0]
+
+    return run
+
+
 def _lazy_results(core, sweep, outputs, one_by_one):
     """Results of a stack or a dask field, as DataArrays."""
     present = [k for k, f in enumerate(sweep.fields) if f is not None]
     ray = sweep.ray
-    func = _block(core, sweep.context, outputs, present, len(sweep.fields), one_by_one)
+    if sweep.sliced:
+        func = _block(
+            core, sweep.context, outputs, present, len(sweep.fields), one_by_one
+        )
+    else:
+        func = _whole_block(core, sweep.context, outputs, present, len(sweep.fields))
     result = xr.apply_ufunc(
         func,
         *(sweep.fields[k].variable for k in present),
-        input_core_dims=[[ray, RANGE]] * len(present),
+        input_core_dims=[list(sweep.core_dims)] * len(present),
         output_core_dims=[list(o.core_dims(ray)) for o in outputs],
         dask="parallelized",
         output_dtypes=[o.dtype for o in outputs],
-        dask_gufunc_kwargs={"allow_rechunk": True},
+        dask_gufunc_kwargs={
+            "allow_rechunk": True,
+            "output_sizes": {k: v for o in outputs for k, v in o.new_dims.items()},
+        },
         keep_attrs=False,
     )
     variables = result if isinstance(result, tuple) else (result,)
     out = []
     for var, spec in zip(variables, outputs):
         da = _as_dataarray(var, sweep)
-        if spec.kind == "sweep":
+        if spec.kind in ("sweep", "gate"):
             order = [d for d in sweep.reference.dims if d in da.dims]
-            da = da.transpose(*order)
+            da = da.transpose(*order, *spec.new_dims)
         out.append(da)
     return out
 
@@ -338,3 +419,8 @@ def apply_sweeps_many(core, sweeps, outputs, one_by_one=False):
         if results[k] is None:
             results[k] = _lazy_results(core, sw, outputs, one_by_one)
     return results
+
+
+# a gate-wise core is run the same way
+apply_gates = apply_sweeps
+apply_gates_many = apply_sweeps_many

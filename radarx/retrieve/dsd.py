@@ -300,6 +300,7 @@ from .._compat import renamed_arguments
 from .._dtypes import fields_as_float32
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import Gates, Output, apply_gates_many
 
 try:
     from . import _dsd
@@ -804,8 +805,8 @@ def _relation(mu_lambda):
     return "custom", coeffs
 
 
-def _as_mask(mask, ds, ref):
-    """Boolean mask array broadcast to the reflectivity field, or None."""
+def _mask_field(mask, ds):
+    """Boolean mask DataArray (lazy), or None."""
     if mask is None:
         return None
     if isinstance(mask, str):
@@ -814,36 +815,31 @@ def _as_mask(mask, ds, ref):
         mask = ds[mask]
     if not isinstance(mask, xr.DataArray):
         raise TypeError("mask must be a variable name or a boolean DataArray")
-    mask = mask.fillna(0).astype(bool)
+    return mask.fillna(0).astype(bool)
+
+
+def _as_mask(mask, ds, ref):
+    """Boolean mask array broadcast to the reflectivity field, or None."""
+    mask = _mask_field(mask, ds)
+    if mask is None:
+        return None
     _, mask = xr.broadcast(ref, mask)
     return np.ascontiguousarray(mask.transpose(*ref.dims).values.ravel())
 
 
 def _prepare(ds, fields, mask, kdp_da, zdr_offset=0.0):
-    """Contiguous 1-D arrays of one dataset and the reference field."""
+    """The gate fields of one dataset (lazy), broadcast to the reflectivity."""
     dbzh, zdr = fields
     zname = _find(ds, dbzh, _DBZH_NAMES, True)
     dname = _find(ds, zdr, _ZDR_NAMES, True)
-    ref = ds[zname]
-
-    def flat(da):
-        _, da = xr.broadcast(ref, da)
-        values = da.transpose(*ref.dims).values.ravel()
-        return np.ascontiguousarray(values, dtype=np.float64)
-
-    arrays = (
-        flat(ref),
-        flat(ds[dname]) - zdr_offset,
-        None if kdp_da is None else flat(kdp_da),
-        _as_mask(mask, ds, ref),
-    )
     kname = None if kdp_da is None else (kdp_da.name or "KDP")
-    return {"ref": ref, "fields": (zname, dname, kname), "arrays": arrays}
+    gates = Gates([ds[zname], ds[dname] - zdr_offset, kdp_da, _mask_field(mask, ds)])
+    return {"ref": gates.reference, "fields": (zname, dname, kname), "gates": gates}
 
 
-def _clipped(item, tab):
-    """Gates (0/1) whose ZDR lies outside the lookup table, as 1-D int8."""
-    z, zdr, _, mask = item["arrays"]
+def _clipped(arrays, tab):
+    """Gates (0/1) whose ZDR lies outside the lookup table, as int8."""
+    z, zdr, _, mask = arrays
     good = np.isfinite(z) & np.isfinite(zdr)
     if mask is not None:
         good &= mask.astype(bool)
@@ -852,49 +848,79 @@ def _clipped(item, tab):
     return out.astype(np.int8)
 
 
-def _wrap(item, values, attrs, clipped=None):
+def _wrap(item, values, attrs, clipped):
     """Output Dataset on the coordinates of the reflectivity field."""
     ref = item["ref"]
     data_vars = {}
-    for i, name in enumerate(_OUT_NAMES):
-        data_vars[name] = (
-            ref.dims,
-            values[i].reshape(ref.shape),
-            dict(_OUT_ATTRS[name]),
-        )
-    if clipped is not None:
-        data_vars["ZDR_CLIPPED"] = (
-            ref.dims,
-            clipped.reshape(ref.shape),
-            {
-                "long_name": "ZDR outside the lookup table",
-                "units": "1",
-                "flag_values": np.array([0, 1], dtype=np.int8),
-                "flag_meanings": "within_table clipped_to_table",
-                "comment": "1 where ZDR (after the offset) was clipped to the "
-                "range of the scattering table, so that Dm and Nw are not "
-                "sensitive to it (at C band ZDR saturates near 3 dB)",
-            },
-        )
+    for name, value in zip(_OUT_NAMES, values):
+        data_vars[name] = (ref.dims, value.data, dict(_OUT_ATTRS[name]))
+    data_vars["ZDR_CLIPPED"] = (
+        ref.dims,
+        clipped.data,
+        {
+            "long_name": "ZDR outside the lookup table",
+            "units": "1",
+            "flag_values": np.array([0, 1], dtype=np.int8),
+            "flag_meanings": "within_table clipped_to_table",
+            "comment": "1 where ZDR (after the offset) was clipped to the "
+            "range of the scattering table, so that Dm and Nw are not "
+            "sensitive to it (at C band ZDR saturates near 3 dB)",
+        },
+    )
     src = ", ".join(f for f in item["fields"] if f)
     out = xr.Dataset(data_vars, coords=dict(ref.coords), attrs=dict(attrs))
     out.attrs["source_fields"] = src
     return out
 
 
-def _run(items, tab, min_kdp, nw_range, attrs, n_threads, use_compiled, kdp_blend=0.0):
+def _flat(values):
+    """Contiguous float64 1-D array."""
+    return np.ascontiguousarray(values, dtype=np.float64).reshape(-1)
+
+
+def _core(batch, tab, min_kdp, nw_range, kdp_blend, n_threads, use_compiled):
+    """DSD parameters and clipped flag of gates given as ``(z, zdr, kdp, mask)``."""
+    shapes, items = [], []
+    for _, (z, zdr, kdp, mask) in batch:
+        shapes.append(z.shape)
+        items.append(
+            (
+                _flat(z),
+                _flat(zdr),
+                None if kdp is None else _flat(kdp),
+                None if mask is None else np.ascontiguousarray(mask).reshape(-1),
+            )
+        )
     if use_compiled:
-        arrays = [it["arrays"] for it in items]
         results = _retrieve_compiled(
-            arrays, tab, min_kdp, nw_range, n_threads, kdp_blend
+            items, tab, min_kdp, nw_range, n_threads, kdp_blend
         )
     else:
         results = [
-            _retrieve_numpy(*it["arrays"], tab, min_kdp, nw_range, kdp_blend)
-            for it in items
+            _retrieve_numpy(*item, tab, min_kdp, nw_range, kdp_blend) for item in items
         ]
     return [
-        fields_as_float32(_wrap(it, res, attrs, _clipped(it, tab)))
+        (*(v.reshape(shape) for v in res), _clipped(item, tab).reshape(shape))
+        for shape, item, res in zip(shapes, items, results)
+    ]
+
+
+_OUTPUTS = (*[Output(np.float32, "gate")] * len(_OUT_NAMES), Output(np.int8, "gate"))
+
+
+def _run(items, tab, min_kdp, nw_range, attrs, n_threads, use_compiled, kdp_blend=0.0):
+    core = functools.partial(
+        _core,
+        tab=tab,
+        min_kdp=min_kdp,
+        nw_range=nw_range,
+        kdp_blend=kdp_blend,
+        n_threads=n_threads,
+        use_compiled=use_compiled,
+    )
+    results = apply_gates_many(core, [it["gates"] for it in items], _OUTPUTS)
+    return [
+        fields_as_float32(_wrap(it, res[:-1], attrs, res[-1]))
         for it, res in zip(items, results)
     ]
 

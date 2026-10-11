@@ -29,6 +29,13 @@ def data_arrays(obj):
     return [obj] if isinstance(obj, xr.DataArray) else list(obj.data_vars.values())
 
 
+def same_dims(obj, expected):
+    """``obj`` with the dimension order of ``expected`` for every variable."""
+    if isinstance(obj, xr.DataArray):
+        return obj.transpose(*expected.dims)
+    return obj.assign({k: obj[k].transpose(*expected[k].dims) for k in obj.data_vars})
+
+
 def assert_lazy(obj):
     """Every data variable of ``obj`` is a dask array."""
     for da in data_arrays(obj):
@@ -73,7 +80,7 @@ def check_stack(func, make, n=3, chunks=None, ignore_attrs=(), **kwargs):
     before = stack.copy(deep=True)
 
     out = func(stack, **kwargs)
-    xr.testing.assert_allclose(out, expected)
+    xr.testing.assert_allclose(same_dims(out, expected), expected)
     assert_same_attrs(out, single[0], ignore_attrs)
     xr.testing.assert_identical(stack, before)
 
@@ -82,7 +89,7 @@ def check_stack(func, make, n=3, chunks=None, ignore_attrs=(), **kwargs):
     assert_lazy(lazy)
     assert_same_attrs(lazy, single[0], ignore_attrs)
     assert read_provenance(lazy) == read_provenance(single[0])
-    xr.testing.assert_allclose(lazy.compute(), expected)
+    xr.testing.assert_allclose(same_dims(lazy.compute(), expected), expected)
     assert all(da.chunks is not None for da in data_arrays(dask_stack))
     xr.testing.assert_identical(dask_stack.compute(), before)
     return out, lazy
