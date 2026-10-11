@@ -484,6 +484,22 @@
   "pages": "673-686",
   "doi": "10.1175/1520-0426(2002)019<0673:UOTDRS>2.0.CO;2"
  },
+ "10.1175/1520-0426(2003)020<0845:TSOSPW>2.0.CO;2": {
+  "authors": [
+   "Bech, J.",
+   "Codina, B.",
+   "Lorente, J.",
+   "Bebbington, D."
+  ],
+  "year": 2003,
+  "title": "The Sensitivity of Single Polarization Weather Radar Beam Blockage Correction to Variability in the Vertical Refractivity Gradient",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "20",
+  "issue": "6",
+  "pages": "845-855",
+  "doi": "10.1175/1520-0426(2003)020<0845:TSOSPW>2.0.CO;2"
+ },
  "10.1175/1520-0434(1994)009<0625:TEONTV>2.0.CO;2": {
   "authors": [
    "Doswell, C. A.",
@@ -1028,6 +1044,21 @@
   "issue": "9",
   "pages": "1717-1723",
   "doi": "10.1175/2008JTECHA1075.1"
+ },
+ "10.1175/2008JTECHA1133.1": {
+  "authors": [
+   "Lang, T. J.",
+   "Nesbitt, S. W.",
+   "Carey, L. D."
+  ],
+  "year": 2009,
+  "title": "On the Correction of Partial Beam Blockage in Polarimetric Radar Data",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "26",
+  "issue": "5",
+  "pages": "943-957",
+  "doi": "10.1175/2008JTECHA1133.1"
  },
  "10.1175/2008WAF2222205.1": {
   "authors": [
