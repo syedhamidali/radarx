@@ -123,6 +123,7 @@ from radarx.retrieve import (
     dealias_velocity,
     dsd_bayesian,
     dsd_prior,
+    dual_doppler_analytic,
     echo_mask,
     echo_top,
     estimate_kdp,
@@ -1277,7 +1278,8 @@ with the same ERA5 wind profile, and
   motion of step 11, and merge their reflectivity;
 - retrieve the three-dimensional wind with the variational multi-Doppler
   method (`multi_doppler`; Gao et al. 1999), with the ERA5 profile as the
-  background.
+  background, and with the classical analytic solution of the 2 x 2 system
+  of the two radial velocities (`dual_doppler_analytic`) for a quick check.
 
 The [multi-radar gridding](Multi_Radar_Grid) and [multi-Doppler](Multi_Doppler)
 notebooks show both in more detail.
@@ -1319,7 +1321,14 @@ with timed("12c. multi-Doppler wind"):
     )
     background = sounding.profile_to_grid(era5, md_grid)
     wind = md_grid.radarx.multi_doppler(background, velocity="VRADH_dealiased")
+    # the classical analytic solution (2 x 2 system per cell, continuity equation upward)
+    analytic = md_grid.radarx.dual_doppler_analytic(background, velocity="VRADH_dealiased")
+    analytic_fn = dual_doppler_analytic(md_grid, background, velocity="VRADH_dealiased")
 print(f"iterations per grid level: {wind.attrs['iterations']}")
+solved = analytic.u.notnull() & (wind.n_radars >= 2)
+print(f"analytic dual-Doppler: {int(solved.sum())} cells with a horizontal wind, "
+      f"rms difference to the variational u {float(np.sqrt(((analytic.u - wind.u).where(solved) ** 2).mean())):.1f} m/s; "
+      "the accessor and the function agree:", bool(analytic.u.equals(analytic_fn.u)))
 mosaic_fn = grid_radars([kgwx, kbmx], x, y, z, data_vars=["DBZH"], names=["KGWX", "KBMX"],
                         time=analysis_time, motion=motion, merge=["DBZH"])
 print("the accessor of the first volume and grid_radars give the same mosaic:",
@@ -2019,6 +2028,7 @@ notebooks or from this index.
 | `grid_lightning` | `radarx.retrieve.lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `lightning_jump` | `radarx.retrieve.lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `vertical_source_distribution` | `radarx.retrieve.lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
+| `dual_doppler_analytic` | `radarx.retrieve.multidoppler` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `fall_speed` | `radarx.retrieve.multidoppler` | [part 2](Radar_Workflow_Advanced): 9. Diabatic Lagrangian analysis |
 | `multi_doppler` | `radarx.retrieve.multidoppler` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `multi_doppler_input` | `radarx.retrieve.multidoppler` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
@@ -2101,6 +2111,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.disdrometer` | [part 2](Radar_Workflow_Advanced): 2. Disdrometers |
 | `.radarx.dsd` | [core](Radar_Workflow): 7. Rain drop size distribution |
 | `.radarx.dsd_bayesian` | [core](Radar_Workflow): 7. Rain drop size distribution |
+| `.radarx.dual_doppler_analytic` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `.radarx.echo_mask` | [core](Radar_Workflow): 2. Remove non-meteorological echo |
 | `.radarx.echo_top` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.estimate_motion` | [core](Radar_Workflow): 11. Storm motion, common analysis time and time interpolation |
