@@ -286,8 +286,8 @@ with xr.open_dataset(path) as back:
   `sweep_*` nodes; `write_odim` also needs a radar identifier for
   `what/source` (`source="NOD:..."`; newer xradar builds it from the
   attributes of a volume that was read from ODIM, xradar 0.11 does not).
-- Zarr 3 stores need xarray 2025.1 or newer; with an older xarray pass
-  `zarr_format=2`.
+- The zarr package 3 needs xarray 2025.1 or newer; with xarray 2024.10
+  install `zarr<3`.
 - Only the CF NetCDF of a grid was checked with a validator (the CF checker
   4.1.0 against CF-1.8: no errors, a warning for a field without
   `long_name`). CfRadial1, CfRadial2 and ODIM_H5 files were read back with

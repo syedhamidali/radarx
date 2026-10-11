@@ -949,8 +949,9 @@ def write_zarr(obj, path, *, cf=False, packing="drop", **kwargs):
     nodes and the variables, and the integer packing of the source encoding
     replaced by floats (``packing="drop"``).
 
-    Zarr 3 needs xarray 2025.1 or newer; with an older xarray only Zarr 2
-    stores can be written (``zarr_format=2``).
+    The zarr package version 3 needs xarray 2025.1 or newer; with xarray
+    2024.10 install ``zarr<3`` (writing failed with zarr 3 there, also with
+    ``zarr_format=2``).
 
     Parameters
     ----------

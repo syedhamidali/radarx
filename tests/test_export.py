@@ -693,6 +693,7 @@ def test_odim_round_trip(volume, tmp_path):
         assert "PHIDP_OFFSET" not in back[name].variables
         assert "radarx_method" not in back[name]["KDP"].attrs
         assert back[name]["METEO_MASK"].dtype != bool
+        assert back[name]["ECHO_CLASS"].dtype.kind == "f"
 
 
 def test_odim_without_optional_how_loses_ray_angles(volume, tmp_path):
