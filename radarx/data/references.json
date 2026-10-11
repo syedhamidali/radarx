@@ -232,6 +232,19 @@
   "pages": "1153-1160",
   "doi": "10.1109/TASSP.1981.1163711"
  },
+ "10.1109/TIP.2011.2181402": {
+  "authors": [
+   "Padfield, D."
+  ],
+  "year": 2012,
+  "title": "Masked Object Registration in the Fourier Domain",
+  "type": "article",
+  "journal": "IEEE Transactions on Image Processing",
+  "volume": "21",
+  "issue": "5",
+  "pages": "2706-2718",
+  "doi": "10.1109/TIP.2011.2181402"
+ },
  "10.1111/2041-210X.13280": {
   "authors": [
    "Lin, T.",
@@ -353,6 +366,22 @@
   "pages": "118-128",
   "doi": "10.1175/1520-0426(1990)007<0118:EDODVU>2.0.CO;2"
  },
+ "10.1175/1520-0426(1990)007<0829:AEOPEI>2.0.CO;2": {
+  "authors": [
+   "Bringi, V. N.",
+   "Chandrasekar, V.",
+   "Balakrishnan, N.",
+   "Zrnić, D. S."
+  ],
+  "year": 1990,
+  "title": "An Examination of Propagation Effects in Rainfall on Radar Measurements at Microwave Frequencies",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "7",
+  "issue": "6",
+  "pages": "829-840",
+  "doi": "10.1175/1520-0426(1990)007<0829:AEOPEI>2.0.CO;2"
+ },
  "10.1175/1520-0426(1993)010<0798:TDDODV>2.0.CO;2": {
   "authors": [
    "Jing, Z.",
@@ -394,6 +423,22 @@
   "issue": "2",
   "pages": "130-139",
   "doi": "10.1175/1520-0426(2000)017<0130:AODFMS>2.0.CO;2"
+ },
+ "10.1175/1520-0426(2000)017<0332:TRPAAT>2.0.CO;2": {
+  "authors": [
+   "Testud, J.",
+   "Le Bouar, E.",
+   "Obligis, E.",
+   "Ali-Mehenni, M."
+  ],
+  "year": 2000,
+  "title": "The Rain Profiling Algorithm Applied to Polarimetric Weather Radar",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "17",
+  "issue": "3",
+  "pages": "332-356",
+  "doi": "10.1175/1520-0426(2000)017<0332:TRPAAT>2.0.CO;2"
  },
  "10.1175/1520-0426(2001)018<1674:ARTFDD>2.0.CO;2": {
   "authors": [
@@ -438,6 +483,20 @@
   "issue": "5",
   "pages": "673-686",
   "doi": "10.1175/1520-0426(2002)019<0673:UOTDRS>2.0.CO;2"
+ },
+ "10.1175/1520-0434(1994)009<0625:TEONTV>2.0.CO;2": {
+  "authors": [
+   "Doswell, C. A.",
+   "Rasmussen, E. N."
+  ],
+  "year": 1994,
+  "title": "The Effect of Neglecting the Virtual Temperature Correction on CAPE Calculations",
+  "type": "article",
+  "journal": "Weather and Forecasting",
+  "volume": "9",
+  "issue": "4",
+  "pages": "625-629",
+  "doi": "10.1175/1520-0434(1994)009<0625:TEONTV>2.0.CO;2"
  },
  "10.1175/1520-0434(1997)012<0473:VDAAHI>2.0.CO;2": {
   "authors": [
@@ -641,6 +700,20 @@
   "pages": "165-166",
   "doi": "10.1175/1520-0469(1948)005<0165:TDORWS>2.0.CO;2"
  },
+ "10.1175/1520-0469(1954)011<0058:EIITRM>2.0.CO;2": {
+  "authors": [
+   "Hitschfeld, W.",
+   "Bordan, J."
+  ],
+  "year": 1954,
+  "title": "Errors Inherent in the Radar Measurement of Rainfall at Attenuating Wavelengths",
+  "type": "article",
+  "journal": "Journal of Meteorology",
+  "volume": "11",
+  "issue": "1",
+  "pages": "58-67",
+  "doi": "10.1175/1520-0469(1954)011<0058:EIITRM>2.0.CO;2"
+ },
  "10.1175/1520-0469(1976)033<0851:TVASOC>2.0.CO;2": {
   "authors": [
    "Beard, K. V."
@@ -767,6 +840,19 @@
   "issue": "4",
   "pages": "361-382",
   "doi": "10.1175/1520-0469(2004)061<0361:ATFSLS>2.0.CO;2"
+ },
+ "10.1175/1520-0477-37.10.528": {
+  "authors": [
+   "Galway, J. G."
+  ],
+  "year": 1956,
+  "title": "The Lifted Index as a Predictor of Latent Instability",
+  "type": "article",
+  "journal": "Bulletin of the American Meteorological Society",
+  "volume": "37",
+  "issue": "10",
+  "pages": "528-529",
+  "doi": "10.1175/1520-0477-37.10.528"
  },
  "10.1175/1520-0493(1972)100<0548:VILWNA>2.3.CO;2": {
   "authors": [
@@ -899,6 +985,20 @@
   "issue": "8",
   "pages": "2238-2255",
   "doi": "10.1175/2008JAMC1732.1"
+ },
+ "10.1175/2008JAMC1753.1": {
+  "authors": [
+   "Giangrande, S. E.",
+   "Ryzhkov, A. V."
+  ],
+  "year": 2008,
+  "title": "Estimation of Rainfall Based on the Results of Polarimetric Echo Classification",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology and Climatology",
+  "volume": "47",
+  "issue": "9",
+  "pages": "2445-2462",
+  "doi": "10.1175/2008JAMC1753.1"
  },
  "10.1175/2008JAMC2026.1": {
   "authors": [
@@ -1180,6 +1280,21 @@
   "pages": "E1768-E1799",
   "doi": "10.1175/BAMS-D-22-0064.1"
  },
+ "10.1175/JAM2213.1": {
+  "authors": [
+   "Ryzhkov, A. V.",
+   "Giangrande, S. E.",
+   "Schuur, T. J."
+  ],
+  "year": 2005,
+  "title": "Rainfall Estimation with a Polarimetric Prototype of WSR-88D",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology",
+  "volume": "44",
+  "issue": "4",
+  "pages": "502-515",
+  "doi": "10.1175/JAM2213.1"
+ },
  "10.1175/JAMC-D-10-05024.1": {
   "authors": [
    "Vulpiani, G.",
@@ -1377,6 +1492,22 @@
   "pages": "2266-2280",
   "doi": "10.1175/JTECH-D-13-00036.1"
  },
+ "10.1175/JTECH-D-13-00038.1": {
+  "authors": [
+   "Ryzhkov, A.",
+   "Diederich, M.",
+   "Zhang, P.",
+   "Simmer, C."
+  ],
+  "year": 2014,
+  "title": "Potential Utilization of Specific Attenuation for Rainfall Estimation, Mitigation of Partial Beam Blockage, and Radar Networking",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "31",
+  "issue": "3",
+  "pages": "599-619",
+  "doi": "10.1175/JTECH-D-13-00038.1"
+ },
  "10.1175/JTECH-D-13-00119.1": {
   "authors": [
    "Thompson, E. J.",
@@ -1454,6 +1585,23 @@
   "issue": "5",
   "pages": "529-543",
   "doi": "10.1175/JTECH-D-21-0130.1"
+ },
+ "10.1175/JTECH1803.1": {
+  "authors": [
+   "Park, S.-G.",
+   "Bringi, V. N.",
+   "Chandrasekar, V.",
+   "Maki, M.",
+   "Iwanami, K."
+  ],
+  "year": 2005,
+  "title": "Correction of Radar Reflectivity and Differential Reflectivity for Rain Attenuation at X Band. Part I: Theoretical and Empirical Basis",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "22",
+  "issue": "11",
+  "pages": "1621-1632",
+  "doi": "10.1175/JTECH1803.1"
  },
  "10.1175/JTECH2035.1": {
   "authors": [
@@ -1818,5 +1966,179 @@
   "publisher": "American Meteorological Society",
   "pages": "P5.6",
   "url": "https://ams.confex.com/ams/11aram22sls/techprogram/paper_81827.htm"
+ },
+ "10.1109/36.175319": {
+  "authors": [
+   "Gorgucci, E.",
+   "Scarchilli, G.",
+   "Chandrasekar, V."
+  ],
+  "year": 1992,
+  "title": "Calibration of radars using polarimetric techniques",
+  "type": "article",
+  "journal": "IEEE Transactions on Geoscience and Remote Sensing",
+  "volume": "30",
+  "issue": "5",
+  "pages": "853-858",
+  "doi": "10.1109/36.175319"
+ },
+ "10.1175/1520-0450(1974)013<0808:ODOTNL>2.0.CO;2": {
+  "authors": [
+   "Hildebrand, P. H.",
+   "Sekhon, R. S."
+  ],
+  "year": 1974,
+  "title": "Objective Determination of the Noise Level in Doppler Spectra",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology",
+  "volume": "13",
+  "issue": "7",
+  "pages": "808-811",
+  "doi": "10.1175/1520-0450(1974)013<0808:ODOTNL>2.0.CO;2"
+ },
+ "10.1175/2008JTECHA1152.1": {
+  "authors": [
+   "Gourley, J. J.",
+   "Illingworth, A. J.",
+   "Tabary, P."
+  ],
+  "year": 2009,
+  "title": "Absolute Calibration of Radar Reflectivity Using Redundancy of the Polarization Observations and Implied Constraints on Drop Shapes",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "26",
+  "issue": "4",
+  "pages": "689-703",
+  "doi": "10.1175/2008JTECHA1152.1"
+ },
+ "10.1175/JTECH-D-13-00045.1": {
+  "authors": [
+   "Kollias, P.",
+   "Jo, I.",
+   "Borque, P.",
+   "Tatarevic, A.",
+   "Lamer, K.",
+   "Bharadwaj, N.",
+   "Widener, K.",
+   "Johnson, K.",
+   "Clothiaux, E. E."
+  ],
+  "year": 2014,
+  "title": "Scanning ARM Cloud Radars. Part II: Data Quality Control and Processing",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "31",
+  "issue": "3",
+  "pages": "583-598",
+  "doi": "10.1175/JTECH-D-13-00045.1"
+ },
+ "10.1175/JTECH1772.1": {
+  "authors": [
+   "Ryzhkov, A. V.",
+   "Giangrande, S. E.",
+   "Melnikov, V. M.",
+   "Schuur, T. J."
+  ],
+  "year": 2005,
+  "title": "Calibration Issues of Dual-Polarization Radar Measurements",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "22",
+  "issue": "8",
+  "pages": "1138-1155",
+  "doi": "10.1175/JTECH1772.1"
+ },
+ "10.1175/JTECH1912.1": {
+  "authors": [
+   "Gourley, J. J.",
+   "Tabary, P.",
+   "Parent du Chatelet, J."
+  ],
+  "year": 2006,
+  "title": "Data Quality of the Meteo-France C-Band Polarimetric Radar",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "23",
+  "issue": "10",
+  "pages": "1340-1356",
+  "doi": "10.1175/JTECH1912.1"
+ },
+ "10.1175/2009BAMS2618.1": {
+  "authors": [
+   "Anderson, J.",
+   "Hoar, T.",
+   "Raeder, K.",
+   "Liu, H.",
+   "Collins, N.",
+   "Torn, R.",
+   "Arellano, A."
+  ],
+  "year": 2009,
+  "title": "The Data Assimilation Research Testbed: A Community Facility",
+  "type": "article",
+  "journal": "Bulletin of the American Meteorological Society",
+  "volume": "90",
+  "issue": "9",
+  "pages": "1283-1296",
+  "doi": "10.1175/2009BAMS2618.1"
+ },
+ "10.1175/BAMS-D-24-0214.1": {
+  "authors": [
+   "El Gharamti, M.",
+   "Kershaw, H.",
+   "Raeder, K.",
+   "Raczka, B.",
+   "Johnson, B.",
+   "Smith, M.",
+   "Anderson, J.",
+   "Amrhein, D.",
+   "Collins, N.",
+   "Hoar, T.",
+   "Gaubert, B.",
+   "Grooms, I.",
+   "Kugler, L."
+  ],
+  "year": 2025,
+  "title": "The Data Assimilation Research Testbed: A Robust, Scalable Software Facility with Groundbreaking Capabilities for Model-Data Integration",
+  "type": "article",
+  "journal": "Bulletin of the American Meteorological Society",
+  "volume": "106",
+  "issue": "11",
+  "pages": "E2328-E2345",
+  "doi": "10.1175/BAMS-D-24-0214.1"
+ },
+ "10.1175/MWR3324.1": {
+  "authors": [
+   "Alpert, J. C.",
+   "Kumar, V. K."
+  ],
+  "year": 2007,
+  "title": "Radial Wind Super-Obs from the WSR-88D Radars in the NCEP Operational Assimilation System",
+  "type": "article",
+  "journal": "Monthly Weather Review",
+  "volume": "135",
+  "issue": "3",
+  "pages": "1090-1109",
+  "doi": "10.1175/MWR3324.1"
+ },
+ "10.5065/D6WQ0202": {
+  "authors": [
+   "Anderson, J.",
+   "Collins, N.",
+   "Gharamti, M.",
+   "Hendricks, J.",
+   "Hoar, T.",
+   "Johnson, B.",
+   "Kershaw, H.",
+   "Raczka, B.",
+   "Raeder, K.",
+   "Smith, M."
+  ],
+  "year": 2024,
+  "title": "Data Assimilation Research Testbed",
+  "type": "software",
+  "publisher": "NSF NCAR Computational and Information Systems Laboratory",
+  "doi": "10.5065/D6WQ0202",
+  "url": "https://github.com/NCAR/DART"
  }
 }

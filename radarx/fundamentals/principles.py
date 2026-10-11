@@ -7,12 +7,12 @@ Core physical and theoretical principles in radar meteorology.
 Sources are [1]_ (radar equation, Doppler shift, noise) and [2]_ (Nyquist
 velocity).
 
-Name clashes: :func:`doppler_frequency_shift` here has the signature
+Name clash: :func:`doppler_frequency_shift` here has the signature
 ``(v_radial, wavelength)`` whereas
 :func:`radarx.fundamentals.doppler.doppler_frequency_shift` takes
-``(frequency, vr)``. Because ``radarx.fundamentals`` star-imports this module
-after ``doppler``, ``radarx.fundamentals.doppler_frequency_shift`` is the
-function of this module. Use the explicit module path to be sure.
+``(frequency, vr)``. Neither is exported by ``radarx.fundamentals`` under that
+name: use the module path. The plain name at package level is a deprecated
+alias of the function of this module.
 
 References
 ----------
@@ -282,10 +282,10 @@ def doppler_frequency_shift(v_radial, wavelength):
     """
     Compute Doppler frequency shift given radial velocity and wavelength.
 
-    ``f_d = 2 v_r / lambda``, Eq. (3.30) of [1]_ divided by ``2 pi``. This
-    function shadows :func:`radarx.fundamentals.doppler.doppler_frequency_shift`
-    in the ``radarx.fundamentals`` namespace although the signature differs
-    (see the module docstring).
+    ``f_d = 2 v_r / lambda``, Eq. (3.30) of [1]_ divided by ``2 pi``. The
+    signature differs from
+    :func:`radarx.fundamentals.doppler.doppler_frequency_shift` (see the
+    module docstring); call it as ``principles.doppler_frequency_shift``.
 
     Parameters
     ----------

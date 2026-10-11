@@ -39,7 +39,7 @@ try:  # pragma: no cover
 except ImportError:  # pragma: no cover
     from datatree import DataTree
 
-__all__ = ["set_provenance", "provenance", "read_provenance"]
+__all__ = ["set_provenance", "provenance", "read_provenance", "inherit_provenance"]
 
 METHOD = "radarx_method"
 REFERENCES = "radarx_references"
@@ -140,20 +140,31 @@ def _history_line(function, params):
     return f"{function}({', '.join(items)})"
 
 
-def _write(node, method, refs, line):
-    attrs = node.attrs
-    methods = [m for m in (attrs.get(METHOD) or "").split(_METHOD_SEP) if m]
-    if method not in methods:
-        methods.append(method)
+def _merge(attrs, methods, refs, version, lines):
+    """Append methods, references and history lines to the provenance attrs."""
+    have = [m for m in (attrs.get(METHOD) or "").split(_METHOD_SEP) if m]
+    have += [m for m in methods if m not in have]
     references = _split(attrs.get(REFERENCES))
     references += [r for r in refs if r not in references]
-    attrs[METHOD] = _METHOD_SEP.join(methods)
+    attrs[METHOD] = _METHOD_SEP.join(have)
     attrs[REFERENCES] = " ".join(references)
-    attrs[VERSION] = str(_version())
-    attrs[HISTORY] = f"{attrs[HISTORY]}\n{line}" if attrs.get(HISTORY) else line
+    attrs[VERSION] = str(version)
+    for line in lines:
+        attrs[HISTORY] = f"{attrs[HISTORY]}\n{line}" if attrs.get(HISTORY) else line
 
 
-def set_provenance(obj, method, refs, params=None, function=None):
+def _write(node, method, refs, line, variables=None):
+    _merge(node.attrs, [method], refs, _version(), [line])
+    if isinstance(node, xr.DataArray):
+        return
+    # the variables carry the method too, so that it survives ``ds[["KDP"]]``
+    # and ``xr.merge``, which drop the attributes of the Dataset
+    for name, var in node.variables.items():
+        if name in node.data_vars and (variables is None or name in variables):
+            _merge(var.attrs, [method], refs, _version(), [])
+
+
+def set_provenance(obj, method, refs, params=None, function=None, variables=None):
     """
     Record the method that produced an xarray object.
 
@@ -172,6 +183,10 @@ def set_provenance(obj, method, refs, params=None, function=None):
         and short tuples of them are written. ``None`` is left out.
     function : str, optional
         Name of the calling function for the history line. Default: ``method``.
+    variables : collection of str, optional
+        Names of the data variables that also get ``radarx_method``,
+        ``radarx_references`` and ``radarx_version``. Default: all of them.
+        The history stays on the Dataset or DataTree node.
 
     Returns
     -------
@@ -180,12 +195,35 @@ def set_provenance(obj, method, refs, params=None, function=None):
     """
     line = _history_line(function or method, params)
     for node in _nodes(obj):
-        _write(node, method, refs, line)
+        _write(node, method, refs, line, variables)
     return obj
+
+
+def _new_variables(result, known):
+    if isinstance(result, xr.DataArray):
+        return None
+    names = set()
+    for node in _nodes(result):
+        names.update(n for n in node.data_vars if n not in known)
+    return names
 
 
 def _is_xarray(obj):
     return isinstance(obj, (xr.DataArray, xr.Dataset, DataTree))
+
+
+def _input_variables(args):
+    """Names of the data variables of the xarray objects among ``args``."""
+    names = set()
+    for arg in args:
+        if isinstance(arg, xr.DataArray):
+            names.add(arg.name)
+        elif isinstance(arg, xr.Dataset):
+            names.update(arg.data_vars)
+        elif isinstance(arg, DataTree):
+            for node in arg.subtree:
+                names.update(node.data_vars)
+    return names
 
 
 def _annotate(result, args, method, refs, params, function):
@@ -193,7 +231,16 @@ def _annotate(result, args, method, refs, params, function):
     if _is_xarray(result):
         if any(result is a for a in args):
             result = result.copy(deep=False)
-        return set_provenance(result, method, refs, params, function)
+        # variables of the input that come back (masked fields, for one) keep
+        # their own provenance; the products are the variables it did not have
+        return set_provenance(
+            result,
+            method,
+            refs,
+            params,
+            function,
+            variables=_new_variables(result, _input_variables(args)),
+        )
     if isinstance(result, (tuple, list)):
         items = [_annotate(r, args, method, refs, params, function) for r in result]
         return type(result)(items) if isinstance(result, tuple) else items
@@ -292,6 +339,47 @@ def provenance(method, extra_refs=()):
     return decorate
 
 
+def inherit_provenance(target, products):
+    """
+    Append the provenance of ``products`` to ``target``, in place.
+
+    A merge of retrieval products into a sweep (``ds.radarx.assign``) keeps the
+    product variables and loses the attributes of the products Dataset. This
+    writes its method, references, version and history lines, and those of
+    its variables, on the attributes of ``target``. A history line that is
+    already there is not repeated.
+
+    Parameters
+    ----------
+    target : xarray.Dataset
+        The sweep that received the products.
+    products : xarray.Dataset
+        The products that were merged into it.
+
+    Returns
+    -------
+    xarray.Dataset
+        ``target``.
+    """
+    sources = [products.attrs] + [v.attrs for v in products.data_vars.values()]
+    for attrs in sources:
+        if METHOD not in attrs and REFERENCES not in attrs:
+            continue
+        have = str(target.attrs.get(HISTORY, "")).split("\n")
+        lines = []
+        for line in str(attrs.get(HISTORY, "")).split("\n"):
+            if line and line not in have and line not in lines:
+                lines.append(line)
+        _merge(
+            target.attrs,
+            [m for m in str(attrs.get(METHOD, "")).split(_METHOD_SEP) if m],
+            _split(str(attrs.get(REFERENCES, ""))),
+            attrs.get(VERSION) or target.attrs.get(VERSION) or _version(),
+            lines,
+        )
+    return target
+
+
 def read_provenance(obj):
     """
     Provenance written on an xarray object.
@@ -300,26 +388,28 @@ def read_provenance(obj):
     ----------
     obj : xarray.DataArray, xarray.Dataset or xarray.DataTree
         Object to read. Every node of a DataTree (root included) and every
-        data variable is read.
+        data variable is read. A variable is listed only when its method is
+        not already on its node, as for products picked from a Dataset with
+        ``ds[["KDP"]]`` or combined with ``xr.merge``.
 
     Returns
     -------
     list of dict
-        One dict per annotated node with ``method`` (list of str),
+        One dict per annotation with ``method`` (list of str),
         ``references`` (list of str), ``version`` (str) and ``history``
         (list of str).
     """
     found = []
-    holders = []
+    seen = []
     for node in _nodes(obj):
-        holders.append(node.attrs)
+        holders = [(node.attrs, True)]
         if not isinstance(node, xr.DataArray):
-            holders.extend(v.attrs for v in node.data_vars.values())
-    for attrs in holders:
-        if METHOD not in attrs and REFERENCES not in attrs:
-            continue
-        found.append(
-            {
+            holders.extend((v.attrs, False) for v in node.data_vars.values())
+        covered = set()
+        for attrs, is_node in holders:
+            if METHOD not in attrs and REFERENCES not in attrs:
+                continue
+            item = {
                 "method": [
                     m for m in str(attrs.get(METHOD, "")).split(_METHOD_SEP) if m
                 ],
@@ -327,5 +417,13 @@ def read_provenance(obj):
                 "version": str(attrs.get(VERSION, "")),
                 "history": [h for h in str(attrs.get(HISTORY, "")).split("\n") if h],
             }
-        )
+            if is_node:
+                covered = set(item["method"])
+            elif set(item["method"]) <= covered:
+                continue  # the variables of one call repeat what the node says
+            key = (id(node), tuple(item["method"]), tuple(item["references"]))
+            if not is_node and key in seen:
+                continue
+            seen.append(key)
+            found.append(item)
     return found

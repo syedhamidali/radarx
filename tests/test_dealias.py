@@ -433,3 +433,90 @@ def test_nexrad_matches_pyart(case, request):
         # jumps above the Nyquist velocity than Py-ART leaves
         assert same > 0.99, (name, same)
         assert ours <= theirs + 2e-4, (name, ours, theirs)
+
+
+def _sector_sweep(width=60.0, nyquist=10.0, mean_wind=30.0, nray=360, ngate=200):
+    """Echo in a sector only; uniform wind of 30 m/s (aliased 3 times)."""
+    rnd = np.random.default_rng(1)
+    azimuth = np.arange(nray) * 360.0 / nray + 0.5
+    rng = 125.0 + 250.0 * np.arange(ngate)
+    az = np.deg2rad(azimuth)[:, None]
+    truth = mean_wind * np.cos(az - np.deg2rad(40.0)) * np.ones(ngate)
+    measured = truth + 0.5 * rnd.standard_normal(truth.shape)
+    aliased = np.mod(measured + nyquist, 2 * nyquist) - nyquist
+    inside = np.abs(((azimuth - 30.0 + 180.0) % 360.0) - 180.0) <= width / 2
+    aliased[~inside] = np.nan
+    ds = xr.Dataset(
+        {"VRADH": (("azimuth", "range"), aliased, {"units": "m s-1"})},
+        coords={
+            "azimuth": ("azimuth", azimuth, {"units": "degrees"}),
+            "range": ("range", rng, {"units": "meters"}),
+            "elevation": ("azimuth", np.full(nray, 0.5), {"units": "degrees"}),
+            "nyquist_velocity": ((), nyquist, {"units": "m s-1"}),
+        },
+    )
+    return ds, truth
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_partial_sector_without_reference_warns(engine):
+    ds, truth = _sector_sweep()
+    with pytest.warns(UserWarning, match="covers only"):
+        out = dealias_velocity(ds, nyquist_velocity=10.0, engine=engine)
+    assert out.attrs["dealias_anchor"] == "zero_mean"
+    # the zero-mean assumption is wrong here, which is what the warning says
+    assert correct_fraction(out, ds, truth) < 0.5
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_anchor_attribute_names_the_reference(engine):
+    import warnings
+
+    ds, truth = _sector_sweep()
+    ref = xr.DataArray(
+        truth, dims=("azimuth", "range"), coords={"azimuth": ds["azimuth"]}
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        out = dealias_velocity(ds, reference=ref, engine=engine)
+        assert out.attrs["dealias_anchor"] == "reference"
+        assert correct_fraction(out, ds, truth) > 0.99
+        full, _ = synthetic_sweep(nyquist=10.0, seed=3)
+        out = dealias_velocity(full, engine=engine)
+        assert out.attrs["dealias_anchor"] == "zero_mean"  # a full circle: no warning
+
+
+def test_anchor_of_a_volume():
+    import warnings
+
+    ds, _ = synthetic_sweep(nyquist=10.0, seed=4)
+    dtree = xr.DataTree.from_dict(
+        {
+            "/": xr.Dataset(),
+            "sweep_0": ds,
+            "sweep_1": ds.assign_coords(elevation=("azimuth", np.full(360, 1.5))),
+        }
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        out = dealias_velocity(dtree)
+    assert out["sweep_0"]["VRADH_dealiased"].attrs["dealias_anchor"] == "zero_mean"
+    assert out["sweep_1"]["VRADH_dealiased"].attrs["dealias_anchor"] == "sweep_below"
+
+
+def test_azimuth_coverage_of_a_group_of_gates():
+    az = np.arange(0.0, 360.0, 1.0)
+    full = np.ones((360, 3), dtype=bool)
+    assert dealias._azimuth_coverage(az, full) == pytest.approx(360.0)
+    half = np.zeros((360, 3), dtype=bool)
+    half[:180] = True
+    assert dealias._azimuth_coverage(az, half) == pytest.approx(180.0)
+    # a sector that wraps through north is the same width
+    wrap = np.zeros((360, 3), dtype=bool)
+    wrap[[*range(330, 360), *range(0, 31)]] = True
+    assert dealias._azimuth_coverage(az, wrap) == pytest.approx(61.0)
+    # one ray (or none) covers no azimuth
+    one = np.zeros((360, 3), dtype=bool)
+    one[10, 1] = True
+    assert dealias._azimuth_coverage(az, one) == 0.0
+    assert dealias._azimuth_coverage(az, np.zeros((360, 3), dtype=bool)) == 0.0

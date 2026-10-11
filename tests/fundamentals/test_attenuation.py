@@ -40,3 +40,11 @@ def test_extinction_coefficient():
         attenuation.absorption_coefficient(diam, wavelength, m)
         + attenuation.scattering_coefficient(diam, wavelength, m),
     )
+
+
+def test_absorption_coefficient_either_sign_convention():
+    diam, wavelength = 1e-3, 0.03
+    minus = attenuation.absorption_coefficient(diam, wavelength, 7.14 - 2.89j)
+    plus = attenuation.absorption_coefficient(diam, wavelength, 7.14 + 2.89j)
+    assert minus > 0
+    assert np.isclose(minus, plus)

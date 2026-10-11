@@ -204,12 +204,48 @@ def _ray_dim(da):
     return dims[0]
 
 
+_ZH_ROLES = (
+    _DBZ_NAMES,
+    _ZDR_NAMES,
+    _RHOHV_NAMES,
+    ("KDP", "specific_differential_phase", "corrected_specific_differential_phase"),
+)
+_PHASE_NAMES = {
+    "phidp",
+    "uphidp",
+    "phidp_processed",
+    "phi",
+    "differential_phase",
+    "uncorrected_differential_phase",
+    "corrected_differential_phase",
+}
+
+
+def _is_2d_numeric(da):
+    return da.ndim == 2 and "range" in da.dims and np.issubdtype(da.dtype, np.number)
+
+
 def _default_vars(ds):
-    return [
-        name
-        for name, da in ds.data_vars.items()
-        if da.ndim == 2 and "range" in da.dims and np.issubdtype(da.dtype, np.number)
-    ]
+    """
+    Reflectivity, differential reflectivity, rhohv and KDP, as far as the
+    sweep has them. Radial velocity and the differential phase do not have a
+    useful azimuthal mean as a default. If the sweep has none of the four,
+    every numeric (azimuth, range) variable.
+    """
+    names = []
+    for candidates in _ZH_ROLES:
+        found = next((n for n in candidates if n in ds.data_vars), None)
+        if found is not None and _is_2d_numeric(ds[found]):
+            names.append(found)
+    if names:
+        return names
+    return [name for name, da in ds.data_vars.items() if _is_2d_numeric(da)]
+
+
+def _is_phase(ds, name):
+    return name.lower() in _PHASE_NAMES and str(
+        ds[name].attrs.get("units", "degrees")
+    ).strip().lower() in ("degrees", "degree", "deg", "degrees_north", "")
 
 
 def _site_altitude(ds):
@@ -322,6 +358,7 @@ def _profiles(
     linear,
     n_threads,
     engine,
+    elevation_correction=False,
 ):
     """Reduce every sweep; returns the per-sweep profiles and metadata."""
     use_compiled = _use_compiled(engine)
@@ -348,21 +385,70 @@ def _profiles(
             quality.append(name)
             thresholds.append(float(limit))
     modes = _modes(first, data_vars, reduction, linear)
+    # the mean of a phase is the circular mean: reduce cos and sin instead
+    circular = [
+        v
+        for v, name in enumerate(data_vars)
+        if reduction == "mean" and _is_phase(first, name)
+    ]
+    kernel_modes = list(modes) + [_MODES["mean"]] * (2 * len(circular))
 
     data, qual, need = [], [], []
     for ds in sweeps:
         d, q = _sweep_arrays(ds, data_vars, quality)
+        for v in circular:
+            rad = np.deg2rad(d[v].astype(np.float64))
+            d.extend([np.cos(rad).astype(np.float32), np.sin(rad).astype(np.float32)])
         data.append(d)
         qual.append(q)
         need.append(max(int(min_count), math.ceil(min_fraction * d[0].shape[0]), 1))
     if use_compiled:
         values, counts = _qvp.azimuthal_reduce(
-            data, qual, thresholds, modes, need, n_threads=int(n_threads or 0)
+            data, qual, thresholds, kernel_modes, need, n_threads=int(n_threads or 0)
         )
     else:
-        values, counts = _reduce_numpy(data, qual, thresholds, modes, need)
+        values, counts = _reduce_numpy(data, qual, thresholds, kernel_modes, need)
+    if circular:
+        nv = len(data_vars)
+        values, counts = list(values), list(counts)
+        for i, (val, cnt) in enumerate(zip(values, counts)):
+            val = np.array(val, dtype=np.float64)
+            for j, v in enumerate(circular):
+                c, sn = val[nv + 2 * j], val[nv + 2 * j + 1]
+                with np.errstate(invalid="ignore"):
+                    angle = np.rad2deg(np.arctan2(sn, c))
+                val[v] = np.where(np.isnan(c) | np.isnan(sn), np.nan, angle)
+            values[i], counts[i] = val[:nv], cnt[:nv]
     filters = {q: t for q, t in zip(quality, thresholds)}
+    _check_elevation(sweeps, data_vars, values, elevation_correction)
     return data_vars, modes, values, counts, filters
+
+
+_KDP_NAMES = {n.lower() for n in _ZH_ROLES[3]}
+_LOW_ELEVATION = 10.0
+
+
+def _check_elevation(sweeps, data_vars, values, correct):
+    """Warn for low sweeps; scale KDP by 1 / cos(elevation)**2 if asked."""
+    low = []
+    for i, ds in enumerate(sweeps):
+        el = float(np.nanmedian(ds["elevation"].values))
+        if el < _LOW_ELEVATION:
+            low.append(el)
+        if correct:
+            for v, name in enumerate(data_vars):
+                if name.lower() in _KDP_NAMES:
+                    values[i][v] = values[i][v] / np.cos(np.deg2rad(el)) ** 2
+    if low:
+        warnings.warn(
+            f"QVP of a sweep at {min(low):.1f} degrees elevation: the method "
+            "assumes high elevations (more than 10 to 20 degrees, Ryzhkov et al. "
+            "2016), and the azimuthal means of ZDR and KDP are lower than "
+            "their values at the horizontal (KDP by about cos(elevation)**2; "
+            "elevation_correction=True scales KDP, ZDR is not corrected)",
+            UserWarning,
+            stacklevel=4,
+        )
 
 
 def _var_attrs(ds, name, mode, filters, min_count):
@@ -428,8 +514,12 @@ _ELEVATION_ATTRS = {
 
 _QVP_PARAMS = """
     data_vars : str or list of str, optional
-        Variables to profile. By default every numeric ``(azimuth, range)``
-        variable of the sweep.
+        Variables to profile. By default the reflectivity, differential
+        reflectivity, correlation coefficient and KDP that the sweep has (if
+        it has none of them, every numeric ``(azimuth, range)`` variable).
+        The mean of the radial velocity is not a wind and is left out; name
+        a variable to profile it. The mean of a differential phase (named
+        ``PHIDP``, ``UPHIDP``, ... in degrees) is the circular mean.
     min_rhohv : float or None, optional
         Only gates with ``rhohv > min_rhohv`` are used. Default 0.6
         (Ryzhkov et al. 2016, p. 553). ``None`` disables the test.
@@ -458,6 +548,12 @@ _QVP_PARAMS = """
         (reflectivity, differential reflectivity). Ignored for the median.
     counts : bool, optional
         Also return ``<name>_count``, the number of valid gates per height.
+    elevation_correction : bool, optional
+        Divide KDP by ``cos(elevation)**2``, the factor by which its
+        azimuthal mean at the elevation of the sweep is lower than at the
+        horizontal (approximate scaling for small oblate scatterers; not checked
+        against a paper). Differential reflectivity is not corrected. Default
+        False. Sweeps below 10 degrees raise a warning either way.
     n_threads : int, optional
         Threads for the compiled kernel. Default: all cores.
     engine : {"auto", "compiled", "numpy"}, optional
@@ -481,6 +577,7 @@ def qvp(
     reduction="mean",
     linear=None,
     counts=False,
+    elevation_correction=False,
     n_threads=None,
     engine="auto",
 ):
@@ -559,6 +656,7 @@ def qvp(
         linear=linear,
         n_threads=n_threads,
         engine=engine,
+        elevation_correction=elevation_correction,
     )
     el, rng, height, ground = _geometry(ds)
     out = {}
@@ -610,6 +708,7 @@ def qvp_timeseries(
     reduction="mean",
     linear=None,
     counts=False,
+    elevation_correction=False,
     n_threads=None,
     engine="auto",
 ):
@@ -674,6 +773,7 @@ def qvp_timeseries(
         linear=linear,
         n_threads=n_threads,
         engine=engine,
+        elevation_correction=elevation_correction,
     )
     geometry = [_geometry(ds) for ds in sweeps]
     if heights is None:
@@ -932,7 +1032,7 @@ def _reference_height(value, template, other):
         if "time" in template.coords and da.sizes["time"] > 1:
             t = template["time"].values
             near = da.sel(time=t, method="nearest").drop_vars("time")
-            da = da.interp(time=t).drop_vars("time").fillna(near)
+            da = da.interp(time=np.asarray(t)).drop_vars("time").fillna(near)
             if np.ndim(t):
                 da = da.assign_coords(time=t)
         elif da.sizes["time"] == 1:

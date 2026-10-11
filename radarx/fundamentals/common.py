@@ -4,6 +4,14 @@ Common Utilities
 
 Shared helper functions for internal use across radarx.fundamentals modules.
 
+Array types: the converters accept scalars, lists and arrays, and return the
+type they are given for :class:`xarray.DataArray` and dask input. A
+DataArray keeps its dims, coords, name and attrs (``units`` and ``long_name``
+are set for the converted quantity, and the attrs that describe the old
+quantity, such as ``standard_name`` and ``valid_range``, are dropped when the
+quantity changes), and a dask-backed DataArray or dask array stays lazy.
+Scalars and lists give NumPy results as before.
+
 Unit conventions: reflectivity is converted with ``10 log10 Z`` for ``Z`` in
 mm^6 m^-3 [1]_ [2]_. Length conversions use the exact factor 1000. The
 knot conversion uses 1 kn = 1852 m/h exactly (international nautical mile;
@@ -74,6 +82,64 @@ __all__ = [
 ]
 
 import numpy as np
+import xarray as xr
+
+# attributes that describe the quantity itself; they are wrong after a
+# conversion that changes the quantity (dBZ to Z, m/s to knots keeps the
+# quantity, see ``_describe``)
+_QUANTITY_ATTRS = (
+    "units",
+    "long_name",
+    "standard_name",
+    "valid_min",
+    "valid_max",
+    "valid_range",
+    "actual_range",
+    "_FillValue",
+    "missing_value",
+    "flag_values",
+    "flag_meanings",
+)
+
+
+def _prepare(x):
+    """
+    Return ``x`` unchanged if it supports NumPy ufuncs (ndarray, DataArray,
+    dask array), otherwise ``np.asarray(x)`` (scalars, lists, tuples).
+    """
+    return x if hasattr(x, "__array_ufunc__") else np.asarray(x)
+
+
+def _describe(source, result, units, long_name=None, same_quantity=False):
+    """
+    Give a converted DataArray the metadata of its source.
+
+    Dims, coords and name are those of ``result`` (they come from ``source``
+    through the arithmetic). The attrs of ``source`` are kept, except that the
+    ones describing the quantity (``units``, ``long_name``, ``standard_name``,
+    ``valid_range`` and so on) are dropped unless ``same_quantity`` is True
+    (length and speed conversions, where only ``units`` changes). ``units``
+    is set and ``long_name`` is set if given. Anything that is not a
+    DataArray is returned as it is.
+    """
+    if not isinstance(source, xr.DataArray) or not isinstance(result, xr.DataArray):
+        return result
+    attrs = dict(source.attrs)
+    if not same_quantity:
+        for key in _QUANTITY_ATTRS:
+            attrs.pop(key, None)
+    attrs["units"] = units
+    if long_name is not None:
+        attrs["long_name"] = long_name
+    elif same_quantity and "long_name" in source.attrs:
+        attrs["long_name"] = source.attrs["long_name"]
+    result.attrs = attrs
+    return result
+
+
+def _safe_log10(a):
+    with np.errstate(divide="ignore"):
+        return np.log10(a)
 
 
 def ensure_positive(value, name="value"):
@@ -130,7 +196,12 @@ def z_to_dbz(z):
            Press, https://doi.org/10.1017/CBO9780511541094 (book; ISBN
            0-521-62384-7).
     """
-    z = np.asarray(z)
+    z = _prepare(z)
+    if isinstance(z, xr.DataArray):
+        log_z = xr.apply_ufunc(
+            _safe_log10, z, dask="parallelized", output_dtypes=[np.float64]
+        )
+        return _describe(z, 10 * log_z, "dBZ", "Reflectivity factor")
     with np.errstate(divide="ignore"):
         return 10 * np.log10(z)
 
@@ -161,7 +232,8 @@ def dbz_to_z(dbz):
            Press, https://doi.org/10.1017/CBO9780511541094 (book; ISBN
            0-521-62384-7).
     """
-    return 10 ** (np.asarray(dbz) / 10)
+    dbz = _prepare(dbz)
+    return _describe(dbz, 10 ** (dbz / 10), "mm6 m-3", "Reflectivity factor")
 
 
 def meters_to_kilometers(meters):
@@ -178,7 +250,8 @@ def meters_to_kilometers(meters):
     float or array-like
         Distance in kilometers.
     """
-    return np.asarray(meters) / 1000.0
+    meters = _prepare(meters)
+    return _describe(meters, meters / 1000.0, "km", same_quantity=True)
 
 
 def kilometers_to_meters(kilometers):
@@ -195,7 +268,8 @@ def kilometers_to_meters(kilometers):
     float or array-like
         Distance in meters.
     """
-    return np.asarray(kilometers) * 1000.0
+    kilometers = _prepare(kilometers)
+    return _describe(kilometers, kilometers * 1000.0, "m", same_quantity=True)
 
 
 def knots_to_mps(knots):
@@ -223,7 +297,8 @@ def knots_to_mps(knots):
            https://www.bipm.org/en/publications/si-brochure (document, no
            DOI).
     """
-    return np.asarray(knots) * 0.514444
+    knots = _prepare(knots)
+    return _describe(knots, knots * 0.514444, "m s-1", same_quantity=True)
 
 
 def mps_to_knots(mps):
@@ -249,7 +324,8 @@ def mps_to_knots(mps):
            https://www.bipm.org/en/publications/si-brochure (document, no
            DOI).
     """
-    return np.asarray(mps) / 0.514444
+    mps = _prepare(mps)
+    return _describe(mps, mps / 0.514444, "knot", same_quantity=True)
 
 
 def si_to_kilometers(value, unit="m"):

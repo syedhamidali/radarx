@@ -273,9 +273,13 @@ def _read_one(path, use_compiled, n_threads):
     if hex_column >= 0:
         data["event_mask"] = hexes
     day = np.datetime64(start.date(), "ns")
-    data["event_time"] = day + np.round(data["event_time"] * 1e9).astype(
-        "timedelta64[ns]"
-    )
+    seconds = data["event_time"]
+    # the column is the UT second of day, so it restarts near 0 after 00 UTC;
+    # a drop of more than 12 h starts the next day (small jitter is ignored)
+    if seconds.size > 1:
+        next_day = np.cumsum(np.concatenate(([False], np.diff(seconds) < -43200.0)))
+        seconds = seconds + 86400.0 * next_day
+    data["event_time"] = day + np.round(seconds * 1e9).astype("timedelta64[ns]")
     return data, header, center, stations, station_data
 
 

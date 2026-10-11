@@ -91,9 +91,18 @@ TERMS = ("observation", "mass_continuity", "smoothness", "background", "vorticit
 # (h^2 / U) R: a radarx choice, not from Shapiro et al. (2009) or Potvin et al.
 # (2012).
 _VREF = 10.0
+# Height [m] of the lowest grid level above the highest radar from which
+# w_boundary="bottom" warns (a radarx choice).
+W_BOTTOM_WARN_HEIGHT = 200.0
 # Share of the observation weight in the preconditioner (radarx choice that
 # only affects the speed of convergence, not the minimiser).
 _PRECONDITIONER_LAMBDA = 0.05
+
+
+def _advection_compiled(engine):
+    from . import advection
+
+    return advection._use_compiled(engine)
 
 
 def _use_compiled(engine):
@@ -283,6 +292,7 @@ def fall_speed(
     rain=(2.65, 0.114),
     ice=(0.817, 0.063),
     reference_density=1.2,
+    melting_depth=500.0,
 ):
     """
     Terminal fall speed of precipitation from reflectivity.
@@ -291,7 +301,9 @@ def fall_speed(
     mm\\ :sup:`6` m\\ :sup:`-3`. Below the freezing level the rain relation
     :math:`V_t = 2.65 Z^{0.114}` of Atlas et al. (1973) [1]_ is used, above it
     the snow relation :math:`V_t = 0.817 Z^{0.063}` (also Atlas et al.
-    1973). The factor :math:`(\\rho_0 / \\rho)^{0.4}` corrects for the lower
+    1973); in between, in the ``melting_depth`` below the freezing level, the
+    two speeds are blended linearly in height (a radarx choice, there is no
+    step at the 0 degC level). The factor :math:`(\\rho_0 / \\rho)^{0.4}` corrects for the lower
     air density aloft (Foote and du Toit 1969 [2]_).
 
     Pointers. The rain relation with its density factor is given in
@@ -313,11 +325,18 @@ def fall_speed(
         no density correction is made.
     freezing_level : float or xarray.DataArray, optional
         Height of the 0 degC level (m above sea level), e.g. ``(y, x)``.
-        Without it the rain relation is used everywhere.
+        Without it the rain relation is used everywhere, which gives several
+        m s-1 too much fall speed in the ice region (at 30 dBZ 5.8 m s-1
+        against 1.3 m s-1). ``-inf`` and ``inf`` mark columns that are ice
+        and rain at all heights.
     rain, ice : tuple of float, optional
         Coefficients ``(a, b)`` of the rain and ice relations.
     reference_density : float, optional
         Surface reference density :math:`\\rho_0` in kg m-3. Default 1.2.
+    melting_depth : float, optional
+        Depth (m) below the freezing level over which the speed changes from
+        the rain to the snow relation. Default 500; 0 gives a step at the
+        freezing level.
 
     Returns
     -------
@@ -342,7 +361,11 @@ def fall_speed(
     vt = rain[0] * z_lin ** rain[1]
     if freezing_level is not None:
         vt_ice = ice[0] * z_lin ** ice[1]
-        vt = xr.where(dbz["z"] > freezing_level, vt_ice, vt)
+        if melting_depth > 0:
+            share = ((dbz["z"] - freezing_level) / melting_depth + 1.0).clip(0.0, 1.0)
+        else:
+            share = (dbz["z"] > freezing_level).astype(float)
+        vt = vt + share.fillna(0.0) * (vt_ice - vt)
     if air_density is not None:
         vt = vt * (reference_density / air_density) ** 0.4
     vt = vt.where(np.isfinite(dbz))
@@ -393,6 +416,12 @@ def radar_geometry(grid, *, earth_radius=EARTH_RADIUS):
     the Earth), so that the radial velocity is :math:`u \\cos\\phi \\sin\\alpha
     + v \\cos\\phi \\cos\\alpha + w \\sin\\phi` with ``u``, ``v`` along the grid
     axes.
+
+    The grid is treated as a plane: the azimuth is the planar bearing from
+    the radar position in the grid coordinates. For radars 100 km either side
+    of the origin at 35 degrees latitude it differs from the geodesic azimuth
+    of :func:`radarx.grid.grid_radars` (which :func:`multi_doppler_input` uses)
+    by less than 0.01 degrees.
 
     Parameters
     ----------
@@ -487,10 +516,14 @@ def multi_doppler_input(
     """
     Grid several radar volumes onto one grid for :func:`multi_doppler`.
 
-    Every volume is cone-gridded (:func:`radarx.grid.grid_cones`) onto the
-    same grid, centred on ``origin`` (an azimuthal equidistant projection);
-    the grids are stacked on a ``radar`` dimension and the beam geometry is
-    added with :func:`radar_geometry`. With ``time`` and ``motion`` every
+    Every volume is cone-gridded onto the same grid, centred on ``origin`` (an
+    azimuthal equidistant projection), by :func:`radarx.grid.grid_radars`: the
+    cells are located from each radar by the geodesic distance and azimuth
+    (WGS84). The grids are stacked on a ``radar`` dimension together with the
+    beam azimuth and elevation of every radar at every cell. Placing the cells
+    by plane offsets from the origin's projection, as earlier versions did,
+    displaced them by up to 0.8 km (0.3 km on average) for radars 100 km from
+    the origin at 35 degrees latitude. With ``time`` and ``motion`` every
     radar's fields are first moved to the common analysis time
     (:func:`radarx.retrieve.advect`).
 
@@ -555,99 +588,74 @@ def multi_doppler_input(
        velocities. *J. Atmos. Oceanic Technol.*, **27**, 1239-1246,
        https://doi.org/10.1175/2010JTECHA1402.1
     """
-    import pyproj
-
-    from ..grid.cone import _lonlat_axes, grid_cones
-    from .advection import advect
+    from ..grid.multi import grid_radars
 
     if (time is None) != (motion is None):
         raise ValueError("give both time and motion, or neither")
-    x, y, z = (np.asarray(a, dtype=np.float64) for a in (x, y, z))
-    sites = [_site(v) for v in volumes]
-    if origin is None:
-        origin = (sites[0]["latitude"], sites[0]["longitude"])
-    lat0, lon0 = map(float, origin)
-    aeqd = pyproj.Proj(proj="aeqd", lat_0=lat0, lon_0=lon0, datum="WGS84")
-    grids, rx_, ry_ = [], [], []
-    for dtree, site in zip(volumes, sites):
-        xs, ys = aeqd(site["longitude"], site["latitude"])
-        fields = [velocity]
+    if not len(volumes):
+        raise ValueError("no radar volumes")
+    fields = [velocity]
+    for dtree in volumes:
         sweeps = [n for n in dtree.children if n.startswith("sweep")]
         if any(reflectivity in dtree[n].data_vars for n in sweeps):
             fields.append(reflectivity)
-        g = grid_cones(
-            dtree,
-            fields,
-            x - xs,
-            y - ys,
-            z,
-            fill_below=fill_below,
-            n_threads=n_threads,
-            engine=engine,
-        )
-        g = g.drop_vars(["lat", "lon", "crs_wkt"], errors="ignore")
-        g = g.assign_coords(x=x, y=y)
-        if time is not None:
-            m = motion if isinstance(motion, xr.Dataset) else None
-            if m is None:
-                g = advect(g, float(motion[0]), float(motion[1]), time=time)
-            else:
-                g = advect(g, m, time=time)
-        grids.append(g)
-        rx_.append(xs)
-        ry_.append(ys)
-    names = [
-        str(v.attrs.get("instrument_name", f"radar_{i}")) for i, v in enumerate(volumes)
-    ]
-    times = [
-        g["time"].values if "time" in g else np.datetime64("NaT", "ns") for g in grids
-    ]
-    stacked = xr.concat(
-        [
-            g.drop_vars(["time", "latitude", "longitude", "altitude"], errors="ignore")
-            for g in grids
-        ],
-        dim="radar",
-        join="outer",
-        combine_attrs="drop",
+            break
+    # every radar places the grid by the geodesic distance and azimuth from
+    # its own site (grid_radars), so the beam azimuth and elevation include
+    # the convergence of the meridians between the radar and the grid origin
+    g = grid_radars(
+        list(volumes),
+        x,
+        y,
+        z,
+        origin=origin,
+        data_vars=fields,
+        time=time,
+        motion=motion,
+        fill_below=fill_below,
+        n_threads=n_threads,
+        engine=engine,
     )
-    lon, lat = _lonlat_axes(x, y, lat0, lon0)
-    stacked = stacked.assign_coords(
-        radar=np.arange(len(volumes)),
+    names = [str(n) for n in g["radar"].values]
+    nr = len(names)
+    dims = ("radar", "z", "y", "x")
+    drop = ["range", "sweep_elevation", "beamwidth", "radar_z"]
+    g = g.drop_vars([v for v in drop if v in g.variables])
+    for name in (
+        "radar_x",
+        "radar_y",
+        "radar_altitude",
+        "radar_latitude",
+        "radar_longitude",
+    ):
+        g = g.reset_coords(name)
+    g = g.assign(
+        azimuth=g["azimuth"].broadcast_like(g[velocity]).transpose(*dims),
+        elevation=g["elevation"].transpose(*dims),
+    )
+    when = g["time"].values.astype("datetime64[ns]")
+    if time is not None:
+        when = np.full(nr, np.datetime64(time, "ns"))
+    g = g.drop_vars("time").assign_coords(
+        radar=np.arange(nr),
         radar_name=("radar", names),
-        time=("radar", np.asarray(times, dtype="datetime64[ns]")),
-        lat=("y", lat, {"units": "degrees_north"}),
-        lon=("x", lon, {"units": "degrees_east"}),
-        crs_wkt=_origin_crs(lat0, lon0),
+        time=("radar", when),
     )
-    stacked["x"].attrs = {"units": "m", "long_name": "distance east of the grid origin"}
-    stacked["y"].attrs = {
-        "units": "m",
-        "long_name": "distance north of the grid origin",
+    for name, attrs in (
+        ("x", {"units": "m", "long_name": "distance east of the grid origin"}),
+        ("y", {"units": "m", "long_name": "distance north of the grid origin"}),
+        ("z", {"units": "m", "long_name": "height above sea level"}),
+    ):
+        g[name].attrs = attrs
+    g["azimuth"].attrs = {
+        "long_name": "beam azimuth, clockwise from the grid y axis",
+        "units": "degree",
     }
-    stacked["z"].attrs = {"units": "m", "long_name": "height above sea level"}
-    stacked = stacked.assign(
-        radar_x=("radar", np.asarray(rx_), {"units": "m", "long_name": "radar x"}),
-        radar_y=("radar", np.asarray(ry_), {"units": "m", "long_name": "radar y"}),
-        radar_altitude=(
-            "radar",
-            np.asarray([s.get("altitude", 0.0) for s in sites]),
-            {"units": "m", "long_name": "radar altitude above sea level"},
-        ),
-        radar_latitude=(
-            "radar",
-            np.asarray([s["latitude"] for s in sites]),
-            {"units": "degrees_north"},
-        ),
-        radar_longitude=(
-            "radar",
-            np.asarray([s["longitude"] for s in sites]),
-            {"units": "degrees_east"},
-        ),
-    )
-    stacked.attrs["origin_latitude"] = lat0
-    stacked.attrs["origin_longitude"] = lon0
-    return radar_geometry(stacked)
+    g["elevation"].attrs = {
+        "long_name": "beam elevation above the local horizon",
+        "units": "degree",
+    }
+    return g
 
 
 def _as_multi_radar(grids, velocity):
@@ -710,6 +718,12 @@ def _standard_density(z):
     return 1.2 * np.exp(-np.asarray(z, dtype=np.float64) / 10000.0)
 
 
+def _as_tuple(w_boundary):
+    if isinstance(w_boundary, str):
+        return (w_boundary,)
+    return tuple(w_boundary or ())
+
+
 def _w_free(ds, w_boundary, valid_any):
     """
     Mask of grid cells where w is a control variable.
@@ -743,6 +757,142 @@ def _w_free(ds, w_boundary, valid_any):
     return free
 
 
+def _background_freezing_level(background):
+    """
+    Freezing level (m above sea level) of a background, or None.
+
+    The ``freezing_level`` of :func:`radarx.io.sounding.era5_column` and
+    :func:`radarx.io.sounding.profile_to_grid` when present, otherwise the
+    highest 0 degC crossing of its ``temperature`` (K) on ``z``. A column
+    without a crossing is rain at all heights (``inf``) when its lowest valid
+    level is above 0 degC and ice at all heights (``-inf``) when it is below.
+    """
+    if "freezing_level" in background:
+        level = background["freezing_level"]
+        if "temperature" not in background or not level.isnull().any():
+            return level
+    elif "temperature" not in background:
+        return None
+    t = background["temperature"]
+    if "z" not in t.dims:
+        return None
+    t = t.transpose("z", ...)
+    z = t["z"].values.astype(np.float64)
+    valid = np.isfinite(t.values)
+    # highest crossing: the last level that is above 0 degC and has a valid
+    # level above it, interpolated linearly to the 0 degC temperature
+    cross = np.full(t.shape[1:], np.nan)
+    tv = np.where(valid, t.values, np.nan)
+    for k in range(len(z) - 1):
+        lo, hi = tv[k], tv[k + 1]
+        hit = (lo > 273.15) & (hi <= 273.15)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            level_k = z[k] + (z[k + 1] - z[k]) * (lo - 273.15) / (lo - hi)
+        cross = np.where(hit, level_k, cross)
+    first = np.argmax(valid, axis=0)
+    t_first = np.take_along_axis(tv, first[None], axis=0)[0]
+    fill = np.where(t_first > 273.15, np.inf, -np.inf)
+    fill = np.where(valid.any(axis=0), fill, np.nan)
+    level = np.where(np.isnan(cross), fill, cross)
+    out = xr.DataArray(
+        level,
+        dims=t.dims[1:],
+        coords={
+            c: t.coords[c] for c in t.coords if set(t.coords[c].dims) <= set(t.dims[1:])
+        },
+    )
+    if "freezing_level" in background:  # keep the given values where they exist
+        given = background["freezing_level"]
+        out = given.where(given.notnull(), out)
+    return out
+
+
+def _freezing_level_choice(choice, from_background):
+    """The freezing level used by the fall speed, or None for rain everywhere."""
+    if isinstance(choice, str):
+        if choice == "rain":
+            return None
+        if choice != "auto":
+            raise ValueError(
+                f"freezing_level must be 'auto', 'rain', a height or an array, "
+                f"not {choice!r}"
+            )
+        if from_background is None:
+            warnings.warn(
+                "no freezing level: the background has neither 'freezing_level' "
+                "nor 'temperature', so the rain fall speed (2.65 Z**0.114) is "
+                "used at all heights, which overestimates the fall speed in the "
+                "ice region by several m s-1 and biases w. Pass a background from "
+                "radarx.io.sounding.era5_column, give freezing_level=<height in "
+                "m>, or freezing_level='rain' for the rain law without this "
+                "warning.",
+                RuntimeWarning,
+                stacklevel=4,
+            )
+        return from_background
+    if choice is None:
+        return from_background
+    return choice
+
+
+def _shift_observations(
+    ds, vr, coef, *, reflectivity, storm_motion, analysis_time, use_compiled, n_threads
+):
+    """
+    Observations and beam directions at the analysis frame of reference.
+
+    Radar ``k`` observed the gate at ``x`` at ``t_k``. If the wind pattern
+    moves with the velocity ``c`` (``storm_motion``), it measured the analysis
+    wind (valid at ``t_a``) at ``x - c (t_k - t_a)``. The observation operator
+    with shifted analysis winds, ``coef(x) . V_a(x - c (t_k - t_a))``, is
+    therefore the same as moving the observation, together with its direction
+    cosines ``coef``, to ``x - c (t_k - t_a)`` and using the unshifted
+    analysis winds. That is done here with the semi-Lagrangian scheme of
+    :func:`radarx.retrieve.advect` (bilinear). Moving the radial velocity
+    alone, as :func:`radarx.retrieve.advect` does for a scalar, keeps the beam
+    direction of the new position and misses the change of the direction of the
+    beam, about ``|c (t_k - t_a)| / r`` in angle.
+    """
+    from .advection import _advect_fields, _departure
+
+    if analysis_time is None:
+        raise ValueError("shift_winds=True needs analysis_time")
+    if "time" not in ds.coords or ds["time"].dims != ("radar",):
+        raise ValueError("shift_winds=True needs the observation time of every radar")
+    t_obs = ds["time"].values.astype("datetime64[ns]")
+    if np.isnat(t_obs).any():
+        raise ValueError("shift_winds=True: a radar has no observation time")
+    dts = (np.datetime64(analysis_time, "ns") - t_obs) / np.timedelta64(1, "s")
+    dx, dy = _spacing(ds["x"]), _spacing(ds["y"])
+    ny, nx = ds.sizes["y"], ds.sizes["x"]
+    cx, cy = (float(storm_motion[0]), float(storm_motion[1]))
+    dbz = None
+    if reflectivity in ds:
+        dbz = ds[reflectivity].transpose("radar", "z", "y", "x").values
+    vr_out, coef_out, dbz_out = np.empty_like(vr), np.empty_like(coef), None
+    if dbz is not None:
+        dbz_out = np.empty(dbz.shape, dtype=np.float64)
+    for k, dt in enumerate(dts):
+        src_row, src_col = _departure(
+            cx, cy, [float(dt)], dx, dy, ny, nx, use_compiled, n_threads
+        )
+        arrays = [vr[k], coef[k]] + (
+            [dbz[k].astype(np.float64)] if dbz is not None else []
+        )
+        moved = _advect_fields(
+            arrays, src_row, src_col, 1, 0.5, use_compiled, n_threads
+        )
+        vr_out[k] = moved[0][0]
+        coef_out[k] = moved[1][0]
+        if dbz is not None:
+            dbz_out[k] = moved[2][0]
+    if dbz is not None:
+        ds = ds.assign(
+            {reflectivity: (("radar", "z", "y", "x"), dbz_out, ds[reflectivity].attrs)}
+        )
+    return ds, vr_out, coef_out
+
+
 def _prepare(
     ds,
     background,
@@ -753,6 +903,13 @@ def _prepare(
     weights,
     storm_motion,
     w_boundary,
+    freezing_level="auto",
+    melting_depth=500.0,
+    w_bottom=0.0,
+    shift_winds=False,
+    analysis_time=None,
+    use_compiled=False,
+    n_threads=None,
 ):
     """NumPy arrays of the variational problem on the grid of ``ds``."""
     nr = ds.sizes["radar"]
@@ -764,6 +921,17 @@ def _prepare(
         [np.cos(el) * np.sin(az), np.cos(el) * np.cos(az), np.sin(el)], axis=1
     )  # (nr, 3, nz, ny, nx)
     zc = ds["z"]
+    if shift_winds:
+        ds, vr, coef = _shift_observations(
+            ds,
+            vr,
+            coef,
+            reflectivity=reflectivity,
+            storm_motion=storm_motion,
+            analysis_time=analysis_time,
+            use_compiled=use_compiled,
+            n_threads=n_threads,
+        )
 
     # density, background and freezing level
     shape3 = (ds.sizes["z"], ds.sizes["y"], ds.sizes["x"])
@@ -782,8 +950,7 @@ def _prepare(
                 b = np.broadcast_to(background[name].values, shape3).astype(np.float64)
                 bg_ok[q] = np.isfinite(b)
                 bg[q] = _fill_column(b)
-        if "freezing_level" in background:
-            freezing = background["freezing_level"]
+        freezing = _background_freezing_level(background)
     if rho is None:
         rho = np.broadcast_to(
             _standard_density(zc.values)[:, None, None], shape3
@@ -791,6 +958,7 @@ def _prepare(
 
     vt = np.zeros((nr,) + shape3)
     if use_fall_speed:
+        freezing = _freezing_level_choice(freezing_level, freezing)
         if reflectivity in ds:
             dbz_mean = ds[reflectivity]
             if "radar" in dbz_mean.dims:
@@ -801,6 +969,7 @@ def _prepare(
                 dbz_mean,
                 xr.DataArray(rho, dims=("z", "y", "x"), coords={"z": zc}),
                 freezing,
+                melting_depth=melting_depth,
             )
             vt = np.broadcast_to(np.nan_to_num(vt_da.values), (nr,) + shape3)
         else:
@@ -828,6 +997,36 @@ def _prepare(
         echo = np.isfinite(ds[reflectivity].transpose(..., "z", "y", "x").values)
         valid_any = valid_any | (echo.any(0) if echo.ndim == 4 else echo)
     free = _w_free(ds, w_boundary, valid_any)
+    w_fixed = np.zeros(shape3)
+    if "bottom" in _as_tuple(w_boundary):
+        wb = w_bottom
+        if isinstance(wb, xr.DataArray):
+            wb = wb.transpose("y", "x").values
+        wb = np.asarray(wb, dtype=np.float64)
+        if wb.ndim not in (0, 2) or (wb.ndim == 2 and wb.shape != shape3[1:]):
+            raise ValueError("w_bottom must be a number or an array on (y, x)")
+        if not np.isfinite(wb).all():
+            raise ValueError("w_bottom must be finite")
+        w_fixed[0] = wb
+        height = (
+            float(zc.values[0]) - float(np.max(ds["radar_altitude"].values))
+            if ("radar_altitude" in ds)
+            else None
+        )
+        if (
+            height is not None
+            and height > W_BOTTOM_WARN_HEIGHT
+            and not np.any(wb != 0.0)
+        ):
+            warnings.warn(
+                f"w_boundary='bottom' sets w = 0 at z = {float(zc.values[0]):g} m, "
+                f"{height:g} m above the highest radar: the true w there is not "
+                "zero and the error carries up the column as an offset. Start "
+                "the grid at the terrain height, give w_bottom, or use "
+                "w_boundary=None/'top'/'echo_top' (see the Notes of multi_doppler).",
+                RuntimeWarning,
+                stacklevel=4,
+            )
 
     dx, dy, dz = _spacing(ds["x"]), _spacing(ds["y"]), _spacing(ds["z"])
     h = float(np.sqrt(abs(dx * dy)))
@@ -860,6 +1059,7 @@ def _prepare(
         h=h,
         vort_scale=h * h / _VREF,
         free=free,
+        w_fixed=w_fixed,
         first_guess=first_guess,
         vr=vr,
         vfall=vt,
@@ -907,6 +1107,7 @@ def _coarsen_problem(p, factor=2):
     q["bg_weight"] = block_mean(p["bg_weight"]) * factor * factor
     q["vort_weight"] = (block_mean(p["vort_weight"]) > 0.5).astype(np.float64)
     q["free"] = block_mean(p["free"].astype(np.float64)) > 0.5
+    q["w_fixed"] = block_mean(p["w_fixed"])
     q["first_guess"] = block_mean(p["first_guess"])
     q["dx"], q["dy"] = p["dx"] * factor, p["dy"] * factor
     q["h"] = p["h"] * factor
@@ -967,6 +1168,7 @@ def _solve(
         s = np.zeros((3,) + free.shape)
         s[0] = xv[:n].reshape(free.shape)
         s[1] = xv[n : 2 * n].reshape(free.shape)
+        s[2] = problem["w_fixed"]
         s[2][free] = xv[2 * n :]
         return s
 
@@ -1070,7 +1272,7 @@ def _solve_cg(
     )
     precondition = _spectral_preconditioner(problem)
     x = np.array(state0, dtype=np.float64)
-    x[2][~free] = 0.0
+    x[2][~free] = problem["w_fixed"][~free]
     terms, grad = _cost_gradient(problem, x, use_compiled, n_threads)
     history.append(np.array(terms))
     r = -grad * mask
@@ -1138,8 +1340,13 @@ def multi_doppler(
     reflectivity="DBZH",
     weights=None,
     fall_speed_correction=True,
+    freezing_level="auto",
+    melting_depth=500.0,
     w_boundary="bottom",
+    w_bottom=0.0,
     storm_motion=(0.0, 0.0),
+    shift_winds=False,
+    analysis_time=None,
     first_guess=None,
     levels=3,
     max_iterations=500,
@@ -1232,14 +1439,49 @@ def multi_doppler(
         ``background``, ``background`` is set to 0.
     fall_speed_correction : bool, optional
         Correct for the precipitation fall speed. Default True.
+    freezing_level : {"auto", "rain"}, float or xarray.DataArray, optional
+        Height of the 0 degC level (m above sea level, or on ``(y, x)``) that
+        separates the rain and the snow fall speed relation of
+        :func:`fall_speed`. ``"auto"`` (default) takes the ``freezing_level``
+        of the ``background`` (as returned by
+        :func:`radarx.io.sounding.era5_column`), or the 0 degC crossing of its
+        ``temperature``; with neither, a ``RuntimeWarning`` is issued and the
+        rain relation is used at all heights. ``"rain"`` is that old
+        behaviour without the warning.
+    melting_depth : float, optional
+        Depth (m) below the freezing level over which the fall speed changes
+        from the rain to the snow relation (:func:`fall_speed`). Default 500.
     w_boundary : str or sequence of str, optional
         Where ``w = 0``: any of ``"bottom"`` (lowest level, default),
         ``"top"`` (highest level) and ``"echo_top"`` (from one level above
         the highest echo in each column). ``None`` for no boundary condition.
-        ``"bottom"`` sets ``w = 0`` at the lowest grid level ``z[0]``
-        whatever its height; see the Notes.
+        ``"bottom"`` sets ``w`` to ``w_bottom`` at the lowest grid level
+        ``z[0]`` whatever its height; a ``RuntimeWarning`` is issued when
+        ``z[0]`` is more than ``W_BOTTOM_WARN_HEIGHT`` (200 m) above the
+        highest radar and ``w_bottom`` is 0; see the Notes.
+    w_bottom : float or xarray.DataArray, optional
+        Value of ``w`` (m s-1, or on ``(y, x)``) held at the lowest level for
+        ``w_boundary="bottom"``. Default 0. With a grid that starts above the
+        ground, give the vertical velocity at ``z[0]`` implied by the flow
+        below, for example from the low-level divergence.
     storm_motion : tuple of float, optional
-        ``(u, v)`` of the frame in which the vorticity is steady, m s-1.
+        ``(u, v)`` of the frame in which the vorticity is steady, m s-1; also
+        the velocity of the wind pattern for ``shift_winds``.
+    shift_winds : bool, optional
+        Evaluate the analysis winds, valid at ``analysis_time``, at the
+        position they had when each radar observed (``x - c (t_k - t_a)``
+        with ``c = storm_motion``) instead of advecting the radial velocities
+        to a common time. Radial velocity is a projection on the beam
+        direction, which changes when the pattern moves by
+        ``c (t_k - t_a)``; advecting it as a scalar leaves an error of about
+        ``|u| |c| |t_k - t_a| / r`` (1.4 m s-1 for 20 m s-1 wind, a 15 m s-1
+        pattern speed, 180 s and 40 km range). Use it with grids that were
+        not advected (``multi_doppler_input`` without ``time``/``motion``),
+        whose ``time`` coordinate holds the observation time of every radar.
+        The shift is made on the observations together with their beam
+        direction (see Notes). Default False.
+    analysis_time : datetime-like, optional
+        Valid time of the analysis for ``shift_winds``.
     first_guess : xarray.Dataset, optional
         Start from these ``u``, ``v``, ``w`` instead of the background (e.g.
         the previous analysis of a time series); then ``levels`` is 1.
@@ -1290,9 +1532,17 @@ def multi_doppler(
     differences for the smoothness term, the background term :math:`J_b`
     and all default weights are radarx's own formulation. Unlike Shapiro et
     al. (2009), who use Taylor's frozen-turbulence hypothesis to shift the
-    analysis winds to the observation times, radarx advects the data to a
-    common time beforehand (:func:`radarx.retrieve.advect`) and treats the
-    vorticity equation as steady in the frame moving with ``storm_motion``.
+    analysis winds to the observation times, radarx by default advects the
+    data to a common time beforehand (:func:`radarx.retrieve.advect`) and
+    treats the vorticity equation as steady in the frame moving with
+    ``storm_motion``. With ``shift_winds=True`` the analysis winds are
+    shifted to the observation times by ``-c (t_k - t_a)`` in the observation
+    operator (the idea of Shapiro et al. 2009; their equations are not checked
+    here). It is done by the equivalent move of each observation with its
+    direction cosines in the opposite direction, so the cost function and the
+    solvers are unchanged; the same bilinear interpolation as in
+    :func:`radarx.retrieve.advect` is used, and observations whose shifted
+    position lies outside the grid are dropped.
     The fall speed correction is described in :func:`fall_speed`.
 
     Gridding artifacts. The radial velocities enter on a Cartesian grid. Linear
@@ -1311,8 +1561,8 @@ def multi_doppler(
     factor of two in x and y) and the stopping tolerances (3e-4 and 1e-7) are
     radarx choices.
 
-    Lower boundary. ``w_boundary="bottom"`` imposes ``w = 0`` at the lowest
-    grid level ``z[0]``, whatever its height. The physical condition of a
+    Lower boundary. ``w_boundary="bottom"`` imposes ``w = w_bottom`` (default
+    0) at the lowest grid level ``z[0]``, whatever its height. The physical condition of a
     wind analysis is impermeability, ``w = 0`` at the ground (terrain), and
     only a grid whose lowest level is the surface satisfies it. If ``z[0]``
     lies above the ground, for example at 500 m above sea level over flat
@@ -1325,12 +1575,15 @@ def multi_doppler(
     noise) the root-mean-square error of ``w`` was 0.05 m s-1 for levels
     0, 500, ..., 10000 m but 0.37 m s-1 (mean error 0.35 m s-1) for levels 500,
     1000, ..., 10500 m, where the true ``w`` at 500 m is -0.20 m s-1. Choose
-    ``z[0]`` at the terrain height, or use ``w_boundary=None`` or
-    ``"top"``/``"echo_top"`` and judge ``w`` accordingly. The statement that
+    ``z[0]`` at the terrain height, pass the ``w`` at ``z[0]`` as
+    ``w_bottom`` (giving the true -0.20 m s-1 in that test brings the rms
+    error of ``w`` back to the level of the first case), or use
+    ``w_boundary=None`` or ``"top"``/``"echo_top"`` and judge ``w``
+    accordingly. The statement that
     the condition belongs at the ground is the standard one for
     dual-Doppler analyses; it is not checked against the text of Gao et
-    al. (1999) or Potvin et al. (2012). There is no terrain
-    following option and no ``w_bottom`` value yet.
+    al. (1999) or Potvin et al. (2012). There is no terrain following
+    option.
 
     References
     ----------
@@ -1406,6 +1659,13 @@ def multi_doppler(
         weights=w_,
         storm_motion=storm_motion,
         w_boundary=w_boundary,
+        freezing_level=freezing_level,
+        melting_depth=melting_depth,
+        w_bottom=w_bottom,
+        shift_winds=shift_winds,
+        analysis_time=analysis_time,
+        use_compiled=_advection_compiled(engine),
+        n_threads=n_threads,
     )
     state0 = problem["first_guess"]
     if first_guess is not None:
@@ -1430,7 +1690,7 @@ def multi_doppler(
         p = hierarchy[level]
         if level < len(hierarchy) - 1:
             state = _refine(state, hierarchy[level + 1]["shape"], p["shape"])
-            state[2][~p["free"]] = 0.0
+            state[2][~p["free"]] = p["w_fixed"][~p["free"]]
         n0 = len(history)
         state, res = solve(
             p, state, use_compiled, n_threads, max_iterations, tolerance, history

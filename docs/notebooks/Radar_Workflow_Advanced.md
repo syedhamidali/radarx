@@ -220,6 +220,7 @@ beam.compute_azimuth_resolution(100e3, 0.01745)
 beam.compute_volume_resolution(100e3, 0.01745, 450.0)
 beam.volume_resolution(100e3, 1.0, 1.0, 450.0)
 geometry.effective_radius()
+geometry.k_e_from_refractivity([0.0, 500.0, 1000.0], [320.0, 301.0, 282.0])
 geometry.beam_center_height(100e3, 0.5, 30.0)
 geometry.half_power_radius(100e3, 0.5)
 geometry.sample_volume_gaussian(100e3, 1.0, 1.0, 450.0)
@@ -313,10 +314,13 @@ constants.Z_TO_DBZ_FACTOR
 constants.RADAR_BANDS
 constants.TYPICAL_BEAMWIDTH
 constants.TYPICAL_PULSE_WIDTHS
+reflectivity.hitschfeld_bordan_correction(np.array([30.0, 40.0, 40.0]), np.array([1e3, 2e3, 3e3]), a=1e-4, b=0.8)[-1]
 """.strip().splitlines()
 rows = []
 for line in calls:
-    value = eval(line, dict(modules, np=np))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)  # dbz_attenuation_correction
+        value = eval(line, dict(modules, np=np))
     text = f"{value:.5g}" if isinstance(value, (float, np.floating)) else str(value)
     rows.append((line.split("(")[0], line if "(" in line else "constant", text))
 table = pd.DataFrame(rows, columns=["function", "call", "result"])
@@ -1506,7 +1510,10 @@ print("models in the registry:", [m["name"] for m in ml.list_models()])
 dbz_n = ml.normalize(sweep_ml.DBZH, offset=0.0, scale=60.0, fill_value=0.0)
 patches, index = ml.polar_patches(dbz_n, (64, 128))
 out = model.run({"x": patches[:, None]}, batch_size=64)["y"][:, 0]
-smoothed = ml.denormalize(ml.reassemble(out, index, attrs=model.attrs).assign_attrs(dbz_n.attrs))
+smoothed = ml.denormalize(
+    ml.reassemble(out, index, attrs=model.attrs).assign_attrs(dbz_n.attrs),
+    mask=sweep_ml.DBZH.isnull(),  # the gates that were filled with 0 come back as NaN
+)
 print(f"{len(patches)} patches, array shape {patches.shape}; the PatchIndex remembers where each came from:",
       isinstance(index, PatchIndex))
 ```

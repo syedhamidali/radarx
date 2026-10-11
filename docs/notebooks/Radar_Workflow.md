@@ -30,11 +30,12 @@ multi-radar steps.
 |---|---|---|
 | 1 | volumes, Nyquist velocity, georeferencing | xradar, `download_file` |
 | 2 | non-meteorological echo removed | `dtree.radarx.echo_mask`, `apply_mask` |
-| 3 | environment: ERA5 profile and radiosonde, 0 °C height, humidity and wind-profile parameters | `dtree.radarx.sounding`, `read_sounding`, `bulk_shear` |
+| 3 | environment: ERA5 profile and radiosonde, 0 °C height, humidity, wind-profile and parcel parameters (CAPE, CIN) | `dtree.radarx.sounding`, `read_sounding`, `bulk_shear` |
 | 4 | dealiased Doppler velocity, VAD wind profile | `dtree.radarx.dealias`, `vad_profile` |
-| 5 | processed ΦDP and KDP | `dtree.radarx.kdp` |
+| 5 | processed ΦDP and KDP, attenuation correction | `dtree.radarx.kdp`, `correct_attenuation` |
 | 6 | hydrometeor classes | `dtree.radarx.hid` |
 | 7 | rain drop size distribution and rain rate, with the Bayesian posterior | `ds.radarx.dsd`, `dsd_bayesian` |
+| 7c | rain rate from $Z_H$, $Z_{DR}$, $K_{DP}$ and $A$, and from the hydrometeor class | `dtree.radarx.rain_rate`, `rain_rate_z`, `rain_rate_kdp`, `rain_rate_z_zdr`, `rain_rate_a` |
 | 8 | QVP time series and melting layer | `qvp_timeseries`, `melting_layer` |
 | 9 | azimuthal shear and radial divergence | `dtree.radarx.llsd` |
 | 10 | 3D grid, Max-CAPPI, other gridding functions, plotting functions, interactive view, UGRID | `dtree.radarx.to_grid`, `grid_cones`, `plot_ppi`, `to_uxarray` |
@@ -42,7 +43,9 @@ multi-radar steps.
 | 12 | multi-radar grid, radar bias, ERA5 on the grid, three-dimensional wind | `grid_radars`, `network_bias`, `multi_doppler` |
 | 13 | evaporation and evaporative cooling | `evaporation`, `integrate_evaporation` |
 | 14 | VIL, liquid VIL, echo top, VIL density and liquid water content | `vil`, `echo_top`, `vil_density`, `liquid_water_content` |
-| 15 | runtime summary and one `DataTree` with all products | |
+| 15 | noise level, SNR, noise-corrected RHOHV and ZDR, ZDR, Z and system ΦDP offsets | `noise_level`, `snr`, `correct_rhohv_noise`, `zdr_offset`, `z_offset`, `phidp_offset` |
+| 16 | super-observations of reflectivity and velocity with errors, WRFDA `ob.radar` and DART `obs_seq` files | `superobs`, `write_wrfda_radar`, `write_dart_obs_seq` |
+| 17 | runtime summary and one `DataTree` with all products | |
 | | function index of the whole package | |
 
 The [second part](Radar_Workflow_Advanced) of this notebook shows the rest of
@@ -94,6 +97,7 @@ from radarx.io import (
     mean_wind,
     nearest_station,
     open_sounding_file,
+    parcel_diagnostics,
     read_sounding,
     relative_humidity_from_dewpoint,
     saturation_vapor_pressure,
@@ -101,14 +105,20 @@ from radarx.io import (
     specific_humidity_from_dewpoint,
     station_list,
     wet_bulb_temperature,
+    write_dart_obs_seq,
+    write_wrfda_radar,
 )
 from radarx.io.aws_data import download_file
 from radarx.retrieve import (
     advect,
     apply_mask,
+    attenuation_coefficients,
     azimuthal_shear,
     bulk_shear,
     bunkers_storm_motion,
+    correct_attenuation,
+    correct_rhohv_noise,
+    correct_zdr_noise,
     create_cappi,
     dealias_velocity,
     dsd_bayesian,
@@ -128,15 +138,26 @@ from radarx.retrieve import (
     llsd,
     melting_layer,
     multi_doppler_input,
+    noise_level,
+    phidp_offset,
     qvp,
     qvp_timeseries,
     radar_geometry,
     radial_divergence,
+    rain_rate,
+    rain_rate_a,
+    rain_rate_kdp,
+    rain_rate_z,
+    rain_rate_z_zdr,
+    snr,
     storm_relative_helicity,
     storm_relative_wind,
+    superobs,
     vad_profile,
     vil,
     vil_density,
+    z_offset,
+    zdr_offset,
 )
 from radarx.vis import (
     RadarxDataArrayPlotAccessor,
@@ -489,6 +510,36 @@ plt.show()
 print(f"storm-relative wind at 1 km: {float(rel.sel(height=low.height[0] + 1000, method='nearest').storm_relative_speed):.1f} m/s")
 ```
 
+### Parcel thermodynamics: CAPE, CIN, the lifted index and the levels
+
+`parcel_diagnostics` lifts a parcel through a sounding or an ERA5 column and
+returns the CAPE and CIN, the lifted index and the pressure and height of the
+lifting condensation level (LCL), the level of free convection (LFC) and the
+equilibrium level (EL), for a surface-based, a mixed-layer (lowest 100 hPa) or
+the most unstable parcel (lowest 300 hPa). The thermodynamics are those of
+Bolton (1980) with the virtual-temperature correction (see
+`radarx.io.parcel`). The ERA5 profile has its levels below the ground masked
+and a surface level of 2 m air and 10 m wind (`surface=True` of `era5_profile`):
+
+```{code-cell} ipython3
+rows = {}
+for name, prof in (("BMX sounding", valid), ("ERA5 at KGWX", era5)):
+    for parcel in ("surface-based", "mixed-layer", "most-unstable"):
+        d = parcel_diagnostics(prof, parcel)
+        rows[(name, parcel)] = {
+            "CAPE (J/kg)": float(d.cape),
+            "CIN (J/kg)": float(d.cin),
+            "lifted index (K)": float(d.lifted_index),
+            "LCL (m)": float(d.lcl_height),
+            "LFC (m)": float(d.lfc_height),
+            "EL (m)": float(d.el_height),
+        }
+display(pd.DataFrame(rows).T.round(1))
+via_accessor = valid.radarx.parcel_diagnostics("most-unstable")
+print("the accessor agrees:",
+      bool(np.isclose(float(via_accessor.cape), rows[("BMX sounding", "most-unstable")]["CAPE (J/kg)"])))
+```
+
 ## 4. Dealias the Doppler velocity
 
 The Doppler cuts have Nyquist velocities of 26–33 m/s, and the low-level jet
@@ -600,6 +651,43 @@ offers several methods (`method="hubbert"` is the default; see the
 sweep_in = volumes[1]["sweep_0"].to_dataset()
 kdp_fn = estimate_kdp(sweep_in, phidp="PHIDP", rhohv="RHOHV", dbzh="DBZH")
 print("same KDP as the accessor:", bool(np.allclose(kdp_fn.KDP, sweep_in.KDP, equal_nan=True)))
+```
+
+### Attenuation correction
+
+Rain attenuates the signal, at S band a little: the two-way attenuation is
+$\alpha\,\Delta\Phi_{DP}$ with $\alpha=0.016$ dB per degree
+(Bringi et al. 1990), so 2.4 dB for a phase of 150° and up to 6 dB for the largest spans of this
+case. `correct_attenuation`
+adds the path attenuation to $Z_H$ and the differential attenuation to $Z_{DR}$
+along every ray, from the processed phase of the step above, with the constrained
+ZPHI solution of Testud et al. (2000) or the linear relation (`method="linear"`).
+The coefficients depend on the band (`attenuation_coefficients`) and can be set.
+The [attenuation notebook](Attenuation_Correction) shows the method on forward-modelled rain at S, C and X
+band and on a C-band volume.
+
+```{code-cell} ipython3
+with timed("5b. Attenuation correction"):
+    att = correct_attenuation(surv, band="S")
+    att_vol = volumes[1].radarx.correct_attenuation(band="S")  # the sweeps of the volume
+att_acc = surv.radarx.correct_attenuation(band="S")  # and the accessor of a sweep
+print("accessor agrees:", bool(att_acc.PIA.equals(att.PIA)),
+      "| sweeps corrected:", list(att_vol.children),
+      "| S band:", attenuation_coefficients("S"))
+print(f"largest path attenuation {float(att.PIA.max()):.1f} dB, largest differential attenuation "
+      f"{float(att.PIDA.max()):.2f} dB")
+fig, axes = plt.subplots(1, 3, figsize=(14, 4.4), sharey=True, layout="constrained")
+panels = [
+    (att.PIA, "path attenuation PIA (dB)", dict(cmap="magma_r", vmin=0, vmax=6)),
+    (att.PIDA, "differential attenuation PIDA (dB)", dict(cmap="magma_r", vmin=0, vmax=1.2)),
+    (att.DBZH_corrected - surv.DBZH, "$Z_H$ corrected minus measured (dB)", dict(cmap="magma_r", vmin=0, vmax=6)),
+]
+for ax, (da, label, style) in zip(axes, panels):
+    pm = ppi(ax, surv.assign(field=da), "field", extent=150, **style)
+    fig.colorbar(pm, ax=ax, label=label, shrink=0.85)
+axes[0].set_ylabel("north of KGWX (km)")
+fig.suptitle("Rain attenuation of the KGWX 0.5° cut, 00:00 UTC")
+plt.show()
 ```
 
 ## 6. Hydrometeor classification
@@ -740,6 +828,74 @@ axes[3].set(xlabel="normalized gamma, $\\mu$ = 3: $D_m$ (mm)", ylabel="posterior
 fig.colorbar(h[3], ax=axes[3], label="gates", shrink=0.85)
 fig.suptitle("Bayesian DSD retrieval, KGWX 0.5°, 00:00 UTC")
 plt.show()
+```
+
+### Rain rate
+
+`rain_rate` turns the classes of step 6 into a rain rate. Each gate gets the
+relation of its class: $R(Z, Z_{DR})$ in rain, $R(K_{DP})$ in a rain-hail
+mixture (Giangrande and Ryzhkov 2008), and NaN, with a flag that says why,
+where no relation is valid (graupel, snow, ice, the melting layer). The S-band
+coefficients of the papers are the defaults. At S band $Z_H$ and $Z_{DR}$ are
+only weakly attenuated, so we use them as they are; at C and X band apply an
+attenuation correction first (see the
+[rainfall estimation notebook](Rainfall_Estimation)). The single relations are
+`rain_rate_z`, `rain_rate_kdp`, `rain_rate_z_zdr` and `rain_rate_a`; the last
+needs the specific attenuation, which we approximate here with
+$A = 0.015\,K_{DP}$ dB km$^{-1}$ (the S-band value of Ryzhkov et al. 2014).
+
+```{code-cell} ipython3
+with timed("7c. rain rate"):
+    surv = volumes[1]["sweep_0"].to_dataset()
+    rain_blend = rain_rate(surv)  # classes from surv.HID
+    r_z = rain_rate_z(surv)
+    r_kdp = rain_rate_kdp(surv)
+    r_zdr = rain_rate_z_zdr(surv)
+    r_a = rain_rate_a(surv.assign(AH=0.015 * surv.KDP))
+flag_counts = {
+    m: int((rain_blend.RAIN_RATE_FLAG == i).sum())
+    for i, m in enumerate(rain_blend.RAIN_RATE_FLAG.attrs["flag_meanings"].split())
+}
+print("gates by flag:", flag_counts)
+```
+
+```{code-cell} ipython3
+panels = [
+    (rain_blend.RAIN_RATE, "rain rate by class (mm/h)", dict(cmap="turbo", vmin=0, vmax=60)),
+    (r_z.where(rain_blend.RAIN_RATE.notnull()), "R(Z), same gates (mm/h)", dict(cmap="turbo", vmin=0, vmax=60)),
+    (r_kdp.where(rain_blend.RAIN_RATE.notnull()), "R(KDP), same gates (mm/h)", dict(cmap="turbo", vmin=0, vmax=60)),
+]
+fig, axes = plt.subplots(1, 3, figsize=(17, 4.8), sharey=True, layout="constrained")
+for ax, (da, label, style) in zip(axes, panels):
+    pm = ppi(ax, surv.assign(field=da), "field", extent=120, **style)
+    fig.colorbar(pm, ax=ax, label=label, shrink=0.85)
+axes[0].set_ylabel("north of KGWX (km)")
+fig.suptitle("Rain rate, KGWX 0.5°, 00:00 UTC")
+plt.show()
+```
+
+The rain rate of the classes can be compared with the one of the DSD retrieval
+of step 7, which uses $Z_H$, $Z_{DR}$ and $K_{DP}$ through a gamma
+distribution. The blend uses $Z_{DR}$ on the rain gates and the DSD retrieval
+takes the intercept from $K_{DP}$ where it is at least 1 °/km:
+
+```{code-cell} ipython3
+both = rain_blend.RAIN_RATE.where(rain_near).values, dsd.RAIN_RATE.where(rain_near).values
+ok = np.isfinite(both[0]) & np.isfinite(both[1]) & (both[1] > 1)
+ratio = both[0][ok] / both[1][ok]
+print(f"{ok.sum()} rain gates; median ratio blend / DSD retrieval {np.median(ratio):.2f}, "
+      f"5-95 %: {np.percentile(ratio, 5):.2f}-{np.percentile(ratio, 95):.2f}")
+```
+
+The same functions are methods of the volume, `vol.radarx.rain_rate()`, and of a
+sweep or a field, for example `surv.radarx.rain_rate_z()`:
+
+```{code-cell} ipython3
+same = volumes[1].radarx.rain_rate()["sweep_0"].RAIN_RATE
+print("same rain rate as the function:", bool(np.allclose(same, rain_blend.RAIN_RATE, equal_nan=True)))
+print("per-field accessors:",
+      surv.radarx.rain_rate_z().name, surv.radarx.rain_rate_kdp().name,
+      surv.radarx.rain_rate_z_zdr().name, surv.radarx.rain_rate_a(a="KDP", coefficients=(4120.0, 1.03)).name)
 ```
 
 ## 8. QVP time series and melting layer
@@ -1369,7 +1525,143 @@ the water content is for the rain gates of the lowest sweep only. Within about
 10 km of the radar the highest beam is only a few km high, so the VIL and
 the echo top there are truncated (`VIL_TOP_TRUNCATED`).
 
-## 15. Summary
+## 15. Noise and calibration
+
+Three things limit how far the dual-polarization fields can be trusted: the noise
+at long range, and the calibration of $Z_{DR}$, $Z$ and $\Phi_{DP}$. The
+[noise and calibration notebook](Noise_and_Calibration) tests each function against a known
+truth; here they run on the KGWX volume.
+
+`noise_level` gives the noise of a sweep as the reflectivity of the noise at 1 km
+(Hildebrand and Sekhon 1974, or the lowest reported reflectivity for NEXRAD data,
+which are thresholded on SNR), `snr` the SNR of every gate from it, and
+`correct_rhohv_noise` and `correct_zdr_noise` invert the effect of the noise of
+the two channels on $\rho_{hv}$ and $Z_{DR}$ (Gourley et al. 2006). The moments
+of the WSR-88D are already corrected for noise (the mean $\rho_{hv}$ at an SNR of
+0 to 5 dB is close to 1), so on this volume the correction only shows what it does. For the calibration, `zdr_offset` compares $Z_{DR}$
+in light rain with its intrinsic value (Ryzhkov et al. 2005), `z_offset` compares the
+reflectivity with the one that $Z_{DR}$ and $K_{DP}$ imply in rain (the
+self-consistency of Gorgucci et al. 1992), and `phidp_offset` finds the system
+$\Phi_{DP}$ of each ray from its first gates. Offsets are the measured value minus
+the true one.
+
+```{code-cell} ipython3
+with timed("15. noise, SNR, noise correction, calibration offsets"):
+    sweep0 = kgwx["sweep_0"].to_dataset()
+    noise = noise_level(kgwx, method="floor")
+    snr_vol = snr(kgwx, noise=noise)
+    rho_corrected = correct_rhohv_noise(kgwx, noise=noise)
+    zdr_corrected = correct_zdr_noise(kgwx, noise=noise)
+    zdr_cal = zdr_offset(kgwx)
+    phi_cal = phidp_offset(kgwx)
+    z_cal = z_offset(sweep0, mask=rain, zdr_offset=float(zdr_cal["sweep_0"].ZDR_OFFSET))
+    # the accessors of the volume and of the sweep give the same results
+    noise_acc = kgwx.radarx.noise_level(method="floor")
+    snr_acc = kgwx.radarx.snr(noise=noise)
+    rho_acc = kgwx.radarx.correct_rhohv_noise(noise=noise)
+    zdr_acc = kgwx.radarx.correct_zdr_noise(noise=noise)
+    zdr_cal_acc = kgwx.radarx.zdr_offset()
+    phi_cal_acc = kgwx.radarx.phidp_offset()
+    z_cal_acc = sweep0.radarx.z_offset(mask=rain, zdr_offset=float(zdr_cal["sweep_0"].ZDR_OFFSET))
+print("accessors agree:",
+      float(noise_acc["sweep_0"].NOISE_LEVEL) == float(noise["sweep_0"].NOISE_LEVEL),
+      bool(snr_acc["sweep_0"].SNR.equals(snr_vol["sweep_0"].SNR)),
+      bool(rho_acc["sweep_0"].RHOHV.equals(rho_corrected["sweep_0"].RHOHV)),
+      bool(zdr_acc["sweep_0"].ZDR.equals(zdr_corrected["sweep_0"].ZDR)),
+      float(zdr_cal_acc["sweep_0"].ZDR_OFFSET) == float(zdr_cal["sweep_0"].ZDR_OFFSET),
+      float(phi_cal_acc["sweep_0"].SYSTEM_PHIDP) == float(phi_cal["sweep_0"].SYSTEM_PHIDP),
+      float(z_cal_acc.Z_OFFSET) == float(z_cal.Z_OFFSET))
+s0 = "sweep_0"
+print(f"noise level {float(noise[s0].NOISE_LEVEL):.1f} dBZ at 1 km | "
+      f"ZDR offset {float(zdr_cal[s0].ZDR_OFFSET):+.2f} dB ({int(zdr_cal[s0].ZDR_OFFSET_COUNT)} gates) | "
+      f"Z offset {float(z_cal.Z_OFFSET):+.2f} dB ({int(z_cal.Z_OFFSET_BINS)} classes) | "
+      f"system PhiDP {float(phi_cal[s0].SYSTEM_PHIDP):.1f}° (rays scatter {float(phi_cal[s0].SYSTEM_PHIDP_SPREAD):.1f}°)")
+```
+
+```{code-cell} ipython3
+fig, axes = plt.subplots(1, 3, figsize=(17, 4.8), sharey=True, layout="constrained")
+panels = [
+    (snr_vol[s0].SNR, "SNR (dB)", dict(cmap="viridis", vmin=0, vmax=60)),
+    (rho_corrected[s0].RHOHV, "$\\rho_{hv}$ corrected for noise", dict(cmap="HomeyerRainbow", vmin=0.8, vmax=1.0)),
+    (zdr_corrected[s0].ZDR, "$Z_{DR}$ corrected for noise (dB)", dict(cmap="HomeyerRainbow", vmin=-1, vmax=5)),
+]
+for ax, (da, label, style) in zip(axes, panels):
+    pm = ppi(ax, sweep0.assign(field=da), "field", extent=150, **style)
+    fig.colorbar(pm, ax=ax, label=label, shrink=0.85)
+axes[0].set_ylabel("north of KGWX (km)")
+fig.suptitle("Signal-to-noise ratio and noise-corrected moments, KGWX 0.5°, 00:00 UTC")
+plt.show()
+
+ray = phi_cal[s0].SYSTEM_PHIDP_RAY
+fig, ax = plt.subplots(figsize=(8, 3.2), layout="constrained")
+ax.plot(ray.azimuth, ray, ".", ms=3)
+ax.axhline(float(phi_cal[s0].SYSTEM_PHIDP), color="C3", label="sweep value")
+ax.set(xlabel="azimuth (°)", ylabel="system $\\Phi_{DP}$ (°)")
+ax.legend(frameon=False)
+plt.show()
+```
+
+## 16. Super-observations for data assimilation
+
+A volume has millions of gates, a model a few hundred thousand cells, and the
+errors of neighbouring gates are correlated, so assimilation systems use
+averages of the gates in a box, the super-observations of Alpert and Kumar
+(2007). `superobs` bins the gates into columns of 3 x 3 cells of a model grid and
+layers of 500 m, and returns the mean reflectivity (averaged in linear $Z$), the
+mean radial velocity with the mean unit vector of the rays (so that an
+operator can project the model wind), the number of gates, the spread and an
+error estimate $\sqrt{\mathrm{floor}^2 + \mathrm{spread}^2/n}$, and flags the
+boxes that have gates but no echo. `write_wrfda_radar` writes the result as
+the `ob.radar` file of WRFDA and `write_dart_obs_seq` as a DART `obs_seq` file. The model here is a Lambert conformal grid of
+1 km cells; a WRF file with `XLAT` and `XLONG` is used the same way. The
+[super-observation notebook](Superobs_Data_Assimilation) shows the gates and the
+super-observations, the errors and the file in more detail.
+
+```{code-cell} ipython3
+from pyproj import Transformer
+
+lcc = "+proj=lcc +lat_1=30 +lat_2=60 +lat_0=33.9 +lon_0=-88.33 +R=6370000 +units=m"
+axis = (np.arange(300) - 149.5) * 1000.0
+lon2d, lat2d = Transformer.from_crs(lcc, "EPSG:4326", always_xy=True).transform(*np.meshgrid(axis, axis))
+
+with timed("16. super-observations, WRFDA and DART files"):
+    so = superobs(kgwx, (lat2d, lon2d), cells=3, vel="VRADH_dealiased", rho_min=0.85, max_range=150e3)
+    so_acc = kgwx.radarx.superobs((lat2d, lon2d), cells=3, vel="VRADH_dealiased", rho_min=0.85, max_range=150e3)
+    stats = write_wrfda_radar(so, "ob.radar", time="2022-03-31_00:00:00")
+    dart_stats = write_dart_obs_seq(so, "obs_seq.out", time="2022-03-31_00:00:00")
+print("accessor agrees:", bool(so.reflectivity.equals(so_acc.reflectivity)), bool(so.velocity.equals(so_acc.velocity)))
+print(f"{int(so.gate_count.sum()):,} gates in {so.sizes['obs']:,} boxes: {int(so.reflectivity.count()):,} with "
+      f"reflectivity, {int(so.velocity.count()):,} with velocity, {int(so.nonprecip.sum()):,} without echo; "
+      f"WRFDA file: {stats['columns']:,} columns; DART file: {dart_stats['observations']:,} records")
+```
+
+```{code-cell} ipython3
+layer = so.where(so.level == 4, drop=True)  # 2 to 2.5 km above sea level
+to_xy = Transformer.from_crs("EPSG:4326", lcc, always_xy=True)
+ox, oy = to_xy.transform(layer.longitude.values, layer.latitude.values)
+ox0, oy0 = to_xy.transform(float(so.radar_longitude[0]), float(so.radar_latitude[0]))
+fig, axes = plt.subplots(1, 3, figsize=(17, 4.8), sharey=True, layout="constrained")
+panels = [
+    (layer.reflectivity, "reflectivity (dBZ)", dict(cmap="ChaseSpectral", vmin=-10, vmax=70)),
+    (layer.velocity, "radial velocity (m s$^{-1}$)", dict(cmap="balance", vmin=-40, vmax=40)),
+    (layer.velocity_error, "velocity error estimate (m s$^{-1}$)", dict(cmap="viridis", vmin=2, vmax=3)),
+]
+for ax, (da, label, style) in zip(axes, panels):
+    ok = da.notnull().values
+    sc = ax.scatter((ox - ox0)[ok] / 1e3, (oy - oy0)[ok] / 1e3, c=da[ok], s=9, marker="s", **style)
+    fig.colorbar(sc, ax=ax, label=label, shrink=0.85)
+    ax.set(xlim=(-150, 150), ylim=(-150, 150), aspect="equal", xlabel="east of KGWX (km)")
+axes[0].set_ylabel("north of KGWX (km)")
+fig.suptitle("Super-observations of 3 km, layer 2 to 2.5 km above sea level, KGWX, 00:00 UTC")
+plt.show()
+```
+
+The dealiased velocity of step 4 is used as it is. The super-observations keep the
+line and the low-level wind and replace millions of gates by tens of thousands of
+boxes. Boxes without echo ahead of and behind the line are flagged, and WRFDA can use
+them to remove spurious model rain.
+
+## 17. Summary
 
 The runtime of each step:
 
@@ -1380,8 +1672,8 @@ summary
 ```
 
 All products of the case in one `DataTree`: the environment profiles,
-the 00:00 UTC polar volume with every derived field, the DSD, the QVPs and melting
-layer, the VIL products, the grids as observed and at the common analysis time, the storm
+the 00:00 UTC polar volume with every derived field, the DSD, the rain rate, the QVPs and melting
+layer, the VIL products, the super-observations, the grids as observed and at the common analysis time, the storm
 motion, the interpolated frames, the two-radar grid and the wind.
 
 ```{code-cell} ipython3
@@ -1391,9 +1683,11 @@ for node in kgwx.subtree:
 nodes["/environment/era5"] = era5
 nodes["/environment/radiosonde"] = raob
 nodes["/dsd"] = dsd
+nodes["/rain_rate"] = rain_blend
 nodes["/qvp"] = tqvp
 nodes["/melting_layer"] = ml
 nodes["/vil"] = vil_vol.assign(ECHO_TOP=top, VIL_DENSITY=density)
+nodes["/superobs"] = so
 for i, (observed, advected) in enumerate(zip(grids, common)):
     nodes[f"/grid/observed/volume_{i}"] = observed
     nodes[f"/grid/analysis_time/volume_{i}"] = advected
@@ -1503,6 +1797,7 @@ notebooks or from this index.
 | `effective_radius` | `radarx.fundamentals.geometry` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `ground_range` | `radarx.fundamentals.geometry` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `half_power_radius` | `radarx.fundamentals.geometry` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
+| `k_e_from_refractivity` | `radarx.fundamentals.geometry` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `sample_volume_gaussian` | `radarx.fundamentals.geometry` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `compute_average_power` | `radarx.fundamentals.power` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `compute_min_detectable_signal` | `radarx.fundamentals.power` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
@@ -1517,6 +1812,7 @@ notebooks or from this index.
 | `round_trip_time` | `radarx.fundamentals.principles` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `snr` | `radarx.fundamentals.principles` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `dbz_attenuation_correction` | `radarx.fundamentals.reflectivity` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
+| `hitschfeld_bordan_correction` | `radarx.fundamentals.reflectivity` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `z_to_r_custom` | `radarx.fundamentals.reflectivity` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `z_to_r_marshall_palmer` | `radarx.fundamentals.reflectivity` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `absorption_coefficient` | `radarx.fundamentals.scattering` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
@@ -1563,10 +1859,12 @@ notebooks or from this index.
 | `download_file` | `radarx.io.aws_data` | [core](Radar_Workflow): 1. Read the volumes |
 | `get_s3_client` | `radarx.io.aws_data` | [core](Radar_Workflow): 1. Read the volumes |
 | `list_available_files` | `radarx.io.aws_data` | [core](Radar_Workflow): 1. Read the volumes |
+| `write_dart_obs_seq` | `radarx.io.dart` | [core](Radar_Workflow): 16. Super-observations for data assimilation |
 | `parsivel_classes` | `radarx.io.disdrometer` | [part 2](Radar_Workflow_Advanced): 2. Disdrometers |
 | `read_parsivel` | `radarx.io.disdrometer` | [part 2](Radar_Workflow_Advanced): 2. Disdrometers |
 | `read_pips_netcdf` | `radarx.io.disdrometer` | [part 2](Radar_Workflow_Advanced): 2. Disdrometers |
 | `read_lma` | `radarx.io.lma` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
+| `parcel_diagnostics` | `radarx.io.parcel` | [core](Radar_Workflow): Parcel thermodynamics: CAPE, CIN, the lifted index and the levels |
 | `read_mrr` | `radarx.io.profiler` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `read_wind_profiler` | `radarx.io.profiler` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `air_density` | `radarx.io.sounding` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
@@ -1591,6 +1889,7 @@ notebooks or from this index.
 | `read_pips` | `radarx.io.surface` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `read_sticknet` | `radarx.io.surface` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `read_sticknet_locations` | `radarx.io.surface` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
+| `write_wrfda_radar` | `radarx.io.wrfda` | [core](Radar_Workflow): 16. Super-observations for data assimilation |
 | `list_models` | `radarx.ml.model` | [part 2](Radar_Workflow_Advanced): 10. Machine-learning plumbing |
 | `load_model` | `radarx.ml.model` | [part 2](Radar_Workflow_Advanced): 10. Machine-learning plumbing |
 | `Model` | `radarx.ml.model` | [part 2](Radar_Workflow_Advanced): 10. Machine-learning plumbing |
@@ -1604,6 +1903,10 @@ notebooks or from this index.
 | `estimate_motion` | `radarx.retrieve.advection` | [core](Radar_Workflow): 11. Storm motion, common analysis time and time interpolation |
 | `interpolate_time` | `radarx.retrieve.advection` | [core](Radar_Workflow): 11. Storm motion, common analysis time and time interpolation |
 | `biological_echo` | `radarx.retrieve.biology` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
+| `correct_attenuation` | `radarx.retrieve.attenuation` | [core](Radar_Workflow): 5. ΦDP processing and KDP |
+| `zdr_offset` | `radarx.retrieve.calibration` | [core](Radar_Workflow): 15. Noise and calibration |
+| `z_offset` | `radarx.retrieve.calibration` | [core](Radar_Workflow): 15. Noise and calibration |
+| `phidp_offset` | `radarx.retrieve.calibration` | [core](Radar_Workflow): 15. Noise and calibration |
 | `create_cappi` | `radarx.retrieve.cappi` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `baroclinic_generation` | `radarx.retrieve.coldpool` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `buoyancy` | `radarx.retrieve.coldpool` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
@@ -1653,17 +1956,28 @@ notebooks or from this index.
 | `multi_doppler` | `radarx.retrieve.multidoppler` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `multi_doppler_input` | `radarx.retrieve.multidoppler` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `radar_geometry` | `radarx.retrieve.multidoppler` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
+| `noise_level` | `radarx.retrieve.noise` | [core](Radar_Workflow): 15. Noise and calibration |
+| `snr` | `radarx.retrieve.noise` | [core](Radar_Workflow): 15. Noise and calibration |
+| `correct_rhohv_noise` | `radarx.retrieve.noise` | [core](Radar_Workflow): 15. Noise and calibration |
+| `correct_zdr_noise` | `radarx.retrieve.noise` | [core](Radar_Workflow): 15. Noise and calibration |
 | `apply_mask` | `radarx.retrieve.qc` | [core](Radar_Workflow): 2. Remove non-meteorological echo |
 | `echo_mask` | `radarx.retrieve.qc` | [core](Radar_Workflow): 2. Remove non-meteorological echo |
+| `rain_rate` | `radarx.retrieve.qpe` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
+| `rain_rate_a` | `radarx.retrieve.qpe` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
+| `rain_rate_kdp` | `radarx.retrieve.qpe` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
+| `rain_rate_z` | `radarx.retrieve.qpe` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
+| `rain_rate_z_zdr` | `radarx.retrieve.qpe` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
 | `rain_source_points` | `radarx.retrieve.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `rain_trajectories` | `radarx.retrieve.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `size_sorting` | `radarx.retrieve.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `surface_dsd` | `radarx.retrieve.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `trajectory_matched_times` | `radarx.retrieve.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
+| `attenuation_coefficients` | `radarx.retrieve.attenuation` | [core](Radar_Workflow): 5. ΦDP processing and KDP |
 | `azimuthal_shear` | `radarx.retrieve.shear` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `llsd` | `radarx.retrieve.shear` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `radial_divergence` | `radarx.retrieve.shear` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `single_doppler_winds` | `radarx.retrieve.single_doppler` | [part 2](Radar_Workflow_Advanced): 8. Wind from a single Doppler radar |
+| `superobs` | `radarx.retrieve.superobs` | [core](Radar_Workflow): 16. Super-observations for data assimilation |
 | `rotation_couplets` | `radarx.retrieve.tornado` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
 | `tornado_probability` | `radarx.retrieve.tornado` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
 | `tornet_inputs` | `radarx.retrieve.tornado` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
@@ -1710,6 +2024,9 @@ The methods of the `.radarx` accessors:
 | `.radarx.bunkers_storm_motion` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
 | `.radarx.cluster_flashes` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `.radarx.cold_pool_intensity` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
+| `.radarx.correct_attenuation` | [core](Radar_Workflow): 5. ΦDP processing and KDP |
+| `.radarx.correct_rhohv_noise` | [core](Radar_Workflow): 15. Noise and calibration |
+| `.radarx.correct_zdr_noise` | [core](Radar_Workflow): 15. Noise and calibration |
 | `.radarx.create_cappi` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `.radarx.dealias` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
 | `.radarx.diabatic_lagrangian` | [part 2](Radar_Workflow_Advanced): 9. Diabatic Lagrangian analysis |
@@ -1734,6 +2051,9 @@ The methods of the `.radarx` accessors:
 | `.radarx.merge_radars` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `.radarx.multi_doppler` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `.radarx.network_bias` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
+| `.radarx.noise_level` | [core](Radar_Workflow): 15. Noise and calibration |
+| `.radarx.parcel_diagnostics` | [core](Radar_Workflow): Parcel thermodynamics: CAPE, CIN, the lifted index and the levels |
+| `.radarx.phidp_offset` | [core](Radar_Workflow): 15. Noise and calibration |
 | `.radarx.plot` | [core](Radar_Workflow): 10. Cone gridding, Max-CAPPI, interactive view and UGRID |
 | `.radarx.plot_cappi` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `.radarx.plot_max_cappi` | [core](Radar_Workflow): 10. Cone gridding, Max-CAPPI, interactive view and UGRID |
@@ -1742,11 +2062,18 @@ The methods of the `.radarx` accessors:
 | `.radarx.potential_temperatures` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `.radarx.qvp` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `.radarx.radial_divergence` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
+| `.radarx.rain_rate` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
+| `.radarx.rain_rate_a` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
+| `.radarx.rain_rate_kdp` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
+| `.radarx.rain_rate_z` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
+| `.radarx.rain_rate_z_zdr` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
 | `.radarx.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `.radarx.rotation_couplets` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
 | `.radarx.single_doppler_winds` | [part 2](Radar_Workflow_Advanced): 8. Wind from a single Doppler radar |
+| `.radarx.snr` | [core](Radar_Workflow): 15. Noise and calibration |
 | `.radarx.sounding` | [core](Radar_Workflow): 3. Environment |
 | `.radarx.storm_relative_helicity` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
+| `.radarx.superobs` | [core](Radar_Workflow): 16. Super-observations for data assimilation |
 | `.radarx.to_cappi` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `.radarx.to_grid` | [core](Radar_Workflow): 10. Cone gridding, Max-CAPPI, interactive view and UGRID |
 | `.radarx.to_uxarray` | [core](Radar_Workflow): 10. Cone gridding, Max-CAPPI, interactive view and UGRID |
@@ -1755,6 +2082,8 @@ The methods of the `.radarx` accessors:
 | `.radarx.vad_profile` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
 | `.radarx.vil` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.vil_density` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
+| `.radarx.z_offset` | [core](Radar_Workflow): 15. Noise and calibration |
+| `.radarx.zdr_offset` | [core](Radar_Workflow): 15. Noise and calibration |
 
 ## References
 
@@ -1766,13 +2095,19 @@ The methods of the `.radarx` accessors:
 - Bunkers, M. J., B. A. Klimowski, J. W. Zeitler, R. L. Thompson, and M. L. Weisman, 2000: Predicting Supercell Motion Using a New Hodograph Technique. *Weather and Forecasting*, **15**, 61-79, <https://doi.org/10.1175/1520-0434(2000)015<0061:PSMUAN>2.0.CO;2>
 - Cao, Q., G. Zhang, E. Brandes, T. Schuur, A. Ryzhkov, and K. Ikeda, 2008: Analysis of Video Disdrometer and Polarimetric Radar Data to Characterize Rain Microphysics in Oklahoma. *Journal of Applied Meteorology and Climatology*, **47**, 2238-2255, <https://doi.org/10.1175/2008JAMC1732.1>
 - Gao, J., M. Xue, A. Shapiro, and K. K. Droegemeier, 1999: A Variational Method for the Analysis of Three-Dimensional Wind Fields from Two Doppler Radars. *Monthly Weather Review*, **127**, 2128-2142, <https://doi.org/10.1175/1520-0493(1999)127<2128:AVMFTA>2.0.CO;2>
+- Gorgucci, E., G. Scarchilli, and V. Chandrasekar, 1992: Calibration of Radars Using Polarimetric Techniques. *IEEE Transactions on Geoscience and Remote Sensing*, **30**, 853-858, <https://doi.org/10.1109/36.175319>
+- Gourley, J. J., P. Tabary, and J. Parent du Chatelet, 2006: Data Quality of the Meteo-France C-Band Polarimetric Radar. *Journal of Atmospheric and Oceanic Technology*, **23**, 1340-1356, <https://doi.org/10.1175/JTECH1912.1>
 - Gourley, J. J., P. Tabary, and J. Parent du Chatelet, 2007: A Fuzzy Logic Algorithm for the Separation of Precipitating from Nonprecipitating Echoes Using Polarimetric Radar Observations. *Journal of Atmospheric and Oceanic Technology*, **24**, 1439-1451, <https://doi.org/10.1175/JTECH2035.1>
+- Giangrande, S. E., and A. V. Ryzhkov, 2008: Estimation of Rainfall Based on the Results of Polarimetric Echo Classification. *Journal of Applied Meteorology and Climatology*, **47**, 2445-2462, <https://doi.org/10.1175/2008JAMC1753.1>
 - Greene, D. R., and R. A. Clark, 1972: Vertically Integrated Liquid Water: A New Analysis Tool. *Monthly Weather Review*, **100**, 548-552, <https://doi.org/10.1175/1520-0493(1972)100<0548:VILWNA>2.3.CO;2>
 - Hersbach, H., and Coauthors, 2020: The ERA5 global reanalysis. *Quarterly Journal of the Royal Meteorological Society*, **146**, 1999-2049, <https://doi.org/10.1002/qj.3803>
+- Hildebrand, P. H., and R. S. Sekhon, 1974: Objective Determination of the Noise Level in Doppler Spectra. *Journal of Applied Meteorology*, **13**, 808-811, <https://doi.org/10.1175/1520-0450(1974)013<0808:ODOTNL>2.0.CO;2>
 - Krause, J. M., 2016: A Simple Algorithm to Discriminate between Meteorological and Nonmeteorological Radar Echoes. *Journal of Atmospheric and Oceanic Technology*, **33**, 1875-1885, <https://doi.org/10.1175/JTECH-D-15-0239.1>
 - Kumjian, M. R., and A. V. Ryzhkov, 2010: The Impact of Evaporation on Polarimetric Characteristics of Rain: Theoretical Model and Practical Implications. *Journal of Applied Meteorology and Climatology*, **49**, 1247-1267, <https://doi.org/10.1175/2010JAMC2243.1>
 - Lakshmanan, V., K. Hondl, C. K. Potvin, and D. Preignitz, 2013: An Improved Method for Estimating Radar Echo-Top Height. *Weather and Forecasting*, **28**, 481-488, <https://doi.org/10.1175/WAF-D-12-00084.1>
 - Park, H. S., A. V. Ryzhkov, D. S. Zrnić, and K.-E. Kim, 2009: The Hydrometeor Classification Algorithm for the Polarimetric WSR-88D: Description and Application to an MCS. *Weather and Forecasting*, **24**, 730-748, <https://doi.org/10.1175/2008WAF2222205.1>
+- Ryzhkov, A. V., S. E. Giangrande, V. M. Melnikov, and T. J. Schuur, 2005: Calibration Issues of Dual-Polarization Radar Measurements. *Journal of Atmospheric and Oceanic Technology*, **22**, 1138-1155, <https://doi.org/10.1175/JTECH1772.1>
+- Ryzhkov, A., M. Diederich, P. Zhang, and C. Simmer, 2014: Potential Utilization of Specific Attenuation for Rainfall Estimation, Mitigation of Partial Beam Blockage, and Radar Networking. *Journal of Atmospheric and Oceanic Technology*, **31**, 599-619, <https://doi.org/10.1175/JTECH-D-13-00038.1>
 - Seo, B.-C., W. F. Krajewski, and J. A. Smith, 2014: Four-dimensional reflectivity data comparison between two ground-based radars: methodology and statistical analysis. *Hydrological Sciences Journal*, **59**, 1320-1334, <https://doi.org/10.1080/02626667.2013.839872>
 - Seo, B.-C., W. F. Krajewski, and Y. Qi, 2020: Utility of vertically integrated liquid water content for radar-rainfall estimation: Quality control and precipitation type classification. *Atmospheric Research*, **236**, 104800, <https://doi.org/10.1016/j.atmosres.2019.104800>
 - Zhang, G., J. Vivekanandan, and E. Brandes, 2001: A method for estimating rain rate and drop size distribution from polarimetric radar measurements. *IEEE Transactions on Geoscience and Remote Sensing*, **39**, 830-841, <https://doi.org/10.1109/36.917906>

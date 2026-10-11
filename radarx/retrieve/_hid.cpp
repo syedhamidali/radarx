@@ -461,7 +461,7 @@ inline int64_t allowed_classes(const Table& t, const Block& b, int64_t r, int64_
 
 // Pass 2: scores, restrictions and argmax for every gate of a row.
 void classify_row(const Table& t, const Block& b, int64_t r, const Melting& ml,
-                  double sin_half_beam) {
+                  double sin_half_beam, double min_confidence) {
     constexpr float fnan = std::numeric_limits<float>::quiet_NaN();
     Gate gate;
     double s[kMaxClass];
@@ -490,6 +490,8 @@ void classify_row(const Table& t, const Block& b, int64_t r, const Melting& ml,
                 best = c;
             }
         }
+        // a gate whose best score is not above min_confidence stays unclassified
+        if (best >= 0 && !(best_s > min_confidence)) best = -1;
         b.cls[i] = static_cast<int8_t>(best + 1);
         b.conf[i] = best >= 0 ? static_cast<float>(best_s) : fnan;
     }
@@ -512,7 +514,7 @@ py::tuple classify(
     bool kdp_log, bool quality, double sin_half_beam, int ws_class, int ot_class,
     int64_t ml_gates_partial, int64_t ml_gates_complete, double stats_rmin,
     double stats_rmax, double hist_lo, double hist_bin, int64_t hist_n, bool want_scores,
-    int n_threads) {
+    double min_confidence, int n_threads) {
     const size_t nb = zh.size();
     const std::vector<const std::vector<py::object>*> lists = {
         &zdr, &kdp, &rho, &temp, &phidp, &blockage, &valid, &height, &rng, &ml_bottom, &ml_top};
@@ -564,7 +566,7 @@ py::tuple classify(
         py::gil_scoped_release release;
         if (mode == kWinter) ml = detect_melting(t, blocks, nt, wo);
         parallel_rows(blocks, nt, [&](const Block& b, int64_t r, int) {
-            classify_row(t, b, r, ml, sin_half_beam);
+            classify_row(t, b, r, ml, sin_half_beam, min_confidence);
         });
     }
     py::list cls_list, conf_list, score_list;
@@ -593,5 +595,5 @@ PYBIND11_MODULE(_hid, m) {
           py::arg("ml_gates_partial"), py::arg("ml_gates_complete"),
           py::arg("stats_rmin"), py::arg("stats_rmax"), py::arg("hist_lo"),
           py::arg("hist_bin"), py::arg("hist_n"), py::arg("want_scores") = true,
-          py::arg("n_threads") = 0);
+          py::arg("min_confidence") = 0.0, py::arg("n_threads") = 0);
 }

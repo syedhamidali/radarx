@@ -109,9 +109,14 @@ def cold_pool(z, b, bottom, threshold, top, n_threads=0):
     return out
 
 
+# A layer limit computed as ground + depth can miss the matching level by
+# rounding; heights within 1e-6 m of the first or last level are that level.
+ZTOL = 1e-6  # [m]
+
+
 def _at(z, u, v, h):
     """Winds at height ``h`` by linear interpolation of valid levels."""
-    if h < z[0] or h > z[-1]:
+    if h < z[0] - ZTOL or h > z[-1] + ZTOL:
         return None
     return np.interp(h, z, u), np.interp(h, z, v)
 

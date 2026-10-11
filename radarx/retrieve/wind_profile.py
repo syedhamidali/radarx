@@ -19,7 +19,9 @@ with a valid wind of every column (the surface for a sounding, the first gate
 of a profiler); pass ``ground=0`` for heights that are already above ground
 level, or the station altitude for heights above sea level. Winds at the
 limits are interpolated linearly between valid levels; a layer that the valid
-winds do not span gives NaN.
+winds do not span gives NaN (a limit within 1e-6 m of the lowest or highest
+valid level counts as that level, so ``ground + top`` rounding does not void
+the layer). The direction of a calm wind is NaN.
 
 Definitions
 -----------
@@ -51,13 +53,13 @@ Definitions
   spread 0.1, 100-m bins up to 12 km, 1-45 degree elevations) are radarx
   choices; none comes from Browning and Wexler [1]_.
 - Bunkers et al. [5]_ "internal dynamics" storm motion as implemented: the
-  0-6 km (non-pressure-weighted, height-weighted here) mean wind plus a
+  0-6 km mean wind (height-weighted by default, pressure-weighted with
+  ``weighting="pressure"``) plus a
   deviation of 7.5 m s-1 at right angles to the shear vector between the
   0-0.5 km and the 5.5-6 km mean winds; to the right of the shear for right
   movers, to the left for left movers. These layers and the 7.5 m s-1 are the
-  values the implementation uses for that method; they and the choice of a
-  height-weighted mean are not checked against the text or tables of the
-  paper.
+  values the implementation uses for that method; they and the choice of
+  weighting are not checked against the text or tables of the paper.
 
 The layer integrals run in the compiled kernel ``radarx.retrieve._coldpool``
 (multithreaded over columns) with an identical NumPy implementation as
@@ -113,8 +115,10 @@ __all__ = [
 import numpy as np
 import xarray as xr
 
+from .._fields import VELOCITY, as_sweep
 from .._provenance import provenance
 from .._registry import accessor_method
+from ..io.sounding import _wind_from_direction
 from .coldpool import _columns, _f64, _height_of, _kernel, _per_column, _threads
 
 # Deviation of the Bunkers et al. (2000) method [m s-1]; value as used by the
@@ -170,7 +174,7 @@ def _da(values, other, coords, shape, name, attrs=None):
 def _wind_vars(u, v, prefix, what):
     """u, v, speed and direction (from) of a wind vector."""
     speed = np.hypot(u, v)
-    direction = (np.degrees(np.arctan2(-u, -v)) % 360.0).where(speed > 0)
+    direction = _wind_from_direction(u, v, calm=np.nan).where(speed > 0)
     return {
         f"{prefix}u": u.rename(f"{prefix}u").assign_attrs(
             long_name=f"{what}, eastward (x) component", units="m s-1"
@@ -330,12 +334,77 @@ def layer_mean_wind(
     return out
 
 
+def _pressure_layer_mean(
+    profile, bottom, top, *, pressure, dim, height, ground, engine, n_threads
+):
+    """
+    Pressure-weighted mean wind of a layer, ``int V dp / (p_bottom - p_top)``.
+
+    The pressures at the two limits are interpolated linearly in height, then
+    the winds are averaged with the pressure as the vertical coordinate (linear
+    between levels in pressure), by the same layer kernel with ``-p`` as the
+    coordinate.
+    """
+    if pressure not in profile:
+        raise ValueError(
+            f"weighting='pressure' needs {pressure!r} in the profile (pressure "
+            "of every level, in any unit)"
+        )
+    z = _height_of(profile["u"], dim, height)
+    (u, v, p), zc, other, coords, shape = _columns(
+        [profile["u"], profile["v"], profile[pressure]], dim, z
+    )
+    g = _per_column(ground, other, coords, shape)
+    k = _kernel(engine)
+    nt = _threads(n_threads)
+    nocm = _per_column(None, other, coords, shape)
+    lim = np.asarray(
+        k.profile(zc, p, p, g, float(bottom), float(top), nocm, nocm, n_threads=nt)
+    )
+    pb, pt = lim[0], lim[2]
+    # layer mapped to 0 ... 1 in pressure (increasing upward), so that the
+    # layer kernel returns int V dp / (p_bottom - p_top) for every column
+    with np.errstate(invalid="ignore", divide="ignore"):
+        zp = (pb[:, None] - p) / (pb - pt)[:, None]
+    res = np.asarray(
+        k.profile(
+            _f64(zp),
+            u,
+            v,
+            np.zeros(u.shape[0]),
+            0.0,
+            1.0,
+            nocm,
+            nocm,
+            n_threads=nt,
+        )
+    )
+    return res, other, coords, shape
+
+
+def _mean_for(profile, bottom, top, weighting, pressure, kw):
+    """Layer-mean wind (Dataset ``u``, ``v``) by height or pressure weighting."""
+    if weighting == "height":
+        return layer_mean_wind(profile, bottom, top, **kw)
+    res, other, coords, shape = _pressure_layer_mean(
+        profile, bottom, top, pressure=pressure, **kw
+    )
+    return xr.Dataset(
+        {
+            "u": _da(res[5], other, coords, shape, "u"),
+            "v": _da(res[6], other, coords, shape, "v"),
+        }
+    )
+
+
 @provenance("Supercell motion of Bunkers et al. (2000), internal dynamics method")
 def bunkers_storm_motion(
     profile,
     *,
     mover="right",
     deviation=BUNKERS_DEVIATION,
+    weighting="height",
+    pressure="pressure",
     dim="height",
     height=None,
     ground=None,
@@ -347,9 +416,15 @@ def bunkers_storm_motion(
 
     Mean wind of 0-6 km plus (right mover) or minus (left mover) a deviation
     of 7.5 m s-1 perpendicular to the shear vector from the 0-0.5 km mean wind
-    to the 5.5-6 km mean wind. The layers, the 7.5 m s-1 and the use of
-    height-weighted rather than pressure-weighted means are as implemented
-    for the method; they are not checked against the text of the paper (the pressure-weighted variant is not offered).
+    to the 5.5-6 km mean wind. The layers and the 7.5 m s-1 are as implemented
+    for the method; they are not checked against the text of the paper.
+
+    The means can be taken over height (``weighting="height"``, default, the
+    result of earlier radarx versions) or over pressure
+    (``weighting="pressure"``, :math:`\\int \\mathbf{V}\\, dp / \\Delta p`, which
+    gives the low levels more weight). Bunkers et al. (2000) are recalled as
+    using pressure-weighted means; that is not checked against the text of the
+    paper.
 
     Parameters
     ----------
@@ -361,6 +436,11 @@ def bunkers_storm_motion(
     deviation : float, optional
         Deviation from the mean wind (m s-1). Default 7.5 (the value of the
         Bunkers et al. method as implemented; not checked, see above).
+    weighting : {"height", "pressure"}, optional
+        Weight of the layer means. ``"pressure"`` needs the variable
+        ``pressure`` of ``profile`` (levels; the unit does not matter).
+    pressure : str, optional
+        Name of the pressure variable for ``weighting="pressure"``.
     dim, height, ground, engine, n_threads : optional
         As in :func:`bulk_shear`.
 
@@ -380,17 +460,23 @@ def bunkers_storm_motion(
     sign = {"right": 1.0, "left": -1.0, "mean": 0.0}
     if mover not in sign:
         raise ValueError(f"mover must be 'right', 'left' or 'mean', not {mover!r}")
+    if weighting not in ("height", "pressure"):
+        raise ValueError(f"weighting must be 'height' or 'pressure', not {weighting!r}")
     kw = dict(dim=dim, height=height, ground=ground, engine=engine, n_threads=n_threads)
-    mean = layer_mean_wind(profile, 0.0, 6000.0, **kw)
-    low = layer_mean_wind(profile, 0.0, 500.0, **kw)
-    high = layer_mean_wind(profile, 5500.0, 6000.0, **kw)
+    mean = _mean_for(profile, 0.0, 6000.0, weighting, pressure, kw)
+    low = _mean_for(profile, 0.0, 500.0, weighting, pressure, kw)
+    high = _mean_for(profile, 5500.0, 6000.0, weighting, pressure, kw)
     su, sv = high["u"] - low["u"], high["v"] - low["v"]
     mag = np.hypot(su, sv)
     # (shear x k) / |shear| points 90 degrees to the right of the shear
     u = mean["u"] + sign[mover] * deviation * sv / mag
     v = mean["v"] - sign[mover] * deviation * su / mag
     out = xr.Dataset(_wind_vars(u, v, "", f"Bunkers et al. (2000) {mover} motion"))
-    out.attrs.update(method="Bunkers et al. (2000) internal dynamics", mover=mover)
+    out.attrs.update(
+        method="Bunkers et al. (2000) internal dynamics",
+        mover=mover,
+        weighting=weighting,
+    )
     return out
 
 
@@ -526,7 +612,7 @@ def storm_relative_helicity(
 # VAD
 # --------------------------------------------------------------------------
 
-_VELOCITY_NAMES = ("VRADH", "VRADV", "VELOCITY", "velocity", "VEL")
+_VELOCITY_NAMES = VELOCITY
 
 
 def _sweep_rings(ds, velocity, min_elevation, max_elevation, max_range):
@@ -590,7 +676,8 @@ def vad_profile(
     Parameters
     ----------
     obj : xarray.Dataset or xarray.DataTree
-        A sweep (``azimuth``, ``range``, ``elevation``, ``altitude``) or a
+        A sweep (``azimuth``, ``range``, ``elevation``, ``altitude``), a
+        single sweep node (``dtree["sweep_0"]``) or a
         volume with ``sweep_*`` groups (xradar layout). The velocities must be
         dealiased (e.g. :func:`radarx.retrieve.dealias_velocity`) and
         no-data codes masked; sweeps without the velocity field are skipped.
@@ -635,6 +722,7 @@ def vad_profile(
            *J. Appl. Meteor.*, **7** (1), 105-113,
            https://doi.org/10.1175/1520-0450(1968)007<0105:TDOKPO>2.0.CO;2
     """
+    obj = as_sweep(obj)
     if isinstance(obj, xr.Dataset):
         datasets = [obj]
         site = obj
@@ -715,7 +803,7 @@ def vad_profile(
     out["wind_speed"] = np.hypot(uda, vda).assign_attrs(
         standard_name="wind_speed", units="m s-1"
     )
-    out["wind_direction"] = (np.degrees(np.arctan2(-uda, -vda)) % 360.0).assign_attrs(
+    out["wind_direction"] = _wind_from_direction(uda, vda, calm=np.nan).assign_attrs(
         standard_name="wind_from_direction", units="degree"
     )
     out["vad_rms"] = xr.DataArray(rm, dims="height", coords=coords).assign_attrs(

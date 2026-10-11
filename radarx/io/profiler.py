@@ -71,6 +71,8 @@ __all__ = ["read_mrr", "read_wind_profiler"]
 import numpy as np
 import xarray as xr
 
+from .sounding import _wind_from_direction
+
 _MRR_VARS = {
     "MRR_Capital_Z": (
         "DBZ",
@@ -304,7 +306,7 @@ def read_wind_profiler(path, *, min_qc=None, beams=False):
                 ),
                 "wind_direction": (
                     dims,
-                    np.degrees(np.arctan2(-u, -v)) % 360.0,
+                    _wind_from_direction(u, v, calm=np.nan),
                     {"standard_name": "wind_from_direction", "units": "degree"},
                 ),
                 "quality": (

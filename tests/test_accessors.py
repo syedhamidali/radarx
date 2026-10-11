@@ -121,7 +121,8 @@ def test_assign_products_real_volume(mock_dtree):
     """Products of a real volume merge into the matching sweeps."""
     dtree = mock_dtree
     products = dtree.radarx.llsd("mean_doppler_velocity")
-    assert set(products.children) == set(dtree.children)  # root kept
+    sweeps = {name for name in dtree.children if name.startswith("sweep")}
+    assert set(products.children) == sweeps  # root kept
     xr.testing.assert_identical(products.to_dataset(), dtree.to_dataset())
     merged = dtree.radarx.assign(products)
     for name in products.children:

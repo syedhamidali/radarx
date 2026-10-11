@@ -191,6 +191,10 @@ def make_3d_grid(
     -----
     - The function uses the Azimuthal Equidistant projection (AEQD)
       defined in the radar dataset.
+    - ``lon`` is the longitude along ``y = 0`` and ``lat`` the latitude along
+      ``x = 0``, so the two axes may have different lengths. Because meridians
+      converge, these axes are not the lon/lat of every cell; the cell-wise
+      values are 2-D (``grid_radar(method="barnes")`` returns them).
     - The transformation ensures compatibility between Cartesian and
       geographic coordinates.
     - This function assumes the dataset is compatible with `xradar`
@@ -207,6 +211,21 @@ def make_3d_grid(
     y = np.arange(y_lim[0], y_lim[1] + y_step, y_step)
     z = np.arange(z_lim[0], z_lim[1] + z_step, z_step)
 
+    transformer, trg_crs = _lonlat_transformer(ds)
+    # Longitude along y = 0 and latitude along x = 0: x and y are axes of the
+    # grid, not paired points, so they may differ in length.
+    lon, _ = transformer.transform(x, np.zeros_like(x))
+    _, lat = transformer.transform(np.zeros_like(y), y)
+    return np.asarray(lat), np.asarray(lon), x, y, z, trg_crs
+
+
+def _lonlat_transformer(ds):
+    """
+    Transformer from the grid projection of a radar dataset to lon/lat.
+
+    Returns the ``(x, y) -> (lon, lat)`` transformer and the target CRS
+    (EPSG:4326).
+    """
     from pyproj import CRS, Transformer
 
     # Convert the dataset to georeferenced coordinates
@@ -214,11 +233,7 @@ def make_3d_grid(
     # Define source and target coordinate reference systems (CRS)
     src_crs = ds.xradar.get_crs()
     trg_crs = CRS.from_user_input(4326)  # EPSG:4326 (WGS 84)
-    # Create a transformer for coordinate conversion
-    transformer = Transformer.from_crs(src_crs, trg_crs)
-    # Transform x, y, z coordinates to latitude, longitude, and altitude
-    lat, lon = transformer.transform(x, y)
-    return lat, lon, x, y, z, trg_crs
+    return Transformer.from_crs(src_crs, trg_crs, always_xy=True), trg_crs
 
 
 @provenance("Radar volume gridding by cone interpolation or Barnes analysis")
@@ -237,6 +252,9 @@ def grid_radar(
     z_smth=1,
     method="cone",
     n_threads=None,
+    fill_depth=500.0,
+    fill_velocity=False,
+    k_e=4.0 / 3.0,
 ):
     """
     Interpolate radar data to a 3D grid and optionally create a pseudo-CAPPI.
@@ -275,10 +293,9 @@ def grid_radar(
         Grid resolution in the z-direction (meters). Defaults to 250.
     x_smth : float, optional
         Smoothing factor for the x-dimension: the Gaussian width of the Barnes
-        kernel as a fraction of the longitude step of the grid. Defaults to
-        0.2.
+        kernel as a fraction of ``x_step``. Defaults to 0.2.
     y_smth : float, optional
-        Smoothing factor for the y-dimension (fraction of the latitude step).
+        Smoothing factor for the y-dimension (fraction of ``y_step``).
         Defaults to 0.2.
     z_smth : float, optional
         Smoothing factor for the z-dimension (fraction of ``z_step``).
@@ -292,6 +309,22 @@ def grid_radar(
         Interpolation method. Default ``"cone"``.
     n_threads : int, optional
         Threads for ``method="cone"``. Default: all cores.
+    fill_depth : float, optional
+        With ``method="cone"`` and ``pseudo_cappi=True``, the lowest sweep
+        fills at most this many metres below itself and never below the radar
+        altitude. Default 500 m, a radarx choice. At 150 km the lowest beam is
+        about 2.5 km up, and the earlier unlimited fill copied it to the
+        ground; ``fill_depth=numpy.inf`` restores that.
+    fill_velocity : bool, optional
+        With ``method="cone"``, also fill radial velocity below the lowest
+        sweep. Default ``False``, because a radial velocity is a projection on
+        the beam direction, which changes with height. ``True`` restores the
+        earlier behaviour.
+    k_e : float, optional
+        Effective Earth radius factor of the beam height (Doviak and Zrnic
+        1993, Eq. 2.28). Default 4/3. See
+        :func:`radarx.fundamentals.geometry.k_e_from_refractivity`. Used by
+        ``method="cone"``; the Barnes path georeferences with xradar's 4/3.
 
     Returns
     -------
@@ -299,7 +332,9 @@ def grid_radar(
         Interpolated dataset with the specified variables and 3D grid.
         Includes longitude and latitude coordinates for the grid and the
         mean time of the volume as a scalar ``time`` coordinate, so grids of
-        several volumes stack with ``xr.concat(grids, "time")``.
+        several volumes stack with ``xr.concat(grids, "time")``. With
+        ``method="barnes"`` ``lat`` and ``lon`` are 2-D on ``(y, x)``, the
+        position of every cell of the metric grid.
 
     Notes
     -----
@@ -318,7 +353,12 @@ def grid_radar(
       the two tilts around the grid cell, nearest neighbour in azimuth and
       range). It differs in interpolating bilinearly within each sweep and
       linearly in beam height (not in elevation angle) between sweeps.
-    - With ``method="barnes"``, interpolation uses Barnes objective analysis.
+    - With ``method="barnes"``, interpolation uses Barnes objective analysis
+      on the metric azimuthal equidistant grid (gate positions and the grid
+      are both in metres from the radar), so the labelled ``x`` and ``y`` are
+      the true cell positions. Earlier versions ran it on a regular lon/lat
+      lattice built from the axes, which displaced cells by up to about
+      1 km at 100 km from the radar.
 
     References
     ----------
@@ -342,7 +382,16 @@ def grid_radar(
         y = np.arange(y_lim[0], y_lim[1] + y_step, y_step)
         z = np.arange(z_lim[0], z_lim[1] + z_step, z_step)
         return grid_cones(
-            dtree, data_vars, x, y, z, fill_below=pseudo_cappi, n_threads=n_threads
+            dtree,
+            data_vars,
+            x,
+            y,
+            z,
+            fill_below=pseudo_cappi,
+            fill_depth=fill_depth,
+            fill_velocity=fill_velocity,
+            k_e=k_e,
+            n_threads=n_threads,
         )
     if method != "barnes":
         raise ValueError(f"method must be 'cone' or 'barnes', not {method!r}")
@@ -357,9 +406,10 @@ def grid_radar(
             "package (Python < 3.13 only): 'pip install fast-barnes-py'. "
             "The default method='cone' has no extra dependencies."
         ) from err
-    ds = stack_data(dtree, data_vars=data_vars, geo=True)
-    lat, lon, trgx, trgy, z, trg_crs = make_3d_grid(
-        _sweep_dataset(dtree, "sweep_0"),
+    ds = stack_data(dtree, data_vars=data_vars, geo=False)
+    sweep0 = _sweep_dataset(dtree, "sweep_0")
+    _, _, x, y, z, _ = make_3d_grid(
+        sweep0,
         x_lim=x_lim,
         y_lim=y_lim,
         x_step=x_step,
@@ -368,20 +418,19 @@ def grid_radar(
         z_step=z_step,
     )
 
-    x = lon
-    y = lat
-
+    # The Barnes lattice is the metric grid itself: gates (x, y, z) and the
+    # target are in metres in the same azimuthal equidistant projection.
     x0 = np.asarray([x.min(), y.min(), z.min()], dtype=np.float64)
-    xstep = np.diff(x).mean()  # Longitude step in degrees
-    ystep = np.diff(y).mean()  # Latitude step in degrees
+    xstep = np.diff(x).mean()
+    ystep = np.diff(y).mean()
 
     size = (len(x), len(y), len(z))
 
     # Adjust sigma to match grid steps
-    sigma_lon = x_smth * xstep  # Smoothing across 2 longitude grid steps
-    sigma_lat = y_smth * ystep  # Smoothing across 2 latitude grid steps
-    sigma_alt = z_smth * z_step  # Smoothing across 2 altitude grid steps
-    sigma = np.array([sigma_lon, sigma_lat, sigma_alt], dtype=np.float64)
+    sigma_x = x_smth * xstep
+    sigma_y = y_smth * ystep
+    sigma_alt = z_smth * z_step
+    sigma = np.array([sigma_x, sigma_y, sigma_alt], dtype=np.float64)
 
     ds_out_fast = xr.Dataset({"z": ("z", z), "y": ("y", y), "x": ("x", x)})
 
@@ -391,9 +440,9 @@ def grid_radar(
 
     for var in data_vars:
         data_orig = ds[var].values.flatten()
-        x_flat = ds["xyz"][:, 0].values.flatten()  # Longitude
-        y_flat = ds["xyz"][:, 1].values.flatten()  # Latitude
-        z_flat = ds["xyz"][:, 2].values.flatten()  # Altitude
+        x_flat = ds["xyz"][:, 0].values.flatten()  # x east of the radar [m]
+        y_flat = ds["xyz"][:, 1].values.flatten()  # y north of the radar [m]
+        z_flat = ds["xyz"][:, 2].values.flatten()  # altitude [m]
 
         mask = np.isfinite(data_orig)
         if np.sum(mask) == 0:
@@ -443,12 +492,13 @@ def grid_radar(
         else:  # pragma: no cover
             ds_out_fast[var] = (("z", "y", "x"), field)
     # Assign metadata
-    ds_out_fast = ds_out_fast.assign_coords(time=ds["time"].mean().variable)
-    ds_out_fast = ds_out_fast.rename({"x": "lon", "y": "lat"})
-    ds_out_fast["x"] = xr.DataArray(trgx, dims="lon")
-    ds_out_fast["y"] = xr.DataArray(trgy, dims="lat")
-    ds_out_fast = ds_out_fast.set_coords(["x", "y"])
-    ds_out_fast = ds_out_fast.swap_dims({"lon": "x", "lat": "y"})
-    ds_out_fast.attrs = dtree.attrs
+    transformer, _ = _lonlat_transformer(sweep0)
+    lon, lat = transformer.transform(*np.meshgrid(x, y))
+    ds_out_fast = ds_out_fast.assign_coords(
+        time=ds["time"].mean().variable,
+        lat=(("y", "x"), np.asarray(lat), {"units": "degrees_north"}),
+        lon=(("y", "x"), np.asarray(lon), {"units": "degrees_east"}),
+    )
+    ds_out_fast.attrs = dict(dtree.attrs)
     ds_out_fast.attrs["radar_name"] = ds_out_fast.attrs.get("instrument_name", "")
     return ds_out_fast

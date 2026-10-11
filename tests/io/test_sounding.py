@@ -806,16 +806,44 @@ def _raw_cds(
     )
 
 
+def _raw_cds_surface(times, lat, lon, sp=95000.0, orography=500.0, point=False):
+    """The single-level download (cfgrib names): surface fields of a 500 m hill."""
+    shape = (len(times), len(lat), len(lon))
+    dims = ("valid_time", "latitude", "longitude")
+    full = lambda v: (dims, np.full(shape, v))  # noqa: E731
+    ds = xr.Dataset(
+        {
+            "sp": full(sp),
+            "z": full(orography * 9.80665),
+            "t2m": full(290.0),
+            "d2m": full(280.0),
+            "u10": full(3.0),
+            "v10": full(-1.0),
+        },
+        coords={
+            "valid_time": np.array(times, dtype="datetime64[ns]"),
+            "latitude": np.asarray(lat, dtype=float),
+            "longitude": np.asarray(lon, dtype=float),
+            "number": 0,
+            "expver": "0001",
+        },
+    )
+    return ds.isel(latitude=0, longitude=0) if point else ds
+
+
 def test_era5_cds_request(tmp_path, monkeypatch):
     monkeypatch.setenv("RADARX_CACHE_DIR", str(tmp_path))
     seen = {}
+    surface_seen = {}
 
     def fake_retrieve(dataset, request, path):
-        seen.update(dataset=dataset, request=request)
         times = [np.datetime64("2022-03-30T23:00"), np.datetime64("2022-03-31T00:00")]
-        return _raw_cds(
-            times, np.arange(34.5, 33.24, -0.25), np.arange(-89.0, -87.74, 0.25)
-        )
+        lat, lon = np.arange(34.5, 33.24, -0.25), np.arange(-89.0, -87.74, 0.25)
+        if dataset == "reanalysis-era5-single-levels":
+            surface_seen.update(dataset=dataset, request=request)
+            return _raw_cds_surface(times, lat, lon)
+        seen.update(dataset=dataset, request=request)
+        return _raw_cds(times, lat, lon)
 
     monkeypatch.setattr(sounding, "_cds_retrieve", fake_retrieve)
     prof = sounding.era5_profile(33.9, -88.33, "2022-03-30T23:30", source="cds")
@@ -826,24 +854,42 @@ def test_era5_cds_request(tmp_path, monkeypatch):
     north, west, south, east = req["area"]
     assert south < 33.9 < north and west < -88.33 < east
     assert prof.attrs["era5_source"] == "cds"
-    np.testing.assert_allclose(prof["u"], 5.0)
+    # the surface fields come from the single-level dataset, same box and times
+    assert "pressure_level" not in surface_seen["request"]
+    assert surface_seen["request"]["area"] == req["area"]
+    assert surface_seen["request"]["time"] == req["time"]
+    assert "surface_pressure" in surface_seen["request"]["variable"]
+    assert "geopotential" in surface_seen["request"]["variable"]
+    # the 1000 hPa level is below the 950 hPa surface (the hill): it is dropped
+    # and the surface level comes first
+    assert prof.sizes["height"] == 4
+    np.testing.assert_allclose(prof["pressure"].values[0], 95000.0)
+    np.testing.assert_allclose(prof["temperature"].values[0], 290.0)
+    np.testing.assert_allclose(prof["u"].values[0], 3.0)
+    np.testing.assert_allclose(prof["u"].values[1:], 5.0)
+    assert float(prof["pressure"].max()) == 95000.0
     # cached: no second request
     seen.clear()
+    surface_seen.clear()
     sounding.era5_profile(33.9, -88.33, "2022-03-30T23:30", source="cds")
-    assert not seen
+    assert not seen and not surface_seen
 
 
 def test_era5_arco_request(tmp_path, monkeypatch):
     monkeypatch.setenv("RADARX_CACHE_DIR", str(tmp_path))
     seen = {}
+    surface_seen = {}
 
     def fake_retrieve(dataset, request, path):
-        seen.update(dataset=dataset, request=request)
         times = np.arange(
             np.datetime64("2022-03-30T00", "h"),
             np.datetime64("2022-03-31T19", "h"),
             np.timedelta64(6, "h"),
         )
+        if dataset == "reanalysis-era5-single-levels-timeseries":
+            surface_seen.update(dataset=dataset, request=request)
+            return _raw_cds_surface(times, [34.0], [271.75], point=True)
+        seen.update(dataset=dataset, request=request)
         raw = _raw_cds(times, [34.0], [271.75], level_dim="pressureLevel")
         return raw.isel(latitude=0, longitude=0)  # point: scalar coordinates
 
@@ -855,7 +901,13 @@ def test_era5_arco_request(tmp_path, monkeypatch):
     assert seen["request"]["date"] == ["2022-03-30/2022-03-31"]
     assert prof.attrs["era5_times"] == "2022-03-30T18:00:00, 2022-03-31T00:00:00"
     assert prof.attrs["era5_grid_point"] == "34.00N -88.25E (nearest)"
-    np.testing.assert_allclose(prof["v"], -2.0)
+    np.testing.assert_allclose(prof["v"].values[1:], -2.0)  # [0]: the 10 m wind
+    assert surface_seen["request"]["location"] == {
+        "latitude": 33.9,
+        "longitude": -88.33,
+    }
+    assert prof.attrs["era5_surface_pressure"] == "950.0 hPa"
+    assert prof.attrs["era5_orography"].endswith(" m")
     # an area request (grid columns)
     sounding._era5_arco(
         (33.0, 34.0, -89.0, -88.0), [np.datetime64("2022-03-31")], tmp_path / "x.nc"
@@ -863,8 +915,31 @@ def test_era5_arco_request(tmp_path, monkeypatch):
     assert seen["request"]["area"] == [34.0, -89.0, 33.0, -88.0]
 
 
-def test_era5_gcs_lazy_selection(tmp_path, monkeypatch):
-    monkeypatch.setenv("RADARX_CACHE_DIR", str(tmp_path))
+def test_era5_arco_surface_requests(tmp_path, monkeypatch):
+    seen = []
+
+    def fake_retrieve(dataset, request, path):
+        seen.append((dataset, request))
+        return path
+
+    monkeypatch.setattr(sounding, "_cds_retrieve", fake_retrieve)
+    when = [np.datetime64("2022-03-30T23:00"), np.datetime64("2022-03-31T01:00")]
+    # a box wider than one grid cell is requested as an area
+    sounding._era5_arco_surface((33.0, 34.0, -89.0, -88.0), when, tmp_path / "a.nc")
+    dataset, request = seen[-1]
+    assert dataset == sounding.CDS_ARCO_SINGLE_LEVELS
+    assert request["area"] == [34.0, -89.0, 33.0, -88.0] and "location" not in request
+    assert request["date"] == ["2022-03-30/2022-03-31"]
+    assert request["variable"] == sounding._ERA5_SURFACE_VARIABLES
+    # a point is requested as a location, at the centre of the box
+    sounding._era5_arco_surface((33.9, 34.0, -88.4, -88.3), when, tmp_path / "b.nc")
+    request = seen[-1][1]
+    assert request["location"] == {"latitude": 33.95, "longitude": -88.35}
+    assert "area" not in request
+
+
+def _fake_gcs_store(monkeypatch):
+    """Replace ``xarray.open_zarr`` by a small store; the returned list holds its calls."""
     times = np.array(
         ["2022-03-30T23:00", "2022-03-31T00:00", "2022-03-31T01:00"],
         dtype="datetime64[ns]",
@@ -889,6 +964,12 @@ def test_era5_gcs_lazy_selection(tmp_path, monkeypatch):
         return store
 
     monkeypatch.setattr(xr, "open_zarr", fake_open_zarr)
+    return calls
+
+
+def test_era5_gcs_lazy_selection(tmp_path, monkeypatch):
+    monkeypatch.setenv("RADARX_CACHE_DIR", str(tmp_path))
+    calls = _fake_gcs_store(monkeypatch)
     prof = sounding.era5_profile(33.9, -88.33, "2022-03-31T00:00", source="gcs")
     assert calls[0][0] == sounding.ARCO_ERA5_ZARR
     assert calls[0][0].startswith("https://storage.googleapis.com/")
@@ -899,6 +980,29 @@ def test_era5_gcs_lazy_selection(tmp_path, monkeypatch):
     assert len(calls) == 1
     speed = np.hypot(bg["u"], bg["v"]).isel(z=0)
     np.testing.assert_allclose(speed, np.hypot(5, 2), rtol=1e-5)
+
+
+def test_era5_gcs_cache_from_before_the_surface_fields_is_read_again(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("RADARX_CACHE_DIR", str(tmp_path))
+    calls = _fake_gcs_store(monkeypatch)
+    box = (33.0, 34.0, -89.0, -88.0)
+    when = [np.datetime64("2022-03-31T00:00")]
+    # a region cached without the surface fields has no 'era5_surface_checked'
+    levels_only = sounding._era5_fields("gcs", box, when, surface=False)
+    assert len(calls) == 1
+    cached = sounding._gcs_cached(box, when[0])
+    assert cached is not None and "era5_surface_checked" not in cached.attrs
+    # asking for the surface fields cannot use it: the store is read again
+    with_surface = sounding._era5_fields("gcs", box, when, surface=True)
+    assert len(calls) == 2
+    np.testing.assert_allclose(with_surface["temperature"], levels_only["temperature"])
+    # the region cached then is marked and serves the next request
+    assert "era5_surface_checked" in sounding._gcs_cached(box, when[0]).attrs
+    sounding._era5_fields("gcs", box, when, surface=True)
+    sounding._era5_fields("gcs", box, when, surface=False)
+    assert len(calls) == 2
 
 
 def test_cds_available(monkeypatch, tmp_path):
@@ -1108,3 +1212,270 @@ def test_small_branches(tmp_path, monkeypatch):
     with pytest.raises(ImportError):
         sounding.saturation_vapor_pressure(273.15, engine="compiled")
     np.testing.assert_allclose(sounding.saturation_vapor_pressure(273.15), 611.2)
+
+
+# ---------------------------------------------------------------------------
+# surface layer and terrain mask of ERA5 columns (issue 224)
+
+
+def _synthetic_era5_hill(times, sp=90000.0, orography=1000.0, **kw):
+    """_synthetic_era5 plus surface fields: a plateau of 1000 m, 900 hPa."""
+    ds, H = _synthetic_era5(times, **kw)
+    shape = (len(times), ds.sizes["latitude"], ds.sizes["longitude"])
+    dims = ("time", "latitude", "longitude")
+    surf = {
+        "sp": sp,
+        "orography": orography * 9.80665,
+        "t2m": 291.0,
+        "d2m": 281.0,
+        "u10": 4.0,
+        "v10": -2.0,
+    }
+    for name, value in surf.items():
+        ds[name] = (dims, np.full(shape, value))
+    return ds
+
+
+def _fake_hill_fields(source, box, times, cache=True, surface=True):
+    ds = _synthetic_era5_hill(times)
+    return (
+        ds if surface else ds.drop_vars(["sp", "orography", "t2m", "d2m", "u10", "v10"])
+    )
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_era5_profile_surface_layer_and_terrain_mask(monkeypatch, engine):
+    monkeypatch.setattr(sounding, "_era5_fields", _fake_hill_fields)
+    monkeypatch.setattr(sounding, "_cds_available", lambda: False)
+    prof = sounding.era5_profile(33.9, -88.33, "2022-03-30T23:00", engine=engine)
+    # 1000 and 925 hPa are below the 900 hPa surface; the 850 hPa level is not
+    assert prof.sizes["height"] == 1 + 6
+    assert float(prof["pressure"].max()) == pytest.approx(90000.0)
+    assert float(prof["height"][0]) == pytest.approx(1002.157, abs=0.01)
+    assert float(prof["temperature"][0]) == pytest.approx(291.0)
+    assert float(prof["dewpoint"][0]) == pytest.approx(281.0, abs=1e-6)
+    assert float(prof["u"][0]) == pytest.approx(4.0)
+    assert float(prof["v"][0]) == pytest.approx(-2.0)
+    assert bool(np.isnan(prof["w"][0]))
+    assert (np.diff(prof["height"].values) > 0).all()
+    assert (np.diff(prof["pressure"].values) < 0).all()
+    assert prof.attrs["era5_surface_pressure"] == "900.0 hPa"
+    assert prof.attrs["era5_orography"] == "1000.2 m"  # geometric height
+    # no level below the ground is left (the extrapolated 1000 hPa level was
+    # at 0 m and 6.5 K warmer than the air at 1000 m)
+    assert float(prof["height"].min()) > 1000.0
+    # without the surface layer the earlier behaviour: all levels
+    old = sounding.era5_profile(
+        33.9, -88.33, "2022-03-30T23:00", surface=False, engine=engine
+    )
+    assert old.sizes["height"] == 8 and float(old["height"].min()) < 200.0
+
+
+def test_era5_fields_without_surface_are_unchanged(monkeypatch):
+    """A download without surface fields gives the pressure levels only."""
+    monkeypatch.setattr(
+        sounding, "_era5_fields", lambda s, b, t, cache=True: _synthetic_era5(t)[0]
+    )
+    monkeypatch.setattr(sounding, "_cds_available", lambda: False)
+    prof = sounding.era5_profile(33.9, -88.33, "2022-03-30T23:00")
+    assert prof.sizes["height"] == 8 and "era5_surface" not in prof.attrs
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_era5_column_masks_levels_below_the_terrain(monkeypatch, engine):
+    monkeypatch.setattr(sounding, "_era5_fields", _fake_hill_fields)
+    monkeypatch.setattr(sounding, "_cds_available", lambda: False)
+    grid = _grid()  # levels from 200 m to 12 km above sea level
+    bg = sounding.era5_column(grid, engine=engine)
+    below = bg.z < 1002.0
+    assert below.sum() >= 1
+    assert bg["temperature"].sel(z=bg.z[below]).isnull().all()
+    assert bg["u"].sel(z=bg.z[below]).isnull().all()
+    above = bg.sel(z=bg.z[~below])
+    assert above["temperature"].notnull().all()
+    assert bg["u"].isel(z=0).isnull().all()  # 200 m: underground, not extrapolated
+    plain = sounding.era5_column(grid, surface=False, engine=engine)
+    assert plain["temperature"].isel(z=0).notnull().all()  # the earlier behaviour
+    # the freezing level is not affected by the ground
+    np.testing.assert_allclose(bg["freezing_level"], plain["freezing_level"], rtol=1e-3)
+
+
+def test_surface_standardization():
+    raw = _raw_cds_surface(
+        [np.datetime64("2022-03-31T00:00")],
+        np.arange(34.5, 33.24, -0.25),
+        np.arange(-89, -87.74, 0.25),
+    )
+    out = sounding._standardize_era5_surface(raw)
+    assert out["sp"].dims == ("time", "latitude", "longitude")
+    assert out["latitude"][0] < out["latitude"][-1]
+    # the geopotential of a pressure-level file is not a surface field
+    assert (
+        sounding._standardize_era5_surface(
+            _raw_cds(
+                [np.datetime64("2022-03-31T00:00")], [34.0, 33.75], [-89.0, -88.75]
+            )
+        )
+        is None
+    )
+    # a static orography (as in the ARCO-ERA5 store) is repeated for every time
+    store = xr.Dataset(
+        {
+            "surface_pressure": raw["sp"],
+            "geopotential_at_surface": raw["z"].isel(valid_time=0, drop=True),
+        }
+    )
+    out = sounding._standardize_era5_surface(store)
+    assert out["orography"].dims == ("time", "latitude", "longitude")
+
+
+def test_surface_request_failure_warns_and_keeps_the_levels(tmp_path, monkeypatch):
+    monkeypatch.setenv("RADARX_CACHE_DIR", str(tmp_path))
+
+    def fake_retrieve(dataset, request, path):
+        times = [np.datetime64("2022-03-30T23:00"), np.datetime64("2022-03-31T00:00")]
+        if "single-levels" in dataset:
+            raise RuntimeError("dataset not available")
+        return _raw_cds(
+            times, np.arange(34.5, 33.24, -0.25), np.arange(-89.0, -87.74, 0.25)
+        )
+
+    monkeypatch.setattr(sounding, "_cds_retrieve", fake_retrieve)
+    with pytest.warns(RuntimeWarning, match="surface fields could not be read"):
+        prof = sounding.era5_profile(33.9, -88.33, "2022-03-30T23:30", source="cds")
+    assert prof.sizes["height"] == 4
+
+
+# failure modes reported against MetPy (Unidata/MetPy #973, #2637, #596, #788,
+# #178, #794, #165, #3640), checked against analytic profiles
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_layer_limit_matches_level_to_rounding(engine):
+    # heights (g + k dz) * 1000 versus g * 1000 + 6000 differ by 9e-13 m for
+    # g = 0.347 km: the layer is still spanned by the profile
+    g, dz = 0.347, 0.1
+    z = (g + np.arange(61) * dz) * 1000.0
+    assert z[-1] < g * 1000.0 + 6000.0
+    prof = xr.Dataset(
+        {"u": ("height", np.linspace(0, 12, 61)), "v": ("height", np.zeros(61))},
+        coords={"height": z},
+    )
+    mw = sounding.mean_wind(prof, g * 1000.0, g * 1000.0 + 6000.0, engine=engine)
+    assert float(mw["u"]) == pytest.approx(6.0)
+    out = sounding.interpolate_profile(
+        prof, [g * 1000.0 + 6000.0], ["u"], engine=engine
+    )
+    assert float(out["u"][0]) == pytest.approx(12.0)
+    # a real gap is still outside the profile
+    assert np.isnan(
+        float(
+            sounding.interpolate_profile(prof, [z[-1] + 0.01], ["u"], engine=engine)[
+                "u"
+            ][0]
+        )
+    )
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_top_down_profile_equals_bottom_up(engine):
+    prof = synthetic_profile()
+    down = prof.isel(height=slice(None, None, -1))
+    target = [500.0, 2500.0, 12000.0]
+    a = sounding.interpolate_profile(prof, target, engine=engine)
+    b = sounding.interpolate_profile(down, target, engine=engine)
+    xr.testing.assert_allclose(a, b)
+    assert float(b["temperature"][0]) == pytest.approx(300.0 - 0.0065 * 500.0)
+    ma = sounding.mean_wind(prof, 1000, 7000, engine=engine)
+    mb = sounding.mean_wind(down, 1000, 7000, engine=engine)
+    assert float(mb["u"]) == pytest.approx(2 + 1e-3 * 4000)
+    xr.testing.assert_allclose(ma, mb)
+    za = sounding.isotherm_height(prof, engine=engine)
+    zb = sounding.isotherm_height(down, engine=engine)
+    assert float(zb) == pytest.approx((300 - 273.15) / 0.0065)
+    assert float(za) == pytest.approx(float(zb))
+    wa = sounding.wet_bulb_zero_height(prof, engine=engine)
+    wb = sounding.wet_bulb_zero_height(down, engine=engine)
+    assert np.isfinite(float(wb)) and float(wa) == pytest.approx(float(wb))
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_wind_direction_range_and_calm(engine):
+    z = np.array([0.0, 1000.0, 2000.0])
+
+    def prof(u, v):
+        return xr.Dataset(
+            {"u": ("height", np.full(3, u)), "v": ("height", np.full(3, v))},
+            coords={"height": z},
+        )
+
+    # north wind with a rounding-sized u: in [0, 360), not 360.0
+    north = prof(1e-17, -5.0)
+    assert (
+        float(sounding.mean_wind(north, 0, 2000, engine=engine)["wind_direction"])
+        == 0.0
+    )
+    out = sounding.interpolate_profile(north, [500.0], engine=engine)
+    assert float(out["wind_direction"][0]) == 0.0
+    # calm: 0, as in the profile readers (not an arbitrary 180)
+    calm = prof(0.0, 0.0)
+    assert (
+        float(sounding.mean_wind(calm, 0, 2000, engine=engine)["wind_direction"]) == 0.0
+    )
+    out = sounding.interpolate_profile(calm, [500.0], engine=engine)
+    assert float(out["wind_direction"][0]) == 0.0
+    ds = sounding._profile_dataset(
+        height=z,
+        temperature=np.full(3, 280.0),
+        u=np.array([0.0, 1e-17, 3.0]),
+        v=np.array([0.0, -5.0, 0.0]),
+    )
+    np.testing.assert_allclose(ds["wind_direction"], [0.0, 0.0, 270.0])
+    # the four cardinal directions and a diagonal
+    d = sounding._wind_from_direction(
+        np.array([0.0, -4.0, 0.0, 4.0, 3.0]), np.array([-4.0, 0.0, 4.0, 0.0, 3.0])
+    )
+    np.testing.assert_allclose(d, [0.0, 90.0, 180.0, 270.0, 225.0])
+    assert np.isnan(sounding._wind_from_direction(np.nan, 1.0))
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_si_units_enforced(engine):
+    with pytest.raises(ValueError, match="temperature must be in K"):
+        sounding.saturation_vapor_pressure(20.0, engine=engine)
+    with pytest.raises(ValueError, match="pressure must be in Pa"):
+        sounding.wet_bulb_temperature(1000.0, 293.15, 283.15, engine=engine)
+    with pytest.raises(ValueError, match="temperature must be in K"):
+        sounding.wet_bulb_temperature(1e5, 20.0, 10.0, engine=engine)
+    with pytest.raises(ValueError, match="pressure must be in Pa"):
+        sounding.air_density(1013.25, 288.15, engine=engine)
+    with pytest.raises(ValueError, match="pressure must be in Pa"):
+        sounding.dewpoint_from_specific_humidity(0.01, 1000.0, engine=engine)
+    # NaN-only and SI input pass
+    assert np.isnan(float(sounding.saturation_vapor_pressure(np.nan, engine=engine)))
+    assert float(sounding.saturation_vapor_pressure(293.15, engine=engine)) > 2000
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_masked_arrays_are_missing_not_fill_values(engine):
+    # netCDF4 returns masked arrays; the data under the mask (1e20, -9999) must
+    # not enter the result (MetPy #361, #1496, #1516, #973)
+    t = np.ma.masked_array([293.15, 1e20, 280.0], mask=[0, 1, 0])
+    es = sounding.saturation_vapor_pressure(t, engine=engine).values
+    assert np.isnan(es[1]) and np.all(np.isfinite(es[[0, 2]]))
+    p = np.ma.masked_array([1e5, 1e5, 9e4], mask=[0, 0, 0])
+    td = np.ma.masked_array([283.15, -9999.0, 270.0], mask=[0, 1, 0])
+    tw = sounding.wet_bulb_temperature(
+        p, np.array([293.15, 293.15, 280.0]), td, engine=engine
+    ).values
+    assert np.isnan(tw[1]) and 280.0 > tw[2] > 270.0
+    rho = sounding.air_density(
+        np.ma.masked_array([1e5, 1e5], mask=[0, 1]), 290.0, 0.01, engine=engine
+    ).values
+    assert np.isfinite(rho[0]) and np.isnan(rho[1])
+    heights = np.ma.masked_array([500.0, 1e20], mask=[0, 1])
+    out = sounding.interpolate_profile(
+        synthetic_profile(), heights, ["temperature"], engine=engine
+    )
+    assert np.isfinite(float(out["temperature"][0]))
+    assert np.isnan(float(out["temperature"][1]))

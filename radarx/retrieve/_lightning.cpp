@@ -8,11 +8,14 @@
 // (d / distance)^2 + (dt / time)^2 <= 1; flashes are the connected components
 // of these links (single linkage). This is the DBSCAN clustering (Ester et
 // al. 1996) with eps = 1 on the normalized coordinates and a minimum number of
-// points of 1 or 2. Fuchs et al. (2016, J. Geophys. Res. Atmos. 121, 8625,
-// pp. 8628-8629) used DBSCAN with N_min = 2 (Alabama, D.C.) and N_min = 10
-// (Colorado) and a default maximum flash duration of 3 s (their streamed
-// processing can split longer flashes): this kernel equals their N_min = 2
-// case, not the N_min = 10 case, and imposes no maximum duration (issue 178).
+// points N_min = min_points (the source itself counted). With N_min <= 2 the
+// flashes are the connected groups of links. With a larger N_min a source is a
+// core source when at least N_min sources lie within eps; flashes are the
+// connected groups of core sources, a source that is not core joins the flash
+// of the core source within eps with the smallest index, and the others
+// (noise) are flashes of one source (Fuchs et al. 2016, J. Geophys. Res.
+// Atmos. 121, 8625, pp. 8628-8629, used N_min = 2 and 10). The maximum flash
+// duration is applied in Python (lightning.py), after the clustering.
 // Every source only looks forward in time up to `time` seconds, so the
 // sources form one pool of work that threads take in blocks from an atomic
 // counter; links go into a lock-free union-find (compare-and-swap, root of the
@@ -218,7 +221,7 @@ py::array_t<T> from_atomic(const std::unique_ptr<std::atomic<T>[]>& a,
 // x, y, z in metres, t in seconds, sorted by t.
 py::array_t<int64_t> cluster_py(const DArray& x, const DArray& y, const DArray& z,
                                 const DArray& t, double distance, double time,
-                                int n_threads) {
+                                int n_threads, int min_points) {
     const int64_t n = t.ndim() == 1 ? t.shape(0) : -1;
     if (n < 0) throw std::invalid_argument("t must be 1-D");
     check_1d(x, n, "x");
@@ -235,17 +238,69 @@ py::array_t<int64_t> cluster_py(const DArray& x, const DArray& y, const DArray& 
         py::gil_scoped_release release;
         UnionFind uf(std::max<int64_t>(n, 1));
         const double id2 = 1.0 / (distance * distance), it2 = 1.0 / (time * time);
-        parallel_blocks<NoScratch>(n, n_threads, [&](int64_t i0, int64_t i1, NoScratch&) {
-            for (int64_t i = i0; i < i1; ++i) {
-                for (int64_t j = i + 1; j < n; ++j) {
-                    const double dt = pt[j] - pt[i];
-                    const double tt = dt * dt * it2;
-                    if (tt > 1.0) break;
-                    const double dx = px[j] - px[i], dy = py_[j] - py_[i], dz = pz[j] - pz[i];
-                    if ((dx * dx + dy * dy + dz * dz) * id2 + tt <= 1.0) uf.unite(i, j);
+        auto linked = [&](int64_t i, int64_t j) {
+            const double dt = pt[j] - pt[i];
+            const double tt = dt * dt * it2;
+            if (tt > 1.0) return false;
+            const double dx = px[j] - px[i], dy = py_[j] - py_[i], dz = pz[j] - pz[i];
+            return (dx * dx + dy * dy + dz * dz) * id2 + tt <= 1.0;
+        };
+        if (min_points <= 1) {
+            parallel_blocks<NoScratch>(n, n_threads, [&](int64_t i0, int64_t i1, NoScratch&) {
+                for (int64_t i = i0; i < i1; ++i) {
+                    for (int64_t j = i + 1; j < n; ++j) {
+                        if (pt[j] - pt[i] > time) break;
+                        if (linked(i, j)) uf.unite(i, j);
+                    }
                 }
+            });
+        } else {
+            // neighbours within eps (the source itself counts), then links
+            // between core sources and the owner (smallest core index) of the
+            // sources that are not core
+            std::unique_ptr<std::atomic<int64_t>[]> count(new std::atomic<int64_t>[std::max<int64_t>(n, 1)]);
+            std::unique_ptr<std::atomic<int64_t>[]> owner(new std::atomic<int64_t>[std::max<int64_t>(n, 1)]);
+            for (int64_t i = 0; i < n; ++i) {
+                count[i].store(1, std::memory_order_relaxed);
+                owner[i].store(n, std::memory_order_relaxed);
             }
-        });
+            parallel_blocks<NoScratch>(n, n_threads, [&](int64_t i0, int64_t i1, NoScratch&) {
+                for (int64_t i = i0; i < i1; ++i) {
+                    for (int64_t j = i + 1; j < n; ++j) {
+                        if (pt[j] - pt[i] > time) break;
+                        if (linked(i, j)) {
+                            count[i].fetch_add(1, std::memory_order_relaxed);
+                            count[j].fetch_add(1, std::memory_order_relaxed);
+                        }
+                    }
+                }
+            });
+            auto is_core = [&](int64_t i) {
+                return count[i].load(std::memory_order_relaxed) >= min_points;
+            };
+            auto claim = [&](int64_t b, int64_t core) {
+                int64_t cur = owner[b].load(std::memory_order_relaxed);
+                while (core < cur &&
+                       !owner[b].compare_exchange_weak(cur, core, std::memory_order_relaxed)) {
+                }
+            };
+            parallel_blocks<NoScratch>(n, n_threads, [&](int64_t i0, int64_t i1, NoScratch&) {
+                for (int64_t i = i0; i < i1; ++i) {
+                    for (int64_t j = i + 1; j < n; ++j) {
+                        if (pt[j] - pt[i] > time) break;
+                        if (!linked(i, j)) continue;
+                        const bool ci = is_core(i), cj = is_core(j);
+                        if (ci && cj) uf.unite(i, j);
+                        else if (ci) claim(j, i);
+                        else if (cj) claim(i, j);
+                    }
+                }
+            });
+            for (int64_t i = 0; i < n; ++i) {
+                const int64_t o = owner[i].load(std::memory_order_relaxed);
+                if (!is_core(i) && o < n) uf.unite(i, o);
+            }
+        }
         // number the flashes in the order of their first source
         std::vector<int64_t> id(n, -1);
         int64_t next = 0;
@@ -464,7 +519,8 @@ py::tuple cells_py(const IArray& mask, int64_t ncell, const DArray& xe, const DA
 PYBIND11_MODULE(_lightning, m) {
     m.doc() = "Compiled lightning (LMA) kernel for radarx.";
     m.def("cluster", &cluster_py, py::arg("x"), py::arg("y"), py::arg("z"), py::arg("t"),
-          py::arg("distance"), py::arg("time"), py::arg("n_threads") = 0);
+          py::arg("distance"), py::arg("time"), py::arg("n_threads") = 0,
+          py::arg("min_points") = 1);
     m.def("flash_stats", &flash_stats_py, py::arg("labels"), py::arg("nflash"), py::arg("x"),
           py::arg("y"), py::arg("n_threads") = 0);
     m.def("grid", &grid_py, py::arg("x"), py::arg("y"), py::arg("z"), py::arg("t"),

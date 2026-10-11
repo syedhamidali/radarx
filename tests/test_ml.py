@@ -6,6 +6,7 @@
 
 import hashlib
 import sys
+import warnings
 
 import numpy as np
 import pytest
@@ -345,7 +346,8 @@ def test_normalize_dataset_and_arrays():
         ml.denormalize(ml.normalize(arr, offset=2.0, scale=0.5), offset=2.0, scale=0.5),
         arr,
     )
-    np.testing.assert_array_equal(ml.normalize(np.full(3, 4.0)), 0.0)  # constant
+    with pytest.warns(RuntimeWarning, match="constant"):  # scale 0 is reported
+        np.testing.assert_array_equal(ml.normalize(np.full(3, 4.0)), 0.0)
     with pytest.raises(ValueError, match="offset and scale"):
         ml.denormalize(arr)
     with pytest.raises(ValueError, match="all-NaN"):
@@ -592,3 +594,96 @@ def test_datatree_node_without_sweep_fields():
     tree = xr.DataTree.from_dict({"/": xr.Dataset(), "bare": bare, "good": good})
     _, index = ml.polar_patches(tree, (4, 4))
     assert index.paths == ["/good"]
+
+
+# --------------------------------------------------------------------------
+# edge cases of the model wrapper and the normalisation (issue 232)
+# --------------------------------------------------------------------------
+
+
+def test_normalize_scale_zero_and_statistics_warnings():
+    da = sweep()
+    # the default statistics are those of this scan, not of the training data
+    with pytest.warns(UserWarning, match="fixed offset and scale"):
+        ml.normalize(da)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        ml.normalize(da, offset=0.0, scale=10.0)  # fixed constants: silent
+    # a scale of zero given by the caller is an error, not replaced by 1
+    with pytest.raises(ValueError, match="scale must not be zero"):
+        ml.normalize(da, offset=0.0, scale=0.0)
+    with pytest.raises(ValueError, match="finite"):
+        ml.normalize(da, offset=0.0, scale=np.nan)
+    # a constant field has no scale: the caller is told that 1 is used
+    with pytest.warns(RuntimeWarning, match="constant"):
+        with pytest.warns(UserWarning, match="fixed offset"):
+            out = ml.normalize(np.full(3, 4.0))
+    np.testing.assert_array_equal(out, 0.0)
+
+
+def test_fill_value_is_recorded_and_not_invertible_without_a_mask():
+    arr = np.array([1.0, np.nan, 3.0])
+    da = xr.DataArray(arr, dims="x")
+    z = ml.normalize(da, offset=2.0, scale=1.0, fill_value=0.0)
+    assert z.attrs["ml_fill_value"] == 0.0
+    # the filled gate and a measured value of 2.0 look the same after scaling
+    with pytest.warns(UserWarning, match="fill_value"):
+        plain = ml.denormalize(z)
+    assert plain[1] == 2.0
+    mask = np.isnan(da)
+    back = ml.denormalize(z, mask=mask)
+    np.testing.assert_allclose(back, arr)
+    assert "ml_fill_value" not in back.attrs
+    ds = ml.denormalize(xr.Dataset({"a": z}), mask={"a": mask})
+    assert np.isnan(ds.a[1])
+    np.testing.assert_allclose(
+        ml.denormalize(np.array([0.0, 1.0]), offset=2.0, scale=1.0, mask=[True, False]),
+        [np.nan, 3.0],
+    )
+
+
+def test_model_run_checks_shape_and_finite_inputs(tiny):
+    path, sha = tiny
+    ml.register_model("tiny", path, sha, "MIT", "x")
+    model = ml.load_model("tiny", providers="cpu")
+    with pytest.raises(ValueError, match="dimensions"):
+        model.run(np.zeros((2, 3, 3)))  # the network takes (N, 1, H, W)
+    with pytest.raises(ValueError, match="size 2 on axis 1"):
+        model.run(np.zeros((2, 2, 3, 3)))
+    x = np.zeros((1, 1, 3, 3))
+    x[0, 0, 1, 1] = np.nan
+    with pytest.warns(UserWarning, match="NaN or infinite"):
+        out = model.run(x)["y"]
+    assert np.isnan(out).any()
+    with pytest.raises(ValueError, match="NaN or infinite"):
+        model.run(x, nan="raise")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        model.run(x, nan="ignore")
+    with pytest.raises(ValueError, match="nan must be"):
+        model.run(np.zeros((1, 1, 3, 3)), nan="skip")
+
+
+def test_download_without_a_hash_does_not_pass_an_empty_hash(
+    tiny, tmp_path, monkeypatch
+):
+    import pooch
+
+    seen = []
+
+    def retrieve(url, known_hash, fname, path):
+        seen.append(known_hash)
+        target = path / fname
+        target.write_bytes(tiny[0].read_bytes())
+        return str(target)
+
+    monkeypatch.setattr(pooch, "retrieve", retrieve)
+    toml = tmp_path / "nohash.toml"
+    toml.write_text(
+        '[models.nohash]\nurl = "https://example.org/tiny.onnx"\nsha256 = ""\n'
+        'licence = "MIT"\ncitation = "Roe (2026)"\n'
+    )
+    monkeypatch.setenv("RADARX_MODEL_REGISTRY", str(toml))
+    with pytest.warns(UserWarning, match="no SHA-256 hash"):
+        ml.load_model("nohash", providers="cpu")
+    assert seen == [None]  # pooch would reject "sha256:" as a hash

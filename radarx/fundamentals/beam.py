@@ -60,18 +60,24 @@ __all__ = [
 __doc__ = __doc__.format("\n   ".join(__all__))
 
 
-def compute_beamwidth(wavelength, antenna_diameter):
+def compute_beamwidth(wavelength, antenna_diameter, factor=1.27):
     """
-    Compute the beamwidth of a radar.
+    Compute the half-power (3 dB) beamwidth of a radar antenna.
 
-    Returns ``1.22 * wavelength / antenna_diameter``. This is the angular
-    radius of the first null of the Airy diffraction pattern of a uniformly
-    illuminated circular aperture (the Rayleigh resolution angle), not the
-    half-power (3 dB) beamwidth. For a tapered paraboloid illumination [1]_
-    gives the 3 dB beamwidth as ``1.27 * wavelength / D`` rad, Eq. (3.2b)
-    (p. 34), and the first-null width as ``3.27 * wavelength / D``. The
-    first-null angle formula of [1]_ is Eq. (2.4) (Section 2.1). The factor
-    1.22 is not attributed to that equation.
+    Returns ``factor * wavelength / antenna_diameter`` in radians with the
+    default ``factor = 1.27``, the 3 dB beamwidth of a tapered paraboloid
+    antenna, Eq. (3.2b) of [1]_ (p. 34); the first-null width of the same
+    antenna is ``3.27 * wavelength / D`` (see the paragraph of that equation).
+
+    Before this release the function returned ``1.22 * wavelength / D``. That
+    is the angular radius of the first null of the Airy pattern of a uniformly
+    illuminated circular aperture (the Rayleigh resolution angle), not a 3 dB
+    width. For the WSR-88D antenna (D = 8.54 m) the published 3 dB beamwidths
+    are 0.96 deg at 2.7 GHz and 0.88 deg at 3.0 GHz: ``1.22`` gives 0.909 and
+    0.818 deg (-5.3 % and -7.1 %), ``1.27`` gives 0.946 and 0.851 deg (-1.5 %
+    and -3.2 %). The published values imply a factor of about 1.29 to 1.31,
+    which is a property of the actual feed and taper. Pass ``factor=1.22`` for
+    the previous result or the factor of your antenna if it is known.
 
     Parameters
     ----------
@@ -79,11 +85,16 @@ def compute_beamwidth(wavelength, antenna_diameter):
         Radar wavelength [m].
     antenna_diameter : float
         Diameter of the radar antenna [m].
+    factor : float, optional
+        Beamwidth factor in units of ``wavelength / antenna_diameter``
+        (default 1.27, Doviak and Zrnic tapered paraboloid, 3 dB). Alternatives:
+        1.22 (first null of a uniform circular aperture), about 1.3 (fitted to
+        the WSR-88D antenna).
 
     Returns
     -------
     float
-        Angle ``1.22 lambda / D`` in radians (first-null radius, see above).
+        Beamwidth ``factor * lambda / D`` in radians.
 
     References
     ----------
@@ -91,7 +102,7 @@ def compute_beamwidth(wavelength, antenna_diameter):
            Observations*, 2nd ed. Academic Press, ISBN 0-12-221422-6 (book, no
            DOI).
     """
-    return 1.22 * wavelength / antenna_diameter
+    return factor * wavelength / antenna_diameter
 
 
 def compute_azimuth_resolution(range_m, beamwidth_rad):

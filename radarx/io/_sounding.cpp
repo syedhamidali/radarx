@@ -34,6 +34,9 @@ using DArray = py::array_t<double, py::array::c_style | py::array::forcecast>;
 namespace {
 
 constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
+// Heights closer than this [m] are the same level: a layer limit computed as
+// ground + depth can miss the matching profile level by rounding.
+constexpr double kZTol = 1e-6;
 constexpr double kPi = 3.14159265358979323846;  // M_PI is not standard (MSVC)
 constexpr double kDeg = kPi / 180.0;
 
@@ -231,7 +234,11 @@ inline double interp_at(const double* zc, const double* vc, int64_t nlev, int64_
     const int64_t b = valid_above(zc, vc, lo + 1, nlev);
     if (a >= 0 && zc[a] == zt) return vc[a];
     if (a >= 0 && b < nlev) return interp_pair(zc, vc, a, b, zt, lg);
-    if (!extrapolate) return kNaN;
+    if (!extrapolate) {
+        if (a >= 0 && zt - zc[a] <= kZTol) return vc[a];
+        if (a < 0 && b < nlev && zc[b] - zt <= kZTol) return vc[b];
+        return kNaN;
+    }
     if (a >= 0) return vc[a];
     return b < nlev ? vc[b] : kNaN;
 }
@@ -362,7 +369,7 @@ py::array_t<double> layer_mean(const DArray& z, const DArray& values, double bot
                     }
                     prev = l;
                 }
-                out[i] = (lowest <= bottom && highest >= top) ? integral / (top - bottom) : kNaN;
+                out[i] = (lowest <= bottom + kZTol && highest >= top - kZTol) ? integral / (top - bottom) : kNaN;
             }
         });
     }

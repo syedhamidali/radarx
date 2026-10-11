@@ -16,6 +16,8 @@ import math
 
 import numpy as np
 
+from . import _raindrop_fall
+
 RD = 287.04
 RV = 461.5
 EPS = RD / RV
@@ -205,6 +207,12 @@ def _v0(m, d):
         elif kind == 1:
             v = fc[0] * np.power(d, fc[1]) * np.exp(-fc[2] * d)
             dv = v * (fc[1] / d - fc[2])
+        elif kind == 3:
+            vs, dvs = _raindrop_fall.sphere(d)
+            small = d < fc[0]
+            e = np.exp(-0.6 * d)
+            v = np.where(small, vs, 9.65 - 10.3 * e)
+            dv = np.where(small, dvs, 6.18 * e)
         else:
             v = np.zeros(np.shape(d))
             dv = np.zeros(np.shape(d))

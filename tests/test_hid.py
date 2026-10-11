@@ -124,7 +124,9 @@ def test_engines_agree(method, band):
         np.testing.assert_allclose(x.HID_scores, y.HID_scores, atol=1e-6)
         np.testing.assert_allclose(x.HID_confidence, y.HID_confidence, atol=1e-6)
         assert (x.HID.values[~ds.MET.values] == 0).all()
-        assert (x.HID.values[ds.MET.values & ds.DBZH.notnull().values] > 0).all()
+        # gates whose scores are all zero stay unclassified (class 0)
+        assert (x.HID_confidence.values[x.HID.values > 0] > 0).all()
+        assert np.isnan(x.HID_confidence.values[x.HID.values == 0]).all()
     if method == "thompson":
         h1 = float(a["sweep_0"]["melting_layer_height"])
         h2 = float(b["sweep_0"]["melting_layer_height"])
@@ -777,3 +779,99 @@ def test_against_csu_radartools(csapr2):
     mapped = np.array([0] + [ours.index(n) + 1 for n in order])[np.asarray(ref, int)]
     m = ds.met.values
     assert np.mean(mapped[m] == out.HID.values[m]) > 0.85
+
+
+# --------------------------------------------------------------------------
+# junk gates, band inference and Level II no-data codes
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_gate_with_all_scores_zero_is_unclassified(engine):
+    """Z=90, ZDR=-5, rhohv=0.3 matches no Park class: class 0, not class 1."""
+    junk = _sweep({"DBZH": [[90.0]], "ZDR": [[-5.0]], "RHOHV": [[0.3]]}, z=[[1000.0]])
+    out = hid(junk, band="S", engine=engine)
+    assert out.HID.item() == 0
+    assert np.isnan(out.HID_confidence.item())
+    ok = hid(_rain_gate(), band="S", engine=engine)
+    assert ok.HID.item() > 0 and ok.HID_confidence.item() > 0
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_min_confidence_rejects_weak_matches(engine):
+    """Dolan scores of a junk gate are small but not zero: raise the limit."""
+    junk = _sweep({"DBZH": [[90.0]], "ZDR": [[-5.0]], "RHOHV": [[0.3]]}, z=[[1000.0]])
+    weak = hid(junk, band="C", engine=engine)
+    assert weak.HID.item() > 0 and weak.HID_confidence.item() < 0.05
+    out = hid(junk, band="C", min_confidence=0.05, engine=engine)
+    assert out.HID.item() == 0 and np.isnan(out.HID_confidence.item())
+    good = hid(_rain_gate(), band="C", min_confidence=0.05, engine=engine)
+    assert good.HID.item() > 0
+    with pytest.raises(ValueError, match="min_confidence"):
+        hid(junk, band="C", min_confidence=1.5)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_band_is_inferred_from_the_frequency(engine):
+    ds = _rain_gate()
+    for freq, band in ((2.8e9, "S"), (5.6e9, "C"), (9.4e9, "X")):
+        sweep = ds.assign_attrs(frequency=freq)
+        assert hid(sweep, engine=engine).HID.attrs["band"] == band
+    c_band = ds.assign_attrs(frequency=5.6e9)
+    assert hid(c_band, band="X", engine=engine).HID.attrs["band"] == "X"
+    with pytest.warns(UserWarning, match="band could not be determined"):
+        assert hid(ds, engine=engine).HID.attrs["band"] == "S"
+    # a volume takes the frequency of its radar_parameters node
+    tree = xr.DataTree.from_dict(
+        {
+            "/": xr.Dataset(),
+            "radar_parameters": xr.Dataset({"frequency": ((), 5.6e9)}),
+            "sweep_0": ds,
+        }
+    )
+    assert hid(tree, engine=engine)["sweep_0"]["HID"].attrs["band"] == "C"
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_level2_no_data_codes_are_not_classified(engine):
+    """Raw codes 0 and 1 decode to -33 dBZ, -13.06 dB and 0.2017."""
+    f = {
+        "DBZH": [[-33.0, 45.0, 45.0]],
+        "ZDR": [[-13.06, -13.06, 1.5]],
+        "KDP": [[0.0, 1.0, 1.0]],
+        "RHOHV": [[0.2017, 0.99, 0.99]],
+    }
+    z = [[1000.0, 1000.0, 1000.0]]
+    ds = _sweep(f, z=z).assign_attrs(scan_name="VCP-12")
+    other = ds.assign_attrs(scan_name="other")
+    out = hid(ds, band="C", engine=engine)
+    assert out.HID.values[0, 0] == 0 and out.HID.values[0, 2] > 0
+    raw = hid(ds, band="C", nodata=None, engine=engine)
+    assert raw.HID.values[0, 0] > 0
+    # the missing ZDR drops out of the aggregation instead of scoring as -13 dB
+    assert out.HID_confidence.values[0, 1] > raw.HID_confidence.values[0, 1]
+    forced = hid(other, band="C", nodata="nexrad", engine=engine)
+    np.testing.assert_array_equal(forced.HID.values, out.HID.values)
+    # other radars are left alone
+    plain = hid(other, band="C", engine=engine)
+    np.testing.assert_array_equal(plain.HID.values, raw.HID.values)
+    # volume: the VCP name is on the root
+    root = xr.Dataset(attrs={"scan_name": "VCP-212"})
+    tree = xr.DataTree.from_dict({"/": root, "sweep_0": other})
+    got = hid(tree, band="C", engine=engine)["sweep_0"]["HID"].values
+    np.testing.assert_array_equal(got, out.HID.values)
+    with pytest.raises(ValueError, match="nodata"):
+        hid(ds, band="C", nodata="x")
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_lkdp_is_minus_30_for_kdp_up_to_1e_3(engine):
+    """Park et al. (2009) Eq. 1: LKdp = -30 where KDP <= 1e-3 deg/km."""
+    scores = []
+    for kdp in (-1.0, 0.0, 5e-4, 1e-3):
+        ds = _rain_gate(KDP=kdp)
+        scores.append(hid(ds, band="S", engine=engine).HID_scores.values)
+    for other in scores[1:]:
+        np.testing.assert_array_equal(other, scores[0])
+    above = hid(_rain_gate(KDP=1.0), band="S", engine=engine).HID_scores.values
+    assert not np.array_equal(above, scores[0])

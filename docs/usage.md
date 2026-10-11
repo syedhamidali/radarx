@@ -28,7 +28,9 @@ notebooks/Interactive_Plots
 notebooks/Echo_QC
 notebooks/Dealiasing
 notebooks/KDP
+notebooks/Attenuation_Correction
 notebooks/Advection_Correction
+notebooks/Superobs_Data_Assimilation
 ```
 
 ```{toctree}
@@ -58,6 +60,7 @@ notebooks/Disdrometers
 notebooks/QVP
 notebooks/Evaporation
 notebooks/Bayesian_DSD
+notebooks/Rainfall_Estimation
 ```
 
 ```{toctree}

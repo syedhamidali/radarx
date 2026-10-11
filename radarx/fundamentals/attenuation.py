@@ -9,12 +9,14 @@ the wavelength).
 The three ``*_coefficient`` functions return cross sections in m^2, not
 dimensionless efficiencies (D^3/lambda and D^6/lambda^4 have units of m^2). The same-named functions in
 :mod:`radarx.fundamentals.scattering` take the radius and return efficiencies,
-and :mod:`radarx.fundamentals` exports the ``scattering`` versions (they are
-imported later). Sign convention: these functions use the engineering
-convention of Bringi and Chandrasekar (2001), complex permittivity
-``eps = eps' - j eps''`` and refractive index ``m = n - j k`` with ``k > 0``, for
-which Im(K) < 0 for an absorbing particle [1]_. Passing ``m = n + j k``
-gives a negative absorption coefficient.
+and neither pair is exported by :mod:`radarx.fundamentals` itself: call them
+as ``attenuation.absorption_coefficient`` or ``scattering.absorption_coefficient``
+(the plain names at package level are deprecated aliases of the ``scattering``
+versions). Sign convention: the documented convention is that of
+Bringi and Chandrasekar (2001), complex permittivity ``eps = eps' - j eps''``
+and refractive index ``m = n - j k`` with ``k > 0``, for which Im(K) < 0 for an
+absorbing particle [1]_. The absorption uses ``|Im(K)|``, so ``m = n + j k``
+gives the same value (before this release it gave a negative one).
 
 References
 ----------
@@ -76,7 +78,7 @@ def absorption_coefficient(diameter, wavelength, m):
     """
     Absorption cross section Qa of a spherical particle (Rayleigh limit).
 
-    Implements ``Qa = pi**2 * D**3 / lambda * Im(-K)`` with
+    Implements ``Qa = pi**2 * D**3 / lambda * |Im(K)|`` with
     ``K = (m**2 - 1) / (m**2 + 2)``. This is the absorption cross section of
     Eq. (1.59) of [1]_, ``9 k0 V eps'' / |eps + 2|**2``, rewritten with the
     sphere volume ``V = pi D**3 / 6`` and ``k0 = 2 pi / lambda``; this form
@@ -90,7 +92,8 @@ def absorption_coefficient(diameter, wavelength, m):
     wavelength : float
         Radar wavelength [m]
     m : complex
-        Complex refractive index (``n - j k`` convention)
+        Complex refractive index (``n - j k`` convention; ``n + j k`` gives
+        the same value)
 
     Returns
     -------
@@ -104,7 +107,7 @@ def absorption_coefficient(diameter, wavelength, m):
            Press, https://doi.org/10.1017/CBO9780511541094 (book; ISBN
            0-521-62384-7).
     """
-    Km_im = np.imag(-1 * k_complex(m))
+    Km_im = np.abs(np.imag(k_complex(m)))
     return (np.pi**2 * np.asarray(diameter) ** 3 / wavelength) * Km_im
 
 

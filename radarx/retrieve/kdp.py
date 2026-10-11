@@ -18,7 +18,8 @@ Every ray is processed independently along range:
    non-meteorological scatterers, p. 736) and the texture of
    :math:`\\Psi_{DP}` (its circular standard deviation over
    ``texture_window``, default 2 km, radarx choice) is at most
-   ``texture_max`` (default 20 degrees, radarx choice). More than half of the
+   ``texture_max`` (default 20 degrees, radarx choice; see
+   ``texture_method`` for a version that ignores the rain ramp). More than half of the
    texture window must be valid, so isolated gates are dropped. The circular
    statistic is computed from running sums of :math:`\\cos\\Psi_{DP}` and
    :math:`\\sin\\Psi_{DP}`, so it is not affected by phase folding.
@@ -154,6 +155,7 @@ __all__ = ["estimate_kdp"]
 import numpy as np
 import xarray as xr
 
+from .._fields import as_sweep
 from .._provenance import provenance
 from ._products import product_tree
 
@@ -166,7 +168,12 @@ except ImportError:  # pragma: no cover - depends on the build
     HAS_COMPILED_KERNEL = False
 
 METHODS = {"hubbert": 0, "vulpiani": 1, "monotone": 2}
+TEXTURES = {"circular": 0, "detrended": 1}
 _DEFAULT_N_ITER = {"hubbert": 10, "vulpiani": 4, "monotone": 0}
+# Multiplier of the S-band defaults of texture_max, delta_threshold and the
+# upper kdp_bounds for each band: the order of the frequency ratio, since KDP
+# scales roughly with frequency. A radarx choice, not taken from a paper.
+_BAND_SCALE = {"S": 1.0, "C": 2.0, "X": 3.0}
 # The two constants below are radarx's own choices, not from a paper.
 _UNFOLD_MEMORY = 5  # unfolding reference: mean of this many previous gates
 _MIN_VALID = 3  # rays with fewer valid gates are left empty
@@ -192,7 +199,12 @@ def _window_sums(prefix, h, n):
     return prefix[..., hi] - prefix[..., lo], lo, hi
 
 
-def _valid_mask(phi, rho, rhohv_min, htex, tex_limit):
+def _wrap180(d):
+    """Differences wrapped into [-180, 180) degrees."""
+    return d - 360.0 * np.floor(d / 360.0 + 0.5)
+
+
+def _valid_mask(phi, rho, rhohv_min, htex, tex_limit, mode=0, tex_max=20.0):
     """Meteorological gates: finite phase, rhohv and phase texture tests."""
     base = np.isfinite(phi)
     if rho is not None:
@@ -205,9 +217,35 @@ def _valid_mask(phi, rho, rhohv_min, htex, tex_limit):
     sc, _, _ = _window_sums(_prefix(c), htex, ng)
     ss, _, _ = _window_sums(_prefix(s), htex, ng)
     sn, _, _ = _window_sums(_prefix(base.astype(np.float64)), htex, ng)
-    # circular std <= limit  <=>  R^2 >= exp(-limit^2), R = |sum| / n
-    ok = (sn >= htex + 1) & (sc * sc + ss * ss >= sn * sn * tex_limit)
+    if mode == 1:
+        # noise std = rms(second difference of the wrapped phase) / sqrt(6)
+        q, n2 = _second_differences(phi, base)
+        sq, _, _ = _window_sums(_prefix(q), htex, ng)
+        nq, _, _ = _window_sums(_prefix(n2), htex, ng)
+        ok = (nq >= htex + 1) & (sq <= 6.0 * tex_max * tex_max * nq)
+    else:
+        # circular std <= limit  <=>  R^2 >= exp(-limit^2), R = |sum| / n
+        ok = (sn >= htex + 1) & (sc * sc + ss * ss >= sn * sn * tex_limit)
     return base & ok, c, s
+
+
+def _second_differences(phi, base):
+    """
+    Squared second differences of the wrapped phase and their validity (0/1).
+
+    Each difference is wrapped into [-180, 180), so a phase ramp (rain with
+    any KDP, folded or not) gives zero and only noise and curvature remain.
+    """
+    q = np.zeros(phi.shape)
+    n2 = np.zeros(phi.shape)
+    if phi.shape[-1] >= 3:
+        x = np.where(base, phi, 0.0)
+        d1 = _wrap180(x[:, 1:] - x[:, :-1])
+        d2 = _wrap180(d1[:, 1:] - d1[:, :-1])
+        ok = base[:, :-2] & base[:, 1:-1] & base[:, 2:]
+        q[:, 1:-1] = np.where(ok, d2 * d2, 0.0)
+        n2[:, 1:-1] = ok
+    return q, n2
 
 
 def _offsets(valid, c, s, n_offset, mode, value):
@@ -224,11 +262,6 @@ def _offsets(valid, c, s, n_offset, mode, value):
     if mode == "sweep":
         return np.full(nr, sweep)
     return np.where(has, np.rad2deg(np.arctan2(sr, cr)), sweep)
-
-
-def _wrap180(d):
-    """Differences wrapped into [-180, 180) degrees."""
-    return d - 360.0 * np.floor(d / 360.0 + 0.5)
 
 
 _SIGN_Z = 30.0  # rain gates for the sign test: Z >= 30 dBZ
@@ -355,7 +388,15 @@ def _isotonic(y):
 def _mask_numpy(phi, rho, z, p):
     """Gate mask, phasors and sign-test statistics of one sweep."""
     tex_limit = np.exp(-np.deg2rad(p["texture_max"]) ** 2)
-    valid, c, s = _valid_mask(phi, rho, p["rhohv_min"], p["htex"], tex_limit)
+    valid, c, s = _valid_mask(
+        phi,
+        rho,
+        p["rhohv_min"],
+        p["htex"],
+        tex_limit,
+        TEXTURES[p.get("texture_method", "circular")],
+        p["texture_max"],
+    )
     return valid, c, s, _sign_stats(phi, valid, rho, z)
 
 
@@ -452,6 +493,8 @@ def _process_compiled(sweeps, params, n_threads):
         params["kdp_max"],
         params["min_valid_fraction"],
         params["phidp_sign"],
+        TEXTURES[params.get("texture_method", "circular")],
+        params["texture_max"],
         int(n_threads or 0),
     )
 
@@ -810,15 +853,17 @@ def estimate_kdp(
     method="hubbert",
     rhohv_min=0.85,
     texture_window=2.0,
-    texture_max=20.0,
+    texture_max=None,
+    texture_method="circular",
+    band=None,
     n_offset=10,
     offset="sweep",
     filter_window=2.0,
     n_iter=None,
-    delta_threshold=4.0,
+    delta_threshold=None,
     kdp_window=(2.0, 6.0),
     z_threshold=40.0,
-    kdp_bounds=(-2.0, 20.0),
+    kdp_bounds=None,
     min_valid_fraction=0.5,
     phidp_sign="auto",
     n_threads=None,
@@ -831,9 +876,10 @@ def estimate_kdp(
     Parameters
     ----------
     obj : xarray.Dataset or xarray.DataTree
-        A sweep on ``(azimuth, range)`` (or ``(elevation, range)``), or a
-        volume with ``sweep_*`` groups, e.g. from xradar. Range gates must be
-        uniformly spaced; ``range`` is in metres.
+        A sweep on ``(azimuth, range)`` (or ``(elevation, range)``), a single
+        sweep node (``dtree["sweep_0"]``), or a volume with ``sweep_*`` groups,
+        e.g. from xradar. Range gates must be uniformly spaced; ``range`` is
+        in metres.
     phidp, rhohv, dbzh : str, optional
         Names of the measured (raw) differential phase (degrees), the
         copolar correlation coefficient and the reflectivity (dBZ). By
@@ -858,8 +904,30 @@ def estimate_kdp(
         Length (km) of the window for the phase texture. Default 2 (radarx
         choice).
     texture_max : float, optional
-        Maximum circular standard deviation (degrees) of the phase within the
-        texture window. Default 20 (radarx choice).
+        Maximum texture (degrees) within the texture window. Default 20 at S
+        band (radarx choice); see ``band``.
+    texture_method : {"circular", "detrended"}, optional
+        ``"circular"`` (default) is the circular standard deviation of the
+        phase, which includes the rain ramp: in uniform rain it is about 0.58
+        degrees per degree/km of KDP for the 2 km window, so with the
+        default limit rain with KDP above about 17 degrees/km is masked as
+        non-meteorological, and all of it from about 20 degrees/km (X band,
+        heavy rain at C band). ``"detrended"`` estimates the noise standard
+        deviation from the second differences of the wrapped phase (their
+        rms divided by the square root of 6, which is exact for white noise
+        around a ramp), so a ramp of any slope, folded or not, has no
+        texture; ``texture_max`` then limits that standard deviation. No
+        published detrending rule was found, so both rules and the limit are
+        radarx choices.
+    band : {"S", "C", "X"} or None, optional
+        Radar band. The defaults of ``texture_max``, ``delta_threshold`` and
+        the upper ``kdp_bounds`` are S-band values (20 degrees, 4 degrees and
+        20 degrees/km). With ``"C"`` or ``"X"`` they are multiplied by 2 or 3
+        (KDP and the backscatter phase grow with frequency; the factors are
+        radarx choices and the backscatter phase values at C and X band were
+        not checked against a reference). Values you pass are used as given.
+        The windows and the 40 dBZ switch are not changed. Default None: S
+        band values, the same as ``"S"``.
     n_offset : int, optional
         Number of first valid gates used for the system offset. Default 10
         (radarx choice).
@@ -878,8 +946,9 @@ def estimate_kdp(
         (radarx choices, not checked against the papers [1], [4]).
     delta_threshold : float, optional
         ``"hubbert"``: gates departing from the filtered profile by more
-        than this (degrees) are replaced by the filtered value. Default 4
-        (radarx choice, not checked against Hubbert and Bringi 1995 [1]).
+        than this (degrees) are replaced by the filtered value. Default 4 at
+        S band (radarx choice, not checked against Hubbert and Bringi 1995
+        [1]); see ``band``.
     kdp_window : (float, float), optional
         Length (km) of the least-squares KDP window where the reflectivity
         is at least / below ``z_threshold``. Default ``(2, 6)``: the 9 and 25
@@ -890,7 +959,8 @@ def estimate_kdp(
         ``Z >= 40``).
     kdp_bounds : (float, float), optional
         ``"vulpiani"``: KDP values (degrees/km) outside these bounds are set
-        to zero in each iteration. Default ``(-2, 20)`` (radarx choice).
+        to zero in each iteration. Default ``(-2, 20)`` at S band (radarx
+        choice); see ``band``.
     min_valid_fraction : float, optional
         KDP is only given at gates where at least this share of the gates in
         the KDP window is valid, which removes unreliable values at echo
@@ -1007,6 +1077,19 @@ def estimate_kdp(
         raise ValueError(f"phidp_sign must be 'auto', 1 or -1, not {phidp_sign!r}")
     if n_iter is None:
         n_iter = _DEFAULT_N_ITER.get(method, 0)
+    if texture_method not in TEXTURES:
+        raise ValueError(
+            f"texture_method must be one of {sorted(TEXTURES)}, not {texture_method!r}"
+        )
+    scale = _BAND_SCALE.get("S" if band is None else str(band).upper())
+    if scale is None:
+        raise ValueError(f"band must be 'S', 'C' or 'X', not {band!r}")
+    if texture_max is None:
+        texture_max = 20.0 * scale
+    if delta_threshold is None:
+        delta_threshold = 4.0 * scale
+    if kdp_bounds is None:
+        kdp_bounds = (-2.0, 20.0 * scale)
     use_compiled = _use_compiled(engine)
     params = {
         "method": METHODS.get(method, -1),
@@ -1014,6 +1097,7 @@ def estimate_kdp(
         "rhohv_min": float(rhohv_min),
         "texture_window": texture_window,
         "texture_max": float(texture_max),
+        "texture_method": texture_method,
         "n_offset": int(n_offset),
         "offset_mode": offset_mode,
         "offset": offset_value,
@@ -1038,6 +1122,7 @@ def estimate_kdp(
         def run(datasets):
             return _run(datasets, fields, params, n_threads, use_compiled)
 
+    obj = as_sweep(obj)
     if isinstance(obj, xr.Dataset):
         return run([obj])[0]
 

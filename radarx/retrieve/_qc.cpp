@@ -58,6 +58,7 @@ struct Params {
     double lim[kFeatures][4];
     double w[kFeatures];
     double spin_thr;
+    bool phi_detrended;  // phidp_texture from second differences, not circular std
     float threshold;
     int64_t min_size;
 };
@@ -119,7 +120,7 @@ inline double span(const double* p, int64_t lo, int64_t hi) {
 
 // Per-thread prefix arrays (ngate + 1 each).
 struct RayScratch {
-    enum { kEcho, kPair, kDz2, kTrip, kFlip, kZn, kZ1, kZ2, kRn, kR1, kPn, kPc, kPs, kN };
+    enum { kEcho, kPair, kDz2, kTrip, kFlip, kZn, kZ1, kZ2, kRn, kR1, kPn, kPc, kPs, kQ, kQn, kN };
     std::vector<double> buf;
     std::vector<uint8_t> echo;
     std::vector<double> dz;
@@ -128,6 +129,9 @@ struct RayScratch {
         : buf(static_cast<size_t>(kN * (ng + 1))), echo(ng), dz(ng), stride(ng + 1) {}
     double* p(int k) { return buf.data() + k * stride; }
 };
+
+// Difference wrapped into [-180, 180) degrees.
+inline double wrap180(double d) { return d - 360.0 * std::floor(d / 360.0 + 0.5); }
 
 inline bool valid(const double* x, int64_t i, double floor) {
     return x != nullptr && std::isfinite(x[i]) && x[i] > floor;
@@ -208,6 +212,22 @@ void polarimetric_prefixes(const Params& P, const Ray& ray, RayScratch& s) {
         pc[g + 1] = pc[g] + (okp ? std::cos(rad) : 0.0);
         ps[g + 1] = ps[g] + (okp ? std::sin(rad) : 0.0);
     }
+    if (!P.phi_detrended || ray.phi == nullptr) return;
+    // squared second differences of the wrapped phase, centred on g: zero for a ramp
+    double* pq = s.p(RayScratch::kQ);
+    double* pm = s.p(RayScratch::kQn);
+    auto ok = [&](int64_t g) { return echo[g] != 0 && valid(ray.phi, g, P.floor_phi); };
+    for (int64_t g = 0; g < ray.ng; ++g) {
+        const bool has = g >= 1 && g + 1 < ray.ng && ok(g - 1) && ok(g) && ok(g + 1);
+        double q = 0.0;
+        if (has) {
+            const double d2 = wrap180(wrap180(ray.phi[g + 1] - ray.phi[g]) -
+                                      wrap180(ray.phi[g] - ray.phi[g - 1]));
+            q = d2 * d2;
+        }
+        pq[g + 1] = pq[g] + q;
+        pm[g + 1] = pm[g] + (has ? 1.0 : 0.0);
+    }
 }
 
 // Weighted sum of memberships (num) and of weights (den) over the window
@@ -238,7 +258,11 @@ void polarimetric_features(const Ray& ray, RayScratch& s, int64_t lo, int64_t hi
             sc.add(2, std::sqrt(std::max(var, 0.0)));
         }
     }
-    if (ray.phi != nullptr) {
+    if (ray.phi != nullptr && sc.P.phi_detrended) {
+        // noise std = rms(second difference) / sqrt(6)
+        const double n = span(s.p(RayScratch::kQn), lo, hi);
+        if (n >= 3) sc.add(3, std::sqrt(span(s.p(RayScratch::kQ), lo, hi) / n / 6.0));
+    } else if (ray.phi != nullptr) {
         const double n = span(s.p(RayScratch::kPn), lo, hi);
         if (n >= 3) {
             const double c = span(s.p(RayScratch::kPc), lo, hi);
@@ -402,7 +426,8 @@ py::tuple classify(const std::vector<DArray>& dbz, const std::vector<py::object>
                    const std::vector<py::object>& snr, const std::vector<UArray>& links,
                    const std::vector<int64_t>& h, const DArray& floors, double snr_min,
                    const DArray& limits, const DArray& weights, double spin_threshold,
-                   double threshold, int64_t min_size, int n_threads) {
+                   double threshold, int64_t min_size, bool phidp_detrended,
+                   int n_threads) {
     const size_t ns = dbz.size();
     if (zdr.size() != ns || rho.size() != ns || phi.size() != ns || snr.size() != ns ||
         links.size() != ns || h.size() != ns)
@@ -425,6 +450,7 @@ py::tuple classify(const std::vector<DArray>& dbz, const std::vector<py::object>
     P.spin_thr = spin_threshold;
     P.threshold = static_cast<float>(threshold);
     P.min_size = min_size;
+    P.phi_detrended = phidp_detrended;
 
     std::vector<DArray> keep(4 * ns);
     std::vector<py::array_t<float>> scores;
@@ -510,5 +536,5 @@ PYBIND11_MODULE(_qc, m) {
           py::arg("phidp"), py::arg("snr"), py::arg("links"), py::arg("h"),
           py::arg("floors"), py::arg("snr_min"), py::arg("limits"), py::arg("weights"),
           py::arg("spin_threshold"), py::arg("threshold"), py::arg("min_size"),
-          py::arg("n_threads") = 0);
+          py::arg("phidp_detrended") = false, py::arg("n_threads") = 0);
 }

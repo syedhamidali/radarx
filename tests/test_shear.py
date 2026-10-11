@@ -146,8 +146,14 @@ def test_missing_data_and_valid_fraction(engine):
     assert np.isfinite(strict.values).sum() < np.isfinite(loose.values).sum()
     # a mask removes gates like missing data
     ds["far"] = (ds.range > 50e3).broadcast_like(ds["VRADH"])
-    for mask in ("far", ds["far"], ds["far"].values):
-        masked = llsd(ds, mask=mask, engine=engine)["azimuthal_shear"]
+    for exclude in ("far", ds["far"], ds["far"].values):
+        masked = llsd(ds, exclude=exclude, engine=engine)["azimuthal_shear"]
+        assert np.isnan(masked.sel(range=slice(50.1e3, None))).all()
+        assert np.isfinite(masked.sel(range=slice(None, 45e3))).any()
+    # mask is True where the gates are kept, as in hid, dsd and echo_mask
+    ds["near"] = ~ds["far"]
+    for keep in ("near", ds["near"], ds["near"].values):
+        masked = llsd(ds, mask=keep, engine=engine)["azimuthal_shear"]
         assert np.isnan(masked.sel(range=slice(50.1e3, None))).all()
         assert np.isfinite(masked.sel(range=slice(None, 45e3))).any()
 
@@ -175,15 +181,16 @@ def test_xarray_interface():
     vel, *_ = rankine(az, RANGE)
     ds = sweep(vel, az, RANGE).transpose("range", "azimuth")
     shear = ds.radarx.azimuthal_shear("VRADH", window=(750.0, 2500.0))
-    div = radial_divergence(ds)
+    div = radial_divergence(ds, "VRADH")
     xr.testing.assert_identical(ds.radarx.radial_divergence("VRADH"), div)
     assert shear.dims == ("range", "azimuth")
     assert shear.attrs["units"] == "s-1"
     assert shear.attrs["window_azimuth_m"] == 2500.0
     assert "elevation" in shear.coords
-    xr.testing.assert_identical(shear, azimuthal_shear(ds))
+    xr.testing.assert_identical(shear, azimuthal_shear(ds, "VRADH"))
     xr.testing.assert_identical(
-        without_provenance(div), ds.radarx.llsd()["radial_divergence"]
+        without_provenance(div),
+        without_provenance(ds.radarx.llsd())["radial_divergence"],
     )
 
     root = xr.Dataset({"site": 1.0})
@@ -302,3 +309,52 @@ def test_nexrad_engines_agree(nexrad_sweep):
     b = llsd(nexrad_sweep, engine="numpy")
     for name in ("azimuthal_shear", "radial_divergence"):
         np.testing.assert_allclose(a[name], b[name], rtol=1e-4, atol=1e-8)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_mask_keeps_true_gates_like_echo_mask(engine):
+    """An echo mask (True = meteorological) must keep, not remove, the rain."""
+    az = jittered_azimuths(seed=5)
+    vel, *_ = rankine(az, RANGE)
+    ds = sweep(vel, az, RANGE)
+    echo = (ds.range < 45e3).broadcast_like(ds["VRADH"])
+    kept = llsd(ds, mask=echo, engine=engine)["azimuthal_shear"]
+    assert np.isnan(kept.sel(range=slice(46e3, None))).all()
+    near = kept.sel(range=slice(None, 44e3))
+    assert np.isfinite(near).mean() > 0.9
+    dropped = llsd(ds, exclude=echo, engine=engine)["azimuthal_shear"]
+    assert np.isnan(dropped.sel(range=slice(None, 44e3))).all()
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_level2_no_data_velocity_codes_are_masked(engine):
+    """Raw codes (about -64.5 m/s) must not enter the fit."""
+    az = jittered_azimuths(seed=6)
+    vel, *_ = rankine(az, RANGE)
+    clean = sweep(vel, az, RANGE)
+    raw = vel.copy()
+    holes = np.random.default_rng(8).random(vel.shape) < 0.15
+    raw[holes] = -64.5
+    nexrad = sweep(raw, az, RANGE).assign_attrs(scan_name="VCP-12")
+    expected = sweep(np.where(holes, np.nan, vel), az, RANGE)
+    ref = llsd(expected, engine=engine)["azimuthal_shear"].values
+    got = llsd(nexrad, engine=engine)["azimuthal_shear"].values
+    np.testing.assert_allclose(got, ref, atol=1e-7, equal_nan=True)
+    # without the VCP name or with nodata=None the codes are data
+    off = llsd(nexrad, nodata=None, engine=engine)["azimuthal_shear"].values
+    assert np.nanmax(np.abs(off)) > 3 * np.nanmax(np.abs(ref))
+    forced = llsd(sweep(raw, az, RANGE), nodata="nexrad", engine=engine)[
+        "azimuthal_shear"
+    ].values
+    np.testing.assert_allclose(forced, ref, atol=1e-7, equal_nan=True)
+    tree = xr.DataTree.from_dict(
+        {
+            "/": xr.Dataset(attrs={"scan_name": "VCP-212"}),
+            "sweep_0": sweep(raw, az, RANGE),
+        }
+    )
+    via_tree = llsd(tree, engine=engine)["sweep_0"]["azimuthal_shear"].values
+    np.testing.assert_allclose(via_tree, ref, atol=1e-7, equal_nan=True)
+    assert clean is not None
+    with pytest.raises(ValueError, match="nodata"):
+        llsd(nexrad, nodata="x")

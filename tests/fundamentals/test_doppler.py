@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from radarx.fundamentals import doppler
 from radarx.fundamentals.constants import C
@@ -29,7 +30,15 @@ def test_dual_prf_velocity():
     prf2 = 800  # Hz
     wavelength = 0.05  # 5 cm
     v_dual = doppler.dual_prf_velocity(wavelength, prf1, prf2)
-    assert np.isclose(np.abs(v_dual), 50.0, rtol=1e-6)
+    assert np.isclose(v_dual, 50.0, rtol=1e-6)
+
+
+def test_dual_prf_velocity_is_positive_for_either_order():
+    # lambda / (4 (T2 - T1)) with T = 1/PRF: 0.1 / (4 (1/750 - 1/1000)) = 75
+    assert np.isclose(doppler.dual_prf_velocity(0.1, 1000, 750), 75.0)
+    assert np.isclose(doppler.dual_prf_velocity(0.1, 750, 1000), 75.0)
+    v = doppler.dual_prf_velocity(0.1, np.array([1000.0, 500.0]), 750.0)
+    np.testing.assert_allclose(v, [75.0, 37.5])
 
 
 def test_max_frequency():
@@ -54,11 +63,29 @@ def test_doppler_frequency_shift_exact():
 
 
 def test_doppler_frequency_shift_relativistic():
+    # two-way: the reflected frequency is f (1 + b) / (1 - b)
     frequency = 3e9  # Hz
     vr = 15.0  # m/s
-    expected = frequency * (np.sqrt((1 + vr / C) / (1 - vr / C)) - 1)
+    beta = vr / C
+    expected = frequency * ((1 + beta) / (1 - beta) - 1)
     result = doppler.doppler_frequency_shift(frequency, vr, relativistic=True)
     assert np.isclose(result, expected)
+
+
+def test_doppler_frequency_shift_relativistic_is_the_two_way_shift():
+    # 5.6 GHz, 10 m/s: 373.592 Hz, not the one-way 186.796 Hz
+    f, v = 5.6e9, 10.0
+    relativistic = doppler.doppler_frequency_shift(f, v, relativistic=True)
+    assert relativistic == pytest.approx(373.592, abs=1e-3)
+    assert relativistic == pytest.approx(
+        doppler.doppler_frequency_shift(f, v, exact=True), rel=1e-9
+    )
+    assert relativistic == pytest.approx(
+        doppler.doppler_frequency_shift(f, v), rel=1e-6
+    )
+    # receding target: negative shift of about the same size
+    receding = doppler.doppler_frequency_shift(f, -v, relativistic=True)
+    assert receding == pytest.approx(-373.592, abs=1e-3)
 
 
 def test_doppler_frequency_shift_array_input():
@@ -75,7 +102,8 @@ def test_doppler_shift_relativistic_overrides_exact():
     result = doppler.doppler_frequency_shift(
         frequency, vr, exact=True, relativistic=True
     )
-    expected = frequency * (np.sqrt((1 + vr / C) / (1 - vr / C)) - 1)
+    beta = vr / C
+    expected = frequency * ((1 + beta) / (1 - beta) - 1)
     assert np.isclose(result, expected)
 
 
@@ -100,7 +128,7 @@ def test__doppler_shift_exact():
 def test__doppler_shift_relativistic():
     frequency = 3e9
     vr = 10
-    expected = frequency * (np.sqrt((1 + vr / C) / (1 - vr / C)) - 1)
+    expected = frequency * ((1 + vr / C) / (1 - vr / C) - 1)
     from radarx.fundamentals.doppler import _doppler_shift_relativistic
 
     assert np.isclose(_doppler_shift_relativistic(frequency, vr), expected)

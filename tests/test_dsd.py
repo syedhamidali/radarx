@@ -561,3 +561,71 @@ def test_nw_range_rejects_non_rain(engine):
     keep = dsd(ds, band="S", nw_range=None, engine=engine)
     assert np.isfinite(keep.RAIN_RATE).all()
     assert keep.attrs["nw_range"] == "none"
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_zdr_outside_the_table_is_flagged(engine):
+    ds = xr.Dataset(
+        {
+            "DBZH": ("gate", np.full(4, 40.0)),
+            "ZDR": ("gate", np.array([-5.0, 1.0, 3.0, 9.0])),
+        },
+        coords={"gate": np.arange(4)},
+    )
+    out = dsd(ds, band="S", engine=engine)
+    lo, hi = dsdmod._lookup_table(
+        "S", 20.0, "constrained", dsdmod.MU_LAMBDA["cao2008"], None
+    )["zdr"][[0, -1]]
+    expected = ((ds.ZDR.values < lo) | (ds.ZDR.values > hi)).astype(np.int8)
+    assert expected.any() and not expected.all()
+    np.testing.assert_array_equal(out.ZDR_CLIPPED.values, expected)
+    # clipped gates still return finite values
+    assert np.isfinite(out.DM.values[expected == 1]).any()
+    # an offset moves gates in or out of the table
+    shifted = dsd(ds, band="S", zdr_offset=float(ds.ZDR.values[3] - 1.0), engine=engine)
+    assert shifted.ZDR_CLIPPED.values[3] == 0
+    assert shifted.attrs["zdr_offset"] == pytest.approx(8.0)
+    np.testing.assert_allclose(
+        shifted.DM.values[3],
+        dsd(ds.isel(gate=[1]), band="S", engine=engine).DM.values[0],
+    )
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_kdp_intercept_blends_smoothly(engine):
+    """Without a blend, Nw jumps where KDP crosses kdp_min; with it, not."""
+    n0, mu, lam = _constrained_truth(n=1)
+    base = _radar("S", n0, mu, lam)
+    # same drops, Z 3 dB too high (a calibration bias): Z and KDP disagree
+    biased = base.assign(DBZH=base.DBZH + 3.0)
+    ks = np.array([0.95, 0.999, 1.001, 1.05])
+    gates = xr.concat([biased.assign(KDP=biased.KDP * 0 + k) for k in ks], "gate")
+    gates = gates.assign_coords(gate=np.arange(ks.size))
+    abrupt = dsd(gates, band="S", kdp="KDP", kdp_min=1.0, nw_range=None, engine=engine)
+    jump = abs(np.log10(abrupt.NW.values[2] / abrupt.NW.values[1]))
+    assert jump > 0.05
+    smooth = dsd(
+        gates,
+        band="S",
+        kdp="KDP",
+        kdp_min=1.0,
+        kdp_blend=1.0,
+        nw_range=None,
+        engine=engine,
+    )
+    step = abs(np.log10(smooth.NW.values[2] / smooth.NW.values[1]))
+    assert step < jump / 20
+    assert smooth.attrs["kdp_blend"] == 1.0
+    with pytest.raises(ValueError, match="kdp_blend"):
+        dsd(gates, band="S", kdp="KDP", kdp_blend=-1.0)
+
+
+@compiled_only
+def test_dsd_blend_and_offset_engines_agree():
+    n0, mu, lam = _constrained_truth()
+    ds = _radar("C", n0, mu, lam)
+    kw = dict(band="C", kdp="KDP", kdp_min=0.5, kdp_blend=2.0, zdr_offset=0.2)
+    a = dsd(ds, engine="numpy", **kw)
+    b = dsd(ds, engine="compiled", **kw)
+    for name in ("N0", "NW", "DM", "RAIN_RATE", "ZDR_CLIPPED"):
+        np.testing.assert_allclose(a[name], b[name], rtol=1e-9, equal_nan=True)

@@ -953,3 +953,58 @@ def test_real_nexrad_volume():
     if vilmod.HAS_COMPILED_KERNEL:
         other = vil(tree, engine="numpy")
         xr.testing.assert_allclose(out, other, rtol=1e-6)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_partial_layers_above_the_last_echo_sample(engine):
+    """The layer to the next sample without echo can be left out."""
+    h = [0.0, 500.0, 1000.0, 3000.0]
+    dbz = [30.0, 30.0, -10.0, -10.0]  # -10 dBZ is below min_dbz: no echo
+    ds = column(dbz, z=h)
+    full = vil(ds, engine=engine)["VIL"].item()
+    no_edge = vil(ds, partial_layers=False, engine=engine)["VIL"].item()
+    assert full == pytest.approx(hand_vil(h, dbz), rel=1e-6)
+    # only the layer between the two echo samples is left
+    assert no_edge == pytest.approx(hand_vil(h[:2], dbz[:2]), rel=1e-6)
+    assert full > no_edge > 0
+    # a column of echo is not changed
+    deep = column([30.0, 25.0, 20.0], z=[0.0, 500.0, 1000.0])
+    assert vil(deep, partial_layers=False, engine=engine)[
+        "VIL"
+    ].item() == pytest.approx(vil(deep, engine=engine)["VIL"].item())
+    # the liquid part
+    cut = vil(ds, melting=800.0, partial_layers=False, engine=engine)
+    assert cut["VIL_LIQUID"].item() == pytest.approx(
+        hand_vil([0.0, 500.0], dbz[:2]), rel=1e-6
+    )
+
+
+@compiled_only
+def test_partial_layers_engines_agree():
+    h = np.array([0.0, 400.0, 900.0, 1500.0, 2600.0, 4000.0])
+    rng = np.random.default_rng(0)
+    dbz = rng.uniform(-10, 50, (h.size, 40))
+    ds = xr.Dataset(
+        {"DBZH": (("z", "y", "x"), dbz[:, :, None], {"units": "dBZ"})},
+        coords={"z": h, "y": np.arange(40.0), "x": [0.0]},
+    )
+    for fill in (False, True):
+        kw = dict(partial_layers=False, fill_below=fill, melting=1800.0)
+        a = vil(ds, engine="numpy", **kw)
+        b = vil(ds, engine="compiled", **kw)
+        np.testing.assert_allclose(a["VIL"], b["VIL"], rtol=1e-12, equal_nan=True)
+        np.testing.assert_allclose(
+            a["VIL_LIQUID"], b["VIL_LIQUID"], rtol=1e-12, equal_nan=True
+        )
+
+
+def test_liquid_water_content_cap():
+    ds = xr.Dataset({"DBZH": ("gate", np.array([30.0, 56.0, 65.0]))})
+    free = liquid_water_content(ds)
+    capped = liquid_water_content(ds, dbz_cap=56.0)
+    np.testing.assert_allclose(capped.values[:2], free.values[:2])
+    assert capped.values[2] == pytest.approx(capped.values[1])
+    assert free.values[2] > 1.5 * free.values[1]
+    assert "capped at 56 dBZ" in capped.attrs["comment"]
+    with pytest.raises(ValueError, match="dbz_cap"):
+        liquid_water_content(ds.assign(ZDR=ds.DBZH * 0), "dsd", dbz_cap=56.0)

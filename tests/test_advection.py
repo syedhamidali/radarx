@@ -132,6 +132,73 @@ def test_estimate_motion_tiled_varying():
     assert float(m.u.sel(x=-70e3, y=0)) < float(m.u.sel(x=70e3, y=0)) - 5
 
 
+def _random_echo(n, seed, count):
+    """Random Gaussian echo blobs on an ``n`` by ``n`` km grid (function of x, y)."""
+    rng = np.random.default_rng(seed)
+    x = np.arange(n) * 1000.0
+    cx, cy = rng.uniform(0, x[-1], count), rng.uniform(0, x[-1], count)
+    amp, wid = rng.uniform(10, 40, count), rng.uniform(3e3, 9e3, count)
+
+    def field(px, py):
+        f = np.zeros(px.shape)
+        for a, w, x0, y0 in zip(amp, wid, cx, cy):
+            f += a * np.exp(-((px - x0) ** 2 + (py - y0) ** 2) / (2 * w**2))
+        return f
+
+    return x, field
+
+
+def _dataset(x, f, t):
+    return xr.Dataset(
+        {"DBZH": (("y", "x"), f)},
+        coords={"x": x, "y": x, "time": T0 + np.timedelta64(t, "s")},
+    )
+
+
+@pytest.mark.parametrize("size", [10, 20, 30])
+def test_estimate_motion_with_a_data_hole(size):
+    """Issue 279: a fixed hole in the data must not pull the motion to zero."""
+    u, v, dt = 12.3, -7.7, 300
+    x, field = _random_echo(200, 3, 60)
+    X2, Y2 = np.meshgrid(x, x)
+    a, b = field(X2, Y2), field(X2 - u * dt, Y2 - v * dt)
+    hole = (
+        slice(90 - size // 2, 90 + size // 2),
+        slice(100 - size // 2, 100 + size // 2),
+    )
+    a[hole] = np.nan
+    b[hole] = np.nan
+    m = estimate_motion(_dataset(x, a, 0), _dataset(x, b, dt))
+    # 3.1 and 3.4 m/s too small for the 30 km hole before the masked correlation
+    assert abs(float(m.u) - u) < 0.3 and abs(float(m.v) - v) < 0.3
+
+
+def test_tiled_motion_recovers_a_shear():
+    """Issue 280: the change of the motion across the domain is kept."""
+    n, dt = 120, 300
+    x, field = _random_echo(n, 5, 37)
+    X2, Y2 = np.meshgrid(x, x)
+    frac = X2 / x[-1]
+    u_true, v_true = 10.0 - 16.0 * frac, 6.0 * frac
+    d0 = _dataset(x, field(X2, Y2), 0)
+    moved = advect(
+        d0,
+        xr.DataArray(u_true, dims=("y", "x"), coords={"y": x, "x": x}),
+        xr.DataArray(v_true, dims=("y", "x"), coords={"y": x, "x": x}),
+        dt=dt,
+        method="cubic",
+    )
+    for tile in (30e3, 50e3):
+        m = estimate_motion(d0, moved, tile=tile)
+        row = n // 2
+        # 0.53 and 0.41 of the change of u for the earlier defaults
+        du = float(m.u[row, -1] - m.u[row, 0]) / (u_true[row, -1] - u_true[row, 0])
+        dv = float(m.v[row, -1] - m.v[row, 0]) / (v_true[row, -1] - v_true[row, 0])
+        assert 0.85 < du < 1.15 and 0.85 < dv < 1.15
+        err = np.hypot(m.u.values - u_true, m.v.values - v_true)
+        assert np.sqrt(np.mean(err**2)) < 1.3
+
+
 def test_estimate_motion_no_signal_is_nan():
     rng = np.random.default_rng(1)
     d0 = _blobs(0, 0, 0).assign(DBZH=(("y", "x"), rng.uniform(0, 60, (Y.size, X.size))))
@@ -518,3 +585,32 @@ def test_dataarray_accessors():
     mid = T0 + np.timedelta64(150, "s")
     frames = da0.radarx.interpolate_time(da1, [mid], motion=motion)
     assert frames.sizes["time"] == 1
+
+
+def test_correlate_without_a_usable_overlap_or_next_to_an_unusable_one():
+    ny, nx = 24, 40
+    everywhere = np.ones((ny, nx), dtype=bool)
+    # echo only on the corner pixel, where the window of the correlation is
+    # zero: there is nothing to correlate, however much echo there is
+    a = np.zeros((ny, nx))
+    a[0, 0] = 30.0
+    b = np.zeros((ny, nx))
+    b[10:14, 10:14] = 30.0
+    dy, dx, quality = advection._correlate(
+        a, b, everywhere, everywhere, 5.0, None, (4, 4)
+    )
+    assert np.isnan(dy) and np.isnan(dx) and quality == 0.0
+
+    # an echo moved by 3 cells within a strip 8 cells wide that is the only
+    # area observed: the overlap of the strips is too small at the next shift
+    # for the peak to be refined, so the whole-cell shift is returned
+    strip = np.zeros((ny, nx), dtype=bool)
+    strip[:, :8] = True
+    ramp = 30.0 + np.arange(3)[None, :]
+    a = np.zeros((ny, nx))
+    b = np.zeros((ny, nx))
+    a[8:16, 0:3] = ramp
+    b[8:16, 3:6] = ramp
+    dy, dx, quality = advection._correlate(a, b, strip, strip, 5.0, None, (4, 14))
+    assert dy == 0.0 and dx == 3.0
+    assert quality == pytest.approx(1.0, abs=1e-9)

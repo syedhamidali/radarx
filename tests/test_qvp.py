@@ -16,6 +16,8 @@ anchors and flags agree exactly, and melting-layer heights to 1e-9 m (the
 onset heights are interpolated between gates, where the compiler may fuse a
 multiply and an add).
 """
+import warnings
+
 import numpy as np
 import pytest
 import xarray as xr
@@ -80,9 +82,10 @@ def _volume(elevations=(0.5, 5.0, 15.0), **kwargs):
 @pytest.mark.parametrize("engine", ENGINES)
 def test_mean_matches_analytic(engine):
     ds, a, dbz, zdr = _sweep()
-    out = qvp(ds, engine=engine)
-    # float32 inputs: agreement to float32 resolution
-    np.testing.assert_allclose(out["PHIDP"], a, atol=2e-5)
+    out = qvp(ds, ["DBZH", "ZDR", "RHOHV", "PHIDP"], engine=engine)
+    # float32 inputs: agreement to float32 resolution (the phase is a
+    # circular mean, a few 1e-4 degrees from the arithmetic mean here)
+    np.testing.assert_allclose(out["PHIDP"], a, atol=1e-3)
     np.testing.assert_allclose(out["DBZH"], dbz, atol=1e-4)  # linear mean
     np.testing.assert_allclose(out["ZDR"], zdr, atol=1e-4)  # linear mean
     np.testing.assert_allclose(out["RHOHV"], 0.98, atol=1e-6)
@@ -122,15 +125,16 @@ def test_quality_filter_excludes_gates(engine):
     for name in ("PHIDP", "DBZH", "ZDR"):
         ds[name] = ds[name].where(~bad, 999.0)
     ds["RHOHV"] = ds["RHOHV"].where(~bad, 0.3)
-    out = qvp(ds, engine=engine, counts=True)
+    out = qvp(ds, ["DBZH", "ZDR", "RHOHV", "PHIDP"], engine=engine, counts=True)
     # remaining rays are not evenly spaced, so compare to the masked mean
     good = ~bad[:, 0]
     np.testing.assert_allclose(
-        out["PHIDP"], ds["PHIDP"].isel(azimuth=good).mean("azimuth"), atol=1e-4
+        out["PHIDP"], ds["PHIDP"].isel(azimuth=good).mean("azimuth"), atol=1e-3
     )
     assert int(out["PHIDP_count"][0]) == good.sum()
     # without the rhohv test the garbage is averaged in
-    assert float(qvp(ds, "PHIDP", min_rhohv=None, engine=engine)["PHIDP"][0]) > 100
+    garbage = float(qvp(ds, "PHIDP", min_rhohv=None, engine=engine)["PHIDP"][0])
+    assert abs(garbage - float(out["PHIDP"][0])) > 10
 
 
 @pytest.mark.parametrize("engine", ENGINES)
@@ -726,3 +730,54 @@ def test_edge_cases():
     ramp = (h, np.full(h.size, 30.0), np.full(h.size, 0.95), 0.5 + h / 1e3)
     flat = melting_layer(_profiles_dataset([ramp]), engine="numpy")
     assert int(flat["melting_layer_flag"][0]) == 0
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_default_variables_are_polarimetric(engine):
+    ds, *_ = _sweep()
+    ds["VRADH"] = ds["DBZH"] * 0 + 5.0
+    ds["KDP"] = ds["DBZH"] * 0 + 1.0
+    out = qvp(ds, engine=engine)
+    assert set(out.data_vars) == {"DBZH", "ZDR", "RHOHV", "KDP"}
+    # naming a variable still works
+    assert "VRADH" in qvp(ds, ["VRADH"], engine=engine)
+    # a sweep with none of the four keeps every variable
+    other = ds[["PHIDP", "VRADH"]].assign(OTHER=ds["PHIDP"])
+    other = other.assign(DBZH=ds["DBZH"]).drop_vars("DBZH")
+    assert set(qvp(other, min_rhohv=None, min_dbz=None, engine=engine).data_vars) == {
+        "PHIDP",
+        "VRADH",
+        "OTHER",
+    }
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_phase_mean_is_circular(engine):
+    """Phases of 179 and -179 degrees average to 180, not to 0."""
+    ds, *_ = _sweep()
+    phi = np.where(np.arange(ds.sizes["azimuth"])[:, None] % 2 == 0, 179.0, -179.0)
+    ds["PHIDP"] = ds["PHIDP"].copy(data=np.broadcast_to(phi, ds["PHIDP"].shape))
+    out = qvp(ds, "PHIDP", engine=engine, counts=True)
+    assert np.all(np.abs(out["PHIDP"].values) > 179.9)
+    assert int(out["PHIDP_count"][0]) == ds.sizes["azimuth"]
+    # the median is left as it is
+    med = qvp(ds, "PHIDP", reduction="median", engine=engine)
+    assert np.isfinite(med["PHIDP"]).all()
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_low_elevation_warning_and_kdp_correction(engine):
+    ds, *_ = _sweep(elevation=5.0)
+    ds["KDP"] = ds["DBZH"] * 0 + 1.0
+    with pytest.warns(UserWarning, match="5.0 degrees"):
+        plain = qvp(ds, ["KDP"], engine=engine)
+    with pytest.warns(UserWarning, match="elevation"):
+        fixed = qvp(ds, ["KDP"], elevation_correction=True, engine=engine)
+    np.testing.assert_allclose(plain["KDP"], 1.0, atol=1e-6)
+    np.testing.assert_allclose(
+        fixed["KDP"], 1.0 / np.cos(np.deg2rad(5.0)) ** 2, atol=1e-4
+    )
+    high, *_ = _sweep(elevation=15.0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        qvp(high, engine=engine)

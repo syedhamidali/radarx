@@ -15,6 +15,9 @@ from radarx.io import sounding
 from radarx.retrieve import coldpool
 from radarx.retrieve import wind_profile as wp
 
+# numpy 2 renamed trapz to trapezoid; the tests run with both
+_trapezoid = getattr(np, "trapezoid", None) or np.trapz
+
 ENGINES = ["numpy"] + (["compiled"] if coldpool.HAS_COMPILED_KERNEL else [])
 DATA = Path(__file__).parent / "io" / "data"
 
@@ -72,6 +75,52 @@ def test_bunkers_straight_hodograph(engine):
         wp.bunkers_storm_motion(straight(), mover="middle")
 
 
+def with_pressure(profile, scale_height=8000.0):
+    """Add p = 1000 exp(-z / H) hPa to a profile on ``height``."""
+    p = 1000.0 * np.exp(-profile.height / scale_height)
+    return profile.assign(pressure=p)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_bunkers_pressure_weighted_means(engine):
+    """Issue 233: the pressure-weighted variant, int V dp / (p_bottom - p_top)."""
+    h, b = 8000.0, 6000.0
+    prof = with_pressure(straight(), h)
+    mean_p = (h / 600.0) * (1 - np.exp(-b / h) * (1 + b / h)) / (1 - np.exp(-b / h))
+    assert 4.3 < mean_p < 4.5  # against 5.0 for the height-weighted mean
+    rm = wp.bunkers_storm_motion(prof, weighting="pressure", engine=engine)
+    assert float(rm.u) == pytest.approx(mean_p, rel=2e-3)
+    assert float(rm.v) == pytest.approx(-7.5, abs=1e-9)
+    assert rm.attrs["weighting"] == "pressure"
+    height = wp.bunkers_storm_motion(prof, engine=engine)  # default: unchanged
+    assert float(height.u) == pytest.approx(5.0)
+    assert height.attrs["weighting"] == "height"
+    left = wp.bunkers_storm_motion(
+        prof, mover="left", weighting="pressure", engine=engine
+    )
+    assert float(left.v) == pytest.approx(7.5, abs=1e-9)
+    # a column that is a profile of times: one result per time
+    times = xr.concat([prof, with_pressure(straight(), 4000.0)], dim="time")
+    both = wp.bunkers_storm_motion(times, weighting="pressure", engine=engine)
+    assert both.u.dims == ("time",)
+    assert float(both.u[0]) == pytest.approx(mean_p, rel=2e-3)
+    assert float(both.u[1]) < float(both.u[0])  # thinner air aloft: more weight below
+    with pytest.raises(ValueError, match="needs 'pressure'"):
+        wp.bunkers_storm_motion(straight(), weighting="pressure", engine=engine)
+    with pytest.raises(ValueError, match="weighting"):
+        wp.bunkers_storm_motion(prof, weighting="mass")
+
+
+def test_bunkers_pressure_weighting_engines_agree():
+    if not coldpool.HAS_COMPILED_KERNEL:
+        pytest.skip("compiled kernel not built")
+    prof = with_pressure(straight(dz=50.0))
+    a = wp.bunkers_storm_motion(prof, weighting="pressure", engine="numpy")
+    b = wp.bunkers_storm_motion(prof, weighting="pressure", engine="compiled")
+    np.testing.assert_allclose(a.u, b.u, rtol=1e-12)
+    np.testing.assert_allclose(a.v, b.v, rtol=1e-12)
+
+
 @pytest.mark.parametrize("engine", ENGINES)
 def test_srh_analytic(engine):
     # straight hodograph, storm (5, -7.5): SRH = 7.5 * du = 7.5 * 5 = 37.5
@@ -119,8 +168,8 @@ def test_srh_vs_metpy_on_real_sounding():
     def mean(lo, hi):
         zz = np.concatenate([[lo], z[(z > lo) & (z < hi)], [hi]])
         return (
-            np.trapezoid(np.interp(zz, z, u), zz) / (hi - lo),
-            np.trapezoid(np.interp(zz, z, v), zz) / (hi - lo),
+            _trapezoid(np.interp(zz, z, u), zz) / (hi - lo),
+            _trapezoid(np.interp(zz, z, v), zz) / (hi - lo),
         )
 
     m, low, high = mean(0, 6000), mean(0, 500), mean(5500, 6000)
@@ -261,3 +310,49 @@ def test_vad_real_volume():
         c = wp.vad_profile(dz, "VRADH_dealiased", engine="numpy")
         np.testing.assert_allclose(b.u, c.u, rtol=1e-9, equal_nan=True)
     assert a.height.attrs["units"] == "m"
+
+
+# ---------------------------------------------------------------------------
+# failure modes reported against MetPy (Unidata/MetPy #596, #788, #178, #794)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_layer_top_equal_to_last_level_to_rounding(engine):
+    # (g + k dz) * 1000 is 9e-13 m below g * 1000 + 6000 for g = 0.347 km; the
+    # profile still spans the 0-6 km layer above ground = g * 1000
+    g, dz = 0.347, 0.1
+    z = (g + np.arange(61) * dz) * 1000.0
+    assert z[-1] < g * 1000.0 + 6000.0
+    p = xr.Dataset(
+        {"u": ("height", np.linspace(0, 10, 61)), "v": ("height", np.zeros(61))},
+        coords={"height": z},
+    )
+    sh = wp.bulk_shear(p, 0, 6000, ground=g * 1000.0, engine=engine)
+    assert float(sh.shear_u) == pytest.approx(10.0)
+    mw = wp.layer_mean_wind(p, 0, 6000, ground=g * 1000.0, engine=engine)
+    assert float(mw.u) == pytest.approx(5.0)
+    srh = wp.storm_relative_helicity(
+        p, (0.0, 0.0), 0, 6000, ground=g * 1000.0, engine=engine
+    )
+    assert np.isfinite(float(srh))
+    # below the lowest level by rounding, and by a real distance
+    sh = wp.bulk_shear(p, 0, 3000, ground=g * 1000.0 - 1e-9, engine=engine)
+    assert np.isfinite(float(sh.shear_u))
+    sh = wp.bulk_shear(p, 0, 3000, ground=g * 1000.0 - 1.0, engine=engine)
+    assert np.isnan(float(sh.shear_u))
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_mean_wind_direction_in_range(engine):
+    z = np.arange(0.0, 7001.0, 500.0)
+    north = xr.Dataset(
+        {
+            "u": ("height", np.full(z.size, 1e-17)),
+            "v": ("height", np.full(z.size, -5.0)),
+        },
+        coords={"height": z},
+    )
+    mw = wp.layer_mean_wind(north, 0, 6000, engine=engine)
+    assert float(mw.direction) == 0.0
+    calm = north.assign(u=north.u * 0, v=north.v * 0)
+    assert np.isnan(float(wp.layer_mean_wind(calm, 0, 6000, engine=engine).direction))

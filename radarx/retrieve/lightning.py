@@ -33,27 +33,23 @@ when their normalized space-time distance is at most one (Fuchs et al. use
 
 Flashes are the connected groups of such links (single linkage). This is what
 DBSCAN [2]_ gives with a minimum number of points :math:`N_{min}` of one or
-two, and only then. Fuchs et al. (2016) [1]_ (sections 2.1 and 2.2, pp.
-8628-8629) ran the scikit-learn DBSCAN with :math:`\\epsilon = 1` and
-:math:`N_{min} = 2` (Alabama, Washington D.C.) and :math:`N_{min} = 10`
-(Colorado). A flash then starts from a core source with at least
-:math:`N_{min}` sources within :math:`\\epsilon`, and an outer source must lie
-near a core source; for :math:`N_{min} > 2` this is stricter than the
-dot-to-dot linking used here, which Fuchs et al. contrast with DBSCAN (p.
-8628). Singletons and clusters of fewer than :math:`N_{min}` sources ("noise" in
-DBSCAN) are kept as small flashes. radarx has no :math:`N_{min}` argument, so
-it reproduces the Alabama and D.C. setting but not the Colorado one: on 150
-synthetic random-walk flashes (check of issue 178) scikit-learn DBSCAN with
-:math:`N_{min}` = 1 and 2 gave the same 622 flashes as radarx, with 3 it gave
-707 and with 10 it gave 3607 (counts depend on the synthetic sample; an
-independent repeat gave identical partitions for 1 and 2 and more flashes for
-3 and 10).
+two. Fuchs et al. (2016) [1]_ (sections 2.1 and 2.2, pp. 8628-8629) ran the
+scikit-learn DBSCAN with :math:`\\epsilon = 1` and :math:`N_{min} = 2`
+(Alabama, Washington D.C.) and :math:`N_{min} = 10` (Colorado). The argument
+``min_points`` of :func:`cluster_flashes` sets :math:`N_{min}`: a flash then
+starts from a core source with at least :math:`N_{min}` sources within
+:math:`\\epsilon`, and an outer source must lie near a core source; for
+:math:`N_{min} > 2` this is stricter than the dot-to-dot linking, which Fuchs
+et al. contrast with DBSCAN (p. 8628). Sources outside every cluster ("noise"
+in DBSCAN) become flashes of one source or, with ``noise="drop"``, belong to no
+flash.
 
 Fuchs et al. (2016) also impose, by default, an "arbitrary 3 s maximum
 duration" on the flashes, because their streamed processing clusters a buffer
 of twice that length (p. 8629); flashes longer than 3 s can be split by it, so
-it is a limit that changes the result, not only a memory saving. radarx imposes
-no maximum duration. The sources should be filtered first as in Fuchs et al.
+it is a limit that changes the result, not only a memory saving. The argument
+``max_duration`` cuts longer flashes in time order (radarx's own rule, not the
+buffers of the paper); by default there is no limit. The sources should be filtered first as in Fuchs et al.
 (at least six stations by default and :math:`\\chi^2 \\le 1`, p. 8628, e.g.
 with the ``min_stations`` and ``max_chi2`` arguments of
 :func:`radarx.io.read_lma`).
@@ -457,16 +453,17 @@ def _components(n, i, j, labels):
     return first[comp]
 
 
-def _cluster_numpy(x, y, z, t, distance, time):
+def _cluster_numpy(x, y, z, t, distance, time, min_points=1):
     # Flashes = connected components of the links (dx / d)^2 + (dt / tau)^2 <= 1
     # (single linkage), the DBSCAN clustering (Ester et al. 1996) with
-    # eps = 1 on the normalized coordinates and a minimum of 1 or 2 points. It
-    # equals the flash sorter of Fuchs et al. (2016, pp. 8628-8629) for their
-    # N_min = 2 (Alabama, D.C.), not for their N_min = 10 (Colorado), and it
-    # has no maximum flash duration (Fuchs et al. impose 3 s by default, which
-    # can split longer flashes; see issue 178). Sources are sorted by time, so
-    # source i only needs partners j > i with t_j - t_i <= tau; the loop
-    # runs over the index lag j - i and stops when no pair is within tau.
+    # eps = 1 on the normalized coordinates. With min_points = N a source is a
+    # core source when at least N sources (itself included) lie within eps;
+    # flashes grow from linked core sources, a source that is not core joins
+    # the flash of the core source within eps that comes first in time and
+    # all other sources (noise) are flashes of one source. N = 1 and N = 2
+    # give single linkage. Sources are sorted by time, so source i only needs
+    # partners j > i with t_j - t_i <= tau; the loop runs over the index lag
+    # j - i and stops when no pair is within tau.
     n = t.size
     labels = np.arange(n)
     id2, it2 = 1.0 / (distance * distance), 1.0 / (time * time)
@@ -485,6 +482,11 @@ def _cluster_numpy(x, y, z, t, distance, time):
         ok = (dx * dx + dy * dy + dz * dz) * id2 + tt[idx] <= 1.0
         i = idx[ok]
         j = i + lag
+        if min_points > 1:  # every link is needed to count the neighbours
+            pend_i.append(i)
+            pend_j.append(j)
+            lag += 1
+            continue
         keep = labels[i] != labels[j]
         pend_i.append(i[keep])
         pend_j.append(j[keep])
@@ -495,13 +497,62 @@ def _cluster_numpy(x, y, z, t, distance, time):
             )
             pend_i, pend_j, pending = [], [], 0
         lag += 1
-    if pend_i:
+    if min_points > 1 and pend_i:
+        i, j = np.concatenate(pend_i), np.concatenate(pend_j)
+        count = 1 + np.bincount(i, minlength=n) + np.bincount(j, minlength=n)
+        core = count >= min_points
+        both = core[i] & core[j]
+        labels = _components(n, i[both], j[both], labels)
+        # a source that is not core joins the first core source within eps
+        owner = np.full(n, n, dtype=np.int64)
+        for a, b in ((i, j), (j, i)):
+            sel = core[a] & ~core[b]
+            np.minimum.at(owner, b[sel], a[sel])
+        joined = owner < n
+        labels = np.where(joined, labels[np.minimum(owner, n - 1)], labels)
+    elif pend_i and min_points <= 1:
         labels = _components(n, np.concatenate(pend_i), np.concatenate(pend_j), labels)
-    # number flashes by their first source
+    return _number_flashes(labels)
+
+
+def _number_flashes(labels):
+    """Number the flashes (labels of any kind) by their first source."""
     _, first_pos, inverse = np.unique(labels, return_index=True, return_inverse=True)
     rank = np.empty(first_pos.size, dtype=np.int64)
     rank[np.argsort(first_pos)] = np.arange(first_pos.size)
     return rank[inverse].astype(np.int64)
+
+
+def _split_long_flashes(labels, t, max_duration):
+    """
+    Split flashes longer than ``max_duration`` seconds.
+
+    The sources of a flash, in time order, are cut into consecutive flashes:
+    a new one starts at the first source more than ``max_duration`` after the
+    start of the current one. ``t`` is sorted. Returns the flashes numbered by
+    their first source.
+    """
+    labels = np.asarray(labels, dtype=np.int64)
+    nflash = int(labels.max()) + 1 if labels.size else 0
+    if not nflash:
+        return labels
+    first = np.full(nflash, np.inf)
+    last = np.full(nflash, -np.inf)
+    np.minimum.at(first, labels, t)
+    np.maximum.at(last, labels, t)
+    long = np.nonzero(last - first > max_duration)[0]
+    if not long.size:
+        return labels
+    part = np.zeros(labels.size, dtype=np.int64)
+    for f in long:
+        members = np.nonzero(labels == f)[0]
+        tm = t[members]
+        k, start = 0, tm[0]
+        for m in range(members.size):
+            if tm[m] - start > max_duration:
+                k, start = k + 1, tm[m]
+            part[members[m]] = k
+    return _number_flashes(labels * (part.max() + 1) + part)
 
 
 def _hull_area(px, py):
@@ -678,7 +729,17 @@ def _with_flashes(ds, use_compiled, n_threads, distance=3000.0, time=0.15):
     "Space-time clustering of LMA sources into flashes, after Fuchs et al. (2016)",
     extra_refs=("ester-1996",),
 )
-def cluster_flashes(ds, *, distance=3000.0, time=0.15, engine="auto", n_threads=None):
+def cluster_flashes(
+    ds,
+    *,
+    distance=3000.0,
+    time=0.15,
+    min_points=1,
+    max_duration=None,
+    noise="flash",
+    engine="auto",
+    n_threads=None,
+):
     """
     Group LMA VHF sources into flashes by their space-time separation.
 
@@ -696,6 +757,25 @@ def cluster_flashes(ds, *, distance=3000.0, time=0.15, engine="auto", n_threads=
     time : float, optional
         Time scale :math:`\\tau` in seconds. Default 0.15 s, the 150 ms of
         Fuchs et al. (2016) [1]_ (p. 8628).
+    min_points : int, optional
+        Minimum number of sources :math:`N_{min}` (the source itself counted)
+        within the normalized distance of one for a source to start or extend
+        a flash, as the ``min_samples`` of DBSCAN [2]_. Default 1 (single
+        linkage, which is also the result for 2). Fuchs et al. [1]_ used 2
+        (Alabama, D.C.) and 10 (Colorado). A source that is not core but near
+        a core source joins the flash of the nearest-in-index core source.
+    max_duration : float, optional
+        Longest flash in s. A longer flash is cut into consecutive flashes,
+        the next starting at the first source later than ``max_duration``
+        after the start of the current one. Fuchs et al. [1]_ impose 3 s
+        ("by default"); their cut is a consequence of clustering buffers of
+        twice that length, radarx's cut in time order is its own (so the
+        result differs from theirs for flashes that reach the buffer
+        boundary). Default None (no limit).
+    noise : {"flash", "drop"}, optional
+        Sources that belong to no cluster (``min_points`` above 2): ``"flash"``
+        (default) makes each a flash of one source, ``"drop"`` gives them
+        ``event_parent_flash_id`` -1, no flash, as DBSCAN's noise label.
     engine : {"auto", "compiled", "numpy"}, optional
         Implementation to use. ``"auto"`` (default) prefers the compiled
         kernel and falls back to NumPy.
@@ -724,29 +804,32 @@ def cluster_flashes(ds, *, distance=3000.0, time=0.15, engine="auto", n_threads=
     Relation to Fuchs et al. (2016). Single linkage is the clustering of
     DBSCAN [2]_ with :math:`\\epsilon = 1` on these normalized coordinates and
     a minimum number of points :math:`N_{min}` (scikit-learn ``min_samples``,
-    the source itself counted) of 1 or 2, and not for larger :math:`N_{min}`.
-    Fuchs et al. [1]_ (sections 2.1 and 2.2, pp. 8628-8629) used
-    :math:`N_{min} = 2` for Alabama and D.C. and :math:`N_{min} = 10` for
-    Colorado. With :math:`N_{min} = 10` a flash grows only from core sources
-    with at least ten sources within :math:`\\epsilon` and an outer source must
-    be within :math:`\\epsilon` of a core source, unlike the "simple dot-to-dot
-    algorithm" that this function implements; sources of clusters smaller than
-    :math:`N_{min}` are kept as small flashes in both. radarx has no
-    :math:`N_{min}` argument. Check on 150 synthetic random-walk flashes
-    (issue 178), scikit-learn ``DBSCAN(eps=1, min_samples=N_min)`` on the same
-    normalized coordinates, noise points turned into one-source flashes:
-    ``N_min`` = 1 and 2 give the same partition as this function (622
-    flashes), ``N_min`` = 3 gives 707 and ``N_min`` = 10 gives 3607 flashes
-    against 622 here, so the Colorado setting of Fuchs et al. is not
-    reproduced (the counts depend on the synthetic sample; an independent
-    repeat on another sample gave identical partitions for 1 and 2 and more
-    flashes for 3 and 10).
+    the source itself counted) of 1 or 2. Fuchs et al. [1]_ (sections 2.1 and
+    2.2, pp. 8628-8629) used :math:`N_{min} = 2` for Alabama and D.C. and
+    :math:`N_{min} = 10` for Colorado. With ``min_points`` :math:`= N_{min}`
+    above 2 a flash grows only from core sources, those with at least
+    :math:`N_{min}` sources within :math:`\\epsilon`; core sources within
+    :math:`\\epsilon` of each other are in one flash, a source that is not core
+    joins the flash of the core source within :math:`\\epsilon` that comes
+    first in time (DBSCAN leaves the choice among several to the order of the
+    search, which is irrelevant for sources that are near one flash only), and
+    the rest is noise. On 150 synthetic random-walk flashes (issue 278) this
+    reproduces a brute-force DBSCAN (adjusted Rand index 1.0) for
+    :math:`N_{min}` from 1 to 10. Issue 278 reports that
+    on a synthetic set of 150 flashes the Colorado setting gives 162 flashes
+    where single linkage gave 150. Whether the paper removes the noise sources
+    or keeps them as flashes has not been checked against the paper, so both
+    are offered (``noise``).
 
     Maximum duration. Fuchs et al. [1]_ (p. 8629) impose "by default an
     arbitrary 3 s maximum duration" on flashes, because they cluster a buffer
-    of twice that duration in a stream; a flash longer than 3 s can be split
-    by this. It is an imposed limit that changes which sources are grouped.
-    No maximum duration is imposed here (flashes can be longer than 3 s).
+    of twice that duration in a stream. With ``max_duration`` a flash longer
+    than that is cut in time order into consecutive flashes, each starting at
+    the first source later than ``max_duration`` after the start of the
+    previous one. This is radarx's own cut and agrees with the paper only in
+    that long flashes are split; the buffer boundaries of the paper are not
+    reproduced. A 5 s flash with ``max_duration=3`` becomes two. No limit is
+    imposed by default.
 
     The flash centroid is the mean of the source latitudes, longitudes and
     altitudes and the plan area is the convex hull of the sources in an
@@ -793,6 +876,13 @@ def cluster_flashes(ds, *, distance=3000.0, time=0.15, engine="auto", n_threads=
     _check_events(ds)
     if not (distance > 0 and time > 0):
         raise ValueError("distance and time must be positive")
+    if int(min_points) != min_points or min_points < 1:
+        raise ValueError("min_points must be a positive integer")
+    if max_duration is not None and not max_duration > 0:
+        raise ValueError("max_duration must be positive")
+    if noise not in ("flash", "drop"):
+        raise ValueError(f"noise must be 'flash' or 'drop', not {noise!r}")
+    min_points = int(min_points)
     old = [v for v in ds.variables if FLASHES in ds[v].dims]
     ds = ds.drop_vars(old + [v for v in ["event_parent_flash_id"] if v in ds.variables])
     ds, _ = _sorted_events(ds)
@@ -808,11 +898,32 @@ def cluster_flashes(ds, *, distance=3000.0, time=0.15, engine="auto", n_threads=
     nt = int(n_threads or 0)
     if use_compiled:
         labels = _lightning.cluster(
-            _f64(ex), _f64(ey), _f64(ez), _f64(t), float(distance), float(time), nt
+            _f64(ex),
+            _f64(ey),
+            _f64(ez),
+            _f64(t),
+            float(distance),
+            float(time),
+            nt,
+            min_points,
         )
     else:
-        labels = _cluster_numpy(_f64(ex), _f64(ey), _f64(ez), _f64(t), distance, time)
+        labels = _cluster_numpy(
+            _f64(ex), _f64(ey), _f64(ez), _f64(t), distance, time, min_points
+        )
     labels = np.asarray(labels, dtype=np.int64)
+    if noise == "drop" and min_points > 2 and n:
+        # a cluster of at least min_points sources: one-source flashes are noise
+        labels = np.where(np.bincount(labels)[labels] == 1, -1, labels)
+    if max_duration is not None and n:
+        kept = labels >= 0
+        if kept.any():
+            labels[kept] = _split_long_flashes(
+                _number_flashes(labels[kept]), t[kept], float(max_duration)
+            )
+    if n and (labels < 0).any():
+        kept = labels >= 0
+        labels[kept] = _number_flashes(labels[kept])
     nflash = int(labels.max()) + 1 if n else 0
     # plan area in a local azimuthal equidistant projection
     if n:
@@ -829,7 +940,9 @@ def cluster_flashes(ds, *, distance=3000.0, time=0.15, engine="auto", n_threads=
     first, last = np.asarray(first), np.asarray(last)
 
     def mean(v):
-        return np.bincount(labels, weights=v, minlength=nflash) / np.maximum(count, 1)
+        member = labels >= 0
+        total = np.bincount(labels[member], weights=v[member], minlength=nflash)
+        return total / np.maximum(count, 1)
 
     start, end = times[first], times[last]
     fl = {

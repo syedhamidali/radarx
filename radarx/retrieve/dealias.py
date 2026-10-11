@@ -96,6 +96,7 @@ from itertools import pairwise
 import numpy as np
 import xarray as xr
 
+from .._fields import VELOCITY, as_sweep, find_field
 from .._provenance import provenance
 from ._products import product_tree
 
@@ -118,6 +119,7 @@ _VAD_WINDOW = 20  # range gates on each side for the in-sweep VAD fit
 _VAD_MIN_GATES = 50
 _VAD_MIN_SPREAD = 0.02  # azimuth coverage (determinant; full circle 0.25)
 _MIN_NEIGHBOURS = 3
+_MIN_COVERAGE = 180.0  # degrees of azimuth below which zero mean is doubtful
 _MAX_RAY_GAP = 10  # empty rays bridged between regions
 _GATE_PASSES = 2
 
@@ -127,7 +129,7 @@ _GATE_PASSES = 2
 )
 def dealias_velocity(
     radar,
-    field="VRADH",
+    field=None,
     nyquist_velocity=None,
     *,
     threshold=0.3,
@@ -148,10 +150,12 @@ def dealias_velocity(
     ----------
     radar : xarray.Dataset or xarray.DataTree
         A PPI sweep on ``(azimuth, range)`` with ``azimuth`` and
-        ``elevation`` coordinates, or a volume with ``sweep_*`` groups,
-        e.g. from xradar.
+        ``elevation`` coordinates, a single sweep node of a volume
+        (``dtree["sweep_0"]``), or a volume with ``sweep_*`` groups, e.g. from
+        xradar.
     field : str, optional
-        Radial velocity field. Default ``"VRADH"``.
+        Radial velocity field. Default: the first of ``VRADH``, ``VRAD``,
+        ``VRADV``, ``VEL``, ``VELOCITY``, ``velocity`` that the sweep holds.
     nyquist_velocity : float or dict, optional
         Nyquist velocity in m/s. By default it is read from the sweep's
         ``nyquist_velocity`` variable or coordinate (xradar), or from the
@@ -225,7 +229,14 @@ def dealias_velocity(
     absolute fold of the lowest sweep assumes that its mean radial velocity
     is close to zero, as for a horizontally uniform wind seen all around the
     radar; for echoes that cover only part of the circle, pass a
-    ``wind_profile`` (or ``reference``).
+    ``wind_profile`` (or ``reference``). A warning is raised when no
+    reference is available and the largest group of gates covers less than
+    180 degrees of azimuth (a 60 degree sector in a 30 m/s wind with a
+    10 m/s Nyquist velocity came out with no correct gate). The output
+    attribute ``dealias_anchor`` names what fixed the absolute fold of the
+    largest group: ``"wind_profile"``, ``"reference"``, ``"sweep_below"`` or
+    ``"zero_mean"``; the other groups follow the same reference, else the
+    azimuth wind (VAD) fitted to the largest group, else a zero mean.
 
     References
     ----------
@@ -253,6 +264,8 @@ def dealias_velocity(
     >>> products = dtree.radarx.dealias("VRADH")  # doctest: +SKIP
     >>> dtree = dtree.radarx.assign(products)  # doctest: +SKIP
     """
+    radar = as_sweep(radar)
+    field = find_field(radar, VELOCITY, field)
     if products_only:
         name = name or f"{field}_dealiased"
     else:
@@ -284,7 +297,9 @@ def dealias_velocity(
             ref = _fill(ref, _wind_reference(radar, sweep, wind_profile))
         (solved,) = _region_folds([sweep], **options)
         (folds,) = _absolute_folds([sweep], [solved], [ref], **options)
-        return sweep.wrap(folds).rename(name)
+        source = "reference" if reference is not None else "wind_profile"
+        anchor = _anchor_of(sweep, solved[1], ref, source, "")
+        return sweep.wrap(folds, anchor).rename(name)
     if reference is not None:
         raise ValueError("reference is only supported for a single sweep.")
     return _dealias_tree(
@@ -365,11 +380,12 @@ class _Sweep:
         vel[~(np.abs(vel) <= _NYQUIST_TOLERANCE * nyquist)] = np.nan
         self.velocity = np.ascontiguousarray(vel)
         self.links = _ray_links(ds["azimuth"].values)
+        self.azimuth = np.asarray(ds["azimuth"].values, dtype=np.float64)
         az = np.deg2rad(np.asarray(ds["azimuth"].values, dtype=np.float64))
         self.ray_sin = np.ascontiguousarray(np.sin(az))
         self.ray_cos = np.ascontiguousarray(np.cos(az))
 
-    def wrap(self, folds):
+    def wrap(self, folds, anchor=None):
         """Dealiased DataArray with the input's coordinates, dims and dtype."""
         da = self.da
         out = self.velocity + 2.0 * self.nyquist * folds
@@ -390,6 +406,8 @@ class _Sweep:
         attrs.setdefault(
             "standard_name", "radial_velocity_of_scatterers_away_from_instrument"
         )
+        if anchor is not None:
+            attrs["dealias_anchor"] = anchor
         return da.copy(data=out.astype(dtype, copy=False)).assign_attrs(attrs)
 
 
@@ -414,6 +432,52 @@ def _wind_reference(ds, sweep, wind_profile):
     elev = np.broadcast_to(ds["elevation"].values, ds[sweep.ray].shape)
     cos_el = np.cos(np.deg2rad(elev.astype(np.float64)))[:, None]
     return (u * np.sin(az) + v * np.cos(az)) * cos_el
+
+
+def _largest_component(comp):
+    """Mask of the gates of the component with the most gates, or None."""
+    valid = comp >= 0
+    if not valid.any():
+        return None
+    return comp == np.argmax(np.bincount(comp[valid]))
+
+
+def _azimuth_coverage(azimuth, mask):
+    """Degrees of azimuth covered by the rays with gates in ``mask``."""
+    az = np.sort(np.unique(np.mod(azimuth[mask.any(axis=1)], 360.0)))
+    if az.size < 2:
+        return 0.0
+    gaps = np.diff(np.concatenate([az, [az[0] + 360.0]]))
+    typical = np.median(gaps)
+    return float(360.0 - gaps.max() + typical)
+
+
+def _anchor_of(sweep, comp, reference, source, label):
+    """
+    Name of what fixes the absolute fold of the largest group of gates:
+    ``source`` (``"wind_profile"``, ``"reference"`` or ``"sweep_below"``)
+    when the reference has values there, else ``"zero_mean"``, which warns
+    when the group spans less than 180 degrees of azimuth.
+    """
+    group = _largest_component(comp)
+    if group is None:
+        return "zero_mean"
+    if source is not None and reference is not None:
+        if np.isfinite(reference[group]).any():
+            return source
+    coverage = _azimuth_coverage(sweep.azimuth, group)
+    if coverage < _MIN_COVERAGE:
+        warnings.warn(
+            f"dealias_velocity: {label}the largest group of gates covers only "
+            f"{coverage:.0f} degrees of azimuth and no reference velocity is "
+            "available, so its absolute fold assumes a zero mean radial "
+            "velocity and can be wrong by multiples of 2 Vn; pass wind_profile "
+            "or reference. The anchor is stored in the dealias_anchor "
+            "attribute.",
+            UserWarning,
+            stacklevel=4,
+        )
+    return "zero_mean"
 
 
 def _fill(ref, other):
@@ -569,7 +633,20 @@ def _dealias_tree(
     folds = _absolute_folds(
         sweeps, solved, winds, previous=previous, mapping=mapping, **options
     )
-    results = [s.wrap(f) for s, f in zip(sweeps, folds)]
+    results = []
+    for i, (n, s, f) in enumerate(zip(names, sweeps, folds)):
+        ref = winds[i]
+        source = "wind_profile"
+        if previous is not None and previous[i] >= 0:
+            ref = _fill(
+                _chained_reference(
+                    sweeps[previous[i]], folds[previous[i]], *mapping[i]
+                ),
+                ref,
+            )
+            source = "sweep_below"
+        anchor = _anchor_of(s, solved[i][1], ref, source, f"{n}: ")
+        results.append(s.wrap(f, anchor))
     if products_only:
         return product_tree(
             dtree, {n: r.rename(name).to_dataset() for n, r in zip(names, results)}

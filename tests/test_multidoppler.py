@@ -12,6 +12,8 @@ a density profile so that it satisfies the anelastic continuity equation)
 sampled by two virtual radars, and on two NEXRAD radars.
 """
 
+import warnings
+
 import numpy as np
 import pytest
 import xarray as xr
@@ -303,12 +305,19 @@ def test_retrieves_beltrami_flow(beltrami_case, engine):
 @needs_kernel
 def test_engines_agree_end_to_end(beltrami_case):
     ds, bg, _ = beltrami_case
-    a = multi_doppler(ds, bg, fall_speed_correction=False, engine="compiled")
-    b = multi_doppler(ds, bg, fall_speed_correction=False, engine="numpy")
+    # The kernel and the NumPy cost and gradient agree to 1e-16 (see
+    # test_cost_and_gradient_engines_agree). Conjugate gradients stopped at
+    # the default tolerance end after a different number of iterations when
+    # rounding flips the stopping test (114 against 113 on the finest grid
+    # here), which moves the state by 0.03 m/s although the minimum is 1 m/s
+    # away in the flat directions of the cost. The engines are compared at a
+    # tolerance where the iterates have converged.
+    kw = dict(fall_speed_correction=False, tolerance=1e-9, max_iterations=3000)
+    a = multi_doppler(ds, bg, engine="compiled", **kw)
+    b = multi_doppler(ds, bg, engine="numpy", **kw)
     for c in "uvw":
-        # rounding differences (summation order) change the CG iterates slightly
-        np.testing.assert_allclose(a[c], b[c], atol=1e-2)
-    np.testing.assert_allclose(float(a.cost.sum()), float(b.cost.sum()), rtol=1e-6)
+        np.testing.assert_allclose(a[c], b[c], atol=1e-3)
+    np.testing.assert_allclose(float(a.cost.sum()), float(b.cost.sum()), rtol=1e-8)
 
 
 def test_lbfgsb_and_cg_reach_the_same_minimum(beltrami_case):
@@ -338,7 +347,8 @@ def test_coarse_to_fine_levels(beltrami_case):
 
 def test_fall_speed_correction():
     ds, bg, truth = synthetic_case(dbz=45.0)
-    out = multi_doppler(ds, bg)
+    # the synthetic fall speed is the rain law at all heights
+    out = multi_doppler(ds, bg, freezing_level="rain")
     raw = multi_doppler(ds, bg, fall_speed_correction=False)
     m = lobes(out)
     assert rms_error(out, truth, m)["w"] < 0.5 * rms_error(raw, truth, m)["w"]
@@ -518,3 +528,320 @@ def test_real_dual_doppler(nexrad_pair):
     # deep south-westerly flow ahead of the line at mid levels
     mid = out.v.sel(z=5000.0).values[good[4]]
     assert mid.mean() > 10.0
+
+
+# --------------------------------------------------------------------------
+# freezing level, lower boundary, advection of the winds, geodesic gridding
+# --------------------------------------------------------------------------
+
+
+def test_fall_speed_blends_across_the_melting_layer():
+    z = np.array([1000.0, 3200.0, 3750.0, 4000.0, 8000.0])
+    dbz = xr.DataArray(np.full(5, 30.0), dims="z", coords={"z": z})
+    rain, snow = 2.65 * 1e3**0.114, 0.817 * 1e3**0.063
+    assert rain > 5.5 and snow < 1.5  # 5.8 and 1.3 m/s at 30 dBZ (issue 221)
+    vt = fall_speed(dbz, freezing_level=4000.0)
+    # rain below 3500 m, snow from 4000 m, linear in between
+    np.testing.assert_allclose(vt, [rain, rain, rain + 0.5 * (snow - rain), snow, snow])
+    step = fall_speed(dbz, freezing_level=4000.0, melting_depth=0.0)
+    np.testing.assert_allclose(step, [rain, rain, rain, rain, snow])
+    # columns without a freezing level crossing: ice (-inf) and rain (inf) everywhere
+    np.testing.assert_allclose(fall_speed(dbz, freezing_level=-np.inf), snow)
+    np.testing.assert_allclose(fall_speed(dbz, freezing_level=np.inf), rain)
+
+
+def test_no_freezing_level_warns_and_rain_option_is_silent():
+    ds, bg, _ = synthetic_case(dbz=30.0)
+    with pytest.warns(RuntimeWarning, match="no freezing level"):
+        multi_doppler(ds, bg, max_iterations=2)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        multi_doppler(ds, bg, freezing_level="rain", max_iterations=2)
+        out = multi_doppler(ds, bg, freezing_level=4000.0, max_iterations=2)
+    assert float(out.fall_speed.sel(z=10000.0).max()) < 2.0  # snow aloft
+    assert float(out.fall_speed.sel(z=0.0).min()) > 5.0  # rain below
+
+
+def test_freezing_level_from_background_temperature():
+    ds, bg, _ = synthetic_case(dbz=30.0)
+    t = 288.15 - 6.5e-3 * bg.z  # 0 degC at 2308 m
+    bg = bg.assign(temperature=t.broadcast_like(bg.u).transpose("z", "y", "x"))
+    level = md._background_freezing_level(bg)
+    np.testing.assert_allclose(level, 15.0 / 6.5e-3, rtol=1e-3)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        out = multi_doppler(ds, bg, max_iterations=2)
+    assert float(out.fall_speed.sel(z=10000.0).max()) < 2.0
+    # all ice and all rain columns
+    cold = md._background_freezing_level(bg.assign(temperature=bg.temperature - 40.0))
+    warm = md._background_freezing_level(bg.assign(temperature=bg.temperature + 100.0))
+    assert (cold == -np.inf).all() and (warm == np.inf).all()
+
+
+def test_freezing_level_given_and_from_temperature_are_merged():
+    ds, bg, _ = synthetic_case(dbz=30.0)
+    t = 288.15 - 6.5e-3 * bg.z  # 0 degC at 2307.7 m
+    shape = (bg.sizes["y"], bg.sizes["x"])
+    given = np.full(shape, 4000.0)
+    given[:, 0] = np.nan  # no value in the first column
+    bg = bg.assign(
+        temperature=t.broadcast_like(bg.u).transpose("z", "y", "x"),
+        freezing_level=(("y", "x"), given),
+    )
+    level = md._background_freezing_level(bg)
+    assert level.dims == ("y", "x")
+    np.testing.assert_allclose(level.values[:, 1:], 4000.0)  # the given value stays
+    np.testing.assert_allclose(level.values[:, 0], 15.0 / 6.5e-3, rtol=1e-3)
+    # no gaps in the given level: it is used as it is, the temperature is ignored
+    full = bg.assign(freezing_level=(("y", "x"), np.full(shape, 3500.0)))
+    np.testing.assert_allclose(md._background_freezing_level(full), 3500.0)
+    # a temperature without a vertical dimension cannot give a level
+    flat = xr.Dataset({"temperature": (("y", "x"), np.full(shape, 280.0))})
+    assert md._background_freezing_level(flat) is None
+
+
+def test_freezing_level_choices():
+    ds, bg, _ = synthetic_case(dbz=30.0)
+    with pytest.raises(ValueError, match="freezing_level must be 'auto', 'rain'"):
+        multi_doppler(ds, bg, freezing_level="snow", max_iterations=2)
+    # None takes the level of the background, like 'auto'
+    t = 288.15 - 6.5e-3 * bg.z
+    bg = bg.assign(temperature=t.broadcast_like(bg.u).transpose("z", "y", "x"))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        by_none = multi_doppler(ds, bg, freezing_level=None, max_iterations=2)
+    by_auto = multi_doppler(ds, bg, freezing_level="auto", max_iterations=2)
+    np.testing.assert_allclose(by_none.fall_speed, by_auto.fall_speed)
+    assert md._freezing_level_choice(None, None) is None
+    assert md._freezing_level_choice(3000.0, 1000.0) == 3000.0
+
+
+def test_no_volumes_and_bad_bottom_velocity():
+    with pytest.raises(ValueError, match="no radar volumes"):
+        multi_doppler_input([], [0.0], [0.0], [0.0])
+    ds, bg, _ = synthetic_case(dbz=30.0)
+    with pytest.raises(ValueError, match="w_bottom must be finite"):
+        multi_doppler(ds, bg, w_bottom=np.nan, fall_speed_correction=False)
+
+
+def test_shift_winds_needs_an_observation_time_for_every_radar():
+    ds, bg, _, t_a = _translating_case()
+    times = ds.time.values.copy()
+    times[1] = np.datetime64("NaT")
+    with pytest.raises(ValueError, match="a radar has no observation time"):
+        multi_doppler(
+            ds.assign_coords(time=("radar", times)),
+            bg,
+            shift_winds=True,
+            analysis_time=t_a,
+            storm_motion=(10.0, 0.0),
+        )
+
+
+def test_shift_winds_moves_the_reflectivity_with_the_storm():
+    ds, _, _, t_a = _translating_case()
+    c = (20.0, 10.0)
+    x = ds.x.values
+    # a field linear in x and y: the semi-Lagrangian step is exact inside the grid
+    field = 0.001 * x[None, None, :] + 0.002 * ds.y.values[None, :, None]
+    dbz = np.broadcast_to(field, (2, ds.sizes["z"], ds.sizes["y"], ds.sizes["x"]))
+    ds = ds.assign(DBZH=(("radar", "z", "y", "x"), dbz.copy()))
+    vr = ds.VRADH.values.copy()
+    coef = np.zeros((2, 3) + vr.shape[1:])
+    out, vr_out, coef_out = md._shift_observations(
+        ds,
+        vr,
+        coef,
+        reflectivity="DBZH",
+        storm_motion=c,
+        analysis_time=t_a,
+        use_compiled=False,
+        n_threads=None,
+    )
+    # the radars saw the pattern 180 s before and after the analysis time: the
+    # values at the analysis time are those at x - c (t_a - t_k)
+    for k, dt in enumerate((180.0, -180.0)):
+        want = 0.001 * (x[None, None, :] - c[0] * dt) + 0.002 * (
+            ds.y.values[None, :, None] - c[1] * dt
+        )
+        inner = slice(4, -4)
+        np.testing.assert_allclose(
+            out.DBZH.values[k][:, inner, inner],
+            np.broadcast_to(want, out.DBZH.values[k].shape)[:, inner, inner],
+            atol=1e-9,
+        )
+    assert vr_out.shape == vr.shape
+    assert coef_out.shape == coef.shape
+    # the input dataset keeps its reflectivity
+    np.testing.assert_array_equal(ds.DBZH.values, dbz)
+
+
+def _anelastic_case(z0, step=3000.0, dz=500.0, nz=21, a=2e-4, scale=1e4):
+    """Two radars and the analytic anelastic flow of issue 171."""
+    x = np.arange(-30e3, 30e3 + 1, step)
+    y = np.arange(-30e3, 30e3 + 1, step)
+    z = z0 + dz * np.arange(nz)
+    Z, Y, X = np.meshgrid(z, y, x, indexing="ij")
+    u, v = 5.0 + a * X, 2.0 + a * Y
+    w = -2.0 * a * scale * (np.exp(Z / scale) - 1.0)
+    ds = xr.Dataset(coords={"z": z, "y": y, "x": x, "radar": [0, 1]})
+    ds["radar_x"] = ("radar", [-25e3, 25e3])
+    ds["radar_y"] = ("radar", [-20e3, -20e3])
+    ds["radar_altitude"] = ("radar", [0.0, 0.0])
+    geo = radar_geometry(ds)
+    el, az = np.radians(geo.elevation.values), np.radians(geo.azimuth.values)
+    ds["VRADH"] = (
+        ("radar", "z", "y", "x"),
+        np.cos(el) * (np.sin(az) * u + np.cos(az) * v) + np.sin(el) * w,
+    )
+    rho = 1.2 * np.exp(-Z / scale)
+    bg = xr.Dataset(
+        {
+            "u": (("z", "y", "x"), np.full(u.shape, 5.0)),
+            "v": (("z", "y", "x"), np.full(u.shape, 2.0)),
+            "air_density": (("z", "y", "x"), rho),
+        },
+        coords={"z": z, "y": y, "x": x},
+    )
+    return ds, bg, w
+
+
+def test_w_bottom_above_the_ground():
+    kw = dict(fall_speed_correction=False, tolerance=1e-6)
+
+    def error(out, w):
+        mask = (out.beam_crossing_angle > 30).values
+        return float(np.sqrt(np.mean((out.w.values - w)[mask] ** 2)))
+
+    ds, bg, w = _anelastic_case(0.0)
+    assert error(multi_doppler(ds, bg, **kw), w) < 0.1  # 0.04 m/s
+    ds, bg, w = _anelastic_case(500.0)
+    with pytest.warns(RuntimeWarning, match="w = 0 at z = 500"):
+        wrong = multi_doppler(ds, bg, **kw)
+    assert error(wrong, w) > 0.3  # the true w at 500 m is -0.2 m/s
+    w_500 = float(w[0, 0, 0])
+    assert w_500 == pytest.approx(-0.205, abs=1e-3)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        right = multi_doppler(ds, bg, w_bottom=w_500, **kw)
+    assert error(right, w) < 0.1
+    np.testing.assert_allclose(right.w.isel(z=0), w_500, atol=1e-6)
+    # a field on (y, x) works too, and so does the other solver
+    field = xr.DataArray(
+        np.full((ds.sizes["y"], ds.sizes["x"]), w_500), dims=("y", "x")
+    )
+    lb = multi_doppler(
+        ds,
+        bg,
+        w_bottom=field,
+        solver="lbfgsb",
+        levels=1,
+        max_iterations=300,
+        fall_speed_correction=False,
+    )
+    np.testing.assert_allclose(lb.w.isel(z=0), w_500, atol=1e-6)
+    with pytest.raises(ValueError, match="w_bottom"):
+        multi_doppler(ds, bg, w_bottom=np.zeros((2, 2)), **kw)
+
+
+def _translating_case(c=(20.0, 10.0), seconds=180.0):
+    """Beltrami flow translating with ``c``, observed at two different times."""
+    step, nz = 2000.0, 11
+    x = np.arange(-40e3, 40e3 + 1, step)
+    y = np.arange(-40e3, 40e3 + 1, step)
+    z = np.linspace(0.0, 10e3, nz)
+    radars = ((-25e3, -20e3), (25e3, -20e3))
+    t_a = np.datetime64("2022-03-31T00:00:00", "ns")
+    lag = (
+        np.array([-seconds, seconds]).astype("timedelta64[s]").astype("timedelta64[ns]")
+    )
+    ds = xr.Dataset(coords={"z": z, "y": y, "x": x, "radar": [0, 1]})
+    ds["radar_x"] = ("radar", [r[0] for r in radars])
+    ds["radar_y"] = ("radar", [r[1] for r in radars])
+    ds["radar_altitude"] = ("radar", np.zeros(2))
+    geo = radar_geometry(ds)
+    el, az = np.radians(geo.elevation.values), np.radians(geo.azimuth.values)
+    vr = np.empty(el.shape)
+    for k, dt in enumerate([-seconds, seconds]):
+        u, v, w, _ = beltrami(x - c[0] * dt, y - c[1] * dt, z)  # pattern at t_k
+        vr[k] = np.cos(el[k]) * (np.sin(az[k]) * u + np.cos(az[k]) * v)
+        vr[k] += np.sin(el[k]) * w
+    dist = np.hypot(ds.x - ds.radar_x, ds.y - ds.radar_y).transpose("radar", "y", "x")
+    ds["VRADH"] = (
+        ("radar", "z", "y", "x"),
+        np.where((dist < 60e3).values[:, None], vr, np.nan),
+    )
+    ds = ds.assign_coords(time=("radar", t_a + lag))
+    u, v, w, rho = beltrami(x, y, z)
+    bg = xr.Dataset(
+        {
+            "u": (("z", "y", "x"), np.full(u.shape, 8.0)),
+            "v": (("z", "y", "x"), np.full(u.shape, 4.0)),
+            "air_density": (("z", "y", "x"), rho),
+        },
+        coords={"z": z, "y": y, "x": x},
+    )
+    truth = xr.Dataset({n: (("z", "y", "x"), a) for n, a in zip("uvw", (u, v, w))})
+    return ds, bg, truth, t_a
+
+
+def test_shift_winds_beats_advecting_the_radial_velocity():
+    from radarx.retrieve import advect
+
+    ds, bg, truth, t_a = _translating_case()
+    c = (20.0, 10.0)
+    kw = dict(fall_speed_correction=False, tolerance=1e-6)
+    # radial velocity moved to the analysis time as a scalar
+    moved = []
+    for k in range(2):
+        one = ds[["VRADH"]].isel(radar=k, drop=True).assign(time=ds.time.values[k])
+        moved.append(advect(one, *c, time=t_a)["VRADH"])
+    old = ds.assign(VRADH=xr.concat(moved, "radar").transpose("radar", "z", "y", "x"))
+    old = radar_geometry(old.drop_vars("time"))
+    scalar = multi_doppler(old, bg, **kw)
+    shifted = multi_doppler(
+        ds, bg, shift_winds=True, analysis_time=t_a, storm_motion=c, **kw
+    )
+    mask = lobes(shifted)
+    e_old = rms_error(scalar, truth, mask)
+    e_new = rms_error(shifted, truth, mask)
+    for q in "uvw":
+        assert e_new[q] < 0.7 * e_old[q], (q, e_old, e_new)
+    assert e_new["u"] < 0.3 and e_new["v"] < 0.5
+    # default off: no shift, the data are taken at face value
+    plain = multi_doppler(ds, bg, **kw)
+    assert rms_error(plain, truth, mask)["u"] > 1.0
+
+
+def test_shift_winds_errors():
+    ds, bg, _, t_a = _translating_case()
+    with pytest.raises(ValueError, match="analysis_time"):
+        multi_doppler(ds, bg, shift_winds=True, storm_motion=(10.0, 0.0))
+    with pytest.raises(ValueError, match="observation time"):
+        multi_doppler(
+            ds.drop_vars("time"),
+            bg,
+            shift_winds=True,
+            analysis_time=t_a,
+            storm_motion=(10.0, 0.0),
+        )
+
+
+def test_input_places_radars_by_geodesic_distance():
+    """Issue 170: radars 100 km either side of the origin, 35 degrees north."""
+    from tests.grid import test_multi as tm
+
+    east = tm._volume(*tm._site(100e3, 0.0), name="E")
+    west = tm._volume(*tm._site(-100e3, 0.0), name="W")
+    x = np.arange(-40e3, 40e3 + 1, 4e3)
+    y = np.arange(-40e3, 40e3 + 1, 4e3)
+    z = np.arange(1000.0, 4000.1, 500.0)
+    out = multi_doppler_input(
+        [east, west], x, y, z, origin=tm.ORIGIN, velocity="DBZH", reflectivity="RHOHV"
+    )
+    expected = tm.truth(x[None, None, :], y[None, :, None], z[:, None, None])
+    for k in range(2):
+        err = out.DBZH.isel(radar=k).values - expected
+        assert np.sqrt(np.nanmean(err**2)) < 1e-3  # 0.044 dBZ (400 m) before
+    assert out.azimuth.dims == ("radar", "z", "y", "x")
+    np.testing.assert_allclose(out.radar_x, [100e3, -100e3], atol=1.0)

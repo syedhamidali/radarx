@@ -725,3 +725,211 @@ def test_create_cappi_height_window_no_2d_fields_raises():
     tree = DataTree.from_dict({"sweep_0": ds_1d})
     with pytest.raises(ValueError, match="No 2D azimuth/range fields"):
         _create_cappi_height_window_composite(tree, height=150.0)
+
+
+def _tall_volume(field):
+    """
+    Eleven sweeps from 0.5 to 19.5 degrees, georeferenced with xradar.
+
+    ``field`` is ``"z"`` (gate height in km) or ``"ground"`` (ground distance
+    of the gate in km).
+    """
+    from xradar.georeference import antenna_to_cartesian
+
+    azimuth = np.arange(0.0, 360.0, 10.0)
+    ranges = np.arange(1000.0, 120_001.0, 1000.0)
+    sweeps = {}
+    for k, elevation in enumerate(np.linspace(0.5, 19.5, 11)):
+        x, y, z = antenna_to_cartesian(
+            ranges[None, :], azimuth[:, None], np.full((azimuth.size, 1), elevation)
+        )
+        data = z / 1000.0 if field == "z" else np.hypot(x, y) / 1000.0
+        sweeps[f"sweep_{k}"] = xr.Dataset(
+            {"DBZH": (("azimuth", "range"), data, {"units": "dBZ"})},
+            coords={
+                "azimuth": ("azimuth", azimuth),
+                "range": ("range", ranges),
+                "x": (("azimuth", "range"), x),
+                "y": (("azimuth", "range"), y),
+                "z": (("azimuth", "range"), z),
+                "time": np.datetime64("2024-01-01T00:00:00"),
+                "latitude": 28.61,
+                "longitude": 77.23,
+                "altitude": 0.0,
+            },
+            attrs={"sweep_mode": "azimuth_surveillance"},
+        )
+    return DataTree.from_dict(sweeps)
+
+
+def test_polar_cappi_applies_the_vertical_tolerance():
+    """No value where no gate is near the height, however wide the gap (#165)."""
+    volume = _tall_volume("z")
+    ds = create_cappi(
+        volume, 18000.0, method="polar", fields=["DBZH"], vertical_tolerance=100.0
+    )
+    dbz = ds["DBZH"]
+    assert dbz.dims == ("time", "range")
+    ground = ds["range"].values
+    # at 60 km ground range the 15 and 19.5 degree sweeps are 4.5 km apart and
+    # neither is within 100 m of 18 km
+    column = dbz.isel(time=0).values[np.argmin(np.abs(ground - 60e3))]
+    assert np.isnan(column)
+    # a pixel with a gate within the tolerance keeps the interpolated height
+    valid = dbz.isel(time=0).to_masked_array().compressed()
+    assert valid.size > 0
+    np.testing.assert_allclose(valid, 18.0, atol=0.1)
+    # the tolerance matters: wider keeps more pixels, infinity restores the
+    # interpolation across any gap
+    counts = [
+        create_cappi(
+            volume, 18000.0, method="polar", fields=["DBZH"], vertical_tolerance=tol
+        )["DBZH"]
+        .to_masked_array()
+        .count()
+        for tol in (100.0, 1000.0, np.inf)
+    ]
+    assert counts[0] < counts[1] < counts[2]
+    # the default is a limit as well
+    default = create_cappi(volume, 18000.0, method="polar", fields=["DBZH"])
+    assert 0 < default["DBZH"].to_masked_array().count() < counts[2]
+
+
+@pytest.mark.parametrize("method", ["polar_vertical_interpolation", "pseudo_cappi"])
+def test_polar_and_window_cappi_are_labelled_with_ground_range(method):
+    """The value at a pixel comes from the ground distance it is labelled with (#166)."""
+    volume = _tall_volume("ground")
+    ds = create_cappi(volume, 3000.0, method=method, fields=["DBZH"])
+    ground = ds["range"].values / 1000.0
+    value = ds["DBZH"].isel(time=0).to_masked_array()
+    ok = ~np.ma.getmaskarray(value)
+    assert ok.sum() > 20
+    # a field equal to the gate's ground distance is reproduced at the label;
+    # labelled with the slant range the error was 0.5 km at 10 km, 0.2 km at 20 km
+    err = np.abs(value.filled(np.nan) - ground)[ok]
+    assert err.max() < 0.05
+    assert np.all(np.diff(ds["range"].values) > 0)
+
+
+def _smooth_velocity_sweep(seed=0):
+    rng = np.random.default_rng(seed)
+    az = np.arange(360.0)
+    r = 250.0 * np.arange(1, 801)
+    A, R = np.meshgrid(np.radians(az), r, indexing="ij")
+    vel = 15.0 * np.cos(A - 1.0) * (R / 200e3 + 0.3) + rng.normal(0, 0.5, A.shape)
+    return xr.Dataset(
+        {
+            "VRADH": (("azimuth", "range"), vel),
+            "DBZH": (("azimuth", "range"), np.full(A.shape, 30.0)),
+        },
+        coords={"azimuth": az, "range": r},
+    )
+
+
+def test_velocity_texture_filter_keeps_clean_velocity():
+    """The default limit is in m/s: smooth velocity is not removed."""
+    from radarx.retrieve.cappi import _apply_velocity_texture_gate_filter as gate_filter
+
+    ds = _smooth_velocity_sweep()
+    out = gate_filter(ds, "VRADH", "DBZH")
+    assert np.isfinite(out["VRADH"].values).mean() > 0.99
+
+
+def test_velocity_texture_filter_removes_garbage():
+    from radarx.retrieve.cappi import _apply_velocity_texture_gate_filter as gate_filter
+
+    ds = _smooth_velocity_sweep()
+    rng = np.random.default_rng(1)
+    bad = rng.random(ds["VRADH"].shape) < 0.5
+    ds["VRADH"] = ds["VRADH"].copy(
+        data=np.where(bad, rng.uniform(-25, 25, bad.shape), ds["VRADH"].values)
+    )
+    out = gate_filter(ds, "VRADH", "DBZH")
+    kept = np.isfinite(out["VRADH"].values)
+    assert kept[bad].mean() < 0.1
+    # the limit can be set (m/s)
+    loose = gate_filter(ds, "VRADH", "DBZH", texture_threshold=14.0)
+    assert np.isfinite(loose["VRADH"].values)[bad].mean() > 0.5
+
+
+def test_create_cappi_texture_threshold_is_passed_on(synthetic_volume):
+    kw = dict(
+        height=150.0,
+        fields=["DBZH"],
+        method="height_window_composite",
+        apply_filter=True,
+    )
+    default = create_cappi(synthetic_volume, **kw)
+    strict = create_cappi(synthetic_volume, texture_threshold=0.0, **kw)
+    assert np.isfinite(default["DBZH"].values).any()
+    assert not np.isfinite(strict["DBZH"].values).any()
+
+
+@pytest.mark.parametrize("method", ["cartesian_idw", "polar_vertical_interpolation"])
+def test_create_cappi_linear_units(synthetic_volume, method):
+    """Averaging in linear units gives a higher dBZ than averaging the dB."""
+    kw = dict(height=200.0, method=method, fields=["DBZH"])
+    in_db = create_cappi(synthetic_volume, **kw)
+    lin = create_cappi(synthetic_volume, linear_units=True, **kw)
+    a, b = in_db["DBZH"].values, lin["DBZH"].values
+    both = np.isfinite(a) & np.isfinite(b)
+    assert both.any()
+    assert np.all(b[both] >= a[both] - 1e-9)
+    assert (b[both] - a[both]).max() > 0.1
+    assert lin.attrs["interpolated_in_linear_units"] == "DBZH"
+    assert in_db.attrs["interpolated_in_linear_units"] == ""
+
+
+@pytest.mark.parametrize("method", ["cartesian_idw", "polar_vertical_interpolation"])
+def test_create_cappi_warns_for_velocity(synthetic_volume, method):
+    with pytest.warns(UserWarning, match="VRADH"):
+        create_cappi(synthetic_volume, height=200.0, method=method)
+
+
+def test_reference_ground_range():
+    from radarx.retrieve.cappi import _reference_ground_range
+
+    az = np.arange(0.0, 360.0, 90.0)
+    r = np.array([1000.0, 2000.0, 3000.0])
+    ang = np.deg2rad(az)[:, None]
+    x, y = r[None, :] * np.sin(ang), r[None, :] * np.cos(ang)
+    dims = ("azimuth", "range")
+    ref = xr.Dataset(coords={"x": (dims, x), "y": (dims, y)})
+    # the median over the rays of the distance from the radar
+    np.testing.assert_allclose(_reference_ground_range(ref), r)
+    # no x or y: the slant range is kept
+    assert _reference_ground_range(ref.drop_vars("y")) is None
+    assert _reference_ground_range(xr.Dataset()) is None
+    # x and y that are not (ray, gate) fields of the same shape
+    flat = xr.Dataset(coords={"x": ("range", r), "y": ("range", r)})
+    assert _reference_ground_range(flat) is None
+    mismatch = xr.Dataset(
+        coords={"x": (dims, x), "y": (("azimuth", "other"), y[:, :2] + 0.0)}
+    )
+    assert _reference_ground_range(mismatch) is None
+    # a distance that does not increase with range, or is not finite
+    back = xr.Dataset(coords={"x": (dims, x[:, ::-1]), "y": (dims, y[:, ::-1])})
+    assert _reference_ground_range(back) is None
+    holes = x.copy()
+    holes[:, 1] = np.nan
+    gap = xr.Dataset(coords={"x": (dims, holes), "y": (dims, y)})
+    with pytest.warns(RuntimeWarning, match="All-NaN"):
+        assert _reference_ground_range(gap) is None
+
+
+def test_onto_ground_range_needs_two_gates_per_ray():
+    from radarx.retrieve.cappi import _onto_ground_range
+
+    ground_ref = np.array([1000.0, 2000.0, 3000.0])
+    values = np.array([[1.0, 2.0, 3.0], [5.0, 6.0, 7.0], [9.0, 9.0, 9.0]])
+    ground = np.array(
+        [
+            [1000.0, 2000.0, 3000.0],  # the same positions: unchanged
+            [1500.0, 2500.0, 3500.0],  # shifted by half a gate: interpolated
+            [np.nan, np.nan, 3000.0],  # a single gate with a distance: no row
+        ]
+    )
+    out = _onto_ground_range(values, ground, ground_ref)
+    np.testing.assert_allclose(out[0], [1.0, 2.0, 3.0])
+    np.testing.assert_allclose(out[1], [np.nan, 5.5, 6.5])
+    assert np.isnan(out[2]).all()

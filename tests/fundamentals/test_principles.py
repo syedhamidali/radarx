@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from radarx.fundamentals import principles
 
@@ -86,3 +87,43 @@ def test_compute_nyquist_velocity():
     assert np.isclose(
         principles.compute_nyquist_velocity(prf, wavelength), expected_nyquist
     )
+
+
+def test_ambiguous_names_are_not_exported_by_the_package():
+    import warnings
+
+    import radarx.fundamentals as fundamentals
+
+    names = (
+        "absorption_coefficient",
+        "scattering_coefficient",
+        "extinction_coefficient",
+        "doppler_frequency_shift",
+    )
+    for name in names:
+        assert name not in fundamentals.__all__
+        assert name not in vars(fundamentals)
+    # unambiguous names stay at package level, the modules are reachable
+    assert "k_complex" in fundamentals.__all__
+    assert fundamentals.attenuation.absorption_coefficient is not (
+        fundamentals.scattering.absorption_coefficient
+    )
+    assert fundamentals.doppler.doppler_frequency_shift is not (
+        fundamentals.principles.doppler_frequency_shift
+    )
+    # the old names still work, with a warning, and are what they used to be
+    for name, module in (
+        ("absorption_coefficient", fundamentals.scattering),
+        ("scattering_coefficient", fundamentals.scattering),
+        ("extinction_coefficient", fundamentals.scattering),
+        ("doppler_frequency_shift", fundamentals.principles),
+    ):
+        with pytest.warns(DeprecationWarning, match=name):
+            func = getattr(fundamentals, name)
+        assert func is getattr(module, name)
+    with pytest.warns(DeprecationWarning):
+        from radarx.fundamentals import doppler_frequency_shift  # noqa: F401
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(AttributeError):
+            fundamentals.no_such_function

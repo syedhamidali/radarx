@@ -11,18 +11,24 @@ Radarx IO
 .. automodule:: radarx.io.imd
 .. automodule:: radarx.io.aws_data
 .. automodule:: radarx.io.sounding
+.. automodule:: radarx.io.parcel
 .. automodule:: radarx.io.surface
 .. automodule:: radarx.io.profiler
 .. automodule:: radarx.io.lma
 .. automodule:: radarx.io.disdrometer
+.. automodule:: radarx.io.wrfda
+.. automodule:: radarx.io.dart
 """
 
 from .imd import *  # noqa
 from .aws_data import *  # noqa
 from .sounding import *  # noqa
+from .parcel import *  # noqa
 from .surface import *  # noqa
 from .profiler import *  # noqa
 from .lma import *  # noqa
 from .disdrometer import *  # noqa
+from .wrfda import *  # noqa
+from .dart import *  # noqa
 
 __all__ = [s for s in dir() if not s.startswith("_")]

@@ -271,9 +271,39 @@ inline Stop stop_at(const Ctx& c, Hints& h, double x, double y, double zconst) {
 // drop physics
 // -------------------------------------------------------------------------
 
+// Drag balance of a sphere (see radarx/retrieve/_raindrop_fall.py): speed [m s-1]
+// and derivative with D [m s-1 mm-1] for D in mm. The Best number
+// C_D Re^2 = (4/3) g rho_a (rho_w - rho_a) D^3 / mu^2 = 24 Re + 3.6 Re^1.687
+// (C_D = 24 / Re (1 + 0.15 Re^0.687), Schiller and Naumann) is solved for Re by
+// Newton iterations from an upper bound of the root (h is convex, increasing).
+inline void sphere_speed(double d, double& v, double& dv) {
+    constexpr double g = 9.81, rho_a = 1.204, rho_w = 1000.0, mu = 1.81e-5;
+    const double dm = std::max(d, 1e-9) * 1e-3;
+    const double x = 4.0 / 3.0 * g * rho_a * (rho_w - rho_a) * dm * dm * dm / (mu * mu);
+    double re = std::min(x / 24.0, std::pow(x / 3.6, 1.0 / 1.687));
+    for (int it = 0; it < 12; ++it) {
+        const double h = 24.0 * re + 3.6 * std::pow(re, 1.687) - x;
+        re -= h / (24.0 + 6.0732 * std::pow(re, 0.687));
+    }
+    const double slope = 24.0 + 6.0732 * std::pow(re, 0.687);
+    const double dre = 3.0 * x / dm / slope;
+    v = re * mu / (rho_a * dm);
+    dv = 1e-3 * mu / rho_a * (dre / dm - re / (dm * dm));
+}
+
 // Sea-level terminal speed (at least zero) and its derivative with respect to D.
+// Kinds: 0 Atlas et al. (1973), 1 a D^b exp(-f D), 2 polynomial, 3 sphere drag
+// balance below D = fc[0] mm and Atlas et al. above.
 inline void v0_of(const Ctx& c, double d, double& v, double& dv) {
-    if (c.fall_kind == 0) {
+    if (c.fall_kind == 3) {
+        if (d < c.fc[0]) {
+            sphere_speed(d, v, dv);
+        } else {
+            const double e = std::exp(-0.6 * d);
+            v = 9.65 - 10.3 * e;
+            dv = 6.18 * e;
+        }
+    } else if (c.fall_kind == 0) {
         const double e = std::exp(-0.6 * d);
         v = 9.65 - 10.3 * e;
         dv = 6.18 * e;
@@ -625,7 +655,8 @@ py::tuple integrate_py(const DArray& x0, const DArray& y0, const DArray& z0,
     c.fc = fc.data();
     if (!(c.dt > 0.0) || !(c.max_time >= 0.0)) throw std::invalid_argument("bad time step");
     if (c.scheme != 2 && c.scheme != 4) throw std::invalid_argument("scheme must be 2 or 4");
-    if (c.fall_kind < 0 || c.fall_kind > 2) throw std::invalid_argument("bad fall_kind");
+    if (c.fall_kind < 0 || c.fall_kind > 3) throw std::invalid_argument("bad fall_kind");
+    if (c.fall_kind == 3 && c.nfc < 1) throw std::invalid_argument("drag balance needs the joining diameter");
     if (c.fall_kind == 1 && c.nfc < 3) throw std::invalid_argument("power law needs a, b, f");
     if (c.fall_kind == 2 && c.nfc < 1) throw std::invalid_argument("polynomial needs coefficients");
     if (c.turb && !(c.timescale > 0.0)) throw std::invalid_argument("bad timescale");

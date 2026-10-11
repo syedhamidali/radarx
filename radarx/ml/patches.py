@@ -37,6 +37,7 @@ from __future__ import annotations
 
 __all__ = ["PatchIndex", "polar_patches", "reassemble", "normalize", "denormalize"]
 
+import warnings
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -57,6 +58,7 @@ _NORMALIZATION_ATTRS = (
     "ml_scale",
     "ml_units",
     "ml_standard_name",
+    "ml_fill_value",
 )
 
 
@@ -583,14 +585,30 @@ def _statistics(values, method):
 
 def _normalize_array(da, method, offset, scale, fill_value, clip):
     values = da.values if isinstance(da, xr.DataArray) else np.asarray(da)
-    if offset is None or scale is None:
+    computed = offset is None or scale is None
+    if computed:
         if not np.isfinite(values).any():
             raise ValueError("cannot compute normalisation statistics of all-NaN data")
+        warnings.warn(
+            "normalising with statistics of this field; a trained model expects the "
+            "fixed offset and scale of its training data: pass offset and scale",
+            UserWarning,
+            stacklevel=4,
+        )
         o, s = _statistics(values, method)
         offset = o if offset is None else offset
         scale = s if scale is None else scale
-    if not scale or not np.isfinite(scale):
-        scale = 1.0  # constant field
+    if not np.isfinite(scale) or not np.isfinite(offset):
+        raise ValueError(f"offset and scale must be finite, not {offset}, {scale}")
+    if scale == 0.0:
+        if not computed:
+            raise ValueError("scale must not be zero")
+        warnings.warn(
+            "the field is constant: its scale is zero and 1 is used instead",
+            RuntimeWarning,
+            stacklevel=4,
+        )
+        scale = 1.0
     out = (da - offset) / scale
     if clip is not None:
         out = np.clip(out, *clip)
@@ -613,6 +631,8 @@ def _normalize_array(da, method, offset, scale, fill_value, clip):
             attrs["ml_units"] = da.attrs["units"]
         if "standard_name" in da.attrs:
             attrs["ml_standard_name"] = da.attrs["standard_name"]
+        if fill_value is not None:
+            attrs["ml_fill_value"] = float(fill_value)
         out.attrs = attrs
     return out
 
@@ -637,12 +657,19 @@ def normalize(
         minimum and range (to [0, 1]). NaN is ignored. Models are normally
         trained with fixed values taken from their authors (for example the
         fixed bounds of TorNet, see :mod:`radarx.retrieve.tornado`); pass
-        them. The two methods are the standard arithmetic definitions, not
+        them. Statistics of the field itself differ from scan to scan and
+        from the constants of the training data, so a warning is issued when
+        they are used. A zero scale raises an error (a constant field with
+        computed statistics warns and uses a scale of 1). The two methods are the standard arithmetic definitions, not
         taken from a particular paper.
     offset, scale : float or dict, optional
         Fixed offset and scale (per variable name for a Dataset).
     fill_value : float, optional
-        Replace NaN (no echo, no data) after scaling, e.g. with 0.
+        Replace NaN (no echo, no data) after scaling, e.g. with 0. This is not
+        reversible: :func:`denormalize` cannot tell the filled gates from
+        measured values equal to the fill value. The value is recorded as
+        ``ml_fill_value`` and :func:`denormalize` takes a ``mask`` of the
+        gates to set back to NaN.
     clip : tuple of float, optional
         Clip the scaled values to ``(low, high)``.
 
@@ -671,7 +698,7 @@ def normalize(
     return _normalize_array(obj, method, offset, scale, fill_value, clip)
 
 
-def _denormalize_array(da, offset, scale):
+def _denormalize_array(da, offset, scale, mask=None):
     attrs = getattr(da, "attrs", {})
     offset = attrs.get("ml_offset") if offset is None else offset
     scale = attrs.get("ml_scale") if scale is None else scale
@@ -680,6 +707,20 @@ def _denormalize_array(da, offset, scale):
             "offset and scale are needed (no ml_offset/ml_scale attributes)"
         )
     out = da * scale + offset
+    if mask is not None:
+        out = (
+            out.where(~mask)
+            if isinstance(out, xr.DataArray)
+            else np.where(np.asarray(mask, dtype=bool), np.nan, out)
+        )
+    elif "ml_fill_value" in attrs:
+        warnings.warn(
+            "the field was normalised with fill_value: the filled gates come back "
+            "as the fill value mapped to physical units, not as NaN; pass mask= "
+            "to set them to NaN",
+            UserWarning,
+            stacklevel=4,
+        )
     if isinstance(out, xr.DataArray):
         new = {k: v for k, v in attrs.items() if k not in _NORMALIZATION_ATTRS}
         if "ml_units" in attrs:
@@ -690,7 +731,7 @@ def _denormalize_array(da, offset, scale):
     return out
 
 
-def denormalize(obj, *, offset=None, scale=None):
+def denormalize(obj, *, offset=None, scale=None, mask=None):
     """
     Undo :func:`normalize`: ``x * scale + offset``.
 
@@ -701,6 +742,9 @@ def denormalize(obj, *, offset=None, scale=None):
     offset, scale : float or dict, optional
         Default to the ``ml_offset`` and ``ml_scale`` attributes written by
         :func:`normalize`; needed for NumPy arrays.
+    mask : array-like of bool, optional
+        Gates without data (True), set to NaN. Needed to undo ``fill_value``
+        of :func:`normalize`, which cannot be inverted without it.
 
     Returns
     -------
@@ -710,9 +754,12 @@ def denormalize(obj, *, offset=None, scale=None):
         return obj.assign(
             {
                 v: _denormalize_array(
-                    da, _per_variable(offset, v), _per_variable(scale, v)
+                    da,
+                    _per_variable(offset, v),
+                    _per_variable(scale, v),
+                    _per_variable(mask, v),
                 )
                 for v, da in obj.data_vars.items()
             }
         )
-    return _denormalize_array(obj, offset, scale)
+    return _denormalize_array(obj, offset, scale, mask)
