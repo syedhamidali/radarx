@@ -397,74 +397,140 @@ double solve4(double G[4][4], double r[4]) {
     return det;
 }
 
-void vad_ring(const double* vr, const double* az, int64_t naz, double cos_el,
-              int64_t min_gates, double min_spread, double* o, int64_t stride) {
-    for (int j = 0; j < kVadRows; ++j) o[j * stride] = kNaN;
+// One range ring: the radial velocities and azimuths of its gates.
+struct Ring {
+    const double* vr;
+    const double* az;
+    int64_t naz;
+    bool valid(int64_t k) const { return std::isfinite(vr[k]) && std::isfinite(az[k]); }
+};
+
+// Number of usable gates and the sums of sin(az), cos(az) and vr over them.
+struct Sums {
+    double n, ss, sc, sv;
+};
+
+// Means of sin(az), cos(az) and vr.
+struct Means {
+    double ms, mc, mv;
+};
+
+// Centered sums of squares and cross products of the first harmonic fit.
+struct Covariance {
+    double css, ccc, csc, csv, ccv;
+    double det() const { return css * ccc - csc * csc; }
+};
+
+Sums ring_sums(const Ring& g) {
     double n = 0, ss = 0, sc = 0, sv = 0;
-    for (int64_t k = 0; k < naz; ++k) {
-        if (!std::isfinite(vr[k]) || !std::isfinite(az[k])) continue;
+    for (int64_t k = 0; k < g.naz; ++k) {
+        if (!g.valid(k)) continue;
         n += 1;
-        ss += std::sin(az[k]);
-        sc += std::cos(az[k]);
-        sv += vr[k];
+        ss += std::sin(g.az[k]);
+        sc += std::cos(g.az[k]);
+        sv += g.vr[k];
     }
-    o[4 * stride] = n;
-    if (n < static_cast<double>(min_gates) || n < 3) return;
-    const double ms = ss / n, mc = sc / n, mv = sv / n;
+    return {n, ss, sc, sv};
+}
+
+Covariance first_covariance(const Ring& g, const Means& m) {
     double css = 0, ccc = 0, csc = 0, csv = 0, ccv = 0;
-    for (int64_t k = 0; k < naz; ++k) {
-        if (!std::isfinite(vr[k]) || !std::isfinite(az[k])) continue;
-        const double ds = std::sin(az[k]) - ms, dc = std::cos(az[k]) - mc;
-        const double dv = vr[k] - mv;
+    for (int64_t k = 0; k < g.naz; ++k) {
+        if (!g.valid(k)) continue;
+        const double ds = std::sin(g.az[k]) - m.ms, dc = std::cos(g.az[k]) - m.mc;
+        const double dv = g.vr[k] - m.mv;
         css += ds * ds;
         ccc += dc * dc;
         csc += ds * dc;
         csv += ds * dv;
         ccv += dc * dv;
     }
-    const double det = css * ccc - csc * csc;
-    if (!(det / (n * n) >= min_spread)) return;
-    const double b1 = (ccc * csv - csc * ccv) / det;
-    const double b2 = (css * ccv - csc * csv) / det;
-    const double a0 = mv - b1 * ms - b2 * mc;
+    return {css, ccc, csc, csv, ccv};
+}
+
+// Sum of squared residuals of the first harmonic fit.
+double first_sse(const Ring& g, double a0, double b1, double b2) {
     double sse = 0;
-    for (int64_t k = 0; k < naz; ++k) {
-        if (!std::isfinite(vr[k]) || !std::isfinite(az[k])) continue;
-        const double r = vr[k] - a0 - b1 * std::sin(az[k]) - b2 * std::cos(az[k]);
+    for (int64_t k = 0; k < g.naz; ++k) {
+        if (!g.valid(k)) continue;
+        const double r = g.vr[k] - a0 - b1 * std::sin(g.az[k]) - b2 * std::cos(g.az[k]);
         sse += r * r;
     }
+    return sse;
+}
+
+// First harmonic fit: writes rows 0-3; false when the ring spans too little of the
+// circle for the fit.
+bool fit_first(const Ring& g, const Sums& s, const Means& m, double cos_el,
+               double min_spread, double* o, int64_t stride) {
+    const Covariance c = first_covariance(g, m);
+    const double det = c.det();
+    if (!(det / (s.n * s.n) >= min_spread)) return false;
+    const double b1 = (c.ccc * c.csv - c.csc * c.ccv) / det;
+    const double b2 = (c.css * c.ccv - c.csc * c.csv) / det;
+    const double a0 = m.mv - b1 * m.ms - b2 * m.mc;
+    const double sse = first_sse(g, a0, b1, b2);
     o[0] = b1 / cos_el;
     o[stride] = b2 / cos_el;
     o[2 * stride] = a0;
-    o[3 * stride] = std::sqrt(sse / n);
+    o[3 * stride] = std::sqrt(sse / s.n);
+    return true;
+}
 
-    // second harmonic: determinant of the covariance of (sin, cos, sin 2, cos 2)
-    // is 1/16 for a full circle; the ring needs min_spread / 4 of it (the same
-    // fraction of the full-circle value as for the first harmonic)
-    double m2 = 0, m3 = 0;
-    for (int64_t k = 0; k < naz; ++k) {
-        if (!std::isfinite(vr[k]) || !std::isfinite(az[k])) continue;
-        m2 += std::sin(2.0 * az[k]);
-        m3 += std::cos(2.0 * az[k]);
+// Means of sin(2 az) and cos(2 az).
+void second_means(const Ring& g, double n, double& m2, double& m3) {
+    m2 = 0;
+    m3 = 0;
+    for (int64_t k = 0; k < g.naz; ++k) {
+        if (!g.valid(k)) continue;
+        m2 += std::sin(2.0 * g.az[k]);
+        m3 += std::cos(2.0 * g.az[k]);
     }
     m2 /= n;
     m3 /= n;
-    double G[4][4] = {}, r[4] = {};
-    for (int64_t k = 0; k < naz; ++k) {
-        if (!std::isfinite(vr[k]) || !std::isfinite(az[k])) continue;
-        const double x[4] = {std::sin(az[k]) - ms, std::cos(az[k]) - mc,
-                             std::sin(2.0 * az[k]) - m2, std::cos(2.0 * az[k]) - m3};
-        const double dv = vr[k] - mv;
+}
+
+// Normal equations of the fit with the second harmonic added.
+void second_normal_equations(const Ring& g, const Means& m, double m2, double m3,
+                             double G[4][4], double r[4]) {
+    for (int64_t k = 0; k < g.naz; ++k) {
+        if (!g.valid(k)) continue;
+        const double x[4] = {std::sin(g.az[k]) - m.ms, std::cos(g.az[k]) - m.mc,
+                             std::sin(2.0 * g.az[k]) - m2, std::cos(2.0 * g.az[k]) - m3};
+        const double dv = g.vr[k] - m.mv;
         for (int i = 0; i < 4; ++i) {
             for (int j = 0; j < 4; ++j) G[i][j] += x[i] * x[j];
             r[i] += x[i] * dv;
         }
     }
+}
+
+// Second harmonic fit: writes rows 5-7. The determinant of the covariance of
+// (sin, cos, sin 2, cos 2) is 1/16 for a full circle; the ring needs min_spread / 4
+// of it (the same fraction of the full-circle value as for the first harmonic).
+void fit_second(const Ring& g, const Sums& s, const Means& m, double min_spread,
+                double* o, int64_t stride) {
+    double m2, m3;
+    second_means(g, s.n, m2, m3);
+    double G[4][4] = {}, r[4] = {};
+    second_normal_equations(g, m, m2, m3, G, r);
     const double det4 = solve4(G, r);
-    if (!(det4 / (n * n * n * n) >= 0.25 * min_spread)) return;
-    o[5 * stride] = mv - r[0] * ms - r[1] * mc - r[2] * m2 - r[3] * m3;
+    if (!(det4 / (s.n * s.n * s.n * s.n) >= 0.25 * min_spread)) return;
+    o[5 * stride] = m.mv - r[0] * m.ms - r[1] * m.mc - r[2] * m2 - r[3] * m3;
     o[6 * stride] = r[2];
     o[7 * stride] = r[3];
+}
+
+void vad_ring(const double* vr, const double* az, int64_t naz, double cos_el,
+              int64_t min_gates, double min_spread, double* o, int64_t stride) {
+    for (int j = 0; j < kVadRows; ++j) o[j * stride] = kNaN;
+    const Ring g{vr, az, naz};
+    const Sums s = ring_sums(g);
+    o[4 * stride] = s.n;
+    if (s.n < static_cast<double>(min_gates) || s.n < 3) return;
+    const Means m{s.ss / s.n, s.sc / s.n, s.sv / s.n};
+    if (!fit_first(g, s, m, cos_el, min_spread, o, stride)) return;
+    fit_second(g, s, m, min_spread, o, stride);
 }
 
 DArray vad_py(DArray vr, DArray az, DArray cos_el, int64_t min_gates, double min_spread,
