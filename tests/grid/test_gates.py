@@ -514,6 +514,10 @@ def test_errors(random_volume, monkeypatch):
         gates.grid_gates(random_volume, "DBZH", x=GRID["x"])
     with pytest.raises(ValueError, match="required"):
         gates.grid_rhi(random_volume, "DBZH", z=GRID["z"])
+    with pytest.raises(ValueError, match="finite"):
+        gates.grid_gates(random_volume, "DBZH", x=[np.nan], y=[0.0], z=[1000.0])
+    with pytest.raises(ValueError, match="finite"):
+        gates.grid_rhi(random_volume, "DBZH", distance=[1e3], z=[np.inf])
     with pytest.raises(ValueError, match="weighting must be"):
         gates.grid_gates(random_volume, "DBZH", **GRID, weighting="kriging")
     with pytest.raises(ValueError, match="weighting must be"):

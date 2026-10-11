@@ -236,6 +236,12 @@ def _use_compiled(engine):
     return HAS_COMPILED_KERNEL and engine != "numpy"
 
 
+def _finite(*axes):
+    for axis in axes:
+        if not np.isfinite(axis).all():
+            raise ValueError("the target coordinates must be finite numbers")
+
+
 def _variables(sweeps, data_vars):
     if data_vars is None:
         return [
@@ -483,6 +489,7 @@ def grid_gates(
     if x is None or y is None or z is None:
         raise ValueError("x, y and z target coordinates are required.")
     x, y, z = (np.asarray(a, dtype=np.float64) for a in (x, y, z))
+    _finite(x, y, z)
     cx, cy = (np.ascontiguousarray(a.ravel()) for a in np.meshgrid(x, y))
     fields, info = _map_fields(
         dtree,
@@ -621,6 +628,7 @@ def grid_rhi(
     if distance is None or z is None:
         raise ValueError("distance and z target coordinates are required.")
     distance, z = (np.asarray(a, dtype=np.float64) for a in (distance, z))
+    _finite(distance, z)
     phi = _plane_azimuth(dtree, azimuth)
     cx = np.ascontiguousarray(distance * np.sin(np.radians(phi)))
     cy = np.ascontiguousarray(distance * np.cos(np.radians(phi)))
