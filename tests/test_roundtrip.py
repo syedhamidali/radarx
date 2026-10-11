@@ -21,6 +21,8 @@ import radarx
 
 from .grid.test_cone import GRID
 from .grid.test_cone import _volume as cone_volume
+from .grid.test_gates import GRID as GATES_GRID
+from .grid.test_gates import _rhi_volume
 from .test_advection import T0, _blobs
 from .test_beam_blockage import bell, geographic_dem
 from .test_beam_blockage import make_sweep as bb_sweep
@@ -196,6 +198,16 @@ PRODUCTS = {
     "vil": lambda: R.vil(storm_volume()),
     "echo_top": lambda: R.echo_top(storm_volume()),
     "grid_cones": _grid,
+    "grid_gates": lambda: radarx.grid.grid_gates(
+        cone_volume(field="random"), "DBZH", **GRID, roi=1500.0
+    ),
+    "grid_rhi": lambda: radarx.grid.grid_rhi(
+        _rhi_volume(lambda x, y, z: 20.0 + 0.001 * z),
+        "DBZH",
+        distance=np.arange(2e3, 20e3, 2e3),
+        z=GATES_GRID["z"],
+        roi=1000.0,
+    ),
     "liquid_water_content": lambda: R.liquid_water_content(storm_volume()),
     "vil_density": lambda: R.vil_density(storm_volume()),
     "qvp": lambda: R.qvp(qvp_volume()),
@@ -352,7 +364,9 @@ def test_not_covered_products_exist():
     assert set(NOT_COVERED) <= set(DECORATED)
 
 
-@pytest.mark.parametrize("name", ["estimate_kdp", "hid (park)", "grid_cones"])
+@pytest.mark.parametrize(
+    "name", ["estimate_kdp", "hid (park)", "grid_cones", "grid_gates", "grid_rhi"]
+)
 def test_chunked_product_round_trip_is_identical(name, tmp_path):
     pytest.importorskip("dask")
     out = PRODUCTS[name]()
