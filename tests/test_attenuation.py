@@ -647,3 +647,122 @@ def test_engines_give_the_same_dataset():
     if not attmod.HAS_COMPILED_KERNEL:  # pragma: no cover
         with pytest.raises(ImportError):
             correct_attenuation(ds, band="X", engine="compiled")
+
+
+# --------------------------------------------------------------------------
+# argument resolution and error paths
+# --------------------------------------------------------------------------
+
+
+def test_compiled_engine_needs_the_kernel(monkeypatch):
+    ds = sweep_from(attenuate(dsd_profile("C")))
+    monkeypatch.setattr(attmod, "HAS_COMPILED_KERNEL", False)
+    with pytest.raises(ImportError, match="compiled attenuation kernel"):
+        correct_attenuation(ds, band="C", engine="compiled")
+    # the NumPy engine and 'auto' still work without the kernel
+    auto = correct_attenuation(ds, band="C", engine="auto")
+    ref = correct_attenuation(ds, band="C", engine="numpy")
+    xr.testing.assert_allclose(auto, ref)
+
+
+def test_rays_without_a_rain_path_give_no_correction():
+    """Every span below min_dphi: nothing is corrected (NumPy engine)."""
+    ng = 60
+    z = np.full((4, ng), 30.0)
+    phi = np.tile(np.linspace(0.0, 1.0, ng), (4, 1))
+    valid = np.ones((4, ng), dtype=np.uint8)
+    ah, pia, dphi = attmod._correct_numpy(z, phi, valid, DR, 0, 0.08, 0.8, 3.0, np.nan)
+    assert np.isnan(ah).all() and np.all(pia == 0.0)
+    np.testing.assert_allclose(dphi, 1.0)
+
+
+def test_sweep_without_rays_is_empty():
+    ds = sweep_from(attenuate(dsd_profile("C")))
+    none = ds.isel(azimuth=slice(0, 0))
+    out = correct_attenuation(none, band="C")
+    assert out.DBZH_corrected.shape == (0, ds.sizes["range"])
+    assert out.DELTA_PHIDP.shape == (0,)
+    empty = np.zeros((0, 5))
+    ah, pia, dphi = attmod._block(
+        empty, empty, empty, DR, "zphi", 0.05, 0.8, 3.0, None, 0, False
+    )
+    assert ah.shape == (0, 5) and pia.shape == (0, 5) and dphi.shape == (0,)
+
+
+def test_coefficient_ranges_are_checked():
+    ds = sweep_from(attenuate(dsd_profile("C")))
+    with pytest.raises(ValueError, match="beta must not be negative"):
+        correct_attenuation(ds, alpha=0.05, beta=-0.01, b=0.8)
+    with pytest.raises(ValueError, match="b must be in"):
+        correct_attenuation(ds, alpha=0.05, beta=0.01, b=2.5)
+    with pytest.raises(ValueError, match="b must be in"):
+        correct_attenuation(ds, alpha=0.05, beta=0.01, b=0.0)
+    with pytest.raises(ValueError, match="min_dphi must not be negative"):
+        correct_attenuation(ds, band="C", min_dphi=-1.0)
+
+
+def test_fields_by_name_or_by_array():
+    ds = sweep_from(attenuate(dsd_profile("C")))
+    ref = correct_attenuation(ds, band="C")
+    # DataArrays for the fields of a Dataset
+    by_array = correct_attenuation(
+        ds, dbzh=ds.DBZH, phidp=ds.PHIDP_processed, zdr=ds.ZDR, band="C"
+    )
+    xr.testing.assert_allclose(by_array.DBZH_corrected, ref.DBZH_corrected)
+    xr.testing.assert_allclose(by_array.ZDR_corrected, ref.ZDR_corrected)
+    # names of fields of the Dataset
+    renamed = ds.rename(PHIDP_processed="PHI_USER", DBZH="Z_USER")
+    by_name = correct_attenuation(renamed, dbzh="Z_USER", phidp="PHI_USER", band="C")
+    np.testing.assert_allclose(by_name.PIA, ref.PIA)
+    with pytest.raises(KeyError, match="'PHI_NONE' is not in the dataset"):
+        correct_attenuation(ds, phidp="PHI_NONE", band="C")
+    with pytest.raises(KeyError, match="'REFL_NONE' is not in the dataset"):
+        correct_attenuation(ds, dbzh="REFL_NONE", band="C")
+
+
+def test_dataarray_inputs_must_be_dataarrays():
+    ds = sweep_from(attenuate(dsd_profile("C")))
+    with pytest.raises(ValueError, match="zdr must be a DataArray"):
+        correct_attenuation(ds.DBZH, phidp=ds.PHIDP_processed, zdr="ZDR", band="C")
+    with pytest.raises(ValueError, match="mask must be a DataArray"):
+        correct_attenuation(ds.DBZH, phidp=ds.PHIDP_processed, mask="keep", band="C")
+
+
+def test_reflectivity_needs_a_range_dimension():
+    ds = sweep_from(attenuate(dsd_profile("C")))
+    z = ds.DBZH.rename(range="gate")
+    with pytest.raises(ValueError, match="needs a 'range' dimension"):
+        correct_attenuation(z, phidp=ds.PHIDP_processed.rename(range="gate"), band="C")
+
+
+def test_melting_height_adds_the_radar_altitude():
+    ds = sweep_from(attenuate(dsd_profile("C")))
+    ds = ds.assign_coords(altitude=300.0)
+    level = float(attmod.beam_center_height(ds.range, 0.5, radar_height=300.0)[250])
+    melt = correct_attenuation(ds, band="C", method="linear", melting=level)
+    # gate 250 is at the melting level: from there on the path is held
+    np.testing.assert_allclose(melt.PIA.values[0, 250:], melt.PIA.values[0, 249])
+    # the same level with the radar at sea level: the beam is lower, more rain gates
+    low = correct_attenuation(
+        ds.assign_coords(altitude=0.0), band="C", method="linear", melting=level
+    )
+    assert low.PIA.values[0, -1] > melt.PIA.values[0, -1]
+    # neither an elevation nor a z coordinate: the beam height is unknown
+    with pytest.raises(ValueError, match="melting needs the beam height"):
+        correct_attenuation(ds.drop_vars("elevation"), band="C", melting=level)
+    # the dataset can be missing: the height comes from the field itself
+    height = attmod._gate_height(ds.DBZH.assign_coords(altitude=300.0), None)
+    np.testing.assert_allclose(height.values[250], level)
+
+
+def test_datatree_reads_the_band_from_radar_parameters():
+    ds = sweep_from(attenuate(dsd_profile("X")))
+    tree = xr.DataTree.from_dict(
+        {
+            "/": xr.Dataset(),
+            "/radar_parameters": xr.Dataset({"frequency": 9.4e9}),
+            "/sweep_0": ds,
+        }
+    )
+    out = correct_attenuation(tree)
+    assert out["sweep_0"].attrs["attenuation_alpha"] == 0.25

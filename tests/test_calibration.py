@@ -490,6 +490,156 @@ def test_errors():
         zdr_offset(np.zeros(3))
 
 
+@pytest.mark.parametrize("engine", ENGINES)
+def test_zdr_offset_ignores_low_snr_and_masked_gates(engine):
+    nray, ngate = 40, 100
+    n = nray * ngate
+    zdr = np.full((nray, ngate), 0.42)
+    snr = np.full((nray, ngate), 30.0)
+    snr[:, :30] = 5.0
+    zdr[:, :30] = 4.0  # low SNR: would move the offset if it were used
+    keep = np.ones((nray, ngate), dtype=bool)
+    keep[:10] = False
+    zdr[:10] = -3.0  # masked rays
+    ds = sweep_from(
+        {"DBZH": np.full(n, 20.0), "ZDR": zdr.ravel(), "RHOHV": np.full(n, 0.99)},
+        nray,
+        ngate,
+        elevation=90.0,
+    )
+    ds["SNR"] = (ds.ZDR.dims, snr)
+    mask = xr.DataArray(keep, dims=ds.ZDR.dims)
+    out = zdr_offset(
+        ds, "vertical", snr_min=20.0, mask=mask, min_count=10, engine=engine
+    )
+    assert float(out.ZDR_OFFSET) == pytest.approx(0.42, abs=1e-6)
+    assert int(out.ZDR_OFFSET_COUNT) == 30 * 70
+    # the SNR is taken from a named field as well
+    named = zdr_offset(
+        ds.rename(SNR="SNR_USER"),
+        "vertical",
+        snr="SNR_USER",
+        snr_min=20.0,
+        mask=mask,
+        min_count=10,
+        engine=engine,
+    )
+    assert int(named.ZDR_OFFSET_COUNT) == 30 * 70
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_z_offset_ignores_low_snr_and_masked_gates(engine):
+    ds, _ = consistent_rain(nray=90, ngate=300, noise=False)
+    snr = xr.full_like(ds.DBZH, 30.0)
+    snr[:, :100] = 5.0
+    keep = xr.ones_like(ds.DBZH, dtype=bool)
+    keep[:30] = False
+    clean = ds.assign(SNR=snr)
+    bad = clean.copy(deep=True)
+    bad["DBZH"] = bad.DBZH.where(snr >= 20.0, bad.DBZH + 15.0)
+    bad["DBZH"] = bad.DBZH.where(keep, bad.DBZH - 15.0)
+    kwargs = dict(
+        zdr_offset=DZDR,
+        band="S",
+        snr_min=20.0,
+        mask=keep,
+        min_bin_count=10,
+        engine=engine,
+    )
+    # gates that are excluded cannot change the result
+    got = z_offset(bad, **kwargs)
+    want = z_offset(clean, **kwargs)
+    assert int(want.Z_OFFSET_BINS) >= 5
+    for name in want.data_vars:
+        np.testing.assert_allclose(got[name], want[name], equal_nan=True)
+    assert float(got.Z_OFFSET) == pytest.approx(DZ, abs=0.15)
+    # without the selection the biased gates are used
+    unselected = z_offset(bad, zdr_offset=DZDR, band="S", min_bin_count=10)
+    assert abs(float(unselected.Z_OFFSET) - DZ) > 0.5
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_phidp_offset_ignores_low_snr_and_masked_gates(engine):
+    ds = phidp_sweep(system=37.0)
+    snr = xr.full_like(ds.PHIDP, 30.0)
+    snr[:, :10] = 5.0
+    keep = xr.ones_like(ds.PHIDP, dtype=bool)
+    keep[:, 10:15] = False
+    phi = ds.PHIDP.values.copy()
+    phi[:, :15] = np.mod(phi[:, :15] + 100.0, 360.0)  # wrong where excluded
+    ds = ds.assign(PHIDP=(ds.PHIDP.dims, phi), SNR=snr)
+    out = phidp_offset(
+        ds, snr_min=20.0, mask=keep, min_range=0.0, n_gates=5, engine=engine
+    )
+    assert abs(float(out.SYSTEM_PHIDP) - 37.0) < 0.5
+    assert int(out.SYSTEM_PHIDP_GATES.values[0]) == 5
+    biased = phidp_offset(ds, min_range=0.0, n_gates=5, engine=engine)
+    assert abs(float(biased.SYSTEM_PHIDP) - 37.0) > 50.0
+
+
+def test_rhohv_can_be_switched_off_or_given():
+    ds = marshall_palmer_rain(offset=0.3)
+    ds["RHOHV"] = ds.RHOHV * 0 + 0.5  # every gate would fail the default limit
+    kw = dict(z_range=(10, 40), band="S")
+    assert int(zdr_offset(ds, "light_rain", **kw).ZDR_OFFSET_COUNT) == 0
+    free = zdr_offset(ds, "light_rain", rhohv=False, **kw)
+    assert int(free.ZDR_OFFSET_COUNT) > 0
+    assert float(free.ZDR_OFFSET) == pytest.approx(0.3, abs=0.02)
+    good = ds.RHOHV * 0 + 0.99
+    by_array = zdr_offset(ds, "light_rain", rhohv=good, **kw)
+    by_name = zdr_offset(ds.assign(RHO_USER=good), "light_rain", rhohv="RHO_USER", **kw)
+    assert int(by_array.ZDR_OFFSET_COUNT) == int(free.ZDR_OFFSET_COUNT)
+    xr.testing.assert_allclose(by_name.ZDR_OFFSET, by_array.ZDR_OFFSET)
+    with pytest.raises(
+        ValueError, match="the light_rain method needs the reflectivity"
+    ):
+        zdr_offset(ds, "light_rain", dbz=False, **kw)
+    # a DataArray with no RHOHV given has none to use
+    with pytest.raises(ValueError, match="pass correlation coefficient as a DataArray"):
+        zdr_offset(ds.ZDR, "vertical", rhohv="RHOHV", dbz=ds.DBZH)
+
+
+def test_zdr_offset_over_chosen_dimensions():
+    nray, ngate = 6, 50
+    bias = np.linspace(-0.3, 0.4, nray)
+    zdr = np.repeat(bias[:, None], ngate, axis=1)
+    ds = sweep_from(
+        {"DBZH": np.full(nray * ngate, 20.0), "ZDR": zdr.ravel()},
+        nray,
+        ngate,
+        elevation=90.0,
+    )
+    # reduce the range only: one offset per ray
+    per_ray = zdr_offset(ds, "vertical", dim="range", rhohv=False, min_count=10)
+    assert per_ray.ZDR_OFFSET.dims == ("azimuth",)
+    np.testing.assert_allclose(per_ray.ZDR_OFFSET, bias, atol=1e-6)
+    assert (per_ray.ZDR_OFFSET_COUNT == ngate).all()
+    # a list of dimensions is the same as the default
+    both = zdr_offset(ds, "vertical", dim=["azimuth", "range"], rhohv=False)
+    assert both.ZDR_OFFSET.ndim == 0
+    assert float(both.ZDR_OFFSET) == pytest.approx(float(np.median(bias)), abs=1e-6)
+    # no range or height dimension: all the dimensions are reduced
+    line = xr.Dataset(
+        {"ZDR": ("time", np.full(150, 0.25)), "DBZH": ("time", np.full(150, 20.0))},
+        coords={"time": np.arange(150)},
+    )
+    out = zdr_offset(line, "vertical", rhohv=False, elevation=90.0)
+    assert float(out.ZDR_OFFSET) == pytest.approx(0.25, abs=1e-6)
+    assert int(out.ZDR_OFFSET_COUNT) == 150
+
+
+def test_z_offset_datatree_and_compiled_engine_check(monkeypatch):
+    ds, _ = consistent_rain(nray=90, ngate=300)
+    tree = xr.DataTree.from_dict({"/": xr.Dataset(), "sweep_0": ds, "sweep_1": ds})
+    out = z_offset(tree, zdr_offset=DZDR, band="S")
+    assert set(out.children) == {"sweep_0", "sweep_1"}
+    ref = z_offset(ds, zdr_offset=DZDR, band="S")
+    np.testing.assert_allclose(out["sweep_0"].Z_OFFSET, ref.Z_OFFSET)
+    monkeypatch.setattr(calmod, "HAS_COMPILED_KERNEL", False)
+    with pytest.raises(ImportError, match="compiled calibration kernel"):
+        z_offset(ds, band="S", engine="compiled")
+
+
 def test_provenance_and_references():
     ds, _ = consistent_rain(nray=40, ngate=100)
     ds["PHIDP"] = (ds.DBZH.dims, np.full(ds.DBZH.shape, 20.0))
