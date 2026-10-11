@@ -67,14 +67,64 @@ Holleman and Beekhuis (2003) [6]. It is a different problem from the
 region-based dealiasing above, which unfolds the velocity of a single-PRF
 sweep.
 
-**UNRAVEL (not implemented).** The modular algorithm of Louf et al. (2020)
-[5] is the open alternative that the module cites. It is not implemented
-here because its algorithm could not be read: the publisher's site refused
-the automated download of the paper (HTTP 403) and no other open copy was
-found, so only its abstract was seen. Its reference implementation is open
-source (MIT licence, ``github.com/vlouf/dealias``); it was not ported,
-because an implementation that cannot be checked against the paper would be
-a guess at its behaviour.
+**UNRAVEL.** ``dealias_velocity(..., method="unravel")`` implements the
+algorithm of Louf et al. (2020) [5], which needs no reference velocity. The
+paper was read in full; the reference implementation of the authors (open
+source, ``github.com/vlouf/dealias``) was used to cross-check the order of the
+steps and the values the paper does not give, and no code was taken from it.
+A gate carries the flag -3 (missing), 0 (not processed), 1 (processed,
+unchanged) or 2 (processed, unfolded); a gate is accepted when its unfolded
+velocity is within ``alpha * Vn`` of a reference velocity (Eq. 3 of the paper),
+and a gate that has been processed is changed only by the checks. The default
+driver (Fig. 4 of the paper) does, for each sweep:
+
+1. *Pre-processing.* A modified z-score, ``(v - median) / MAD``, in a running
+   window of 10 gates along each ray; a gate with ``|z| > 2`` is unfolded
+   against the mean of the window gates of the sign of the median, then against
+   the mean of the others, and is made missing if neither is within the
+   tolerance.
+2. *Reference radials.* Two rays that hold enough gates (two thirds of the
+   mean number per ray), no gate near the Nyquist velocity (``|v| >= 0.6 Vn``),
+   and minima of the curve of the mean ``|v|`` along the azimuth; the first is
+   the lowest minimum, the second the minimum at least 120 degrees from it that
+   stands deepest below the adjacent maxima. If none qualifies the first
+   condition, then the second, are dropped. The reference radials are assumed
+   not to be aliased, and their neighbours are unfolded against them.
+3. *First pass.* Azimuthal continuity in four sectors that start at the
+   reference radials and end halfway between them, each gate against the mean
+   of the three rays before it (at least two processed), ``alpha = 0.6``.
+4. *Range and azimuthal continuity,* twice with a growing window (6 then 12):
+   along the ray, onward then backward, against the mean of the processed
+   gates in the window; across the rays from the first reference radial,
+   clockwise then counterclockwise, against their median.
+5. *Box.* Four passes against the median of the processed gates in a box
+   around the gate, of (5, 5), (20, 10), (40, 10) and (80, 20) gates and rays.
+6. *Closest reference.* The gates that remain take the fold nearest to the
+   median of the processed gates around the closest processed gate.
+7. *Checks.* The processed gates are brought within ``alpha * Vn`` of a
+   least-squares line along each ray, and of the mean of the gates within one
+   standard deviation of the mean in a box of (80, 20); for a volume, every
+   sweep is then compared in the same way with the corrected sweep below it
+   (``sweep_continuity``).
+
+The Nyquist velocity, ``alpha`` (0.8) and the sizes and windows above are those
+of the paper where it gives them (the first-pass ``alpha`` 0.6, ``beta`` 0.6,
+the z-score window 10 and cutoff 2, the window 6 and the four boxes). It does
+not give the tolerance of the pre-processing (0.3, as in the reference
+implementation), the second window (12, ditto), the size of the box around the
+closest reference (5 x 5), the box of the check (80, 20, ditto), the windows of
+the 3-D check (10 gates, 3 rays), the number of near-Nyquist gates a reference
+radial may hold (3, ditto) and the least-squares check's minimum of 10 gates;
+these are radarx choices. Not implemented: the "long range" driver of the
+paper (windows 12, 24, 48 and 96 alternating with 6), the box that precedes
+the gate instead of surrounding it, and the use of a reflectivity gate filter.
+A compiled kernel (sweeps in parallel, the passes of a sweep sequential, as the
+paper's passes are) and a Python specification
+(:mod:`radarx.retrieve._unravel_numpy`) give identical values. On the Doppler
+cuts of KGWX volumes folded to a C-band Nyquist velocity of 13.3 m/s its errors
+are lower than those of the region method on two of four volumes and higher on
+the other two (see the notebook); the error rate of the paper's test is not
+reproduced.
 
 .. autosummary::
    :nosignatures:
@@ -132,6 +182,14 @@ except ImportError:  # pragma: no cover - depends on the build
     _dealias = None
     HAS_COMPILED_KERNEL = False
 
+try:
+    from . import _unravel
+
+    HAS_UNRAVEL_KERNEL = True
+except ImportError:  # pragma: no cover - depends on the build
+    _unravel = None
+    HAS_UNRAVEL_KERNEL = False
+
 _SCALE = 1 << 20  # fixed point for velocity jumps in units of 2 Vn
 # The constants below are radarx's own choices, not values from a paper.
 _NYQUIST_TOLERANCE = 1.01  # values beyond this times Vn are flags, not data
@@ -148,7 +206,8 @@ _GATE_PASSES = 2
 
 
 @provenance(
-    "Region-based velocity dealiasing, radarx's own combination of published concepts"
+    "Velocity dealiasing: region-based (radarx's combination of published "
+    "concepts) or UNRAVEL (Louf et al. 2020)"
 )
 def dealias_velocity(
     radar,
@@ -162,6 +221,8 @@ def dealias_velocity(
     sweep_continuity=True,
     name=None,
     confidence=False,
+    method="region",
+    alpha=0.8,
     max_iterations=100,
     n_threads=None,
     engine="auto",
@@ -218,6 +279,20 @@ def dealias_velocity(
         sweep then gives a Dataset instead of a DataArray; a volume gives the
         extra variable in every sweep node. Not available with
         ``products_only=False``.
+    method : {"region", "unravel"}, optional
+        ``"region"`` (default) is the region-based method of the module
+        documentation. ``"unravel"`` is the UNRAVEL algorithm of Louf et al.
+        (2020) [5], which needs no reference velocity: it ignores
+        ``threshold``, ``max_gap`` and ``max_iterations``, does not take
+        ``wind_profile`` or ``reference``, and uses ``sweep_continuity`` for
+        its 3-D check between neighbouring elevation angles (see the module
+        documentation for what was implemented). A volume is processed with
+        the sweeps in parallel; the passes inside a sweep are sequential.
+    alpha : float, optional
+        UNRAVEL's stringency (Eq. 3 of the paper): a gate is accepted when its
+        unfolded velocity is within ``alpha * Vn`` of the reference. Default
+        0.8, the paper's default (0.6 in its first pass, which is fixed).
+        Only used with ``method="unravel"``.
     max_iterations : int, optional
         Maximum passes of the fold optimisation. Default 100.
     n_threads : int, optional
@@ -287,6 +362,10 @@ def dealias_velocity(
        kinematic properties of a wind field using Doppler radar. *J. Appl.
        Meteor.*, **7** (1), 105-113,
        https://doi.org/10.1175/1520-0450(1968)007<0105:TDOKPO>2.0.CO;2
+    .. [5] Louf, V., A. Protat, R. C. Jackson, S. M. Collis, and J. Helmus,
+       2020: UNRAVEL: A robust modular velocity dealiasing technique for
+       Doppler radar. *J. Atmos. Oceanic Technol.*, **37** (5), 741-758,
+       https://doi.org/10.1175/JTECH-D-19-0020.1
 
     Examples
     --------
@@ -298,6 +377,18 @@ def dealias_velocity(
     """
     radar = as_sweep(radar)
     field = find_field(radar, VELOCITY, field)
+    if method not in ("region", "unravel"):
+        raise ValueError(f"method must be 'region' or 'unravel', not {method!r}")
+    if method == "unravel":
+        if wind_profile is not None or reference is not None:
+            raise ValueError(
+                "method='unravel' needs no reference velocity: "
+                "do not pass wind_profile or reference"
+            )
+        if not products_only:
+            raise ValueError("method='unravel' needs products_only=True")
+        if not 0 < alpha <= 2:
+            raise ValueError("alpha must be in (0, 2]")
     if confidence and not products_only:
         raise ValueError("confidence=True needs products_only=True")
     if products_only:
@@ -321,8 +412,17 @@ def dealias_velocity(
         "n_threads": int(n_threads or 0),
         "compiled": compiled,
     }
+    if method == "unravel":
+        if engine == "compiled" and not HAS_UNRAVEL_KERNEL:
+            raise ImportError("the compiled UNRAVEL kernel is not available")
+        options["compiled"] = HAS_UNRAVEL_KERNEL and engine != "numpy"
+        options["alpha"] = float(alpha)
     if isinstance(radar, xr.Dataset):
         sweep = _Sweep(radar, field, _nyquist(radar, field, nyquist_velocity))
+        if method == "unravel":
+            (folds,) = _unravel_folds([radar], [sweep], False, options)
+            result = sweep.wrap(folds, "unravel", "unravel").rename(name)
+            return _with_confidence(result, sweep, options) if confidence else result
         ref = None
         if reference is not None:
             ref = reference.broadcast_like(sweep.da).transpose(sweep.ray, "range")
@@ -348,6 +448,7 @@ def dealias_velocity(
         name=name,
         products_only=products_only,
         confidence=confidence,
+        method=method,
         **options,
     )
 
@@ -444,7 +545,7 @@ class _Sweep:
         self.ray_sin = np.ascontiguousarray(np.sin(az))
         self.ray_cos = np.ascontiguousarray(np.cos(az))
 
-    def wrap(self, folds, anchor=None):
+    def wrap(self, folds, anchor=None, method="region"):
         """Dealiased DataArray with the input's coordinates, dims and dtype."""
         da = self.da
         out = self.velocity + 2.0 * self.nyquist * folds
@@ -458,7 +559,13 @@ class _Sweep:
                 + da.attrs.get("long_name", "radial velocity"),
                 "nyquist_velocity": self.nyquist,
                 "comment": "Nyquist folds unfolded with radarx.retrieve."
-                "dealias_velocity (region-based, Jing and Wiener 1993)",
+                "dealias_velocity ("
+                + (
+                    "UNRAVEL, Louf et al. 2020"
+                    if method == "unravel"
+                    else "region-based, Jing and Wiener 1993"
+                )
+                + ")",
             }
         )
         attrs.setdefault("units", "m s-1")
@@ -660,6 +767,7 @@ def _dealias_tree(
     name,
     products_only,
     confidence=False,
+    method="region",
     **options,
 ):
     """Dealias every sweep of a volume that contains ``field``."""
@@ -675,6 +783,14 @@ def _dealias_tree(
         _Sweep(datasets[n], field, _nyquist(datasets[n], field, nyquist_velocity, n))
         for n in names
     ]
+    if method == "unravel":
+        folds = _unravel_folds(
+            [datasets[n] for n in names], sweeps, sweep_continuity, options
+        )
+        results = [s.wrap(f, "unravel", "unravel") for s, f in zip(sweeps, folds)]
+        return _tree_products(
+            dtree, names, sweeps, results, name, products_only, confidence, options
+        )
     # the expensive part, all sweeps in parallel
     solved = _region_folds(sweeps, **options)
     winds = [
@@ -705,6 +821,15 @@ def _dealias_tree(
             source = "sweep_below"
         anchor = _anchor_of(s, solved[i][1], ref, source, f"{n}: ")
         results.append(s.wrap(f, anchor))
+    return _tree_products(
+        dtree, names, sweeps, results, name, products_only, confidence, options
+    )
+
+
+def _tree_products(
+    dtree, names, sweeps, results, name, products_only, confidence, options
+):
+    """The result tree (or the input with the field added) of a dealiased volume."""
     if products_only:
         nodes = {}
         for n, s, r in zip(names, sweeps, results):
@@ -715,6 +840,128 @@ def _dealias_tree(
     for n, result in zip(names, results):
         out[f"{n}/{name}"] = result.variable
     return out
+
+
+def _unravel_folds(datasets, sweeps, three_d, options):
+    """
+    Integer folds (NaN where a gate is dropped) of sweeps dealiased with UNRAVEL.
+
+    ``datasets`` are the sweeps ordered by elevation. Each sweep is run with
+    the default driver of the paper (compiled kernel, or the Python
+    specification of :mod:`radarx.retrieve._unravel_numpy`), then, if
+    ``three_d`` and there are several, every sweep above the lowest is checked
+    against the corrected sweep below it.
+    """
+    from . import _unravel_numpy as spec
+
+    p = dict(spec.DEFAULTS, alpha=options["alpha"])
+    prepared = []
+    for ds, s in zip(datasets, sweeps):
+        rng = np.ascontiguousarray(ds["range"].values, dtype=np.float64)
+        elevation = (
+            float(np.nanmedian(ds["elevation"].values))
+            if "elevation" in ds.variables
+            else 0.0
+        )
+        ground = rng * np.cos(np.deg2rad(elevation))
+        az = np.deg2rad(s.azimuth)
+        x = np.ascontiguousarray(ground[None, :] * np.sin(az)[:, None])
+        y = np.ascontiguousarray(ground[None, :] * np.cos(az)[:, None])
+        prepared.append((rng, ground, x, y, _is_full_circle(s.azimuth)))
+    if options["compiled"]:
+        solved = _unravel.unravel(
+            [s.velocity for s in sweeps],
+            [s.nyquist for s in sweeps],
+            [s.azimuth for s in sweeps],
+            [q[0] for q in prepared],
+            [q[2] for q in prepared],
+            [q[3] for q in prepared],
+            [q[4] for q in prepared],
+            p["alpha"],
+            p["alpha_first"],
+            p["alpha_pre"],
+            p["z_cutoff"],
+            p["pre_window"],
+            p["beta"],
+            list(p["windows"]),
+            [tuple(b) for b in p["boxes"]],
+            p["closest_half"],
+            tuple(p["check_box"]),
+            options["n_threads"],
+        )
+    else:
+        solved = [
+            spec.unravel_sweep(
+                s.velocity, s.nyquist, s.azimuth, q[0], q[2], q[3], q[4], p
+            )
+            for s, q in zip(sweeps, prepared)
+        ]
+    outs = [np.array(o) for o, _ in solved]
+    flags = [np.array(f) for _, f in solved]
+    if three_d:
+        for k in range(1, len(sweeps)):
+            _check_below(k, outs, flags, sweeps, datasets, prepared, p, options)
+    folds = []
+    for out, s in zip(outs, sweeps):
+        with np.errstate(invalid="ignore"):
+            folds.append(
+                np.where(
+                    np.isfinite(out),
+                    np.rint((out - s.velocity) / (2.0 * s.nyquist)),
+                    np.nan,
+                )
+            )
+    return folds
+
+
+def _check_below(k, outs, flags, sweeps, datasets, prepared, p, options):
+    """3-D check of sweep ``k`` against the corrected sweep ``k - 1`` (in place)."""
+    from . import _unravel_numpy as spec
+
+    s, below = sweeps[k], sweeps[k - 1]
+    ground, ground_b = prepared[k][1], prepared[k - 1][1]
+    step = np.abs((np.diff(below.azimuth) + 180.0) % 360.0 - 180.0)
+    az_step = float(np.median(step)) if step.size else 1.0
+    gate_step = float(np.median(np.diff(ground_b))) if ground_b.size > 1 else 1.0
+    iray = _nearest_index(below.azimuth, s.azimuth, 1.5 * az_step, 360.0)
+    igate = _nearest_index(ground_b, ground, 1.5 * gate_step)
+    shape = outs[k].shape
+    iray2 = np.ascontiguousarray(np.broadcast_to(iray[:, None], shape), dtype=np.int32)
+    igate2 = np.ascontiguousarray(
+        np.broadcast_to(igate[None, :], shape), dtype=np.int32
+    )
+    wg, wr = p["window_3d"]
+    if options["compiled"]:
+        new = _unravel.check_3d(
+            outs[k],
+            flags[k],
+            outs[k - 1],
+            flags[k - 1],
+            iray2,
+            igate2,
+            s.nyquist,
+            p["alpha"],
+            wg,
+            wr,
+            prepared[k - 1][4],
+        )
+    else:
+        new = outs[k].copy()
+        spec.check_3d(
+            new,
+            flags[k],
+            outs[k - 1],
+            flags[k - 1],
+            iray2,
+            igate2,
+            s.nyquist,
+            p["alpha"],
+            (wg, wr),
+            prepared[k - 1][4],
+        )
+    outs[k] = np.asarray(new)
+    done = np.isfinite(outs[k])
+    flags[k] = np.where(done, np.where(outs[k] == s.velocity, 1, 2), -3).astype(np.int8)
 
 
 # --------------------------------------------------------------------------

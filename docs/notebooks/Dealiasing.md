@@ -40,6 +40,7 @@ import time
 
 import matplotlib.pyplot as plt
 import numpy as np
+import xarray as xr
 import xradar as xd
 from xradar.io.backends.nexrad_level2 import NEXRADLevel2File
 
@@ -222,20 +223,93 @@ axes[0].set_ylabel("y (km)")
 plt.show()
 ```
 
-## Dual-PRF radars and other methods
+## Dual-PRF radars
 
 A dual-PRF radar unfolds the velocity of each ray with a noisy estimate and
 leaves isolated dealiasing errors of a different kind; they are corrected with
 `correct_dual_prf` (Holleman and Beekhuis 2003), shown on synthetic data in
 section 13 of the [second workflow notebook](Radar_Workflow_Advanced).
 
-The modular algorithm UNRAVEL (Louf et al. 2020) is the open alternative that
-`radarx.retrieve.dealias` cites. It is **not implemented**: its algorithm could
-not be read (the publisher's site refused the automated download of the paper
-and no other open copy was found; only the abstract was seen), and an implementation that cannot be
-checked against the paper would be a guess at its behaviour. Its reference
-implementation is open source (MIT licence, `github.com/vlouf/dealias`) and was
-not ported.
+## UNRAVEL
+
+`method="unravel"` runs the UNRAVEL algorithm of Louf et al. (2020), which needs
+no reference wind. The paper gives the algorithm as modules that a driver calls
+in order: a modified z-score filter that also unfolds the edges of aliased
+areas, two reference radials found where the mean $|v|$ is smallest, azimuthal
+continuity in four sectors from them with $\alpha = 0.6$, range and azimuthal
+continuity and box passes with growing windows against the mean or median of
+the gates processed so far, a closest-reference module for what is left, a
+least-squares check along each ray and a box check, and for a volume a check
+against the sweep below ($\alpha = 0.8$ in the later modules). The module
+documentation of `radarx.retrieve.dealias` lists the steps, which values are the
+paper's and which radarx chose where the paper is silent. What was not
+implemented: the "long range" driver, the box that precedes the gate and the
+reflectivity gate filter. A compiled kernel runs the sweeps in parallel; a
+Python specification gives identical values.
+
+Because it assumes that the reference radials are not aliased, UNRAVEL is
+built for a Nyquist velocity that is larger than the winds seen on the radials
+of lowest $|v|$; a field folded more than once at those radials is out of its
+reach. On the KGWX volume the two methods agree where both have a value:
+
+```{code-cell} ipython3
+start = time.perf_counter()
+unraveled = dtree.radarx.assign(dtree.radarx.dealias("VRADH", method="unravel"))
+print(f"UNRAVEL dealiased the volume in {time.perf_counter() - start:.1f} s")
+for name in ("sweep_1", "sweep_8"):
+    a = dealiased[name].to_dataset().VRADH_dealiased
+    b = unraveled[name].to_dataset().VRADH_dealiased
+    both = a.notnull() & b.notnull()
+    print(f"{name}: UNRAVEL keeps {float(b.notnull().sum() / a.notnull().sum()):.1%} of the gates of the "
+          f"region method; they agree within 1 m/s on {float((abs(a - b) < 1).where(both).mean()):.2%}")
+```
+
+The test of the UNRAVEL paper folds an unaliased volume into a smaller Nyquist
+interval and counts the gates that a method does not bring back. Here the
+Doppler cuts up to 4°, dealiased at their own Nyquist velocity (about 26 m/s)
+by the region method, are folded into ±13.3 m/s, the Nyquist velocity of a
+C-band radar, and both methods unfold them again; a gate is an error if it
+differs from the reference by more than 1 m/s:
+
+```{code-cell} ipython3
+nodes = {"/": dtree.to_dataset()}
+for name in sweeps:
+    ds = dealiased[name].to_dataset()
+    if "VRADH" in ds and float(ds.elevation.median()) < 4.1:
+        folded = (ds.VRADH_dealiased + 13.3) % 26.6 - 13.3
+        nodes["/" + name] = ds[["VRADH_dealiased"]].assign(VRADH=folded).assign_coords(nyquist_velocity=13.3)
+c_band = xr.DataTree.from_dict(nodes)
+rows = {}
+for label, kwargs in (("region", {}), ("UNRAVEL", dict(method="unravel")),
+                      ("UNRAVEL, 2-D only", dict(method="unravel", sweep_continuity=False))):
+    start = time.perf_counter()
+    result = c_band.radarx.dealias("VRADH", **kwargs)
+    errors = total = 0
+    for name in result.children:
+        got = result[name].to_dataset().VRADH_dealiased
+        ref = c_band[name].to_dataset().VRADH_dealiased
+        both = got.notnull() & ref.notnull()
+        errors += int(((abs(got - ref) > 1.0) & both).sum())
+        total += int(both.sum())
+    rows[label] = (errors / total, time.perf_counter() - start)
+for label, (rate, seconds) in rows.items():
+    print(f"{label:18s} error rate {rate:.2%} in {seconds:.1f} s")
+```
+
+The numbers depend strongly on the volume. On the four KGWX volumes of this
+case, with one cut per elevation (the validation scripts of radarx), the error
+rate of this test was 1 to 22 % for the region method, 4 to 39 % for UNRAVEL and
+29 to 58 % for UNRAVEL without the check between sweeps; UNRAVEL did better
+than the region method on two of the four and worse on the other two, and it
+dropped about 4 % of the gates as noise. Its result depends on the absolute fold
+of the lowest sweep, which the reference radials fix, and the check between
+sweeps carries it upward: when the lowest sweep is right the others are
+repaired (from 33 % to 4 % on one volume), when it is wrong they follow it. The
+volume above, with its repeated 0.5° cuts, is a fifth sample. The error rate of
+the paper (0.2 % on its test) is not reproduced on this case: the winds of the
+squall line fold up to four times at 13.3 m/s, which is a harder test than the
+paper's, and radarx fixed the details that the paper leaves open without
+tuning them to this data.
 
 ## References
 
