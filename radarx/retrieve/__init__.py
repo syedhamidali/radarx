@@ -26,6 +26,7 @@ _SECTIONS = {
         "kdp",
         "attenuation",
         "beam_blockage",
+        "beam_path",
         "noise",
         "calibration",
         "advection",

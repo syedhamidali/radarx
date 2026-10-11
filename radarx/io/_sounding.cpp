@@ -146,7 +146,8 @@ double wet_bulb(double p, double t, double td) {
 // ---------------------------------------------------------------------------
 // Elementwise thermodynamics on flat, already broadcast arrays.
 // op: "esat"(T), "dewpoint"(e), "vapor_pressure"(q, p), "specific_humidity"(e, p),
-//     "wet_bulb"(p, T, Td), "height"(geopotential), "density"(p, T, q)
+//     "wet_bulb"(p, T, Td), "height"(geopotential), "density"(p, T, q),
+//     "refractivity_bd" / "refractivity_sw" / "refractivity_itu"(p, T, e) in Pa, K, Pa
 py::array_t<double> thermo(const std::string& op, const std::vector<DArray>& inputs,
                            int n_threads) {
     if (inputs.empty()) throw std::invalid_argument("no inputs");
@@ -166,6 +167,9 @@ py::array_t<double> thermo(const std::string& op, const std::vector<DArray>& inp
     else if (op == "wet_bulb") { need(3); code = 4; }
     else if (op == "height") { need(1); code = 5; }
     else if (op == "density") { need(3); code = 6; }
+    else if (op == "refractivity_bd") { need(3); code = 7; }
+    else if (op == "refractivity_sw") { need(3); code = 8; }
+    else if (op == "refractivity_itu") { need(3); code = 9; }
     else throw std::invalid_argument("unknown op " + op);
 
     py::array_t<double> result(n);
@@ -192,6 +196,16 @@ py::array_t<double> thermo(const std::string& op, const std::vector<DArray>& inp
                     case 5: {  // geometric height from geopotential
                         const double h = in[0][i] / kG0;
                         v = kRe * h / (kRe - h);
+                        break;
+                    }
+                    case 7: case 8: case 9: {
+                        // radio refractivity (N-units), p and e in hPa: Bean and Dutton (1966)
+                        // Eq. 1.17, Smith and Weintraub Eq. 1.16 of the same book, ITU-R P.453-9
+                        const double pt = 0.01 * in[0][i] / in[1][i];
+                        const double et = 0.01 * in[2][i] / in[1][i];
+                        if (code == 7) v = 77.6 * pt + 3.73e5 * et / in[1][i];
+                        else if (code == 8) v = 77.6 * pt - 5.6 * et + 3.75e5 * et / in[1][i];
+                        else v = 77.6 * pt + 3.732e5 * et / in[1][i];
                         break;
                     }
                     default: {  // density of moist air

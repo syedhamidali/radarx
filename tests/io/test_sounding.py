@@ -1479,3 +1479,82 @@ def test_masked_arrays_are_missing_not_fill_values(engine):
     )
     assert np.isfinite(float(out["temperature"][0]))
     assert np.isnan(float(out["temperature"][1]))
+
+
+# ---------------------------------------------------------------------------
+# radio refractivity
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_refractivity_forms(engine):
+    p, t, e = 101325.0, 288.15, 1000.0  # 1013.25 hPa, 15 degC, 10 hPa
+    bd = float(sounding.refractivity(p, t, e, engine=engine))
+    # Bean and Dutton (1966) Eq. 1.17 written out
+    assert bd == pytest.approx(
+        77.6 * 1013.25 / 288.15 + 3.73e5 * 10.0 / 288.15**2, rel=1e-12
+    )
+    sw = float(sounding.refractivity(p, t, e, form="smith_weintraub", engine=engine))
+    assert sw == pytest.approx(
+        77.6 * 1013.25 / 288.15 - 5.6 * 10.0 / 288.15 + 3.75e5 * 10.0 / 288.15**2,
+        rel=1e-12,
+    )
+    itu = float(sounding.refractivity(p, t, e, form="itu", engine=engine))
+    assert itu == pytest.approx(
+        77.6 * 1013.25 / 288.15 + 3.732e5 * 10.0 / 288.15**2, rel=1e-12
+    )
+    # the two- and three-term forms agree to 0.05 % in the range the book
+    # states (-50 to 40 degC; the book gives 0.02 % at 1013 hPa)
+    for temp in (223.15, 253.15, 273.15, 303.15, 313.15):
+        es = float(sounding.saturation_vapor_pressure(temp, engine=engine))
+        a = float(sounding.refractivity(95000.0, temp, 0.8 * es, engine=engine))
+        b = float(
+            sounding.refractivity(
+                95000.0, temp, 0.8 * es, form="smith_weintraub", engine=engine
+            )
+        )
+        assert abs(a - b) < 5e-4 * a
+    # dry air at the standard sea level: 77.6 p / T
+    assert float(sounding.refractivity(p, t, engine=engine)) == pytest.approx(
+        272.8, abs=0.1
+    )
+    # the standard atmosphere decreases by about 39 N-units per km near the ground
+    z = np.array([0.0, 1000.0])
+    pres = 101325.0 * (1.0 - 2.25577e-5 * z) ** 5.25588
+    temp = 288.15 - 0.0065 * z
+    es = sounding.saturation_vapor_pressure(temp, engine=engine)
+    n = sounding.refractivity(pres, temp, 0.6 * es, engine=engine).values
+    assert -50.0 < (n[1] - n[0]) < -25.0
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_refractivity_xarray_and_units(engine):
+    p = xr.DataArray([100000.0, 90000.0], dims="level", attrs={"units": "Pa"})
+    t = xr.DataArray([290.0, 280.0], dims="level")
+    e = xr.DataArray([800.0, 500.0], dims="level")
+    out = sounding.refractivity(p, t, e, engine=engine)
+    assert out.name == "refractivity" and out.dims == ("level",)
+    assert out.attrs["units"] == "1"
+    one = sounding.refractivity(p[:1], t[:1], 800.0, engine=engine)
+    assert one.item() == pytest.approx(float(out[0]))
+    # the input is not changed; hPa and degC are refused; NaN stays NaN
+    assert p.attrs == {"units": "Pa"}
+    with pytest.raises(ValueError, match="pressure must be in Pa"):
+        sounding.refractivity(1000.0, 288.15, engine=engine)
+    with pytest.raises(ValueError, match="temperature must be in K"):
+        sounding.refractivity(101325.0, 15.0, engine=engine)
+    with pytest.raises(ValueError, match="form must be one of"):
+        sounding.refractivity(101325.0, 288.15, form="x", engine=engine)
+    assert np.isnan(float(sounding.refractivity(np.nan, 288.15, engine=engine)))
+
+
+def test_refractivity_engines_agree():
+    if not sounding.HAS_COMPILED_KERNEL:
+        pytest.skip("compiled kernel not built")
+    rng = np.random.default_rng(1)
+    p = rng.uniform(30000, 105000, 500)
+    t = rng.uniform(220, 315, 500)
+    e = rng.uniform(0, 3000, 500)
+    for form in ("bean_dutton", "smith_weintraub", "itu"):
+        a = sounding.refractivity(p, t, e, form=form, engine="numpy")
+        b = sounding.refractivity(p, t, e, form=form, engine="compiled")
+        np.testing.assert_allclose(a, b, rtol=1e-13)

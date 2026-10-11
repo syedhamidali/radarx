@@ -2243,5 +2243,118 @@
   "publisher": "NSF NCAR Computational and Information Systems Laboratory",
   "doi": "10.5065/D6WQ0202",
   "url": "https://github.com/NCAR/DART"
+ },
+ "10.6028/NBS.MONO.92": {
+  "authors": [
+   "Bean, B. R.",
+   "Dutton, E. J."
+  ],
+  "year": 1966,
+  "title": "Radio meteorology",
+  "type": "book",
+  "publisher": "National Bureau of Standards",
+  "doi": "10.6028/NBS.MONO.92"
+ },
+ "10.1109/JRPROC.1953.274297": {
+  "authors": [
+   "Smith, E.",
+   "Weintraub, S."
+  ],
+  "year": 1953,
+  "title": "The Constants in the Equation for Atmospheric Refractive Index at Radio Frequencies",
+  "type": "article",
+  "journal": "Proceedings of the IRE",
+  "volume": "41",
+  "issue": "8",
+  "pages": "1035-1037",
+  "doi": "10.1109/JRPROC.1953.274297"
+ },
+ "10.1175/1520-0469(1982)039<1591:CCABOR>2.0.CO;2": {
+  "authors": [
+   "Low, T. B.",
+   "List, R."
+  ],
+  "year": 1982,
+  "title": "Collision, Coalescence and Breakup of Raindrops. Part I: Experimentally Established Coalescence Efficiencies and Fragment Size Distributions in Breakup",
+  "type": "article",
+  "journal": "Journal of the Atmospheric Sciences",
+  "volume": "39",
+  "issue": "7",
+  "pages": "1591-1606",
+  "doi": "10.1175/1520-0469(1982)039<1591:CCABOR>2.0.CO;2"
+ },
+ "10.1175/1520-0469(1982)039<1607:CCABOR>2.0.CO;2": {
+  "authors": [
+   "Low, T. B.",
+   "List, R."
+  ],
+  "year": 1982,
+  "title": "Collision, Coalescence and Breakup of Raindrops. Part II: Parameterization of Fragment Size Distributions",
+  "type": "article",
+  "journal": "Journal of the Atmospheric Sciences",
+  "volume": "39",
+  "issue": "7",
+  "pages": "1607-1619",
+  "doi": "10.1175/1520-0469(1982)039<1607:CCABOR>2.0.CO;2"
+ },
+ "10.1175/1520-0469(2004)061<0777:ANROCB>2.0.CO;2": {
+  "authors": [
+   "McFarquhar, G. M."
+  ],
+  "year": 2004,
+  "title": "A New Representation of Collision-Induced Breakup of Raindrops and Its Implications for the Shapes of Raindrop Size Distributions",
+  "type": "article",
+  "journal": "Journal of the Atmospheric Sciences",
+  "volume": "61",
+  "issue": "7",
+  "pages": "777-794",
+  "doi": "10.1175/1520-0469(2004)061<0777:ANROCB>2.0.CO;2"
+ },
+ "10.1175/JAM2544.1": {
+  "authors": [
+   "Prat, O. P.",
+   "Barros, A. P."
+  ],
+  "year": 2007,
+  "title": "A Robust Numerical Solution of the Stochastic Collection–Breakup Equation for Warm Rain",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology and Climatology",
+  "volume": "46",
+  "issue": "9",
+  "pages": "1480-1497",
+  "doi": "10.1175/JAM2544.1"
+ },
+ "10.1175/JAS-D-19-0185.1": {
+  "authors": [
+   "Heymsfield, A.",
+   "Szakáll, M.",
+   "Jost, A.",
+   "Giammanco, I.",
+   "Wright, R.",
+   "Brimelow, J."
+  ],
+  "year": 2020,
+  "title": "CORRIGENDUM",
+  "type": "article",
+  "journal": "Journal of the Atmospheric Sciences",
+  "volume": "77",
+  "issue": "1",
+  "pages": "405-412",
+  "doi": "10.1175/JAS-D-19-0185.1"
+ },
+ "10.5194/gmd-6-1925-2013": {
+  "authors": [
+   "Frick, C.",
+   "Seifert, A.",
+   "Wernli, H."
+  ],
+  "year": 2013,
+  "title": "A bulk parametrization of melting snowflakes with explicit liquid water fraction for the COSMO model",
+  "type": "article",
+  "journal": "Geoscientific Model Development",
+  "volume": "6",
+  "issue": "6",
+  "pages": "1925-1939",
+  "doi": "10.5194/gmd-6-1925-2013"
  }
 }
