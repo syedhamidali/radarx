@@ -487,6 +487,7 @@ def test_errors(sweep_and_truth, monkeypatch):
         dealias_velocity(ds, "VRADH", method="unravel", products_only=False)
     with pytest.raises(ValueError, match="alpha"):
         dealias_velocity(ds, "VRADH", method="unravel", alpha=0.0)
+    monkeypatch.setattr(dealias, "HAS_COMPILED_KERNEL", True)
     monkeypatch.setattr(dealias, "HAS_UNRAVEL_KERNEL", False)
     with pytest.raises(ImportError, match="UNRAVEL"):
         dealias_velocity(ds, "VRADH", method="unravel", engine="compiled")

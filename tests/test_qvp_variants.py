@@ -109,6 +109,7 @@ LINEAR = {
 # --------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(not vp.HAS_COMPILED_KERNEL, reason="no compiled QVP kernel")
 @pytest.mark.parametrize("kernel", ["top_hat", "cressman"])
 def test_blend_engines_agree_and_ignore_missing(kernel):
     rng = np.random.default_rng(1)
