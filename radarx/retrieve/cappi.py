@@ -721,7 +721,11 @@ def _reference_ground_range(ref):
     y = np.asarray(ref["y"].values, dtype=float)
     if x.ndim != 2 or x.shape != y.shape:
         return None
-    ground = np.nanmedian(np.hypot(x, y), axis=0)
+    horizontal = np.hypot(x, y)
+    # a gate with no valid ray has no ground distance (nanmedian would warn)
+    if not np.all(np.any(~np.isnan(horizontal), axis=0)):
+        return None
+    ground = np.nanmedian(horizontal, axis=0)
     if not np.all(np.isfinite(ground)) or np.any(np.diff(ground) <= 0):
         return None
     return ground

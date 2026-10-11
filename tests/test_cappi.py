@@ -941,8 +941,14 @@ def test_reference_ground_range():
     holes = x.copy()
     holes[:, 1] = np.nan
     gap = xr.Dataset(coords={"x": (dims, holes), "y": (dims, y)})
-    with pytest.warns(RuntimeWarning, match="All-NaN"):
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
         assert _reference_ground_range(gap) is None
+        # a few missing values in a gate are fine: the median skips them
+        part = x.copy()
+        part[0, 1] = np.nan
+        some = xr.Dataset(coords={"x": (dims, part), "y": (dims, y)})
+        assert _reference_ground_range(some) is not None
 
 
 def test_onto_ground_range_needs_two_gates_per_ray():
