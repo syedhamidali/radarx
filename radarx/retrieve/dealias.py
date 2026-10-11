@@ -54,8 +54,26 @@ concepts quoted here are not checked against the papers.
 
 All decisions use integer arithmetic, so the compiled C++ kernel
 (multithreaded, all sweeps in one call) and the NumPy fallback give
-identical folds. A modular alternative that is not used here is described by
-Louf et al. (2020) [5].
+identical folds.
+
+**Confidence.** ``dealias_velocity(..., confidence=True)`` and
+:func:`dealias_confidence` give, for every gate, how clearly the chosen fold
+beats the second best one given the neighbouring gates (a radarx definition,
+see the function). It is computed from the result alone.
+
+**Dual-PRF radars.** :func:`correct_dual_prf` corrects the isolated dealiasing
+errors that dual-PRF velocity data contain, with the local dealiasing step of
+Holleman and Beekhuis (2003) [6]. It is a different problem from the
+region-based dealiasing above, which unfolds the velocity of a single-PRF
+sweep.
+
+**UNRAVEL (not implemented).** The modular algorithm of Louf et al. (2020)
+[5] is the open alternative that the module cites. It is not implemented
+here because its algorithm could not be read: the paper is not available from
+the publisher without access and no open copy was found, so only its abstract
+was seen. Its reference implementation is open source (MIT licence,
+``github.com/vlouf/dealias``); it was not ported, because an implementation
+that cannot be checked against the paper would be a guess at its behaviour.
 
 .. autosummary::
    :nosignatures:
@@ -82,11 +100,14 @@ References
    UNRAVEL: A robust modular velocity dealiasing technique for Doppler radar.
    *J. Atmos. Oceanic Technol.*, **37** (5), 741-758,
    https://doi.org/10.1175/JTECH-D-19-0020.1
+.. [6] Holleman, I., and H. Beekhuis, 2003: Analysis and correction of dual
+   PRF velocity data. *J. Atmos. Oceanic Technol.*, **20** (4), 443-453,
+   https://doi.org/10.1175/1520-0426(2003)20<443:AACODP>2.0.CO;2
 """
 
 from __future__ import annotations
 
-__all__ = ["dealias_velocity"]
+__all__ = ["dealias_velocity", "correct_dual_prf", "dealias_confidence"]
 
 __doc__ = __doc__.format("\n   ".join(__all__))
 
@@ -98,6 +119,7 @@ import xarray as xr
 
 from .._fields import VELOCITY, as_sweep, find_field
 from .._provenance import provenance
+from .._registry import accessor_method
 from ..fundamentals.geometry import beam_center_height
 from ._products import product_tree
 
@@ -138,6 +160,7 @@ def dealias_velocity(
     wind_profile=None,
     sweep_continuity=True,
     name=None,
+    confidence=False,
     max_iterations=100,
     n_threads=None,
     engine="auto",
@@ -186,6 +209,14 @@ def dealias_velocity(
         (e.g. ``"VRADH_dealiased"``), so that it never replaces the measured
         field when the products are merged into the sweep or volume with
         ``.radarx.assign(products)``.
+    confidence : bool, optional
+        Also return the continuity confidence of every gate (see
+        :func:`dealias_confidence`) as ``f"{name}_confidence"``: 1 where the
+        chosen fold agrees with the median of the neighbouring gates, falling
+        to 0 where the second best fold fits them as well. Default False. A
+        sweep then gives a Dataset instead of a DataArray; a volume gives the
+        extra variable in every sweep node. Not available with
+        ``products_only=False``.
     max_iterations : int, optional
         Maximum passes of the fold optimisation. Default 100.
     n_threads : int, optional
@@ -266,6 +297,8 @@ def dealias_velocity(
     """
     radar = as_sweep(radar)
     field = find_field(radar, VELOCITY, field)
+    if confidence and not products_only:
+        raise ValueError("confidence=True needs products_only=True")
     if products_only:
         name = name or f"{field}_dealiased"
     else:
@@ -299,7 +332,10 @@ def dealias_velocity(
         (folds,) = _absolute_folds([sweep], [solved], [ref], **options)
         source = "reference" if reference is not None else "wind_profile"
         anchor = _anchor_of(sweep, solved[1], ref, source, "")
-        return sweep.wrap(folds, anchor).rename(name)
+        result = sweep.wrap(folds, anchor).rename(name)
+        if confidence:
+            result = _with_confidence(result, sweep, options)
+        return result
     if reference is not None:
         raise ValueError("reference is only supported for a single sweep.")
     return _dealias_tree(
@@ -310,8 +346,30 @@ def dealias_velocity(
         sweep_continuity=sweep_continuity,
         name=name,
         products_only=products_only,
+        confidence=confidence,
         **options,
     )
+
+
+def _with_confidence(result, sweep, options):
+    """Dataset of a dealiased DataArray and its confidence (see :func:`dealias_confidence`)."""
+    values = np.ascontiguousarray(
+        result.transpose(sweep.ray, "range").values, dtype=np.float64
+    )
+    opts = _confidence_options(
+        1, _MIN_NEIGHBOURS, 1.0, options["n_threads"], options["compiled"]
+    )
+    conf = _confidence_values(values, sweep.azimuth, sweep.nyquist, opts)
+    if result.dims[0] != sweep.ray:
+        conf = conf.T
+    out = result.to_dataset()
+    out[f"{result.name}_confidence"] = xr.DataArray(
+        conf,
+        dims=result.dims,
+        coords=result.coords,
+        attrs=_confidence_attrs(opts, sweep.nyquist),
+    )
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -600,6 +658,7 @@ def _dealias_tree(
     sweep_continuity,
     name,
     products_only,
+    confidence=False,
     **options,
 ):
     """Dealias every sweep of a volume that contains ``field``."""
@@ -646,9 +705,11 @@ def _dealias_tree(
         anchor = _anchor_of(s, solved[i][1], ref, source, f"{n}: ")
         results.append(s.wrap(f, anchor))
     if products_only:
-        return product_tree(
-            dtree, {n: r.rename(name).to_dataset() for n, r in zip(names, results)}
-        )
+        nodes = {}
+        for n, s, r in zip(names, sweeps, results):
+            r = r.rename(name)
+            nodes[n] = _with_confidence(r, s, options) if confidence else r.to_dataset()
+        return product_tree(dtree, nodes)
     out = dtree.copy()
     for n, result in zip(names, results):
         out[f"{n}/{name}"] = result.variable
@@ -1064,3 +1125,595 @@ def _absolute_folds_numpy(vel, k, comp, nyq, ref, rsin, rcos, links):
 
     # 3. gate check
     return _gate_check(vel, folds, comp, links, nyq, _GATE_PASSES)
+
+
+# --------------------------------------------------------------------------
+# local median, dealiasing confidence and dual-PRF error correction
+# --------------------------------------------------------------------------
+
+_DEALIASED = tuple(f"{n}_dealiased" for n in VELOCITY) + VELOCITY
+
+
+def _is_full_circle(azimuth):
+    """Whether the rays cover the whole circle (the first ray follows the last)."""
+    az = np.sort(np.mod(np.asarray(azimuth, dtype=np.float64), 360.0))
+    if az.size < 3:
+        return False
+    typical = np.median(np.diff(az))
+    return bool(360.0 - (az[-1] - az[0]) <= 2.0 * typical)
+
+
+def _local_median_numpy(vel, wrap, half_start, half_max, min_points, include_centre):
+    """
+    NumPy implementation of the compiled ``local_median`` kernel (same values).
+
+    The window grows from half-width ``half_start`` to ``half_max``; each gate
+    takes the median of the first window with at least ``min_points`` valid
+    gates (``include_centre`` says whether the gate counts). Gates are
+    gathered window by window for the gates still without a median.
+    """
+    nray, ngate = vel.shape
+    out = np.full(vel.shape, np.nan)
+    todo = np.argwhere(np.isfinite(vel))
+    half_max = min(half_max, (nray - 1) // 2) if wrap else half_max
+    for h in range(half_start, half_max + 1):
+        if not len(todo):
+            break
+        rows, cols = todo[:, 0], todo[:, 1]
+        stack = []
+        for dr in range(-h, h + 1):
+            r = rows + dr
+            ok_r = np.ones(r.shape, dtype=bool)
+            if wrap:
+                r = r % nray
+            else:
+                ok_r = (r >= 0) & (r < nray)
+                r = np.clip(r, 0, nray - 1)
+            for dc in range(-h, h + 1):
+                if not include_centre and dr == 0 and dc == 0:
+                    continue
+                c = cols + dc
+                ok = ok_r & (c >= 0) & (c < ngate)
+                stack.append(np.where(ok, vel[r, np.clip(c, 0, ngate - 1)], np.nan))
+        window = np.stack(stack, axis=1)
+        count = np.isfinite(window).sum(axis=1)
+        done = count >= min_points
+        if done.any():
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                med = np.nanmedian(window[done], axis=1)
+            out[rows[done], cols[done]] = med
+        todo = todo[~done]
+    return out
+
+
+def _local_median(
+    vel, wrap, half_start, half_max, min_points, include_centre, n_threads, compiled
+):
+    """Window medians of a (ray, range) array; see :func:`_local_median_numpy`."""
+    if compiled:
+        return _dealias.local_median(
+            vel,
+            bool(wrap),
+            int(half_start),
+            int(half_max),
+            int(min_points),
+            bool(include_centre),
+            int(n_threads or 0),
+        )
+    return _local_median_numpy(
+        vel, wrap, half_start, half_max, min_points, include_centre
+    )
+
+
+def _plain_sweep(ds, field):
+    """``(ray_dim, values (ray, range) float64, azimuth)`` of a sweep field."""
+    if field not in ds:
+        raise KeyError(f"{field!r} is not in the sweep")
+    da = ds[field]
+    ray = _ray_dim(da)
+    values = np.array(da.transpose(ray, "range").values, dtype=np.float64)
+    return (
+        ray,
+        np.ascontiguousarray(values),
+        np.asarray(ds["azimuth"].values, dtype=np.float64),
+    )
+
+
+def _disagreement_numpy(values, wrap, half, threshold, min_neighbours):
+    """
+    NumPy implementation of the compiled ``neighbour_disagreement`` kernel.
+
+    For each valid gate, the fraction of its valid neighbours (window of
+    half-width ``half``, the gate left out) that differ from it by more than
+    ``threshold``; NaN with fewer than ``min_neighbours`` valid neighbours.
+    """
+    nray, ngate = values.shape
+    if wrap:
+        half = min(half, (nray - 1) // 2)
+    padded = np.full((nray, ngate + 2 * half), np.nan)
+    padded[:, half : half + ngate] = values
+    valid = np.zeros(values.shape, dtype=np.int64)
+    far = np.zeros(values.shape, dtype=np.int64)
+    for dr in range(-half, half + 1):
+        if wrap:
+            rows = np.roll(padded, -dr, axis=0)
+        else:
+            rows = np.full_like(padded, np.nan)
+            lo, hi = max(0, -dr), min(nray, nray - dr)
+            rows[lo:hi] = padded[lo + dr : hi + dr]
+        for dc in range(-half, half + 1):
+            if dr == 0 and dc == 0:
+                continue
+            neighbour = rows[:, half + dc : half + dc + ngate]
+            ok = np.isfinite(neighbour)
+            valid += ok
+            far += ok & (np.abs(values - neighbour) > threshold)
+    fraction = far / np.maximum(valid, 1)
+    return np.where(np.isfinite(values) & (valid >= min_neighbours), fraction, np.nan)
+
+
+def _confidence_values(values, azimuth, nyquist, options):
+    """Confidence (1 - share of far neighbours) of dealiased velocities, float32."""
+    wrap = _is_full_circle(azimuth)
+    threshold = options["threshold"] * nyquist
+    if options["compiled"]:
+        fraction = _dealias.neighbour_disagreement(
+            values,
+            bool(wrap),
+            int(options["window"]),
+            float(threshold),
+            int(options["min_neighbours"]),
+            int(options["n_threads"] or 0),
+        )
+    else:
+        fraction = _disagreement_numpy(
+            values, wrap, options["window"], threshold, options["min_neighbours"]
+        )
+    return (1.0 - fraction).astype(np.float32)
+
+
+def _confidence_attrs(options, nyquist):
+    window = options["window"]
+    return {
+        "long_name": "confidence of the dealiased velocity",
+        "units": "1",
+        "valid_range": [0.0, 1.0],
+        "comment": "share of the valid neighbouring gates that differ from the gate "
+        "by no more than threshold * Vn, so that they prefer the chosen fold "
+        "to the next one (a radarx definition, no paper defines it)",
+        "window": f"{2 * window + 1} x {2 * window + 1} gates, centre left out",
+        "min_neighbours": options["min_neighbours"],
+        "threshold": options["threshold"],
+        "nyquist_velocity": nyquist,
+    }
+
+
+def _confidence_options(window, min_neighbours, threshold, n_threads, compiled):
+    if int(window) != window or window < 1:
+        raise ValueError("window must be a positive integer (half-width in gates)")
+    if int(min_neighbours) != min_neighbours or not 1 <= min_neighbours <= (
+        (2 * window + 1) ** 2 - 1
+    ):
+        raise ValueError(
+            "min_neighbours must be between 1 and the window size minus one"
+        )
+    if not threshold > 0:
+        raise ValueError("threshold must be positive")
+    return {
+        "window": int(window),
+        "min_neighbours": int(min_neighbours),
+        "threshold": float(threshold),
+        "n_threads": n_threads,
+        "compiled": compiled,
+    }
+
+
+@provenance(
+    "Confidence of dealiased velocity from the neighbouring gates, a radarx definition"
+)
+def dealias_confidence(
+    radar,
+    field=None,
+    nyquist_velocity=None,
+    *,
+    window=1,
+    min_neighbours=3,
+    threshold=1.0,
+    name=None,
+    n_threads=None,
+    engine="auto",
+):
+    """
+    Confidence of the fold chosen for every gate of a dealiased velocity field.
+
+    A gate with the dealiased velocity :math:`v` could also have been unfolded
+    to :math:`v \\pm 2 V_n`. A neighbouring gate with the velocity :math:`v_j`
+    is closer to :math:`v` than to the next candidate fold if
+    :math:`|v - v_j| < V_n`, and the confidence is the share of the valid
+    neighbours that are:
+
+    .. math::
+
+        c = 1 - \\frac{\\#\\{j : |v - v_j| > \\mathrm{threshold}\\, V_n\\}}
+                       {\\#\\{j\\}}
+
+    with the neighbours :math:`j` the ``(2 window + 1)`` by ``(2 window + 1)``
+    gates around the gate (rays wrap around north for full-circle sweeps), the
+    gate itself left out, and at least ``min_neighbours`` of them valid.
+    :math:`c = 1` where all neighbours support the chosen fold, :math:`c = 0`
+    where none does (the case in which the gate check of
+    :func:`dealias_velocity` refolds a gate), and a gate on a straight fold
+    line has :math:`c = 5/8` with ``window=1``. This is a radarx definition:
+    no paper defines a confidence for the dealiasing methods cited in
+    :mod:`radarx.retrieve.dealias`. It is computed from the result alone, so it
+    also applies to the output of another method or of
+    :func:`correct_dual_prf`.
+
+    What it says. It marks isolated gates and small clusters that disagree with
+    their surroundings, and the two sides of the lines along which the folds
+    change. It does not say that a region is right: a large region that is
+    unfolded to the wrong fold as a whole has :math:`c = 1` inside, and is low
+    only along its edge. Real shear and turbulence also lower :math:`c` where
+    the velocity changes by more than :math:`V_n` between neighbouring gates.
+
+    Parameters
+    ----------
+    radar : xarray.Dataset or xarray.DataTree
+        A sweep or a volume with the dealiased velocity and the ``azimuth``
+        and ``range`` coordinates.
+    field : str, optional
+        Dealiased velocity. Default: the first of ``VRADH_dealiased``,
+        ``VRAD_dealiased``, ... (the names :func:`dealias_velocity` gives),
+        then ``VRADH``, ``VRAD``, ... that the sweep holds.
+    nyquist_velocity : float or dict, optional
+        Nyquist velocity (m s⁻¹), as in :func:`dealias_velocity`. By default
+        it is read from the sweep, or from the ``nyquist_velocity`` attribute
+        that :func:`dealias_velocity` writes on its result.
+    window : int, optional
+        Half-width of the neighbourhood in rays and gates. Default 1 (3 x 3,
+        the neighbourhood of the gate check of :func:`dealias_velocity`).
+    min_neighbours : int, optional
+        Fewest valid neighbours for a confidence. Default 3, the number that
+        the gate check also requires.
+    threshold : float, optional
+        Difference, in Nyquist velocities, beyond which a neighbour does not
+        support the fold. Default 1: the neighbour is then closer to the next
+        fold. Values below 1 count smaller differences as disagreement.
+    name : str, optional
+        Name of the result. Default ``f"{field}_confidence"``.
+    n_threads : int, optional
+        Threads for the compiled kernel. Default: all cores.
+    engine : {"auto", "compiled", "numpy"}, optional
+        Implementation to use; both give the same values.
+
+    Returns
+    -------
+    xarray.DataArray or xarray.DataTree
+        The confidence (float32, NaN where the gate has no data or too few
+        neighbours) on the sweep's dimensions; a DataTree with one node per
+        sweep that has ``field`` for a volume. Merge it with
+        ``.radarx.assign``.
+
+    Examples
+    --------
+    >>> dea = dtree.radarx.dealias("VRADH")  # doctest: +SKIP
+    >>> conf = dtree.radarx.assign(dea).radarx.dealias_confidence()  # doctest: +SKIP
+    """
+    options = _confidence_options(
+        window, min_neighbours, threshold, n_threads, _use_compiled(engine)
+    )
+    radar = as_sweep(radar)
+    field = find_field(radar, _DEALIASED, field)
+    if isinstance(radar, xr.Dataset):
+        return _confidence_sweep(radar, field, nyquist_velocity, None, name, options)
+    nodes = {}
+    for sweep in _sweep_names_with(radar, field):
+        ds = _sweep_dataset_of(radar, sweep)
+        nodes[sweep] = _confidence_sweep(
+            ds, field, nyquist_velocity, sweep, name, options
+        ).to_dataset()
+    if not nodes:
+        raise ValueError(f"No sweep contains {field!r}.")
+    return product_tree(radar, nodes)
+
+
+def _sweep_names_with(dtree, field):
+    from ..grid.cone import _sweep_names
+
+    return [n for n in _sweep_names(dtree) if field in dtree[n].data_vars]
+
+
+def _sweep_dataset_of(dtree, sweep):
+    from ..grid.cone import _sweep_dataset
+
+    return _sweep_dataset(dtree, sweep)
+
+
+def _confidence_sweep(ds, field, nyquist, sweep, name, options):
+    vn = _nyquist(ds, field, nyquist, sweep)
+    ray, values, azimuth = _plain_sweep(ds, field)
+    conf = _confidence_values(values, azimuth, vn, options)
+    da = ds[field]
+    if da.dims[0] != ray:
+        conf = conf.T
+    return xr.DataArray(
+        conf,
+        dims=da.dims,
+        coords=da.coords,
+        name=name or f"{field}_confidence",
+        attrs=_confidence_attrs(options, vn),
+    )
+
+
+def _prf_flags(ds, ray, prf, first_ray):
+    """Boolean per ray, True for a high-PRF ray (see :func:`correct_dual_prf`)."""
+    n = ds.sizes[ray]
+    if prf is None:
+        if first_ray not in ("high", "low"):
+            raise ValueError(f"first_ray must be 'high' or 'low', not {first_ray!r}")
+        return (np.arange(n) % 2 == 0) == (first_ray == "high")
+    flags = ds[prf] if isinstance(prf, str) else prf
+    values = np.asarray(flags.values if hasattr(flags, "values") else flags)
+    if values.shape != (n,):
+        raise ValueError(
+            f"prf must have one value per ray ({n}), not shape {values.shape}"
+        )
+    return values.astype(bool)
+
+
+def _dual_prf_sweep(
+    ds,
+    field,
+    vh,
+    vl,
+    prf,
+    first_ray,
+    min_points,
+    max_window,
+    passes,
+    name,
+    n_threads,
+    compiled,
+):
+    ray, values, azimuth = _plain_sweep(ds, field)
+    high = _prf_flags(ds, ray, prf, first_ray)
+    vu = np.where(high, vh, vl)[:, None]
+    wrap = _is_full_circle(azimuth)
+    half_max = (max_window - 1) // 2
+    shift = np.zeros(values.shape, dtype=np.int32)
+    current = values
+    for _ in range(passes):
+        med = _local_median(
+            current, wrap, 1, half_max, min_points, True, n_threads, compiled
+        )
+        with np.errstate(invalid="ignore"):
+            outlier = np.isfinite(med) & (np.abs(current - med) > vu)
+            k = np.floor((med - current) / (2.0 * vu) + 0.5)
+        if not outlier.any():
+            break
+        k = np.where(outlier, k, 0.0)
+        current = current + 2.0 * vu * k
+        shift += k.astype(np.int32)
+    da = ds[field]
+    out = current
+    if da.dims[0] != ray:
+        out, shift = out.T, shift.T
+    dtype = da.dtype if np.issubdtype(da.dtype, np.floating) else np.float64
+    attrs = dict(da.attrs)
+    attrs.update(
+        {
+            "long_name": "Dual-PRF corrected "
+            + da.attrs.get("long_name", "radial velocity"),
+            "comment": "outliers of the dual-PRF velocity moved by multiples of twice the "
+            "unambiguous velocity of their PRF towards the local median "
+            "(Holleman and Beekhuis 2003, local dealiasing step)",
+            "nyquist_high_prf": vh,
+            "nyquist_low_prf": vl,
+            "nyquist_extended": vh * vl / (vh - vl),
+            "unfolding_factor": vl / (vh - vl),
+            "min_points": min_points,
+            "max_window": max_window,
+            "passes": passes,
+            "outliers_corrected": int((shift != 0).sum()),
+        }
+    )
+    corrected = da.copy(data=out.astype(dtype, copy=False)).assign_attrs(attrs)
+    shifts = xr.DataArray(
+        shift,
+        dims=da.dims,
+        coords=da.coords,
+        attrs={
+            "long_name": "multiples of twice the unambiguous velocity added by the dual-PRF correction",
+            "units": "1",
+        },
+    )
+    return xr.Dataset({name: corrected, f"{name}_shift": shifts})
+
+
+def _per_sweep(value, sweep):
+    return value.get(sweep) if isinstance(value, dict) else value
+
+
+def _positive(value, what, sweep):
+    if value is None:
+        where = f" for {sweep!r}" if sweep else ""
+        raise ValueError(f"{what} is needed{where}")
+    value = float(value)
+    if not np.isfinite(value) or value <= 0:
+        raise ValueError(f"{what} must be positive, got {value}.")
+    return value
+
+
+@provenance(
+    "Dual-PRF velocity error correction by the local median (Holleman and Beekhuis 2003)"
+)
+def correct_dual_prf(
+    radar,
+    field=None,
+    *,
+    nyquist_high,
+    nyquist_low,
+    prf=None,
+    first_ray="high",
+    min_points=9,
+    max_window=9,
+    passes=2,
+    name=None,
+    n_threads=None,
+    engine="auto",
+):
+    """
+    Correct the dealiasing errors of dual-PRF radial velocities.
+
+    A dual-PRF radar alternates two pulse repetition frequencies from ray to
+    ray and unfolds the velocity of each ray with the difference of the two
+    velocity estimates. The difference is noisy, so now and then a gate is
+    unfolded to the wrong Nyquist interval of its own PRF and stands out as an
+    isolated outlier whose error is a multiple of twice the unambiguous
+    velocity of that ray's PRF. This function finds the outliers by their
+    distance from the local median velocity and moves them back, the local
+    dealiasing step of Holleman and Beekhuis (2003) [1]_.
+
+    Parameters
+    ----------
+    radar : xarray.Dataset or xarray.DataTree
+        A sweep, or a volume whose sweeps holding ``field`` are processed one
+        by one. The velocity is the output of the radar processor, already
+        unfolded to the extended interval.
+    field : str, optional
+        Radial velocity field. Default: the first of ``VRADH``, ``VRAD``,
+        ``VRADV``, ``VEL``, ``VELOCITY``, ``velocity`` that the sweep holds.
+    nyquist_high, nyquist_low : float or dict
+        Nyquist (unambiguous) velocities of the high and the low PRF in
+        m s⁻¹, :math:`V_{uh} > V_{ul} > 0` (Eq. 1 of the paper,
+        :math:`V_u = \\lambda\\,\\mathrm{PRF}/4`). For a volume a dict maps
+        sweep names to values. The extended interval
+        :math:`V_{ulh} = V_{uh} V_{ul} / (V_{uh} - V_{ul})` (Eq. 3) and the
+        unfolding factor :math:`N = V_{ul} / (V_{uh} - V_{ul})` (Eq. 4) are
+        written to the attributes.
+    prf : str or array-like, optional
+        Which rays used the high PRF: the name of a variable of the sweep, or
+        an array with one value per ray, true (or 1) for the high PRF. Default
+        None: the rays alternate, starting with ``first_ray``. This needs the
+        rays to be in the order of acquisition.
+    first_ray : {"high", "low"}, optional
+        PRF of the first ray when ``prf`` is None. Default ``"high"``. The
+        paper finds the PRF of each ray from the position of the outlier
+        sidebands of the histogram of deviations (its Fig. 2) when the radar
+        does not record it; that is not done here.
+    min_points : int, optional
+        Valid gates that the window of the local median must hold, including
+        the gate. Default 9, the value of the paper.
+    max_window : int, optional
+        Largest edge of the window, an odd number of gates (rays and range).
+        The window is 3 x 3 first and grows by 2 until it holds
+        ``min_points`` valid gates (the paper says only that it is "enlarged
+        step by step"); gates whose largest window is still short are left
+        unchanged. Default 9, a radarx choice.
+    passes : int, optional
+        Number of passes. Each pass takes the medians of the field the previous
+        pass left. Default 2: in the 300 scans of the paper (Table 2) one pass
+        lowers the fraction of outliers from 1.1e-2 to 3.9e-4 and the second
+        to 1.1e-4, a radarx choice.
+    name : str, optional
+        Name of the corrected velocity. Default ``f"{field}_dualprf"``; the
+        number of shifts is ``f"{name}_shift"``.
+    n_threads : int, optional
+        Threads for the compiled kernel. Default: all cores.
+    engine : {"auto", "compiled", "numpy"}, optional
+        Implementation to use; both give the same values.
+
+    Returns
+    -------
+    xarray.Dataset or xarray.DataTree
+        The corrected velocity and ``f"{name}_shift"``, the multiples of twice
+        the ray's unambiguous velocity that were added (0 for the unchanged
+        gates), on the sweep's dimensions; a DataTree with one node per sweep
+        that has ``field`` for a volume.
+
+    Notes
+    -----
+    A gate is an outlier when its velocity differs from the median of the
+    valid gates of its window (the gate included) by more than the
+    unambiguous velocity of its ray's PRF. It is moved by the multiple
+    :math:`k` of twice that velocity that brings it closest to the median,
+    :math:`v + 2 k V_u`, so no smoothing is applied (the paper's last step
+    description). The window is cut at the ends of a ray and wraps around
+    north for full-circle sweeps.
+
+    What is taken from the paper (read in full) is the local dealiasing step:
+    the median of at least nine valid gates in a 3 x 3 square enlarged when
+    needed, the test against the unambiguous velocity and the correction by
+    multiples of twice the unambiguous velocity of the ray's PRF, with several
+    passes allowed. What is not implemented: the group-size filter (step 1,
+    which removes clutter and noise; its minimum group size falls from 25 gates
+    at zero range to 10 at the maximum range), the global dealiasing with a
+    wind profile (step 2, for velocities beyond the extended interval; use
+    :func:`dealias_velocity` with ``nyquist_velocity=V_ulh`` and a
+    ``wind_profile`` before or after), and the reconstruction of the PRF
+    labels. The window rule of the paper relies on the minimum group size of
+    its first step; a fixed ``min_points`` is used here. The algorithm of Joe
+    and May (2003, https://doi.org/10.1175/1520-0426(2003)20<429:CODPVE>2.0.CO;2)
+    could not be read and is not implemented. The paper tests the algorithm
+    on one C-band radar with an unfolding factor of 3; where outliers cluster
+    (strong shear, large spectrum width) several passes are needed, and the
+    median of a window that holds genuine strong shear can move true gates.
+
+    References
+    ----------
+    .. [1] Holleman, I., and H. Beekhuis, 2003: Analysis and correction of
+       dual PRF velocity data. *J. Atmos. Oceanic Technol.*, **20** (4),
+       443-453,
+       https://doi.org/10.1175/1520-0426(2003)20<443:AACODP>2.0.CO;2
+
+    Examples
+    --------
+    >>> fixed = radarx.retrieve.correct_dual_prf(  # doctest: +SKIP
+    ...     sweep, "VRADH", nyquist_high=13.3, nyquist_low=10.0)
+    """
+    if int(passes) != passes or passes < 1:
+        raise ValueError("passes must be a positive integer")
+    if int(min_points) != min_points or min_points < 1:
+        raise ValueError("min_points must be a positive integer")
+    if int(max_window) != max_window or max_window < 3 or max_window % 2 == 0:
+        raise ValueError("max_window must be an odd number of at least 3")
+    compiled = _use_compiled(engine)
+    radar = as_sweep(radar)
+    field = find_field(radar, VELOCITY, field)
+    name = name or f"{field}_dualprf"
+    options = (min_points, max_window, int(passes), name, n_threads, compiled)
+
+    def limits(sweep):
+        vh = _positive(_per_sweep(nyquist_high, sweep), "nyquist_high", sweep)
+        vl = _positive(_per_sweep(nyquist_low, sweep), "nyquist_low", sweep)
+        if not vh > vl:
+            raise ValueError("nyquist_high must be larger than nyquist_low")
+        return vh, vl
+
+    if isinstance(radar, xr.Dataset):
+        vh, vl = limits(None)
+        return _dual_prf_sweep(radar, field, vh, vl, prf, first_ray, *options)
+    nodes = {}
+    for sweep in _sweep_names_with(radar, field):
+        vh, vl = limits(sweep)
+        nodes[sweep] = _dual_prf_sweep(
+            _sweep_dataset_of(radar, sweep), field, vh, vl, prf, first_ray, *options
+        )
+    if not nodes:
+        raise ValueError(f"No sweep contains {field!r}.")
+    return product_tree(radar, nodes)
+
+
+@accessor_method("dataset", "datatree", name="correct_dual_prf")
+def _correct_dual_prf_accessor(self, field=None, **kwargs):
+    return correct_dual_prf(self.xarray_obj, field, **kwargs)
+
+
+@accessor_method("dataset", "datatree", name="dealias_confidence")
+def _dealias_confidence_accessor(self, field=None, nyquist_velocity=None, **kwargs):
+    return dealias_confidence(self.xarray_obj, field, nyquist_velocity, **kwargs)
+
+
+_correct_dual_prf_accessor.__doc__ = correct_dual_prf.__doc__
+_dealias_confidence_accessor.__doc__ = dealias_confidence.__doc__
