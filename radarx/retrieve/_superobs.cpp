@@ -205,150 +205,235 @@ private:
 
 namespace {
 
+// The sweep: its range gates and its fields (a null pointer for a field it does not have).
+struct Fields {
+    const double* rng;
+    int64_t ngate;
+    const double* dbz;
+    const double* vr;
+    const double* rho;
+};
+
+// What is the same for every gate: the site, the limits, the layers and the columns.
+struct Setup {
+    double lon0, alt0, reff, rearth, max_range, min_ground;
+    double slat0, clat0;
+    const double* edges;
+    int64_t nedge, nlev;
+    bool clear;
+    double vmax, rho_min;
+    int mode;
+    double box;
+    int64_t half, width, cells, nbx_blocks;
+    double lon_ref, cos_ref, sin_ref;
+    const GridIndex* index;
+};
+
+// One ray: its angles and its rows of the fields.
+struct Ray {
+    double e, saz, caz, sel, cel;
+    const double *zrow, *vrow, *rrow;
+};
+
+// One gate that is worth binning: its range and the fields where they are valid.
+struct Gate {
+    double r;
+    double zd = 0.0, vv = 0.0;
+    bool zok = false, vok = false;
+};
+
+// Where a gate is: height above sea level, ground distance, layer, latitude (rad) with its
+// sine, and longitude minus radar longitude (rad).
+struct Place {
+    double hm, s;
+    int64_t level;
+    double lat, sl, dlon;
+};
+
+// The sums of one block of rays: one row of N_STATS sums per bin met, in order of arrival.
+struct Block {
+    std::unordered_map<int64_t, int64_t> slot;
+    std::vector<int64_t> bins;
+    std::vector<double> sums;
+
+    Block() { slot.reserve(256); }
+
+    double* row(int64_t bin) {
+        int64_t pos;
+        auto it = slot.find(bin);
+        if (it == slot.end()) {
+            pos = static_cast<int64_t>(bins.size());
+            slot.emplace(bin, pos);
+            bins.push_back(bin);
+            sums.resize(sums.size() + N_STATS, 0.0);
+        } else {
+            pos = it->second;
+        }
+        return sums.data() + pos * N_STATS;
+    }
+};
+
 struct Table {
     std::vector<int64_t> bins;
     std::vector<double> stats;  // N_STATS per bin
 };
 
-// One block of rays: sums the gates into a table sorted by bin.
-Table sum_block(int64_t r0, int64_t r1, const double* az, const double* el, const double* rng,
-                int64_t ngate, const double* dbz, const double* vr, const double* rho,
-                double lat0, double lon0, double alt0, double reff, double rearth,
-                double max_range, double min_ground, const double* edges, int64_t nedge,
-                bool clear, double vmax, double rho_min, int mode, double box, int64_t half,
-                int64_t cells, int64_t nbx_blocks, double lat_ref, double lon_ref,
-                const GridIndex* index) {
-    const int64_t nlev = nedge - 1;
-    const int64_t width = 2 * half + 1;
-    const double slat0 = std::sin(lat0), clat0 = std::cos(lat0);
-    const double cos_ref = std::cos(lat_ref), sin_ref = std::sin(lat_ref);
-    const bool has_z = dbz != nullptr, has_v = vr != nullptr;
-    std::unordered_map<int64_t, int64_t> slot;
-    slot.reserve(256);
-    std::vector<int64_t> bins;
-    std::vector<double> sums;
+Ray make_ray(const Fields& f, double az, double el, int64_t ray) {
+    const double a = az * kDeg, e = el * kDeg;
+    Ray y;
+    y.e = e;
+    y.saz = std::sin(a);
+    y.caz = std::cos(a);
+    y.sel = std::sin(e);
+    y.cel = std::cos(e);
+    y.zrow = f.dbz ? f.dbz + ray * f.ngate : nullptr;
+    y.vrow = f.vr ? f.vr + ray * f.ngate : nullptr;
+    y.rrow = f.rho ? f.rho + ray * f.ngate : nullptr;
+    return y;
+}
 
-    for (int64_t ray = r0; ray < r1; ++ray) {
-        const double a = az[ray] * kDeg, e = el[ray] * kDeg;
-        const double saz = std::sin(a), caz = std::cos(a), sel = std::sin(e), cel = std::cos(e);
-        const double* zrow = has_z ? dbz + ray * ngate : nullptr;
-        const double* vrow = has_v ? vr + ray * ngate : nullptr;
-        const double* rrow = rho ? rho + ray * ngate : nullptr;
-        for (int64_t g = 0; g < ngate; ++g) {
-            const double r = rng[g];
-            if (!(r > 0.0) || r > max_range) continue;
-            bool zok = false, vok = false;
-            double zd = 0.0, vv = 0.0;
-            if (has_z) {
-                zd = zrow[g];
-                zok = std::isfinite(zd);
-            }
-            if (has_v) {
-                vv = vrow[g];
-                vok = std::isfinite(vv) && std::fabs(vv) <= vmax;
-            }
-            if (rrow && std::isfinite(rrow[g]) && rrow[g] < rho_min) zok = vok = false;
-            if (!clear && !zok && !vok) continue;
-
-            // site altitude in the Earth radius, as in xradar and radarx.fundamentals.geometry
-            const double ra = reff + alt0;
-            const double bd = std::sqrt(r * r + ra * ra + 2.0 * r * ra * sel);
-            const double hgt = bd - ra;
-            const double hm = hgt + alt0;
-            if (!(hm >= edges[0] && hm < edges[nedge - 1])) continue;
-            const double s = reff * std::asin(r * cel / bd);
-            if (!(s > min_ground)) continue;
-            const int64_t level = (std::upper_bound(edges, edges + nedge, hm) - edges) - 1;
-
-            const double d = s / rearth;
-            const double sd = std::sin(d), cd = std::cos(d);
-            double sl = slat0 * cd + clat0 * sd * caz;
-            sl = std::min(1.0, std::max(-1.0, sl));
-            const double lat = std::asin(sl);
-            const double dlon = std::atan2(saz * sd * clat0, cd - slat0 * sl);
-
-            int64_t col;
-            if (mode == 0) {
-                const double fx = std::floor(s * saz / box);
-                const double fy = std::floor(s * caz / box);
-                const int64_t ix = static_cast<int64_t>(fx) + half;
-                const int64_t iy = static_cast<int64_t>(fy) + half;
-                if (ix < 0 || ix >= width || iy < 0 || iy >= width) continue;
-                col = iy * width + ix;
-            } else {
-                // azimuthal equidistant projection about the reference point
-                const double dl = lon0 + dlon - lon_ref;
-                const double cl = std::cos(lat);
-                const double pa = cl * std::sin(dl);
-                const double pb = cos_ref * sl - sin_ref * cl * std::cos(dl);
-                const double pc = sin_ref * sl + cos_ref * cl * std::cos(dl);
-                const double pr = std::hypot(pa, pb);
-                const double kp = pr > 0.0 ? std::atan2(pr, pc) / pr : 1.0;
-                const int64_t k = index->nearest(rearth * kp * pa, rearth * kp * pb);
-                if (k < 0) continue;
-                col = ((k / index->nx()) / cells) * nbx_blocks + ((k % index->nx()) / cells);
-            }
-            const int64_t bin = col * nlev + level;
-
-            int64_t pos;
-            auto it = slot.find(bin);
-            if (it == slot.end()) {
-                pos = static_cast<int64_t>(bins.size());
-                slot.emplace(bin, pos);
-                bins.push_back(bin);
-                sums.resize(sums.size() + N_STATS, 0.0);
-            } else {
-                pos = it->second;
-            }
-            double* t = sums.data() + pos * N_STATS;
-            t[N_ALL] += 1.0;
-            t[S_LAT] += lat / kDeg;
-            t[S_DLON] += dlon / kDeg;
-            t[S_H] += hm;
-            t[S_R] += r;
-            if (has_z) {
-                t[N_ZS] += 1.0;
-                if (zok) {
-                    t[N_Z] += 1.0;
-                    t[S_Z] += std::pow(10.0, zd / 10.0);
-                    t[S_D] += zd;
-                    t[S_D2] += zd * zd;
-                }
-            }
-            if (has_v) {
-                t[N_VS] += 1.0;
-                if (vok) {
-                    t[N_V] += 1.0;
-                    t[S_V] += vv;
-                    t[S_V2] += vv * vv;
-                    // ray direction at the gate: bearing of the great circle there and the
-                    // elevation relative to the local horizontal (4/3 Earth)
-                    const double aa = std::sin(dlon) * clat0;
-                    const double bb = std::cos(lat) * slat0 - sl * clat0 * std::cos(dlon);
-                    const double nrm = std::hypot(aa, bb);
-                    const double eg = e + s / reff;
-                    const double ceg = std::cos(eg);
-                    t[S_EX] += (aa / nrm) * ceg;
-                    t[S_EY] += (-bb / nrm) * ceg;
-                    t[S_EZ] += std::sin(eg);
-                }
-            }
-        }
+// Reads gate g of a ray. False if the gate is out of range or has no valid value to bin.
+bool read_gate(const Fields& f, const Setup& su, const Ray& ray, int64_t g, Gate& gt) {
+    const double r = f.rng[g];
+    if (!(r > 0.0) || r > su.max_range) return false;
+    gt.r = r;
+    if (ray.zrow) {
+        gt.zd = ray.zrow[g];
+        gt.zok = std::isfinite(gt.zd);
     }
+    if (ray.vrow) {
+        gt.vv = ray.vrow[g];
+        gt.vok = std::isfinite(gt.vv) && std::fabs(gt.vv) <= su.vmax;
+    }
+    if (ray.rrow && std::isfinite(ray.rrow[g]) && ray.rrow[g] < su.rho_min)
+        gt.zok = gt.vok = false;
+    return su.clear || gt.zok || gt.vok;
+}
 
-    // sort the bins of the block
-    std::vector<int64_t> order(bins.size());
+// Height, layer, ground distance, latitude and longitude of a gate at range r. False if it
+// is outside the layers or too close to the radar.
+bool place_gate(const Setup& su, const Ray& ray, double r, Place& pl) {
+    // site altitude in the Earth radius, as in xradar and radarx.fundamentals.geometry
+    const double ra = su.reff + su.alt0;
+    const double bd = std::sqrt(r * r + ra * ra + 2.0 * r * ra * ray.sel);
+    const double hgt = bd - ra;
+    const double hm = hgt + su.alt0;
+    if (!(hm >= su.edges[0] && hm < su.edges[su.nedge - 1])) return false;
+    const double s = su.reff * std::asin(r * ray.cel / bd);
+    if (!(s > su.min_ground)) return false;
+    pl.hm = hm;
+    pl.s = s;
+    pl.level = (std::upper_bound(su.edges, su.edges + su.nedge, hm) - su.edges) - 1;
+
+    const double d = s / su.rearth;
+    const double sd = std::sin(d), cd = std::cos(d);
+    double sl = su.slat0 * cd + su.clat0 * sd * ray.caz;
+    sl = std::min(1.0, std::max(-1.0, sl));
+    pl.sl = sl;
+    pl.lat = std::asin(sl);
+    pl.dlon = std::atan2(ray.saz * sd * su.clat0, cd - su.slat0 * sl);
+    return true;
+}
+
+// Column of a box of the regular grid of the plane around the radar (mode 0).
+bool box_column(const Setup& su, const Ray& ray, const Place& pl, int64_t& col) {
+    const double fx = std::floor(pl.s * ray.saz / su.box);
+    const double fy = std::floor(pl.s * ray.caz / su.box);
+    const int64_t ix = static_cast<int64_t>(fx) + su.half;
+    const int64_t iy = static_cast<int64_t>(fy) + su.half;
+    if (ix < 0 || ix >= su.width || iy < 0 || iy >= su.width) return false;
+    col = iy * su.width + ix;
+    return true;
+}
+
+// Column of the block of model cells that holds the nearest cell (mode 1).
+bool grid_column(const Setup& su, const Place& pl, int64_t& col) {
+    // azimuthal equidistant projection about the reference point
+    const double dl = su.lon0 + pl.dlon - su.lon_ref;
+    const double cl = std::cos(pl.lat);
+    const double pa = cl * std::sin(dl);
+    const double pb = su.cos_ref * pl.sl - su.sin_ref * cl * std::cos(dl);
+    const double pc = su.sin_ref * pl.sl + su.cos_ref * cl * std::cos(dl);
+    const double pr = std::hypot(pa, pb);
+    const double kp = pr > 0.0 ? std::atan2(pr, pc) / pr : 1.0;
+    const int64_t k = su.index->nearest(su.rearth * kp * pa, su.rearth * kp * pb);
+    if (k < 0) return false;
+    col = ((k / su.index->nx()) / su.cells) * su.nbx_blocks + ((k % su.index->nx()) / su.cells);
+    return true;
+}
+
+void add_reflectivity(double* t, const Gate& gt) {
+    t[N_ZS] += 1.0;
+    if (!gt.zok) return;
+    t[N_Z] += 1.0;
+    t[S_Z] += std::pow(10.0, gt.zd / 10.0);
+    t[S_D] += gt.zd;
+    t[S_D2] += gt.zd * gt.zd;
+}
+
+void add_velocity(double* t, const Setup& su, const Ray& ray, const Gate& gt, const Place& pl) {
+    t[N_VS] += 1.0;
+    if (!gt.vok) return;
+    t[N_V] += 1.0;
+    t[S_V] += gt.vv;
+    t[S_V2] += gt.vv * gt.vv;
+    // ray direction at the gate: bearing of the great circle there and the
+    // elevation relative to the local horizontal (4/3 Earth)
+    const double aa = std::sin(pl.dlon) * su.clat0;
+    const double bb = std::cos(pl.lat) * su.slat0 - pl.sl * su.clat0 * std::cos(pl.dlon);
+    const double nrm = std::hypot(aa, bb);
+    const double eg = ray.e + pl.s / su.reff;
+    const double ceg = std::cos(eg);
+    t[S_EX] += (aa / nrm) * ceg;
+    t[S_EY] += (-bb / nrm) * ceg;
+    t[S_EZ] += std::sin(eg);
+}
+
+// Adds gate g of a ray to the sums of its bin, if it has one.
+void sum_gate(Block& blk, const Fields& f, const Setup& su, const Ray& ray, int64_t g) {
+    Gate gt;
+    if (!read_gate(f, su, ray, g, gt)) return;
+    Place pl;
+    if (!place_gate(su, ray, gt.r, pl)) return;
+    int64_t col;
+    if (su.mode == 0 ? !box_column(su, ray, pl, col) : !grid_column(su, pl, col)) return;
+
+    double* t = blk.row(col * su.nlev + pl.level);
+    t[N_ALL] += 1.0;
+    t[S_LAT] += pl.lat / kDeg;
+    t[S_DLON] += pl.dlon / kDeg;
+    t[S_H] += pl.hm;
+    t[S_R] += gt.r;
+    if (ray.zrow) add_reflectivity(t, gt);
+    if (ray.vrow) add_velocity(t, su, ray, gt, pl);
+}
+
+// The bins of a block sorted, with their rows of sums.
+Table sorted_table(const Block& blk) {
+    std::vector<int64_t> order(blk.bins.size());
     for (size_t i = 0; i < order.size(); ++i) order[i] = static_cast<int64_t>(i);
-    std::sort(order.begin(), order.end(), [&](int64_t p, int64_t q) { return bins[p] < bins[q]; });
+    std::sort(order.begin(), order.end(),
+              [&](int64_t p, int64_t q) { return blk.bins[p] < blk.bins[q]; });
     Table out;
-    out.bins.resize(bins.size());
-    out.stats.resize(sums.size());
+    out.bins.resize(blk.bins.size());
+    out.stats.resize(blk.sums.size());
     for (size_t i = 0; i < order.size(); ++i) {
-        out.bins[i] = bins[order[i]];
-        std::copy(sums.begin() + order[i] * N_STATS, sums.begin() + (order[i] + 1) * N_STATS,
-                  out.stats.begin() + i * N_STATS);
+        out.bins[i] = blk.bins[order[i]];
+        std::copy(blk.sums.begin() + order[i] * N_STATS,
+                  blk.sums.begin() + (order[i] + 1) * N_STATS, out.stats.begin() + i * N_STATS);
     }
     return out;
+}
+
+// One block of rays: sums the gates into a table sorted by bin.
+Table sum_block(int64_t r0, int64_t r1, const double* az, const double* el, const Fields& f,
+                const Setup& su) {
+    Block blk;
+    for (int64_t ray = r0; ray < r1; ++ray) {
+        const Ray y = make_ray(f, az[ray], el[ray], ray);
+        for (int64_t g = 0; g < f.ngate; ++g) sum_gate(blk, f, su, y, g);
+    }
+    return sorted_table(blk);
 }
 
 }  // namespace
@@ -380,19 +465,43 @@ py::tuple bin_sweep_py(const DArray& azimuth, const DArray& elevation, const DAr
 
     const int64_t nblocks = (nray + kBlockRays - 1) / kBlockRays;
     std::vector<Table> tables(nblocks);
-    const double* dp = dbz.size() ? dbz.data() : nullptr;
-    const double* vp = vr.size() ? vr.data() : nullptr;
-    const double* rp = rho.size() ? rho.data() : nullptr;
+    Fields fields;
+    fields.rng = range.data();
+    fields.ngate = ngate;
+    fields.dbz = dbz.size() ? dbz.data() : nullptr;
+    fields.vr = vr.size() ? vr.data() : nullptr;
+    fields.rho = rho.size() ? rho.data() : nullptr;
+    Setup setup;
+    setup.lon0 = lon0 * kDeg;
+    setup.alt0 = alt0;
+    setup.reff = reff;
+    setup.rearth = rearth;
+    setup.max_range = max_range;
+    setup.min_ground = min_ground;
+    setup.slat0 = std::sin(lat0 * kDeg);
+    setup.clat0 = std::cos(lat0 * kDeg);
+    setup.edges = edges.data();
+    setup.nedge = edges.shape(0);
+    setup.nlev = edges.shape(0) - 1;
+    setup.clear = clear;
+    setup.vmax = vmax;
+    setup.rho_min = rho_min;
+    setup.mode = mode;
+    setup.box = box;
+    setup.half = half;
+    setup.width = 2 * half + 1;
+    setup.cells = cells;
+    setup.nbx_blocks = nbx_blocks;
+    setup.lon_ref = lon_ref * kDeg;
+    setup.cos_ref = std::cos(lat_ref * kDeg);
+    setup.sin_ref = std::sin(lat_ref * kDeg);
+    setup.index = index;
     {
         py::gil_scoped_release release;
         parallel_blocks(nblocks, n_threads, [&](int64_t b) {
             const int64_t r0 = b * kBlockRays;
             const int64_t r1 = std::min(nray, r0 + kBlockRays);
-            tables[b] = sum_block(r0, r1, azimuth.data(), elevation.data(), range.data(), ngate,
-                                  dp, vp, rp, lat0 * kDeg, lon0 * kDeg, alt0, reff, rearth,
-                                  max_range, min_ground, edges.data(), edges.shape(0), clear,
-                                  vmax, rho_min, mode, box, half, cells, nbx_blocks,
-                                  lat_ref * kDeg, lon_ref * kDeg, index);
+            tables[b] = sum_block(r0, r1, azimuth.data(), elevation.data(), fields, setup);
         });
     }
     // add the tables of the blocks, in block order, into one table sorted by bin
