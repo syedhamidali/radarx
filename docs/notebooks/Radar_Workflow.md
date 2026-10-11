@@ -42,7 +42,7 @@ multi-radar steps.
 | 11 | storm motion, common analysis time, time interpolation | `estimate_motion`, `advect`, `interpolate_time` |
 | 12 | multi-radar grid, radar bias, ERA5 on the grid, three-dimensional wind | `grid_radars`, `network_bias`, `multi_doppler` |
 | 13 | evaporation and evaporative cooling | `evaporation`, `integrate_evaporation` |
-| 14 | VIL, liquid VIL, echo top, VIL density and liquid water content | `vil`, `echo_top`, `vil_density`, `liquid_water_content` |
+| 14 | VIL, liquid VIL, echo top, VIL density, liquid water content and hail products | `vil`, `echo_top`, `vil_density`, `liquid_water_content`, `hail_products`, `shi`, `mesh`, `posh`, `hail_kinetic_energy` |
 | 15 | noise level, SNR, noise-corrected RHOHV and ZDR, ZDR, Z and system ΦDP offsets | `noise_level`, `snr`, `correct_rhohv_noise`, `zdr_offset`, `z_offset`, `phidp_offset` |
 | 16 | super-observations of reflectivity and velocity with errors, WRFDA `ob.radar` and DART `obs_seq` files | `superobs`, `write_wrfda_radar`, `write_dart_obs_seq` |
 | 17 | runtime summary and one `DataTree` with all products | |
@@ -129,6 +129,8 @@ from radarx.retrieve import (
     estimate_motion,
     evaporation,
     forward_grid,
+    hail_kinetic_energy,
+    hail_products,
     hid,
     hid_classes,
     integrate_evaporation,
@@ -137,9 +139,11 @@ from radarx.retrieve import (
     liquid_water_content,
     llsd,
     melting_layer,
+    mesh,
     multi_doppler_input,
     noise_level,
     phidp_offset,
+    posh,
     qvp,
     qvp_timeseries,
     radar_geometry,
@@ -149,6 +153,7 @@ from radarx.retrieve import (
     rain_rate_kdp,
     rain_rate_z,
     rain_rate_z_zdr,
+    shi,
     snr,
     storm_relative_helicity,
     storm_relative_wind,
@@ -1525,6 +1530,57 @@ the water content is for the rain gates of the lowest sweep only. Within about
 10 km of the radar the highest beam is only a few km high, so the VIL and
 the echo top there are truncated (`VIL_TOP_TRUNCATED`).
 
+### Hail products
+
+The hail detection algorithm of Witt et al. (1998) turns the same columns and the
+heights of the 0 and −20 °C levels into the severe hail index `shi`
+($\mathrm{SHI}=0.1\sum W_T\,\dot E\,\Delta H$ with the kinetic energy flux
+$\dot E=5\times10^{-6}\,10^{0.084Z}\,W(Z)$), the maximum expected hail size `mesh`
+($2.54\,\mathrm{SHI}^{0.5}$ mm), the probability of severe hail `posh`
+and the hail kinetic energy flux of the lowest beam `hail_kinetic_energy`;
+`hail_products` returns them together. The two levels come here from the ERA5
+profile of step 3 (`profile=era5`; they can also be numbers or fields). The
+[hail notebook](Hail_Products) checks the sums against closed-form columns and
+against the worked example of the paper.
+
+```{code-cell} ipython3
+with timed("14b. hail products"):
+    hail = hail_products(kgwx, profile=era5)
+    shi_vol = shi(kgwx, profile=era5)
+    mesh_vol = mesh(kgwx, profile=era5)
+    posh_vol = posh(kgwx, profile=era5)
+    flux_vol = hail_kinetic_energy(kgwx)
+    hail_acc = kgwx.radarx.hail_products(profile=era5)  # the accessors of the volume
+    shi_acc = kgwx.radarx.shi(profile=era5)
+    mesh_acc = kgwx.radarx.mesh(profile=era5)
+    posh_acc = kgwx.radarx.posh(profile=era5)
+    flux_acc = kgwx.radarx.hail_kinetic_energy()
+print("accessors agree:", bool(hail_acc.SHI.equals(hail.SHI)), bool(shi_acc.equals(shi_vol)),
+      bool(mesh_acc.equals(mesh_vol)), bool(posh_acc.equals(posh_vol)), bool(flux_acc.equals(flux_vol)))
+print(f"SHI above 0 in {int((hail.SHI > 0).sum())} columns, maximum {float(hail.SHI.max()):.0f} J m-1 s-1, "
+      f"MESH {float(hail.MESH.max()):.0f} mm, POSH {float(hail.POSH.max()):.0f} %, "
+      f"hail kinetic energy flux {float(flux_vol.max()):.2f} J m-2 s-1")
+```
+
+```{code-cell} ipython3
+fig, axes = plt.subplots(1, 3, figsize=(15, 4.8), sharey=True, layout="constrained")
+panels = [
+    (hail.SHI.where(hail.SHI > 0), "SHI (J m$^{-1}$ s$^{-1}$)", dict(cmap="magma_r", vmin=0, vmax=60)),
+    (hail.MESH.where(hail.MESH > 0), "MESH (mm)", dict(cmap="viridis", vmin=0, vmax=25)),
+    (hail.POSH.where(hail.POSH > 0), "POSH (%)", dict(cmap="cividis", vmin=0, vmax=60)),
+]
+for ax, (da, label, style) in zip(axes, panels):
+    pm = ppi(ax, surv.assign(field=da), "field", extent=150, **style)
+    fig.colorbar(pm, ax=ax, label=label, shrink=0.85)
+axes[0].set_ylabel("north of KGWX (km)")
+fig.suptitle("Hail products with the ERA5 0 and -20 °C levels, KGWX, 00:00 UTC")
+plt.show()
+```
+
+SHI counts only echo of 40 dBZ or more above the 0 °C level, so it is positive in
+the cores of the line and zero elsewhere; the warning threshold of POSH at this
+melting level is about 74 J m$^{-1}$ s$^{-1}$, so POSH stays low.
+
 ## 15. Noise and calibration
 
 Three things limit how far the dual-polarization fields can be trusted: the noise
@@ -1944,6 +2000,11 @@ notebooks or from this index.
 | `drop_evaporation_rate` | `radarx.retrieve.evaporation` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `evaporation` | `radarx.retrieve.evaporation` | [core](Radar_Workflow): 13. Evaporation |
 | `integrate_evaporation` | `radarx.retrieve.evaporation` | [core](Radar_Workflow): 13. Evaporation |
+| `hail_kinetic_energy` | `radarx.retrieve.hail` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
+| `hail_products` | `radarx.retrieve.hail` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
+| `mesh` | `radarx.retrieve.hail` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
+| `posh` | `radarx.retrieve.hail` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
+| `shi` | `radarx.retrieve.hail` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `hid` | `radarx.retrieve.hid` | [core](Radar_Workflow): 6. Hydrometeor classification |
 | `hid_classes` | `radarx.retrieve.hid` | [core](Radar_Workflow): 6. Hydrometeor classification |
 | `estimate_kdp` | `radarx.retrieve.kdp` | [core](Radar_Workflow): 5. ΦDP processing and KDP |
@@ -2041,6 +2102,8 @@ The methods of the `.radarx` accessors:
 | `.radarx.evaporation` | [core](Radar_Workflow): 13. Evaporation |
 | `.radarx.grid_lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `.radarx.grid_radars` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
+| `.radarx.hail_kinetic_energy` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
+| `.radarx.hail_products` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.hid` | [core](Radar_Workflow): 6. Hydrometeor classification |
 | `.radarx.integrate_evaporation` | [core](Radar_Workflow): 13. Evaporation |
 | `.radarx.interpolate_profile` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
@@ -2051,6 +2114,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.llsd` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `.radarx.melting_layer` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `.radarx.merge_radars` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
+| `.radarx.mesh` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.multi_doppler` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `.radarx.network_bias` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `.radarx.noise_level` | [core](Radar_Workflow): 15. Noise and calibration |
@@ -2061,6 +2125,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.plot_max_cappi` | [core](Radar_Workflow): 10. Cone gridding, Max-CAPPI, interactive view and UGRID |
 | `.radarx.plot_ppi` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `.radarx.plot_rhi` | [core](Radar_Workflow): Other ways to grid, section and plot |
+| `.radarx.posh` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.potential_temperatures` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `.radarx.qvp` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `.radarx.radial_divergence` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
@@ -2071,6 +2136,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.rain_rate_z_zdr` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
 | `.radarx.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `.radarx.rotation_couplets` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
+| `.radarx.shi` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.single_doppler_winds` | [part 2](Radar_Workflow_Advanced): 8. Wind from a single Doppler radar |
 | `.radarx.snr` | [core](Radar_Workflow): 15. Noise and calibration |
 | `.radarx.sounding` | [core](Radar_Workflow): 3. Environment |

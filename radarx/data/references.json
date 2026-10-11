@@ -528,6 +528,24 @@
   "pages": "473-478",
   "doi": "10.1175/1520-0434(1997)012<0473:VDAAHI>2.0.CO;2"
  },
+ "10.1175/1520-0434(1998)013<0286:AEHDAF>2.0.CO;2": {
+  "authors": [
+   "Witt, A.",
+   "Eilts, M. D.",
+   "Stumpf, G. J.",
+   "Johnson, J. T.",
+   "Mitchell, E. D.",
+   "Thomas, K. W."
+  ],
+  "year": 1998,
+  "title": "An Enhanced Hail Detection Algorithm for the WSR-88D",
+  "type": "article",
+  "journal": "Weather and Forecasting",
+  "volume": "13",
+  "issue": "2",
+  "pages": "286-303",
+  "doi": "10.1175/1520-0434(1998)013<0286:AEHDAF>2.0.CO;2"
+ },
  "10.1175/1520-0434(2000)015<0061:PSMUAN>2.0.CO;2": {
   "authors": [
    "Bunkers, M. J.",
@@ -585,6 +603,37 @@
   "issue": "2",
   "pages": "249-253",
   "doi": "10.1175/1520-0450(1969)008<0249:TVORA>2.0.CO;2"
+ },
+ "10.1175/1520-0450(1978)017<0515:TKEOHP>2.0.CO;2": {
+  "authors": [
+   "Waldvogel, A.",
+   "Schmid, W.",
+   "Federer, B."
+  ],
+  "year": 1978,
+  "title": "The Kinetic Energy of Hailfalls. Part I: Hailstone Spectra",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology",
+  "volume": "17",
+  "issue": "4",
+  "pages": "515-520",
+  "doi": "10.1175/1520-0450(1978)017<0515:TKEOHP>2.0.CO;2"
+ },
+ "10.1175/1520-0450(1978)017<1680:TKEOHP>2.0.CO;2": {
+  "authors": [
+   "Waldvogel, A.",
+   "Federer, B.",
+   "Schmid, W.",
+   "Mezeix, J. F."
+  ],
+  "year": 1978,
+  "title": "The Kinetic Energy of Hailfalls. Part II: Radar and Hailpads",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology",
+  "volume": "17",
+  "issue": "11",
+  "pages": "1680-1693",
+  "doi": "10.1175/1520-0450(1978)017<1680:TKEOHP>2.0.CO;2"
  },
  "10.1175/1520-0450(1981)020<1527:NEFCVP>2.0.CO;2": {
   "authors": [
@@ -1953,6 +2002,18 @@
   "publisher": "AAAI Press",
   "pages": "226-231"
  },
+ "graham-nelson-1998": {
+  "authors": [
+   "Graham, R. A.",
+   "Nelson, J. A."
+  ],
+  "year": 1998,
+  "title": "An examination into the utility of the Build 9 hail detection algorithm (HDA) across northern Utah",
+  "type": "report",
+  "journal": "NWS Western Region Technical Attachment No. 98-27",
+  "publisher": "National Weather Service Western Region",
+  "url": "https://www.weather.gov/media/wrh/online_publications/TAs/ta9827.pdf"
+ },
  "maesaka-2012": {
   "authors": [
    "Maesaka, T.",
@@ -1963,6 +2024,17 @@
   "title": "Non-negative KDP estimation by monotone increasing PhiDP assumption below melting layer",
   "type": "inproceedings",
   "journal": "Proceedings of the Seventh European Conference on Radar in Meteorology and Hydrology (ERAD 2012)"
+ },
+ "holleman-2001": {
+  "authors": [
+   "Holleman, I."
+  ],
+  "year": 2001,
+  "title": "Hail detection using single-polarization radar",
+  "type": "report",
+  "journal": "KNMI Scientific Report WR-2001-01",
+  "publisher": "Royal Netherlands Meteorological Institute (KNMI)",
+  "url": "https://cdn.knmi.nl/knmi/pdf/bibliotheek/knmipubWR/WR2001-01.pdf"
  },
  "radarx": {
   "authors": [

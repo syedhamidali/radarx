@@ -79,6 +79,7 @@ notebooks/Cold_Pools_and_Wind_Profiles
 
 notebooks/Lightning
 notebooks/Tornado_Detection
+notebooks/Hail_Products
 ```
 
 ```{toctree}
