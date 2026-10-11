@@ -11,7 +11,9 @@ echo (insects, birds, ground clutter, anomalous propagation, sea clutter,
 second-trip echo, noise) gate by gate, before KDP, hydrometeor
 classification, rain rates or gridding.
 
-The classification is a weighted fuzzy-logic scheme in the spirit of
+Two methods are available (option ``method`` of :func:`echo_mask`).
+
+``method="radarx"`` (default) is a weighted fuzzy-logic scheme in the manner of
 Gourley et al. (2007) [1] and Krause (2016) [2]: local features of the
 polarimetric variables and of the reflectivity are mapped to a membership in
 [0, 1] ("how meteorological"), and the weighted mean of the memberships is
@@ -22,8 +24,18 @@ Only the form of the aggregation, :math:`A = \\sum_j W_j P_j / \\sum_j W_j`
 are taken from them. The membership corners, weights, threshold, window,
 smoothing and speckle filter are radarx's own choices; see the Notes of
 :func:`echo_mask` for the number-by-number comparison with the two papers.
-Every feature is computed along the ray over a window of ``window`` km
-centred on the gate:
+
+``method="krause2016"`` is the MetSignal algorithm of Krause (2016) [2]:
+the six memberships of its Fig. 2, the weights of its Table 1, standard
+deviations over nine range bins, the threshold of 0.8 (warm season) or 0.7
+(cold season) and the post-processing rules of its Sect. 2. The Notes of
+:func:`echo_mask` list what the paper specifies and what radarx had to choose.
+The method of Gourley et al. (2007) [1] is not implemented, because its
+membership functions are density estimates of C-band data of one radar that
+the paper shows in a figure only (see the Notes).
+
+For ``method="radarx"``, every feature is computed along the ray over a
+window of ``window`` km centred on the gate:
 
 ``rhohv``
     Mean copolar correlation coefficient. Precipitation has a mode of
@@ -835,7 +847,8 @@ def _fixed_angle(ds):
 
 
 @provenance(
-    "Fuzzy-logic echo score in the manner of Gourley 2007 and Krause 2016, own memberships and weights"
+    "Fuzzy-logic echo score in the manner of Gourley 2007 and Krause 2016, own memberships "
+    "and weights (method='krause2016': the MetSignal algorithm of Krause 2016)"
 )
 def echo_mask(
     obj,
@@ -882,15 +895,43 @@ def echo_mask(
         ``PHIDP``, ``uncorrected_differential_phase``, ``differential_phase``,
         ``PHI``; ``SNRH``, ``SNR``, ``signal_to_noise_ratio``. Missing
         optional fields are left out of the classification.
+    method : {"radarx", "krause2016"}, optional
+        ``"radarx"`` (default) is the scheme described above, in the manner of
+        Gourley et al. (2007) [1] and Krause (2016) [2] with memberships and
+        weights of radarx. ``"krause2016"`` is the MetSignal algorithm of
+        Krause (2016) [2] with the memberships of its Fig. 2, the weights of
+        its Table 1, nine-gate standard deviations and its post-processing
+        rules (see Notes). With ``"krause2016"``, ``limits``, ``weights`` and
+        ``window`` are not accepted, ``spin_threshold`` and
+        ``phidp_texture`` are not used, and the score ``METEO_SCORE`` is the
+        aggregation value A of the paper, not averaged over 3 x 3 gates.
+    vrad : str, optional
+        Radial velocity field (m/s) of ``method="krause2016"``. By default the
+        first of ``VRADH``, ``VRAD``, ``VRADV``, ``VEL``, ``VELOCITY``,
+        ``velocity``, ``radial_velocity`` that a sweep holds. Where it is
+        missing, as in the surveillance cut of a NEXRAD split cut, the
+        velocity term is left out of the weighted mean. Not valid for
+        ``method="radarx"``, which does not use velocity.
+    zh_3km : str, optional
+        Name of a field of the sweeps with the reflectivity (dBZ) at 3 km
+        height of the previous volume scan on the same gates, for the
+        override rule of ``method="krause2016"`` (gates with at least 11 dBZ
+        are meteorological). Krause (2016) builds it as a constant-altitude
+        PPI from the previous volume (p. 1882); radarx does not compute it.
+        Not valid for ``method="radarx"``.
     window : float, optional
         Length (km) of the window along the ray for the features. Default 1.5
         (radarx choice; Krause 2016 [2] uses nine range bins, p. 1876).
+        Only for ``method="radarx"``; ``method="krause2016"`` always uses
+        nine range bins.
     threshold : float, optional
-        Gates whose score (weighted mean membership, averaged over 3 x 3
-        gates) is at least this are meteorological. Default 0.6, radarx's
-        own choice, lower than the 0.8 (warm season) and 0.7 (cold season) of
-        Krause (2016) [2] (p. 1876), whose memberships and weights differ
-        (see Notes).
+        Gates whose score are at least this are meteorological. Default for
+        ``method="radarx"``: 0.6 (the weighted mean membership averaged over
+        3 x 3 gates), radarx's own choice, lower than the 0.8 (warm season)
+        and 0.7 (cold season) of Krause (2016) [2] (p. 1876), whose
+        memberships and weights differ (see Notes). Default for
+        ``method="krause2016"``: 0.8, the warm-season value; pass 0.7 for the
+        cold season.
     limits : dict, optional
         Trapezoid ``(a, b, c, d)`` of any of the features ``"rhohv"``,
         ``"zdr"`` (dB), ``"zdr_texture"`` (dB), ``"phidp_texture"``
@@ -906,8 +947,9 @@ def echo_mask(
         2002 [4]).
     min_size : int, optional
         Connected meteorological regions with fewer gates are speckle.
-        Default 10 (radarx choice, not from the cited papers); 1 or less
-        disables the filter.
+        Default 10 for ``method="radarx"`` (radarx choice, not from the cited
+        papers) and 1 for ``method="krause2016"``, which has no speckle
+        filter; 1 or less disables the filter.
     phidp_texture : {"circular", "detrended"}, optional
         ``"circular"`` (default) is the circular standard deviation of the
         phase along the ray, which includes the rain ramp (about 0.58
@@ -1029,9 +1071,11 @@ def echo_mask(
     from these papers. They have not been tuned against the published
     algorithms or a labelled data set.
 
-    Behavioural differences from the two papers (documented, not changed
-    here; see the open issues on the weights, the threshold, the missing
-    rules and the aggregation):
+    Behavioural differences of ``method="radarx"`` from the two papers. They
+    are documented and not changed, so that existing results keep their
+    numbers; ``method="krause2016"`` has none of the differences with Krause
+    (2016) listed below except the choices named under "Method
+    ``krause2016``":
 
     - Weights. All polarimetric features have weight 1.0, the same as
       rhohv. Krause (2016) gives SD(PhiDP) and SD(ZDR) twice the weight of
@@ -1057,6 +1101,57 @@ def echo_mask(
       precipitation, ground clutter and clear air (their Eq. 3); their
       suppression thresholds (Table 1, p. 1446) and their despeckling of
       precipitation pixels on a 1 km grid (p. 1446) have no counterpart.
+
+    Method ``krause2016``. From the paper (Krause 2016 [2], Sect. 2, Table 1,
+    Fig. 2, Sect. 4): the inputs :math:`Z_h`, :math:`\\rho_{hv}`, radial
+    velocity V, SD(:math:`\\Phi_{DP}`), SD(:math:`Z_{DR}`) and
+    SD(:math:`\\rho_{hv}`), the standard deviations over nine range bins
+    centred on the gate; the weights 1, 1, 1, 2, 2, 1; the single-sided
+    trapezoid memberships :math:`Z_h` 0 at 10 and 1 at 30 dBZ,
+    :math:`\\rho_{hv}` 0 at 0.75 and 1 at 0.90, SD(:math:`\\Phi_{DP}`) 1 up to
+    10 and 0 at 20 degrees, SD(:math:`Z_{DR}`) 1 up to 1 and 0 at 2 dB,
+    SD(:math:`\\rho_{hv}`) 1 up to 0.03 and 0 at 0.04, and the velocity
+    membership 1 minus the inverted trapezoid that is 1 between -1.0 and
+    1.0 m/s and 0 beyond :math:`\\pm` 1.5 m/s (the corners are read from the
+    dashed lines of Fig. 2 against its axes, the text gives none); the
+    aggregation
+    :math:`A = \\sum_j W_j P_j / \\sum_j W_j` compared with 0.8 (warm season)
+    or 0.7 (cold season); the mean :math:`Z_{DR}` is not a term; then
+    gates with :math:`|Z_{DR}| > 4.5` dB or :math:`\\rho_{hv} < 0.65` are
+    non-meteorological, and gates whose :math:`Z_h` at 3 km height in the
+    previous volume exceeds 11 dBZ are meteorological. The paper does not
+    state, and radarx chooses: the standard deviation is the population
+    standard deviation of the gates with echo and data in the window (the
+    circular standard deviation for :math:`\\Phi_{DP}`, which equals the
+    ordinary one for small spread and is safe at the wrap of the phase), at
+    least three such gates are needed (else the term is left out), the window
+    is cut at the ends of the ray, a field that is missing at a gate drops
+    its term from the weighted mean, the comparisons are ``A >= threshold``
+    and ``Zh_3km >= 11``, the override is applied after the two rules, the
+    rules use the value of the gate itself, and no speckle filter is applied
+    (``min_size`` defaults to 1). The paper gives neither the gate spacing of
+    its data nor how the 3 km field is built beyond "the elevation closest to
+    the constant altitude of 3 km" of the previous volume, so ``zh_3km`` must
+    be built by the caller. The standard deviations depend on the gate
+    spacing: over nine gates of 250 m a phase ramp of rain alone gives
+    SD(:math:`\\Phi_{DP}`) of 1.3 degrees per degree/km of KDP, so that the
+    membership starts to fall at a KDP of 7.7 degrees/km. A volume of NEXRAD data has no velocity in the
+    surveillance cut of a split cut, so that cut is classified without the
+    velocity term (weights 7 instead of 8).
+
+    Gourley et al. (2007) [1] is not implemented as a method. The paper was
+    read in full, but its three-class classifier rests on membership
+    functions that are Gaussian-kernel density estimates of C-band data of
+    one radar (Trappes, Fig. 3 and Eq. 2) published as plots only; the text
+    gives the modes (:math:`\\rho_{hv}` 0.97, 0.92 and 0.42 for precipitation,
+    ground clutter and clear air; texture of :math:`Z_{DR}` 0.4, 5.2 and 2.5
+    dB; texture of :math:`\\Phi_{DP}` 4, 125 and 35 degrees), the overlap
+    areas of the weights (0.243, 0.203, 0.081 giving 1 : 1.20 : 3.00 by
+    Eq. 4) and one membership example, not the curves. The slope of the
+    range correction of the texture (Eq. 1, Fig. 2) and the pulse-to-pulse
+    variability of Z of Table 1 are not available either. Curves digitised
+    from the figure would be an invention at S band. The method is built to
+    be refitted for each radar and wavelength.
 
     References
     ----------
@@ -1088,6 +1183,13 @@ def echo_mask(
     --------
     >>> qc = radarx.retrieve.echo_mask(dtree)  # doctest: +SKIP
     >>> clean = dtree.radarx.apply_mask(qc)  # doctest: +SKIP
+
+    The MetSignal algorithm of Krause (2016), with the reflectivity at 3 km of
+    the previous volume as a field ``ZH3KM`` of the sweep:
+
+    >>> qc = radarx.retrieve.echo_mask(
+    ...     sweep, method="krause2016", zh_3km="ZH3KM"
+    ... )  # doctest: +SKIP
     """
     if method not in METHODS:
         raise ValueError(f"method must be one of {METHODS}, not {method!r}")

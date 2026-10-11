@@ -883,3 +883,34 @@ def test_krause_kgwx_removes_biological_echo_and_keeps_the_squall_line(kgwx):
     assert np.mean(cls[bio] != 1) > 0.95
     assert np.mean(cls[squall] == 1) > 0.9
     assert (cls[z <= -32] == 0).all()
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_krause_synthetic_echo_types(engine):
+    """Rain, biological echo and clutter (described in the paper) and AP."""
+    ds, truth = _sweep()
+    rnd = np.random.default_rng(7)
+    # clutter does not move, rain and insects do (Krause 2016, p. 1881)
+    vel = rnd.normal(0, 4, ds.DBZH.shape)
+    vel[truth == 2] = rnd.normal(0, 0.3, (truth == 2).sum())
+    vel[:, 180:260] = rnd.normal(0, 4, (ds.sizes["azimuth"], 80))  # insects drift
+    ds["VRADH"] = (ds.DBZH.dims, vel)
+    out = echo_mask(ds, method="krause2016", vrad="VRADH", engine=engine)
+    cls = out.ECHO_CLASS.values
+    assert _share(cls, truth, 1, [1]) > 0.99
+    assert _share(cls, truth, 2, [2]) > 0.99
+    assert _share(cls, truth, 0, [0]) == 1.0
+    # anomalous propagation: strong, rhohv 0.88 +- 0.08, SD(PhiDP) 25 deg, noisy ZDR
+    nray, ng = 60, 300
+    one = np.ones((nray, ng))
+    ap = _krause_sweep(
+        40 * one + rnd.normal(0, 3, (nray, ng)),
+        zdr=rnd.normal(0, 2.5, (nray, ng)),
+        rho=np.clip(rnd.normal(0.88, 0.08, (nray, ng)), 0, 1),
+        phi=rnd.normal(0, 25, (nray, ng)) % 360,
+    )
+    for threshold in (0.8, 0.7):
+        out = echo_mask(
+            ap, method="krause2016", threshold=threshold, nodata=None, engine=engine
+        )
+        assert np.mean(out.ECHO_CLASS.values == 1) < 0.01
