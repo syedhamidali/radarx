@@ -436,6 +436,9 @@ def test_dask_stays_lazy():
         correct_rhohv_noise(lazy).compute(), correct_rhohv_noise(ds)
     )
     xr.testing.assert_allclose(snr(lazy, noise=ZN).compute(), snr(ds, noise=ZN))
+    # a noise level estimated lazily is a dask scalar; its value is recorded
+    est = snr(lazy)
+    assert est.attrs["noise_level"] == pytest.approx(float(noise_level(ds).NOISE_LEVEL))
     nl = noise_level(lazy)
     assert nl.NOISE_LEVEL.chunks is not None
     assert float(nl.NOISE_LEVEL.compute()) == pytest.approx(
