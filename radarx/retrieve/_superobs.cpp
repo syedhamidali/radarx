@@ -94,45 +94,16 @@ void parallel_blocks(int64_t nblocks, int n_threads, F&& body) {
 class GridIndex {
 public:
     GridIndex(const DArray& x, const DArray& y, double max_dist) : max_dist_(max_dist) {
-        if (x.ndim() != 2 || y.ndim() != 2 || x.shape(0) != y.shape(0) || x.shape(1) != y.shape(1))
-            throw std::invalid_argument("x and y must be 2-D arrays of the same shape");
-        if (!(max_dist > 0.0)) throw std::invalid_argument("max_dist must be positive");
+        check_inputs(x, y, max_dist);
         ny_ = x.shape(0);
         nx_ = x.shape(1);
         const int64_t n = ny_ * nx_;
         x_.assign(x.data(), x.data() + n);
         y_.assign(y.data(), y.data() + n);
-        double xmax = -std::numeric_limits<double>::infinity();
-        double ymax = xmax;
-        xmin_ = std::numeric_limits<double>::infinity();
-        ymin_ = xmin_;
-        for (int64_t k = 0; k < n; ++k) {
-            if (!std::isfinite(x_[k]) || !std::isfinite(y_[k])) continue;
-            xmin_ = std::min(xmin_, x_[k]);
-            xmax = std::max(xmax, x_[k]);
-            ymin_ = std::min(ymin_, y_[k]);
-            ymax = std::max(ymax, y_[k]);
-        }
-        if (!std::isfinite(xmin_)) throw std::invalid_argument("the grid has no finite cell");
-        const double wx = std::floor((xmax - xmin_) / max_dist) + 1.0;
-        const double wy = std::floor((ymax - ymin_) / max_dist) + 1.0;
-        if (wx * wy > 1.0e8) throw std::invalid_argument("the grid is too large for its spacing");
-        nbx_ = static_cast<int64_t>(wx);
-        nby_ = static_cast<int64_t>(wy);
-        start_.assign(nbx_ * nby_ + 1, 0);
-        std::vector<int64_t> bucket(n, -1);
-        for (int64_t k = 0; k < n; ++k) {
-            if (!std::isfinite(x_[k]) || !std::isfinite(y_[k])) continue;
-            const int64_t bx = static_cast<int64_t>(std::floor((x_[k] - xmin_) / max_dist));
-            const int64_t by = static_cast<int64_t>(std::floor((y_[k] - ymin_) / max_dist));
-            bucket[k] = by * nbx_ + bx;
-            ++start_[bucket[k] + 1];
-        }
-        for (int64_t b = 0; b < nbx_ * nby_; ++b) start_[b + 1] += start_[b];
-        item_.resize(start_[nbx_ * nby_]);
-        std::vector<int64_t> fill(start_.begin(), start_.end() - 1);
-        for (int64_t k = 0; k < n; ++k)
-            if (bucket[k] >= 0) item_[fill[bucket[k]]++] = k;
+        double xmax, ymax;
+        find_extent(xmax, ymax);
+        size_buckets(xmax, ymax);
+        place_items(count_buckets());
     }
 
     // Flat index of the nearest cell within max_dist, else -1. Ties take the lower index.
@@ -168,6 +139,64 @@ public:
     int64_t nx() const { return nx_; }
 
 private:
+    static void check_inputs(const DArray& x, const DArray& y, double max_dist) {
+        if (x.ndim() != 2 || y.ndim() != 2 || x.shape(0) != y.shape(0) || x.shape(1) != y.shape(1))
+            throw std::invalid_argument("x and y must be 2-D arrays of the same shape");
+        if (!(max_dist > 0.0)) throw std::invalid_argument("max_dist must be positive");
+    }
+
+    bool finite_cell(int64_t k) const { return std::isfinite(x_[k]) && std::isfinite(y_[k]); }
+
+    // Lower corner (members) and upper corner (arguments) of the finite cells.
+    void find_extent(double& xmax, double& ymax) {
+        const int64_t n = ny_ * nx_;
+        xmax = -std::numeric_limits<double>::infinity();
+        ymax = xmax;
+        xmin_ = std::numeric_limits<double>::infinity();
+        ymin_ = xmin_;
+        for (int64_t k = 0; k < n; ++k) {
+            if (!finite_cell(k)) continue;
+            xmin_ = std::min(xmin_, x_[k]);
+            xmax = std::max(xmax, x_[k]);
+            ymin_ = std::min(ymin_, y_[k]);
+            ymax = std::max(ymax, y_[k]);
+        }
+        if (!std::isfinite(xmin_)) throw std::invalid_argument("the grid has no finite cell");
+    }
+
+    void size_buckets(double xmax, double ymax) {
+        const double wx = std::floor((xmax - xmin_) / max_dist_) + 1.0;
+        const double wy = std::floor((ymax - ymin_) / max_dist_) + 1.0;
+        if (wx * wy > 1.0e8) throw std::invalid_argument("the grid is too large for its spacing");
+        nbx_ = static_cast<int64_t>(wx);
+        nby_ = static_cast<int64_t>(wy);
+    }
+
+    // Bucket of every cell (-1 for a cell without finite position); fills start_ with the
+    // cumulative number of cells per bucket.
+    std::vector<int64_t> count_buckets() {
+        const int64_t n = ny_ * nx_;
+        start_.assign(nbx_ * nby_ + 1, 0);
+        std::vector<int64_t> bucket(n, -1);
+        for (int64_t k = 0; k < n; ++k) {
+            if (!finite_cell(k)) continue;
+            const int64_t bx = static_cast<int64_t>(std::floor((x_[k] - xmin_) / max_dist_));
+            const int64_t by = static_cast<int64_t>(std::floor((y_[k] - ymin_) / max_dist_));
+            bucket[k] = by * nbx_ + bx;
+            ++start_[bucket[k] + 1];
+        }
+        for (int64_t b = 0; b < nbx_ * nby_; ++b) start_[b + 1] += start_[b];
+        return bucket;
+    }
+
+    // Cell indices ordered by bucket, ascending within a bucket.
+    void place_items(const std::vector<int64_t>& bucket) {
+        item_.resize(start_[nbx_ * nby_]);
+        std::vector<int64_t> fill(start_.begin(), start_.end() - 1);
+        for (int64_t k = 0; k < ny_ * nx_; ++k)
+            if (bucket[k] >= 0) item_[fill[bucket[k]]++] = k;
+    }
+
     double max_dist_, xmin_, ymin_;
     int64_t ny_, nx_, nbx_, nby_;
     std::vector<double> x_, y_;
