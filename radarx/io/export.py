@@ -373,6 +373,48 @@ def _harmonize_fields(tree):
             node[name] = empty
 
 
+def _common_variable_attrs(tree):
+    """
+    Keep, for each variable of several sweeps, only the attributes all sweeps agree on.
+
+    The CfRadial1 writer of xradar stacks the sweeps along ``time`` and merges the
+    attributes of each variable; it stops when a key has different values in
+    different sweeps (for example the ``phase_noise`` that ``estimate_kdp`` records
+    per sweep). CfRadial1 has one set of attributes per variable, so a value that
+    differs between the sweeps cannot be written, and it is dropped.
+    """
+    nodes = [tree[name] for name in tree.match("sweep_*")]
+    seen = {}
+    for node in nodes:
+        for name, var in node.to_dataset(inherit=False).data_vars.items():
+            seen.setdefault(name, []).append(var.attrs)
+    for node in nodes:
+        for name in node.to_dataset(inherit=False).data_vars:
+            attrs_list = seen[name]
+            if len(attrs_list) < 2:
+                continue
+            first = attrs_list[0]
+            common = {
+                key
+                for key in first
+                if all(
+                    key in other and _same(first[key], other[key])
+                    for other in attrs_list[1:]
+                )
+            }
+            node[name].attrs = {
+                k: v for k, v in node[name].attrs.items() if k in common
+            }
+
+
+def _same(a, b):
+    """Whether two attribute values are equal, for arrays too."""
+    try:
+        return bool(np.array_equal(np.asarray(a), np.asarray(b)))
+    except (TypeError, ValueError):
+        return a == b
+
+
 def write_cfradial1(dtree, path, *, calibs=True, packing="drop"):
     """
     Write a radar volume as a CfRadial1 NetCDF file.
@@ -449,6 +491,7 @@ def write_cfradial1(dtree, path, *, calibs=True, packing="drop"):
     # the "None" placeholders of the readers are no values; xradar 0.11 keeps them
     prepared.attrs = {k: v for k, v in prepared.attrs.items() if not _is_placeholder(v)}
     _harmonize_fields(prepared)
+    _common_variable_attrs(prepared)
     writer(prepared, os.fspath(path), calibs=calibs)
     return _path(path)
 

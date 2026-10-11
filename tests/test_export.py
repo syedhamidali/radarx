@@ -504,6 +504,36 @@ def test_cfradial1_with_different_fields_per_sweep(volume, tmp_path):
         assert flat["DBZH"].isel(time=slice(36, None)).notnull().any()
 
 
+def test_cfradial1_drops_variable_attributes_that_differ_between_sweeps(
+    volume, tmp_path
+):
+    # estimate_kdp records the phase noise of each sweep on PHIDP_processed; CfRadial1
+    # has one set of attributes per variable and xradar stops when they differ
+    tree = volume.copy()
+    tree["sweep_0"]["KDP"].attrs.update(
+        {"phase_noise": 1.0, "window": [1, 2], "units": "deg/km"}
+    )
+    tree["sweep_1"]["KDP"].attrs.update(
+        {"phase_noise": 2.0, "window": [1, 3], "units": "deg/km"}
+    )
+    before = snapshot(tree)
+    out = radarx.io.write_cfradial1(tree, tmp_path / "differing.nc")
+    assert repr(snapshot(tree)) == repr(before)
+    with xr.open_dataset(out) as flat:
+        assert "phase_noise" not in flat["KDP"].attrs
+        assert "window" not in flat["KDP"].attrs
+        assert flat["KDP"].attrs["units"] == "deg/km"
+
+
+def test_same_attribute_value_compares_arrays_and_other_types():
+    from radarx.io.export import _same
+
+    assert _same([1, 2, 3], np.array([1, 2, 3]))
+    assert not _same([1, 2, 3], [1, 2, 4])
+    assert _same("a", "a") and not _same("a", "b")
+    assert _same({"a": 1}, {"a": 1}) and not _same({"a": 1}, {"a": 2})
+
+
 def test_harmonize_fields_leaves_a_sweep_without_fields_alone():
     tree = xr.DataTree.from_dict(
         {
