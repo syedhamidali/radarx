@@ -81,9 +81,8 @@ def test_chain_of_tilts_and_an_isolated_couplet():
     assert (kept["sweep_0"]["n_tilts"].values == 4).all()
     for name in ("sweep_1", "sweep_2", "sweep_3"):
         assert kept[name].sizes["couplet"] == 1
-    # all couplets of the chain are one circulation
-    ids = {int(kept[n]["vortex"].values[0]) for n in kept.children}
-    assert len(ids) == 1
+    # every couplet of the chain sees the whole chain, from any tilt
+    assert all((kept[n]["n_tilts"].values == 4).all() for n in kept.children)
     assert kept["sweep_0"].attrs["min_tilts"] == 3
     assert kept["sweep_0"].attrs["link_distance_m"] == 5000.0
     # a chain of 4 does not meet 5
@@ -140,21 +139,16 @@ def test_opposite_rotation_is_not_linked():
     x = np.array([0.0, 100.0])
     y = np.zeros(2)
     level = np.array([0, 1])
-    assert tor_mod._links(x, y, np.array([1.0, -1.0]), level, 5000.0, 0) == []
-    assert tor_mod._links(x, y, np.array([1.0, 1.0]), level, 5000.0, 0) == [(1, 0)]
+    by_level = {0: np.array([0]), 1: np.array([1])}
+    for signs, expect in ((np.array([1.0, -1.0]), 0), (np.array([1.0, 1.0]), 1)):
+        args = (x, y, signs, level, by_level, 5000.0, 0)
+        assert tor_mod._walk(0, 1, *args) == expect
+        assert tor_mod._walk(1, -1, *args) == expect
+    # a vortex on two tilts: both couplets see a chain of two
     layout = {"sweep_0": (0.5, [COLUMN]), "sweep_1": (1.5, [COLUMN])}
-    # the strongest couplet of each sweep is the core; the flanks of a vortex
-    # have the opposite sign and can touch the core of the other one
-    opposite = rotation_couplets(
-        volume(layout, signs={"sweep_1": [-1.0]}), rotation="both", min_tilts=1
-    )
-    assert (
-        opposite["sweep_0"]["vortex"].values[0]
-        != opposite["sweep_1"]["vortex"].values[0]
-    )
     same = rotation_couplets(volume(layout), rotation="both", min_tilts=1)
-    assert same["sweep_0"]["vortex"].values[0] == same["sweep_1"]["vortex"].values[0]
     assert same["sweep_0"]["n_tilts"].values[0] == 2
+    assert same["sweep_1"]["n_tilts"].values[0] == 2
 
 
 def test_repeated_cuts_of_one_angle_are_one_tilt():
@@ -190,19 +184,33 @@ def test_default_numbers_do_not_change():
 
 
 def test_positions_use_the_ground_range_of_each_tilt():
-    """The peak of a high tilt is placed at its ground range, not its slant range."""
-    layout = {"sweep_0": (0.5, [COLUMN]), "sweep_1": (12.0, [COLUMN])}
-    vol = volume(layout)
-    out = rotation_couplets(vol, min_tilts=2)
-    assert out["sweep_1"].sizes["couplet"] == 1
-    # without the correction the slant range of the 12 degree peak differs by
-    # 2 percent of 30 km, which is inside the link distance anyway: check the
-    # helper itself
-    nodes = {n: rotation_couplets(vol)[n].to_dataset() for n in vol.children}
-    s = ground_range(nodes["sweep_1"]["range"].values, 12.0)
-    assert (s < nodes["sweep_1"]["range"].values).all()
-    found = tor_mod._vertical_continuity(nodes, 5000.0, 0)
-    assert found["sweep_0"][0] == [2] and found["sweep_1"][0] == [2]
+    """Couplets over the same ground point are linked though their slant ranges differ."""
+    from scipy.optimize import brentq
+
+    r_low = 30000.0
+    ground = ground_range(r_low, 0.5)
+    r_high = brentq(lambda r: ground_range(r, 12.0) - ground, 20e3, 40e3)
+    assert abs(r_high - r_low) > 500.0  # the slant ranges are far apart
+
+    def couplets(angle, rng):
+        return xr.Dataset(
+            {"azimuthal_shear": ("couplet", [0.02])},
+            coords={
+                "azimuth": ("couplet", [45.0]),
+                "range": ("couplet", [rng]),
+                "sweep_fixed_angle": angle,
+            },
+        )
+
+    nodes = {"sweep_0": couplets(0.5, r_low), "sweep_1": couplets(12.0, r_high)}
+    found = tor_mod._vertical_continuity(nodes, 100.0, 0)
+    assert found == {"sweep_0": [2], "sweep_1": [2]}
+    # the same ranges on the same angle would be 700 m apart on the ground
+    apart = {"sweep_0": couplets(0.5, r_low), "sweep_1": couplets(12.0, r_low)}
+    assert tor_mod._vertical_continuity(apart, 100.0, 0) == {
+        "sweep_0": [1],
+        "sweep_1": [1],
+    }
 
 
 def test_errors():
@@ -223,3 +231,17 @@ def test_provenance_names_the_algorithm_description():
     vol = volume({"sweep_0": (0.5, [COLUMN]), "sweep_1": (1.5, [COLUMN])})
     out = rotation_couplets(vol, min_tilts=2)
     assert "roc-mesocyclone-detection" in out["sweep_0"].attrs["radarx_references"]
+
+
+def test_median_filter_option_reaches_the_shear():
+    ds = vortices([COLUMN], 0.5)
+    plain = rotation_couplets(ds)
+    filtered = rotation_couplets(ds, median_filter=3)
+    assert "median_filter_size" not in plain.attrs
+    assert filtered.attrs["median_filter_size"] == 3
+    # the 3 x 3 median smooths the peak of the vortex a little but keeps the couplet
+    ratio = float(filtered.azimuthal_shear[0] / plain.azimuthal_shear[0])
+    assert 0.8 < ratio < 1.0
+    vol = volume({"sweep_0": (0.5, [COLUMN]), "sweep_1": (1.5, [COLUMN])})
+    out = vol.radarx.rotation_couplets(min_tilts=2, median_filter=3)
+    assert out["sweep_1"].sizes["couplet"] == 1

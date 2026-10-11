@@ -69,11 +69,12 @@ sweep.
 
 **UNRAVEL (not implemented).** The modular algorithm of Louf et al. (2020)
 [5] is the open alternative that the module cites. It is not implemented
-here because its algorithm could not be read: the paper is not available from
-the publisher without access and no open copy was found, so only its abstract
-was seen. Its reference implementation is open source (MIT licence,
-``github.com/vlouf/dealias``); it was not ported, because an implementation
-that cannot be checked against the paper would be a guess at its behaviour.
+here because its algorithm could not be read: the publisher's site refused
+the automated download of the paper (HTTP 403) and no other open copy was
+found, so only its abstract was seen. Its reference implementation is open
+source (MIT licence, ``github.com/vlouf/dealias``); it was not ported,
+because an implementation that cannot be checked against the paper would be
+a guess at its behaviour.
 
 .. autosummary::
    :nosignatures:

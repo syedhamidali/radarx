@@ -106,8 +106,8 @@ _REFERENCES = """
     .. [1] Smith, T. M., and K. L. Elmore, 2004: The use of radial velocity
        derivative to diagnose rotation and divergence. *Preprints, 11th Conf.
        on Aviation, Range, and Aerospace Meteorology*, Hyannis, MA, Amer.
-       Meteor. Soc., P5.6 (conference extended abstract, no DOI),
-       https://ams.confex.com/ams/11aram22sls/techprogram/paper_81827.htm
+       Meteor. Soc., P5.6 (conference preprint, no DOI),
+       https://ams.confex.com/ams/pdfpapers/81827.pdf
     .. [2] Miller, M. L., V. Lakshmanan, and T. M. Smith, 2013: An automated
        method for depicting mesocyclone paths and intensities. *Wea.
        Forecasting*, **28**, 570-585,
@@ -954,8 +954,9 @@ def azimuthal_shear_layer_max(
     velocity (the dealiasing of Jing and Wiener 1993, and the LLSD window,
     which Smith et al. do not give) is not reproduced; ``median_filter``
     (Smith and Elmore 2004 [2]_) and ``window`` are options. Miller et al.
-    (2013) [3]_ is cited for the LLSD maximum within a layer, but the paper
-    could not be read and nothing here is attributed to it.
+    (2013, doi 10.1175/WAF-D-12-00065.1) is cited for the LLSD maximum within
+    a layer, but the paper could not be read and nothing here is attributed
+    to it.
 
     References
     ----------
@@ -970,10 +971,6 @@ def azimuthal_shear_layer_max(
        on Aviation, Range, and Aerospace Meteorology*, Hyannis, MA, Amer.
        Meteor. Soc., P5.6 (conference preprint, no DOI),
        https://ams.confex.com/ams/pdfpapers/81827.pdf
-    .. [3] Miller, M. L., V. Lakshmanan, and T. M. Smith, 2013: An automated
-       method for depicting mesocyclone paths and intensities. *Wea.
-       Forecasting*, **28** (3), 570-585,
-       https://doi.org/10.1175/WAF-D-12-00065.1
 
     Examples
     --------

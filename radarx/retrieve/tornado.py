@@ -714,15 +714,23 @@ def _delta_v(vel, az, rng, peak, diameter):
 
 
 def _couplets_sweep(
-    ds, field, threshold, window, min_area, diameter, min_reflectivity, rotation
+    ds,
+    field,
+    threshold,
+    window,
+    min_area,
+    diameter,
+    min_reflectivity,
+    rotation,
+    median_filter=None,
 ):
-    from .shear import llsd
+    from .shear import _median_size, llsd
 
     da = ds[field]
     ray_dim = [d for d in da.dims if d != "range"][0]
     vel = da.transpose(ray_dim, "range").values.astype(np.float64)
     shear = (
-        llsd(ds, field, window)["azimuthal_shear"]
+        llsd(ds, field, window, median_filter=median_filter)["azimuthal_shear"]
         .transpose(ray_dim, "range")
         .values.astype(np.float64)
     )
@@ -777,6 +785,8 @@ def _couplets_sweep(
         "window_azimuth_m": float(window[1]),
         "diameter_m": float(diameter),
     }
+    if _median_size(median_filter):
+        method["median_filter_size"] = _median_size(median_filter)
     out = xr.Dataset(
         {
             "azimuthal_shear": (
@@ -817,37 +827,40 @@ def _couplets_sweep(
     return out
 
 
-def _links(x, y, sign, level, link_distance, max_skip):
+def _walk(i, step, x, y, sign, level, by_level, link_distance, max_skip):
     """
-    Pairs of couplets on neighbouring tilt levels that belong to one circulation.
+    Tilts reached from couplet ``i`` going up (``step=1``) or down (``-1``).
 
-    A couplet is linked to the couplets of the same sense of rotation within
-    ``link_distance`` on the nearest level below that has one, looking at most
-    ``max_skip`` levels further down when the level directly below has none.
+    From the current couplet the nearest couplet of the same sense of rotation
+    within ``link_distance`` on the next tilt level is taken, and if there is
+    none, on the levels beyond it, at most ``max_skip`` of them; the walk
+    continues from the couplet found and stops when there is none.
     """
-    pairs = []
-    for i in range(len(level)):
+    count, here = 0, i
+    while True:
         for k in range(1, max_skip + 2):
-            below = np.flatnonzero(level == level[i] - k)
-            near = below[
-                (np.hypot(x[below] - x[i], y[below] - y[i]) <= link_distance)
-                & (sign[below] == sign[i])
-            ]
-            if near.size:
-                pairs += [(i, int(j)) for j in near]
+            cand = by_level.get(level[here] + step * k)
+            if cand is None:
+                continue
+            dist = np.hypot(x[cand] - x[here], y[cand] - y[here])
+            ok = (dist <= link_distance) & (sign[cand] == sign[here])
+            if ok.any():
+                here = int(cand[np.flatnonzero(ok)[np.argmin(dist[ok])]])
+                count += 1
                 break
-    return pairs
+        else:
+            return count
 
 
 def _vertical_continuity(nodes, link_distance, max_skip):
     """
-    Number of tilts of the vertical circulation each couplet belongs to.
+    Number of tilts each couplet is continuous over.
 
-    Couplets of different tilts (distinct elevation angles, rounded to 0.1
-    degree; repeated cuts of one angle are one level) are joined into a
-    circulation when they are linked by :func:`_links`. Returns, for each
-    sweep of ``nodes`` (a dict name -> couplet Dataset), the number of levels
-    of the circulation of every couplet and the circulation's index.
+    The tilts are the distinct elevation angles of the sweeps of ``nodes``
+    (a dict name -> couplet Dataset), rounded to 0.1 degree; repeated cuts of
+    one angle are one tilt. For every couplet the chain of couplets above and
+    below it is followed with :func:`_walk` and the number of tilts of the
+    chain, the couplet's own included, is returned for each sweep.
     """
     from ..fundamentals.geometry import ground_range
 
@@ -863,43 +876,26 @@ def _vertical_continuity(nodes, link_distance, max_skip):
         level += [ordered.index(round(angles[name], 1))] * ds.sizes["couplet"]
         owner += [name] * ds.sizes["couplet"]
     x, y, sign, level = (np.asarray(v) for v in (x, y, sign, level))
-    parent = list(range(len(level)))
-
-    def root(i):
-        while parent[i] != i:
-            parent[i] = parent[parent[i]]
-            i = parent[i]
-        return i
-
-    for i, j in _links(x, y, sign, level, link_distance, max_skip):
-        parent[root(i)] = root(j)
-    roots = np.array([root(i) for i in range(len(level))], dtype=int)
-    ids = {r: k for k, r in enumerate(dict.fromkeys(roots.tolist()))}
-    count = {r: len(set(level[roots == r].tolist())) for r in ids}
-    result = {name: ([], []) for name in nodes}
-    for name, r in zip(owner, roots):
-        result[name][0].append(count[r])
-        result[name][1].append(ids[r])
+    by_level = {k: np.flatnonzero(level == k) for k in set(level.tolist())}
+    options = (x, y, sign, level, by_level, link_distance, max_skip)
+    result = {name: [] for name in nodes}
+    for i, name in enumerate(owner):
+        result[name].append(1 + _walk(i, 1, *options) + _walk(i, -1, *options))
     return result
 
 
 def _keep_continuous(nodes, min_tilts, link_distance, max_skip):
-    """Add ``n_tilts`` and ``vortex`` to the couplets and keep the continuous ones."""
+    """Add ``n_tilts`` to the couplets and keep those on at least ``min_tilts`` tilts."""
     found = _vertical_continuity(nodes, link_distance, max_skip)
     out = {}
     for name, ds in nodes.items():
-        n_tilts, vortex = (np.asarray(v, dtype=np.int64) for v in found[name])
+        n_tilts = np.asarray(found[name], dtype=np.int64)
         ds = ds.assign(
             n_tilts=(
                 "couplet",
                 n_tilts,
-                {"long_name": "tilts of the vertically continuous circulation"},
-            ),
-            vortex=(
-                "couplet",
-                vortex,
-                {"long_name": "index of the vertical circulation in the volume"},
-            ),
+                {"long_name": "tilts of the vertical chain of couplets"},
+            )
         )
         ds.attrs = dict(
             ds.attrs,
@@ -928,6 +924,7 @@ def rotation_couplets(
     min_tilts=None,
     link_distance=5000.0,
     max_skip=0,
+    median_filter=None,
 ):
     """
     Rotation couplets: compact maxima of LLSD azimuthal shear.
@@ -968,16 +965,16 @@ def rotation_couplets(
         tornadoes in the north); ``"both"`` uses the magnitude of the shear.
         The reported ``azimuthal_shear`` keeps its sign.
     min_tilts : int, optional
-        Vertical continuity (volumes only): keep the couplets that belong to a
-        circulation present on at least this many tilts, that is on this many
+        Vertical continuity (volumes only): keep the couplets that are part of
+        a chain of couplets on at least this many tilts, that is on this many
         distinct elevation angles (repeated cuts of one angle count once).
-        Default None: every couplet is kept, as before. The variables
-        ``n_tilts`` (tilts of the circulation) and ``vortex`` (its index in
-        the volume) are added when it is given.
+        Default None: every couplet is kept, as before. The variable
+        ``n_tilts``, the number of tilts of the chain through the couplet, is
+        added when it is given.
     link_distance : float, optional
         Largest horizontal distance (m) between the peaks of two couplets of
-        the same sense of rotation on neighbouring tilts for them to belong to
-        one circulation. Default 5000, a radarx choice (the NSSL Mesocyclone
+        the same sense of rotation on neighbouring tilts for them to be linked.
+        Default 5000, a radarx choice (the NSSL Mesocyclone
         Detection Algorithm derives a maximum feature distance from the sizes
         of the two features; the formula could not be read reliably in the
         copy of the algorithm description that was available).
@@ -986,6 +983,10 @@ def rotation_couplets(
         of the tilt directly below matches, up to ``max_skip`` tilts further
         down are searched, as the algorithm description does for one tilt.
         Default 0: couplets must be on consecutive tilts.
+    median_filter : None, True or int, optional
+        Median filter of the velocity before the LLSD fit, see
+        :func:`radarx.retrieve.llsd` (Smith and Elmore 2004). Default None:
+        none.
 
     Returns
     -------
@@ -995,7 +996,7 @@ def rotation_couplets(
         (``delta_v / 2``) and ``area``, with the ``azimuth``, ``range`` (and
         ``x``, ``y`` if the sweep is georeferenced) of the peak. A DataTree
         input gives a DataTree with one such node per sweep that has
-        ``field``. With ``min_tilts``, also ``n_tilts`` and ``vortex``.
+        ``field``. With ``min_tilts``, also ``n_tilts``.
 
     Notes
     -----
@@ -1014,17 +1015,18 @@ def rotation_couplets(
     threshold are radarx choices.
 
     Vertical continuity (``min_tilts``). The tilts of the volume are ordered by
-    elevation angle and a couplet is joined to the couplets of the same sense
-    of rotation within ``link_distance`` of its peak on the tilt below. The
-    chains that result are the vertical circulations; a couplet is kept when
-    its circulation spans ``min_tilts`` tilts. This follows the association of
-    shear features across elevation angles of the WSR-88D Mesocyclone
-    Detection Algorithm as described in its algorithm description [4]_ (a
-    feature at one elevation angle is correlated with a feature at the
-    previous angle when their centres are closer than a maximum feature
-    distance, and a second previous angle is tried when the first has no
-    match; a vortex with two or more features is "3-D shear" or a
-    mesocyclone). Not taken from it: the distance (the formula of the copy
+    elevation angle. From a couplet the chain is followed up and down: on the
+    next tilt the nearest couplet of the same sense of rotation within
+    ``link_distance`` of the current peak is taken, and the chain goes on from
+    it. The couplet is kept when its chain spans ``min_tilts`` tilts. This
+    follows the association of shear features across elevation angles of the
+    WSR-88D Mesocyclone Detection Algorithm as described in its algorithm
+    description [4]_: a feature at one elevation angle is correlated with a
+    feature at the previous angle when their centres are closer than a maximum
+    feature distance (the description takes the first match in its list; the
+    nearest is taken here), and a second previous angle is tried when the
+    first has no match; a vortex with two or more features is "3-D shear" or a
+    mesocyclone. Not taken from it: the distance (the formula of the copy
     read is garbled), the thresholds on shear, momentum and aspect of its
     features, and the time continuity it also requires. The published
     algorithm papers (Stumpf et al. 1998; Mitchell et al. 1998) were not
@@ -1068,6 +1070,7 @@ def rotation_couplets(
         diameter,
         min_reflectivity,
         rotation,
+        median_filter,
     )
     if isinstance(obj, xr.Dataset):
         if min_tilts is not None:
