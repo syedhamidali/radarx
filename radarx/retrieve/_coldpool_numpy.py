@@ -251,7 +251,8 @@ def vad(vr, az, cos_el, min_gates, min_spread, n_threads=0):
         )
         gram = np.einsum("rik,rjk->rij", x, x)
         rhs = np.einsum("rik,rk->ri", x, dv)
-        good2 = good & (np.linalg.det(gram) / n**4 >= 0.25 * min_spread)
+        det2 = np.linalg.det(gram)
+        good2 = good & (det2 != 0.0) & (det2 / n**4 >= 0.25 * min_spread)
     if good2.any():
         coef = np.linalg.solve(gram[good2], rhs[good2][..., None])[..., 0]
         out[5, good2] = (

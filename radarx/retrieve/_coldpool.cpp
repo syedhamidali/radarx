@@ -515,7 +515,7 @@ void fit_second(const Ring& g, const Sums& s, const Means& m, double min_spread,
     double G[4][4] = {}, r[4] = {};
     second_normal_equations(g, m, m2, m3, G, r);
     const double det4 = solve4(G, r);
-    if (!(det4 / (s.n * s.n * s.n * s.n) >= 0.25 * min_spread)) return;
+    if (det4 == 0.0 || !(det4 / (s.n * s.n * s.n * s.n) >= 0.25 * min_spread)) return;
     o[5 * stride] = m.mv - r[0] * m.ms - r[1] * m.mc - r[2] * m2 - r[3] * m3;
     o[6 * stride] = r[2];
     o[7 * stride] = r[3];

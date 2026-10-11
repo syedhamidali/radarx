@@ -368,6 +368,22 @@ def test_vad_second_harmonic_needs_wide_coverage(engine):
     np.testing.assert_allclose(out.divergence, ux + vy, atol=1e-12)
 
 
+@pytest.mark.parametrize("engine", ENGINES)
+def test_vad_ring_with_one_azimuth_has_no_harmonics_and_does_not_raise(engine):
+    """All gates of a ring at one azimuth make the second-harmonic system singular.
+
+    With min_spread = 0 the spread test passes; the NumPy fit raised a singular matrix
+    error and the compiled kernel wrote values from a half-eliminated system.
+    """
+    ds = linear_field_sweep(8.0, -3.0, *LINEAR_FIELDS["all terms"], 4.0)
+    ds = ds.assign_coords(azimuth=np.full(ds.sizes["azimuth"], 90.0))
+    out = wp.vad_profile(
+        ds, height_bins=[0.0, 5000.0], min_elevation=0.5, min_spread=0.0, engine=engine
+    )
+    assert np.isnan(out.divergence).all() and np.isnan(out.deformation).all()
+    assert out.vad_rings_harmonics.item() == 0
+
+
 def test_vad_datatree_skips_sweeps_without_velocity_and_high_elevations():
     tree = xr.DataTree.from_dict(
         {
