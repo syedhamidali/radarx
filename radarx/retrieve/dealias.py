@@ -1648,20 +1648,6 @@ def _local_median(
     )
 
 
-def _plain_sweep(ds, field):
-    """``(ray_dim, values (ray, range) float64, azimuth)`` of a sweep field."""
-    if field not in ds:
-        raise KeyError(f"{field!r} is not in the sweep")
-    da = ds[field]
-    ray = ray_dimension(da)
-    values = np.array(da.transpose(ray, "range").values, dtype=np.float64)
-    return (
-        ray,
-        np.ascontiguousarray(values),
-        np.asarray(ds["azimuth"].values, dtype=np.float64),
-    )
-
-
 def _disagreement_numpy(values, wrap, half, threshold, min_neighbours):
     """
     NumPy implementation of the compiled ``neighbour_disagreement`` kernel.

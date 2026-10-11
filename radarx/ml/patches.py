@@ -43,6 +43,8 @@ from dataclasses import dataclass, field
 import numpy as np
 import xarray as xr
 
+from .._sweepwise import dask_support
+
 try:
     from . import _patches
 
@@ -330,6 +332,10 @@ def _split(obj, variables, dims):
     return [s.values for s in sweeps], info
 
 
+@dask_support(
+    "computes",
+    "the patches are cut from the whole sweep and stacked in memory for the model.",
+)
 def polar_patches(
     obj,
     size=(64, 64),

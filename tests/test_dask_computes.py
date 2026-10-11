@@ -11,12 +11,14 @@ and give the result of the same call on arrays in memory. Each case builds
 its call from the fixtures of the tests of the function.
 """
 
+import importlib
+
 import numpy as np
 import pytest
 import xarray as xr
 
 import radarx  # noqa: F401
-from radarx import grid, retrieve
+from radarx import ml, retrieve
 from radarx._sweepwise import DASK_SUPPORT
 
 from . import (
@@ -148,7 +150,13 @@ def split_cuts():
     return retrieve.echo_mask, (test_qc._volume(),), {"split_cuts": True}
 
 
+def patches():
+    sweep = test_qvp._sweep(nray=60)[0]["DBZH"]
+    return lambda *a, **k: ml.polar_patches(*a, **k)[0], (sweep,), {"size": (8, 8)}
+
+
 CASES = {
+    "polar_patches": patches,
     "dealias-continuity": dealias_volume,
     "hid-thompson": winter_hid,
     "echo_mask-split-cuts": split_cuts,
@@ -166,6 +174,18 @@ CASES = {
 }
 
 
+def assert_same(result, expected):
+    """Equal results, whatever the type; dask arrays are computed."""
+    if isinstance(expected, (tuple, list)):
+        assert len(result) == len(expected)
+        for r, e in zip(result, expected):
+            assert_same(r, e)
+    elif isinstance(expected, (xr.DataArray, xr.Dataset, xr.DataTree)):
+        xr.testing.assert_allclose(result.compute(), expected)
+    else:
+        np.testing.assert_allclose(result, expected)
+
+
 @pytest.mark.parametrize("name", CASES)
 def test_dask_input_is_computed(name):
     func, args, kwargs = CASES[name]()
@@ -173,14 +193,10 @@ def test_dask_input_is_computed(name):
     dask_args = chunked(args)
     assert any(has_dask(a) for a in dask_args)
     result = func(*dask_args, **kwargs)
-    if hasattr(result, "compute"):
-        result = result.compute()
-    xr.testing.assert_allclose(result, expected)
+    assert_same(result, expected)
 
 
 def test_every_declared_function_exists():
     for key in DASK_SUPPORT:
         module, name = key.rsplit(".", 1)
-        assert module.split(".")[0] in ("retrieve", "grid"), key
-        package = retrieve if module.startswith("retrieve") else grid
-        assert callable(getattr(package, name)), key
+        assert callable(getattr(importlib.import_module(f"radarx.{module}"), name))

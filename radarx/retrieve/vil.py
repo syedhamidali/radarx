@@ -610,9 +610,9 @@ def _column_products(
             core,
             Gates([da, ceiling_field], context=(z, ceiling), core_dim=zdim),
             [Output(np.float64, "gate")] * 6,
+            raw=True,
         )
-        attrs = dict(da.attrs)
-        return [o.data for o in out], template, base, attrs
+        return out, template, base, dict(da.attrs)
     products = [out[i].reshape(template.shape) for i in range(6)]
     return products, template, base, attrs
 

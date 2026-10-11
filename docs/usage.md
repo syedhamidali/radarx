@@ -104,8 +104,8 @@ computes the dask input in the same way.
 Some functions of the first class compute in one case, and say so: a volume
 with `sweep_continuity=True` in `dealias_velocity`, `split_cuts=True` in
 `echo_mask`, the winter scheme of `hid`, and a polar volume in `vil`,
-`vil_density` and `echo_top`. The table covers `radarx.retrieve` and
-`radarx.grid`; a function with no row there takes a profile, a table or
+`vil_density` and `echo_top`. The table covers `radarx.retrieve`, `radarx.grid`
+and `radarx.ml`; a function with no row there takes a profile, a table or
 coordinates only.
 
 dask is optional: radarx imports it nowhere, xarray does when the data are
@@ -135,6 +135,7 @@ dask arrays.
 | Computes | `radarx.grid.grid` | `grid_radar`, `stack_data` |
 | Computes | `radarx.grid.multi` | `grid_radars`, `merge_radars`, `network_bias` |
 | Computes | `radarx.grid.ugrid` | `to_uxarray` |
+| Computes | `radarx.ml.patches` | `polar_patches` |
 | Computes | `radarx.retrieve.advection` | `advect`, `estimate_motion`, `interpolate_time` |
 | Computes | `radarx.retrieve.biology` | `biological_echo` |
 | Computes | `radarx.retrieve.cappi` | `create_cappi` |

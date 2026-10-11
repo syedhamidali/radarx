@@ -4,6 +4,7 @@
 
 """Tests for the mechanism that runs sweep functions on stacks and dask arrays."""
 
+import importlib
 import re
 import subprocess
 import sys
@@ -14,7 +15,6 @@ import pytest
 import xarray as xr
 
 from radarx import _sweepwise as sw
-from radarx import grid, retrieve
 
 from .sweepwise_helpers import assert_lazy
 
@@ -320,10 +320,75 @@ def test_the_documentation_lists_the_declared_functions():
 def test_the_note_is_in_the_docstring():
     for key, (kind, why) in sw.DASK_SUPPORT.items():
         module, name = key.rsplit(".", 1)
-        func = getattr(retrieve if module.startswith("retrieve") else grid, name)
-        doc = func.__doc__
+        doc = getattr(importlib.import_module(f"radarx.{module}"), name).__doc__
         if kind in ("computes", "eager"):
             assert "computes the dask array" in doc, key
         else:
             assert "Dask arrays stay lazy" in doc, key
         assert len(re.findall(r"^ *Dask( and extra dimensions)?\. ", doc, re.M)) == 1
+
+
+DOC = """Short.
+
+    Parameters
+    ----------
+    x : int
+        Something.
+
+    Notes
+    -----
+    Existing note.
+
+    Examples
+    --------
+    >>> pass
+    """
+
+
+def test_the_note_goes_to_the_notes_section():
+    doc = sw._add_note(DOC, "Dask. New note.")
+    assert doc.index("Existing note.") < doc.index("Dask. New note.")
+    assert doc.index("Dask. New note.") < doc.index("Examples")
+    assert doc.count("Notes\n") == 1
+
+
+def test_a_missing_notes_section_is_made():
+    no_notes = DOC.replace("Notes\n    -----\n    Existing note.\n\n    ", "")
+    doc = sw._add_note(no_notes, "Dask. New note.")
+    assert doc.index("Notes\n    -----\n    Dask. New note.") < doc.index("Examples")
+    plain = sw._add_note(
+        "Short.\n\n    Parameters\n    ----------\n    x : int\n", "Dask. N."
+    )
+    assert plain.rstrip().endswith("Dask. N.")
+    bare = sw._add_note("Short.", "Dask. N.")
+    assert "Notes\n    -----\n    Dask. N." in bare
+
+
+def test_a_placeholder_ends_the_notes():
+    doc = DOC.replace("Existing note.\n", "Existing note.\n    {references}\n")
+    doc = sw._add_note(doc, "Dask. New note.")
+    assert doc.index("Dask. New note.") < doc.index("{references}")
+
+
+def test_dask_support_registers_and_checks():
+    @sw.dask_support("lazy", "An exception.")
+    def lazy(x):
+        """Short.
+
+        Notes
+        -----
+        Text.
+        """
+
+    @sw.dask_support("computes", "it needs all times.")
+    def computes(x):
+        """Short."""
+
+    assert "An exception." in lazy.__doc__
+    assert "computes the dask array: it needs all times." in computes.__doc__
+    key = f"{__name__.replace('radarx.', '')}.lazy"
+    assert sw.DASK_SUPPORT.pop(key)[0] == "lazy"
+    sw.DASK_SUPPORT.pop(key.replace(".lazy", ".computes"))
+    for kind, why in (("never", ""), ("computes", ""), ("eager", "")):
+        with pytest.raises(ValueError):
+            sw.dask_support(kind, why)

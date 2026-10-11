@@ -822,7 +822,7 @@ def qvp(
     >>> profile = dtree.radarx.qvp(sweep=9)  # doctest: +SKIP
     """
     ds = _select_sweep(obj, sweep=sweep, elevation=elevation)
-    data_vars, modes, values, cnts, filters = _lazy_profile(
+    data_vars, modes, values, cnts, filters, dims = _lazy_profile(
         ds,
         data_vars,
         min_rhohv=min_rhohv,
@@ -842,14 +842,14 @@ def qvp(
     out = {}
     for v, (name, mode) in enumerate(zip(data_vars, modes)):
         out[name] = (
-            _profile_dims(values[v]),
-            values[v].data,
+            dims,
+            values[v],
             _var_attrs(ds, name, mode, filters, min_count, elevation_correction),
         )
         if counts:
             out[f"{name}_count"] = (
-                _profile_dims(cnts[v]),
-                cnts[v].data,
+                dims,
+                cnts[v],
                 {"long_name": f"number of valid gates of {name}", "units": "1"},
             )
     coords = _height_coords(height, rng, ground)
@@ -861,11 +861,6 @@ def qvp(
         "references": "Ryzhkov et al. (2016), doi:10.1175/JTECH-D-15-0020.1",
     }
     return result
-
-
-def _profile_dims(da):
-    """The dimensions of a profile: the range of the sweep becomes the height."""
-    return tuple("height" if d == "range" else d for d in da.dims)
 
 
 def _lazy_profile(
@@ -889,8 +884,8 @@ def _lazy_profile(
     Azimuthal reduction of a sweep, a stack of sweeps or dask arrays.
 
     Returns the names, modes, the profile of each variable and its count of
-    valid gates (DataArrays on the extra dimensions and ``range``) and the
-    filters.
+    valid gates (arrays on the extra dimensions and the heights), the filters
+    and the dimensions of the arrays.
     """
     use_compiled = _use_compiled(engine)
     data_vars, quality, thresholds = _fields_of(
@@ -927,10 +922,12 @@ def _lazy_profile(
             raise ValueError(
                 f"{field.name!r} is not on the same rays as {data_vars[0]!r}"
             )
-    results = apply_sweeps(core, Sweep(fields, context=elevation), outputs)
+    stack = Sweep(fields, context=elevation)
+    results = apply_sweeps(core, stack, outputs, raw=True)
     nv = len(data_vars)
     filters = dict(zip(quality, thresholds))
-    return data_vars, modes, results[:nv], results[nv:], filters
+    dims = stack.extra + ("height",)
+    return data_vars, modes, results[:nv], results[nv:], filters, dims
 
 
 def _interp_nan(x_new, x, y):

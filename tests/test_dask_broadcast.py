@@ -67,9 +67,8 @@ from . import (
     test_qvp,
     test_shear,
 )
-from .sweepwise_helpers import CHUNKS, check_stack, check_volume
+from .sweepwise_helpers import CHUNKS, check_stack, check_volume, stacked, volume_of
 
-dask = pytest.importorskip("dask")
 dsd_mod = importlib.import_module("radarx.retrieve.dsd")
 hid_mod = importlib.import_module("radarx.retrieve.hid")
 vil_mod = importlib.import_module("radarx.retrieve.vil")
@@ -429,14 +428,27 @@ def case_params(volume=False):
 
 
 @pytest.mark.parametrize("c, kwargs", case_params())
-def test_stack_and_dask(c, kwargs):
+def test_stack(c, kwargs):
+    check_stack(c.func, c.make, ignore_attrs=c.ignore, dim=c.dim, **kwargs)
+
+
+@pytest.mark.parametrize("c, kwargs", case_params())
+def test_dask_stack(c, kwargs):
+    pytest.importorskip("dask")
     check_stack(
-        c.func, c.make, chunks=c.chunks, ignore_attrs=c.ignore, dim=c.dim, **kwargs
+        c.func,
+        c.make,
+        chunks=c.chunks,
+        ignore_attrs=c.ignore,
+        dim=c.dim,
+        dask=True,
+        **kwargs,
     )
 
 
 @pytest.mark.parametrize("c, kwargs", case_params(volume=True))
 def test_volume_with_dask_sweeps(c, kwargs):
+    pytest.importorskip("dask")
     check_volume(c.func, c.make, **kwargs)
 
 
@@ -446,3 +458,34 @@ def test_every_lazy_function_has_a_case():
         f"{c.func.__module__.replace('radarx.', '')}.{c.func.__name__}" for c in CASES
     }
     assert declared <= tabled, sorted(declared - tabled)
+
+
+@pytest.mark.parametrize("chunked", [False, True])
+def test_dealias_options_on_a_stack(chunked):
+    wind = test_dealias.wind_profile()
+    members = [alias_sweep(k) for k in range(2)]
+    ref = xr.DataArray(np.full(members[0].VRADH.shape, 3.0), dims=("azimuth", "range"))
+    options = {"field": "VRADH", "wind_profile": wind, "reference": ref}
+    expected = stacked([dealias_velocity(m, **options) for m in members], "volume")
+    stack = stacked(members, "volume")
+    if chunked:
+        pytest.importorskip("dask")
+        stack = stack.chunk({"volume": 1, "azimuth": 30})
+    out = dealias_velocity(stack, **options)
+    assert (out.chunks is not None) is chunked
+    xr.testing.assert_allclose(out.compute().transpose(*expected.dims), expected)
+    different = stacked(members, "volume").assign_coords(
+        elevation=(("volume", "azimuth"), np.full((2, 120), 0.5))
+    )
+    with pytest.raises(ValueError, match="same elevation"):
+        dealias_velocity(different, field="VRADH", wind_profile=wind)
+
+
+def test_dealias_continuity_needs_sweeps_without_extra_dimensions():
+    stack = stacked([alias_sweep(0), alias_sweep(1)], "volume")
+    stack_high = stack.assign_coords(elevation=stack.elevation + 1.0)
+    tree = volume_of([stack, stack_high])
+    with pytest.raises(ValueError, match="sweep_continuity=False"):
+        dealias_velocity(tree, field="VRADH")
+    out = dealias_velocity(tree, field="VRADH", sweep_continuity=False)
+    assert out["sweep_1"]["VRADH_dealiased"].dims[0] == "volume"

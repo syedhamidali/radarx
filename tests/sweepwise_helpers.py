@@ -55,9 +55,11 @@ def assert_same_attrs(result, reference, ignore=()):
             assert np.array_equal(keep[key], want[key]), (name, key)
 
 
-def check_stack(func, make, n=3, chunks=None, ignore_attrs=(), dim="time", **kwargs):
+def check_stack(
+    func, make, n=3, chunks=None, ignore_attrs=(), dim="time", dask=False, **kwargs
+):
     """
-    The result for a stack and for dask arrays equals that of the sweeps.
+    The result for a stack equals that of the sweeps, in memory or as dask arrays.
 
     Parameters
     ----------
@@ -74,18 +76,21 @@ def check_stack(func, make, n=3, chunks=None, ignore_attrs=(), dim="time", **kwa
         Attributes that only the result for a sweep in memory has.
     dim : str
         Name of the dimension of the stack.
+    dask : bool
+        Check the stack as dask arrays (needs dask) instead of in memory.
     """
     members = [make(k) for k in range(n)]
     single = [func(m, **kwargs) for m in members]
     expected = stacked(single, dim)
     stack = stacked(members, dim)
     before = stack.copy(deep=True)
-
-    out = func(stack, **kwargs)
-    xr.testing.assert_allclose(same_dims(out, expected), expected)
-    assert_same_attrs(out, single[0], ignore_attrs)
-    xr.testing.assert_identical(stack, before)
-
+    if not dask:
+        out = func(stack, **kwargs)
+        xr.testing.assert_allclose(same_dims(out, expected), expected)
+        assert_same_attrs(out, single[0], ignore_attrs)
+        assert read_provenance(out) == read_provenance(single[0])
+        xr.testing.assert_identical(stack, before)
+        return out
     dask_stack = stack.chunk(CHUNKS if chunks is None else chunks)
     lazy = func(dask_stack, **kwargs)
     assert_lazy(lazy)
@@ -94,7 +99,7 @@ def check_stack(func, make, n=3, chunks=None, ignore_attrs=(), dim="time", **kwa
     xr.testing.assert_allclose(same_dims(lazy.compute(), expected), expected)
     assert all(da.chunks is not None for da in data_arrays(dask_stack))
     xr.testing.assert_identical(dask_stack.compute(), before)
-    return out, lazy
+    return lazy
 
 
 def volume_of(members):

@@ -44,19 +44,19 @@ import xarray as xr
 
 __all__ = [
     "DASK_SUPPORT",
-    "Gates",
-    "dask_support",
     "apply_gates",
     "apply_gates_many",
-    "Output",
-    "Sweep",
     "apply_sweeps",
     "apply_sweeps_many",
+    "dask_support",
     "extra_dims",
+    "Gates",
     "is_dask",
     "is_plain",
+    "Output",
     "ray_coordinate",
     "ray_dimension",
+    "Sweep",
 ]
 
 RANGE = "range"
@@ -67,8 +67,8 @@ KINDS = ("sweep", "ray", "range", "scalar", "gate")
 
 
 def is_dask(obj):
-    """Whether an xarray object (or a Variable) is backed by a dask array."""
-    return getattr(obj, "chunks", None) is not None and not isinstance(obj, dict)
+    """Whether a DataArray or Variable is backed by a dask array."""
+    return getattr(obj, "chunks", None) is not None
 
 
 def ray_dimension(da):
@@ -167,6 +167,13 @@ class Output:
         return f"Output({self.dtype}, {self.kind!r})"
 
 
+def _values_as(variable, dims):
+    """The values of a Variable with its dimensions in the order ``dims``."""
+    if variable.dims != dims:
+        variable = variable.transpose(*dims)
+    return variable.values
+
+
 class Sweep:
     """
     The inputs of a core for one sweep or stack of sweeps.
@@ -215,10 +222,29 @@ class Sweep:
 
     def arrays(self):
         """The fields of a plain sweep as ``(ray, range)`` NumPy arrays."""
+        want = (self.ray, RANGE)
         return tuple(
-            None if f is None else f.transpose(self.ray, RANGE).values
-            for f in self.fields
+            None if f is None else _values_as(f.variable, want) for f in self.fields
         )
+
+
+def _share_grid(fields, core_dim):
+    """Whether the fields have the same dimensions and equal indexes."""
+    first = fields[0]
+    for field in fields[1:]:
+        if field.dims != first.dims:
+            return False
+        for dim, index in field.indexes.items():
+            if dim != core_dim and not index.equals(first.indexes.get(dim, index)):
+                return False
+    return True
+
+
+def _dims_first(da, dims):
+    """``da`` with the dimensions ``dims`` first, the others after them."""
+    if da.dims[: len(dims)] == dims:
+        return da
+    return da.transpose(*dims, ...)
 
 
 class Gates:
@@ -251,12 +277,11 @@ class Gates:
             raise ValueError("a gate-wise function needs at least one field")
         self.core_dim = core_dim
         self.dims = tuple(d for d in present[0].dims if d != core_dim)
-        exclude = [] if core_dim is None else [core_dim]
-        broadcast = iter(xr.broadcast(*present, exclude=exclude))
-        self.fields = [
-            None if f is None else next(broadcast).transpose(*self.dims, ...)
-            for f in fields
-        ]
+        if not _share_grid(present, core_dim):
+            exclude = [] if core_dim is None else [core_dim]
+            broadcast = iter(xr.broadcast(*present, exclude=exclude))
+            fields = [None if f is None else next(broadcast) for f in fields]
+        self.fields = [None if f is None else _dims_first(f, self.dims) for f in fields]
         self.reference = next(f for f in self.fields if f is not None)
         self.context = context
 
@@ -276,24 +301,37 @@ class Gates:
 
 def _as_dataarray(variable, sweep, name=None):
     """A result Variable on the coordinates of the reference field."""
-    ref = sweep.reference
+    dims = set(variable.dims)
     coords = {
         key: coord
-        for key, coord in ref.coords.items()
-        if set(coord.dims) <= set(variable.dims)
+        for key, coord in sweep.reference.coords.variables.items()
+        if set(coord.dims) <= dims
     }
     return xr.DataArray(variable, coords=coords, name=name)
+
+
+def _on_reference(sweep, value, core):
+    """The reference field with ``value`` (on the dimensions ``core``) as data."""
+    ref = sweep.reference
+    order = [core.index(d) for d in ref.dims]
+    out = ref.copy(deep=False, data=np.transpose(value, order))
+    out.attrs = {}
+    out.name = None
+    return out
 
 
 def _plain_results(sweep, results, outputs):
     """DataArrays of the result of one plain sweep."""
     out = []
     for value, spec in zip(results, outputs):
-        dims = spec.core_dims(sweep.ray)
+        value = np.asarray(value, dtype=spec.dtype)
+        core = spec.core_dims(sweep.ray)
         if spec.kind == "gate":
-            dims = sweep.dims + dims
-        var = xr.Variable(dims, np.asarray(value, dtype=spec.dtype))
-        da = _as_dataarray(var, sweep)
+            core = sweep.dims + core
+        if set(core) == set(sweep.reference.dims):
+            out.append(_on_reference(sweep, value, core))
+            continue
+        da = _as_dataarray(xr.Variable(core, value), sweep)
         if spec.kind in ("sweep", "gate"):
             da = da.transpose(*sweep.dims, *spec.new_dims)
         out.append(da)
@@ -385,7 +423,7 @@ def _lazy_results(core, sweep, outputs, one_by_one):
     return out
 
 
-def apply_sweeps(core, sweep, outputs, one_by_one=False):
+def apply_sweeps(core, sweep, outputs, one_by_one=False, raw=False):
     """
     Run a core on a sweep, a stack of sweeps or a dask-backed field.
 
@@ -405,6 +443,10 @@ def apply_sweeps(core, sweep, outputs, one_by_one=False):
         Call the core with one sweep at a time for a stack or dask field, so
         that a decision the core takes over its batch (the sign of the phase,
         say) does not depend on the chunks. Default False.
+    raw : bool, optional
+        Return the arrays without the DataArrays around them, for a caller
+        that builds its own (the dimensions are those of the DataArrays).
+        Default False.
 
     Returns
     -------
@@ -415,8 +457,11 @@ def apply_sweeps(core, sweep, outputs, one_by_one=False):
     """
     if sweep.plain:
         (res,) = core([(sweep.context, sweep.arrays())])
+        if raw:
+            return [np.asarray(v, dtype=o.dtype) for v, o in zip(res, outputs)]
         return _plain_results(sweep, res, outputs)
-    return _lazy_results(core, sweep, outputs, one_by_one)
+    results = _lazy_results(core, sweep, outputs, one_by_one)
+    return [da.data for da in results] if raw else results
 
 
 def apply_sweeps_many(core, sweeps, outputs, one_by_one=False):
