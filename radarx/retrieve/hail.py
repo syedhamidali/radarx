@@ -102,10 +102,13 @@ Not implemented
   Murillo and Homeyer 2019) were not read and are not included.
 * Witt et al. (1998) apply the equations to the storm cells of a cell tracking
   algorithm (the maximum reflectivity of each 2D component). Here the same sum
-  is applied to the reflectivity of every column, as the gridded MRMS version
-  of the algorithm does (the NOAA product pages state that the MRMS SHI uses
-  the equations of the paper on a 3D grid; their equations are images that were
-  read from the product guide).
+  is applied to the reflectivity of every column, which is what the MRMS
+  version does on its 3D grid according to the NOAA Warning Decision Training
+  Division product guide. The guide gives the same Eqs. 1 to 5 (as images) and
+  the equation image on its MESH page reads ``MESH(inch) = sqrt(SHI)``, which
+  differs by a factor 10 from Eq. 6 of the paper (``2.54 SHI^0.5`` mm, or
+  ``0.1 SHI^0.5`` inch); that was not resolved and the paper is followed.
+* A comparison with the MRMS MESH product was not possible (no MESH data).
 
 The column sums run in a compiled, multithreaded C++ kernel; if it is not
 available an equivalent NumPy implementation is used.
