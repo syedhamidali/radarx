@@ -138,6 +138,20 @@ def broadcast_block(*blocks):
     return shape, flat
 
 
+def detach(*arrays):
+    """
+    Shallow copies of DataArrays that are safe to pass to ``xarray.apply_ufunc``.
+
+    With several DataArray inputs and ``keep_attrs=False``, xarray 2024.10
+    merges the coordinates by assigning the (empty) attributes to the
+    coordinate variable of the first input, which strips ``units``,
+    ``long_name`` and the like from the caller's object (fixed in later
+    xarray releases). A shallow copy has its own coordinate variables and
+    shares the data.
+    """
+    return [a.copy(deep=False) for a in arrays]
+
+
 def elementwise(func, arrays, dtype=np.float32):
     """
     Apply a flat element-wise function to DataArrays, lazily for dask arrays.
@@ -152,7 +166,7 @@ def elementwise(func, arrays, dtype=np.float32):
 
     return xr.apply_ufunc(
         block,
-        *arrays,
+        *detach(*arrays),
         dask="parallelized",
         output_dtypes=[dtype],
         keep_attrs=False,

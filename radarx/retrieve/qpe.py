@@ -150,6 +150,7 @@ import xarray as xr
 
 from .._provenance import provenance
 from .._registry import accessor_method
+from ._fieldtools import detach
 
 try:
     from . import _qpe
@@ -631,7 +632,7 @@ def _rate_dataarray(rel, fields, temperature, setup, text, engine, n_threads):
 
     out = xr.apply_ufunc(
         func,
-        *arrays,
+        *detach(*arrays),
         dask="parallelized",
         output_dtypes=[np.float32],
         keep_attrs=False,
@@ -1271,7 +1272,7 @@ def _blend_dataset(
 
     rate, flag, used = xr.apply_ufunc(
         func,
-        *arrays,
+        *detach(*arrays),
         dask="parallelized",
         output_core_dims=[[], [], []],
         output_dtypes=[np.float32, np.int8, np.int8],

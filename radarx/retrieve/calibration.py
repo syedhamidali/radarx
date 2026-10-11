@@ -346,8 +346,7 @@ def _row_apply(fields, leads, dims, nout, func):
 
     return xr.apply_ufunc(
         block,
-        *arrays,
-        *leads,
+        *ft.detach(*arrays, *leads),
         input_core_dims=[list(dims)] * len(arrays) + [[]] * len(leads),
         output_core_dims=[[_STAT]],
         dask="parallelized",

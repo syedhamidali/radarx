@@ -209,6 +209,7 @@ import xarray as xr
 from .._provenance import provenance
 from .._registry import accessor_method
 from ..fundamentals.geometry import beam_center_height
+from ._fieldtools import detach
 from ._products import product_tree
 from .dsd import _infer_band
 from .kdp import _PHIDP_NAMES, _RHOHV_NAMES, _gate_spacing, estimate_kdp
@@ -556,9 +557,7 @@ def _correct_fields(
 
     ah, pia, dphi = xr.apply_ufunc(
         run,
-        dbz,
-        phidp,
-        valid,
+        *detach(dbz, phidp, valid),
         input_core_dims=[[_RANGE]] * 3,
         output_core_dims=[[_RANGE], [_RANGE], []],
         dask="parallelized",
