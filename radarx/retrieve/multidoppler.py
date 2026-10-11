@@ -1809,7 +1809,13 @@ def multi_doppler(
         multiplied by :math:`1 / \\sigma^2` (m-2 s2), so a radar with twice the
         error counts a quarter as much. A NaN error removes the observation.
         Default None: every observation has the weight ``weights['observation']``
-        alone, as if :math:`\\sigma = 1` m s-1 (the earlier behaviour).
+        alone, as if :math:`\\sigma = 1` m s-1 (the earlier behaviour). The
+        default weights of the other terms are tuned for errors of about
+        1 m s-1: if all radars have a much larger error the smoothness and mass
+        terms win over the observations (on the test flow, errors of
+        ``[0.2, 1.0]`` m s-1 give up to 30 % smaller errors than equal weights,
+        while ``[1.0, 3.0]`` give larger ones), so give the relative quality
+        of the radars unless the absolute values are what you want.
     crossing_angle_weight : bool, optional
         Multiply the weight of every observation by :math:`\\sin^2\\beta`,
         where :math:`\\beta` is ``beam_crossing_angle`` (at least
@@ -1952,10 +1958,15 @@ def multi_doppler(
     analysis system with these weights; they do not include errors of the
     fall speed, the gridding, the advection, or a wrong lower boundary
     condition. On the synthetic flow of the tests (Beltrami flow, two radars,
-    0.5 m s-1 noise) they are 0.9 to 1.5 times the root-mean-square error of
-    the retrieval where the beams cross at more than 30 degrees; see the
-    tests and the notebook. The Hessian of the vorticity term is not
-    constant, so ``error=True`` needs ``weights['vorticity'] = 0``.
+    0.5 m s-1 noise, ``obs_error=0.5``, 32 draws) they are 1.44 (``u``), 1.27
+    (``v``) and 1.04 (``w``) times the root-mean-square error of the
+    retrieval where the beams cross at more than 30 degrees. They are 1.5 to
+    2.1 times the standard deviation of the retrievals over 16 noise
+    realisations, because they include the freedom that the weak constraints
+    leave. On a 4 km grid the truncation error of the discretisation, which
+    they do not contain, dominates the actual error and the ratio for ``w``
+    falls to 0.35. The Hessian of the vorticity term is not constant, so
+    ``error=True`` needs ``weights['vorticity'] = 0``.
 
     O'Brien adjustment. ``w_boundary="obrien"`` (usually with ``"bottom"``)
     applies the adjustment of O'Brien (1970) [9]_ to the retrieved ``w``

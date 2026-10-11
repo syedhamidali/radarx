@@ -57,6 +57,13 @@ gridding and `advect`), add a background (`radarx.io.sounding`), retrieve.
 - Foote, G. B., and P. S. du Toit, 1969: Terminal velocity of raindrops
   aloft. *J. Appl. Meteor.*, **8**, 249-253,
   https://doi.org/10.1175/1520-0450(1969)008<0249:TVORA>2.0.CO;2
+- O'Brien, J. J., 1970: Alternative solutions to the classical vertical
+  velocity problem. *J. Appl. Meteor.*, **9**, 197-203,
+  https://doi.org/10.1175/1520-0450(1970)009<0197:ASTTCV>2.0.CO;2
+- Collis, S., A. Protat, and K.-S. Chung, 2010: The effect of radial velocity
+  gridding artifacts on variationally retrieved vertical velocities. *J.
+  Atmos. Oceanic Technol.*, **27**, 1239-1246,
+  https://doi.org/10.1175/2010JTECHA1402.1
 - Shapiro, A., 1993: The use of an exact solution of the Navier-Stokes
   equations in a validation test of a three-dimensional nonhydrostatic
   numerical model. *Mon. Wea. Rev.*, **121**, 2420-2425,
@@ -165,6 +172,136 @@ ax.set_ylabel("cost (m$^2$ s$^{-2}$)")
 ax.legend()
 plt.show()
 ```
+
+## Observation errors, error estimates, the upper boundary and the analytic solution
+
+The same virtual radars show the options added to `multi_doppler` and the
+classical analytic solution. We take every second grid point (2 km
+horizontally, 1 km vertically) to keep the error estimate quick.
+
+```{code-cell} ipython3
+coarse = virtual.isel(x=slice(None, None, 2), y=slice(None, None, 2), z=slice(None, None, 2))
+coarse_bg = background.isel(x=slice(None, None, 2), y=slice(None, None, 2), z=slice(None, None, 2))
+coarse_truth = truth.isel(x=slice(None, None, 2), y=slice(None, None, 2), z=slice(None, None, 2))
+
+
+def rms(wind, mask):
+    return {c: round(float(np.sqrt(((wind[c] - coarse_truth[c]).where(mask) ** 2).mean())), 2) for c in "uvw"}
+
+
+base = rx.retrieve.multi_doppler(coarse, coarse_bg, fall_speed_correction=False)
+crossing = base.beam_crossing_angle > 30
+print("default             ", rms(base, crossing))
+```
+
+**Observation errors.** `obs_error` is the standard deviation of the radial
+velocity error in m/s (one number, one per radar, or a field such as one
+computed from the signal to noise ratio of the gate); the weight of an
+observation in the cost function is divided by its square. The weights of
+the other terms are tuned for errors of about 1 m/s, so the option is meant
+for the *relative* quality of the radars and gates. Here the first radar has
+an error of 0.2 m/s and the second one of 1 m/s:
+
+```{code-cell} ipython3
+cel, caz = np.radians(coarse.elevation), np.radians(coarse.azimuth)
+clean = np.cos(cel) * (np.sin(caz) * coarse_truth.u + np.cos(caz) * coarse_truth.v) + np.sin(cel) * coarse_truth.w
+errors = xr.DataArray([0.2, 1.0], dims="radar")
+rng = np.random.default_rng(1)
+noise = xr.DataArray(rng.normal(size=clean.shape), dims=clean.dims)
+noisy_vr = (clean + errors * noise).where(coarse.VRADH.notnull())
+noisy = coarse.assign(VRADH=noisy_vr.transpose("radar", "z", "y", "x"))
+flat = rx.retrieve.multi_doppler(noisy, coarse_bg, fall_speed_correction=False)
+weighted = rx.retrieve.multi_doppler(noisy, coarse_bg, fall_speed_correction=False, obs_error=errors.values)
+print("equal weights       ", rms(flat, crossing))
+print("obs_error=[0.2, 1]  ", rms(weighted, crossing))
+```
+
+The weights of the other terms are fixed, so a larger error of all radars
+(say 3 m/s) lets the smoothness penalty win over the observations; scale
+`obs_error` to about 1 m/s unless that is what you want.
+
+`crossing_angle_weight=True` multiplies the weights by the squared sine of
+the beam crossing angle. The normal equations already contain the geometry,
+so this is an extra down-weighting (a radarx choice, not from a paper).
+
+**Error estimate.** With `error=True` the result has `u_error`, `v_error`
+and `w_error`, the standard deviation of the retrieval error from the
+covariance of the cost function (the inverse of half its Hessian, which is
+constant because the cost is quadratic). The covariance of a million unknowns
+cannot be written down, so radarx estimates its diagonal from random draws,
+each one a conjugate-gradient solution (`error_samples`, 8 here; use 32 or
+more for a result).
+
+```{code-cell} ipython3
+est = rx.retrieve.multi_doppler(coarse, coarse_bg, fall_speed_correction=False,
+                                obs_error=1.0, error=True, error_samples=8)
+actual = rms(est, crossing)
+estimate = {c: round(float(np.sqrt((est[f"{c}_error"].where(crossing) ** 2).mean())), 2) for c in "uvw"}
+print("actual rms error    ", actual)
+print("estimated std       ", estimate)
+
+fig, axes = plt.subplots(1, 2, figsize=(11, 4.2), layout="constrained")
+for ax, c in zip(axes, "vw"):
+    est[f"{c}_error"].sel(z=5000.0).where(crossing.sel(z=5000.0)).plot(ax=ax, cmap="viridis", cbar_kwargs={"label": "m/s"})
+    ax.set_title(f"estimated standard deviation of the error of {c} at 5 km")
+    ax.set_aspect("equal")
+plt.show()
+```
+
+The estimate is the error of the analysis system with its weights: it counts
+the noise of the radial velocities and the freedom that the weights of the
+smoothness and mass terms leave, not the error of the fall speed, of the
+gridding or of the advection, and it does not know that a smooth truth is
+easier. On the tests of radarx (two radars, 0.5 m/s noise, 2 km grid) the
+estimate is 1.0 to 1.4 times the actual error where the beams cross at more
+than 30 degrees (this example: 0.8 to 1.4).
+
+**Upper boundary condition.** The true vertical velocity of this flow is zero
+at 10 km. `w_boundary` accepts `"obrien"`: after the minimisation the mass
+flux is corrected, in each column, by the part of its value at the top that
+grows as the square of the height (`obrien_error="constant"`: linearly), so
+that `w = 0` there (O'Brien 1970). The option follows the open ARPS code and
+documentation of the adjustment; the paper itself could not be read, see the
+docstring.
+
+```{code-cell} ipython3
+adjusted = rx.retrieve.multi_doppler(coarse, coarse_bg, fall_speed_correction=False,
+                                     w_boundary=("bottom", "obrien"))
+print("w at the top before:", float(abs(base.w.isel(z=-1)).max()), " after:", float(abs(adjusted.w.isel(z=-1)).max()))
+print("bottom only         ", rms(base, crossing))
+print("bottom and O'Brien  ", rms(adjusted, crossing))
+```
+
+**The analytic solution.** `dual_doppler_analytic` solves the 2 x 2 system of
+the two radial velocities in every cell and integrates the continuity
+equation upward, downward or upward with the O'Brien adjustment. It is
+instant but follows every error of the data, and it gives nothing where the
+beams do not cross well. It also returns the geometric error of the
+horizontal wind, which grows as one over the sine of the crossing angle.
+
+```{code-cell} ipython3
+for boundary in ("upward", "downward", "obrien"):
+    ana = rx.retrieve.dual_doppler_analytic(coarse, coarse_bg, fall_speed_correction=False,
+                                            boundary=boundary, iterations=6, obs_error=1.0)
+    ok = crossing & ana.w.notnull()
+    print(f"analytic, {boundary:9s}", rms(ana, ok))
+print("variational         ", rms(adjusted, crossing))
+
+fig, ax = plt.subplots(figsize=(6, 4))
+beta = ana.beam_crossing_angle.where(ana.u_error.notnull()).values.ravel()
+herr = np.hypot(ana.u_error, ana.v_error).values.ravel()
+ax.scatter(beta[::40], herr[::40], s=3, label="cells")
+b = np.linspace(30, 90, 100)
+ax.plot(b, np.sqrt(2) / np.sin(np.radians(b)), "k", label=r"$\sqrt{2}\,\sigma / \sin\beta$ (ground level)")
+ax.set_xlabel("beam crossing angle (degrees)")
+ax.set_ylabel("error of the horizontal wind (m/s)")
+ax.legend()
+plt.show()
+```
+
+The lower boundary stays at the lowest grid level (`w_bottom`); a boundary
+that follows a digital elevation model, and the mixed-order interpolation of
+Collis et al. (2010) at the gridding step, are not implemented.
 
 ## A squall line seen by KGWX and KBMX
 

@@ -529,6 +529,15 @@ def test_real_dual_doppler(nexrad_pair):
     # deep south-westerly flow ahead of the line at mid levels
     mid = out.v.sel(z=5000.0).values[good[4]]
     assert mid.mean() > 10.0
+    # the analytic solution gives the horizontal wind where the beams cross; its
+    # w is NaN because the lowest levels are not seen by KBMX (no divergence)
+    ana = dual_doppler_analytic(grids, freezing_level="rain")
+    solved = np.isfinite(ana.u.values) & good
+    assert solved.sum() > 1000
+    for c in "uv":
+        diff = (ana[c].values - out[c].values)[solved]
+        assert np.sqrt(np.mean(diff**2)) < 4.0
+    assert np.isnan(ana.w.values[good]).all()
 
 
 # --------------------------------------------------------------------------
