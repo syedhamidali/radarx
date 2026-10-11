@@ -529,6 +529,26 @@ def test_ice_matches_the_closed_forms_of_jung(engine, name, tol):
     assert np.all(out.RHOHV > 0.97) or name == "hail"
 
 
+@pytest.mark.parametrize("name", ["snow", "hail"])
+def test_ice_correlation_coefficient_from_the_definition(name):
+    """RHOHV of ice: <S_hh S_vv*> from the canting averages of Jung et al. (2008,
+    Eq. 5), written independently of the module: C (a^2 + b^2) + (A + B) a b."""
+    p = JUNG[name]
+    s = np.deg2rad(p["sigma"])
+    e1, e2 = np.exp(-2 * s * s), np.exp(-8 * s * s)
+    a_, b_, c_ = (3 + 4 * e1 + e2) / 8, (3 - 4 * e1 + e2) / 8, (1 - e2) / 8
+    fa, fb = p["a"], p["b"]
+    cov = c_ * (fa**2 + fb**2) + (a_ + b_) * fa * fb
+    zh = a_ * fa**2 + b_ * fb**2 + 2 * c_ * fa * fb
+    zv = b_ * fa**2 + a_ * fb**2 + 2 * c_ * fa * fb
+    want = cov / np.sqrt(zh * zv)
+    ds = xr.Dataset({"Q": ("x", [3e-4]), "AIR_DENSITY": ("x", [0.8])})
+    kw = {"snow": None, "hail": "Q"} if name == "hail" else {"snow": "Q"}
+    out = forward_operator(ds, rain=None, **kw)
+    assert float(out.RHOHV[0]) == pytest.approx(want, abs=2e-4)
+    assert want < 1.0  # the canting makes it a little smaller than 1
+
+
 def test_ice_variables_physical():
     q = np.geomspace(1e-6, 5e-3, 30)
     ds = xr.Dataset(
