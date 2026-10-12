@@ -7,14 +7,16 @@ Tests for the tropical-cyclone centre, GBVTD and the decomposition
 ===================================================================
 
 The truth is an analytic vortex written from the definitions: a modified
-Rankine-combined vortex (Eqs. 15 and 16 of Chen et al. 2013) with a uniform mean
+Rankine-combined vortex (Eqs. 28 to 31 of Lee et al. 1999) with a uniform mean
 wind and wavenumber-1 and 2 tangential asymmetries, projected on the beams with
 the exact geometry of a radar at the origin. The retrieval is compared with the
 known profiles, the ring fits and the simplex search of the compiled kernel with
-the NumPy implementation, and the NORM score with Table 1 of Bell and Lee
-(2012). Where the method has a known error (the geometric distortion of the
-wavenumber-1 wind, the aliased cross-beam mean wind, the dependence on the
-centre) the test states the size of the error it expects.
+the NumPy implementation, the NORM score with Table 1 of Bell and Lee (2012) and
+the closure with Eqs. 13 to 27 of Lee et al. (1999). The published numbers of
+the analytic experiments of Lee et al. (1999) and Lee and Marks (2000) are
+checked in the last section. Where the method has a known error (the geometric
+distortion of the wavenumber-1 wind, the aliased cross-beam mean wind, the
+dependence on the centre) the test states the size of the error it expects.
 """
 
 import numpy as np
@@ -217,9 +219,10 @@ def gate_arrays(ds):
 
 CFG = {
     "half_width": 1000.0,
-    "max_order": 3,
+    "max_order": 4,
     "min_points": 30,
     "max_gap": 120.0,
+    "geometric_limit": False,
     "mean_wind": (0.0, 0.0),
 }
 
@@ -248,7 +251,7 @@ def test_ring_fits_agree_between_kernel_and_numpy():
 
 
 @compiled_only
-@pytest.mark.parametrize("order", [1, 2, 3])
+@pytest.mark.parametrize("order", [1, 2, 3, 4])
 def test_ring_orders_agree(order):
     ds = vortex(asymmetry={1: (0.2, 45.0)}, noise=1.0)
     gates = gate_arrays(ds)
@@ -268,7 +271,7 @@ def test_simplex_search_agrees_between_kernel_and_numpy():
     radii = np.array([14000.0, 20000.0, 28000.0])
     cfg = dict(CFG, max_order=2, mean_wind=(4.0, 2.0))
     search = {
-        "step": 2000.0,
+        "step": 4000.0,
         "tolerance": 50.0,
         "max_iter": 200,
         "limit": 25000.0,
@@ -320,7 +323,7 @@ def test_kernel_argument_checks():
     with pytest.raises(ValueError, match="positive"):
         k.gbvtd_rings(x, x, x, x, [0.0], [1.0], [1.0], 0.0)
     with pytest.raises(ValueError, match="max_order"):
-        k.gbvtd_rings(x, x, x, x, [0.0], [1.0], [1.0], 1000.0, max_order=4)
+        k.gbvtd_rings(x, x, x, x, [0.0], [1.0], [1.0], 1000.0, max_order=5)
     with pytest.raises(ValueError, match="same length"):
         k.center_search(x, x, x, np.zeros(2), [[0.0, 0.0]], [1.0], 1000.0)
     with pytest.raises(ValueError, match="shape"):
@@ -360,7 +363,8 @@ def test_axisymmetric_vortex_is_retrieved(engine):
     assert np.abs(g["VT1_AMPLITUDE"].values[away]).max() < 0.3
     assert np.abs(g["VT2_AMPLITUDE"].values[away]).max() < 0.4
     assert np.abs(g["VM_ALONG"].values[away]).max() < 0.1
-    assert (g["FIT_ORDER"] == 3).all()
+    assert np.abs(g["VT3_AMPLITUDE"].values[away]).max() < 0.5
+    assert (g["FIT_ORDER"] == 4).all()
     fine = gbvtd(ds, CENTER, radii=np.arange(5000.0, 40001.0, 1000.0), engine=engine)
     assert abs(float(fine["RMW"]) - RMW) < 500.0
     assert abs(float(fine["VT_MAX"]) - VMAX) < 1.5
@@ -378,7 +382,7 @@ def test_cross_beam_mean_wind_is_aliased_and_removed():
     leak = 10.0 * RADII / CENTER[1]
     assert np.allclose((plain["VT0"].values - vt)[away], leak[away], atol=0.3)
     assert np.abs((fixed["VT0"].values - vt)[away]).max() < 0.2
-    # the along-beam component of the mean wind is found from the fit (A0 + A2)
+    # the along-beam component of the mean wind is found from the fit (A0 + A2 + A4)
     assert np.abs(plain["VM_ALONG"].values[away]).max() < 0.2
     # wind along the beam (north): found, and no aliasing into VT0
     ds = vortex(mean_wind=(0.0, -6.0))
@@ -399,15 +403,43 @@ def test_wavenumber_one_and_two_asymmetries():
     g = gbvtd(ds, CENTER, radii=RADII)
     vt, _ = truth()
     away = np.abs(RADII - RMW) > 2000.0
-    # the geometric distortion of the series in psi (Lee et al. 1999): the
-    # amplitudes are found to within 10 percent of VT0 and the phase to 10 degrees
+    # the coefficients of the series in psi (the quantities of Table 1 of Lee and
+    # Marks 2000) are within 10 percent of VT0 of the amplitudes
     wn1 = g["VT1_AMPLITUDE"].values
     wn2 = g["VT2_AMPLITUDE"].values
     assert np.abs(wn1 - 0.2 * vt)[away].max() < 0.1 * vt[away].min() + 1.5
     assert np.abs(wn2 - 0.1 * vt)[away].max() < 0.1 * vt[away].min() + 2.0
+    # the series in psi alone gives a rough position of the maximum
     err = (g["VT1_AZIMUTH"].values - 45.0 + 180.0) % 360.0 - 180.0
-    assert np.abs(err[away]).max() < 12.0
+    assert np.abs(err[away]).max() < 15.0
     assert np.abs(g["VT0"].values - vt)[away].max() < 2.0
+    # the waves of the azimuth (the comparison of Fig. 13 of Lee et al. 1999)
+    # are found much better when the series goes up to the order 4
+    d = tc_decompose(g)
+    amp = d["AZIMUTHAL_AMPLITUDE"].sel(wavenumber=1).values
+    phase = d["AZIMUTHAL_PHASE"].sel(wavenumber=1).values
+    assert np.abs(amp - 0.2 * vt)[away].max() < 0.5
+    assert np.abs(phase - 45.0)[away].max() < 2.0
+    amp2 = d["AZIMUTHAL_AMPLITUDE"].sel(wavenumber=2).values
+    assert np.abs(amp2 - 0.1 * vt)[away].max() < 1.0
+    low = tc_decompose(gbvtd(ds, CENTER, radii=RADII, max_wavenumber=3))
+    low_phase = low["AZIMUTHAL_PHASE"].sel(wavenumber=1).values
+    assert np.abs(low_phase - 45.0)[away].max() > np.abs(phase - 45.0)[away].max()
+
+
+def test_wavenumber_three_tangential_wind():
+    # Eqs. 26 and 27: V_TS3 = 2 A4 and V_TC3 = -2 B4, found for a ring close to
+    # the radar line (sin(alpha_max) = 0.125) to within 5 percent
+    ds = vortex(absolute_asymmetry={3: (10.0, 25.0)}, azimuth_step=0.5)
+    g = gbvtd(ds, CENTER, radii=np.array([10000.0]), ring_width=1000.0)
+    assert abs(float(g["VT3_AMPLITUDE"].values[0]) - 10.0) < 0.6
+    assert (g["FIT_ORDER"] == 4).all()
+    d = tc_decompose(g)
+    assert abs(float(d["AZIMUTHAL_AMPLITUDE"].sel(wavenumber=3).values[0]) - 10.0) < 0.6
+    # a fit of the order 3 has no wavenumber 3 and the waves above are zero
+    low = gbvtd(ds, CENTER, radii=np.array([10000.0]), max_wavenumber=3)
+    assert np.isnan(low["VT3_AMPLITUDE"]).all()
+    assert np.allclose(tc_decompose(low)["VT_WAVENUMBER3"], 0.0)
 
 
 def test_asymmetric_radial_wind_leaks_into_the_wavenumber_one_wind():
@@ -450,9 +482,10 @@ def test_centre_error_sensitivity():
         a1 = rms(((g["VT1_AMPLITUDE"].values - 0.2 * vt) / (0.2 * vt))[away])
         errs[d] = (rms(((g["VT0"].values - vt) / vt)[away]), a1)
     # the wavenumber-1 wind is much more sensitive to the centre than the mean
-    # tangential wind (Lee and Marks 2000, as reported by Bell and Lee 2012: more
-    # than 20 percent for 1 km in a storm with a radius of maximum wind of 20 km)
-    assert errs[1000.0][1] > 0.18 and errs[1000.0][1] > 1.5 * errs[0.0][1]
+    # tangential wind (Lee and Marks 2000, section 2: the error of a real
+    # wavenumber 1 of 10 m/s is 20 percent for 1 km in a storm with a radius of
+    # maximum wind of 20 km)
+    assert errs[1000.0][1] > 0.14 and errs[1000.0][1] > 1.5 * errs[0.0][1]
     assert errs[2000.0][1] > errs[1000.0][1] * 0.9
     assert errs[5000.0][1] > 0.25
     assert errs[5000.0][0] > errs[0.0][0] and errs[1000.0][0] < 0.06
@@ -747,9 +780,13 @@ def test_decomposition_of_a_retrieval():
     g = gbvtd(ds, CENTER, radii=radii)
     d = tc_decompose(g)
     az = d["azimuth"].values
-    assert d.sizes == {"radius": radii.size, "azimuth": 72}
+    assert d.sizes == {"radius": radii.size, "azimuth": 72, "wavenumber": 3}
     assert np.allclose(
-        d["VT"], d["VT_SYMMETRIC"] + d["VT_WAVENUMBER1"] + d["VT_WAVENUMBER2"]
+        d["VT"],
+        d["VT_SYMMETRIC"]
+        + d["VT_WAVENUMBER1"]
+        + d["VT_WAVENUMBER2"]
+        + d["VT_WAVENUMBER3"],
     )
     assert np.allclose(d["VT_SYMMETRIC"].values[:, 0], g["VT0"].values)
     # the winds, the position and the geometry of the polar grid
@@ -966,7 +1003,7 @@ def test_centre_arguments_and_errors():
         (gbvtd, {"min_radius": 0.0}, "min_radius"),
         (gbvtd, {"radius_step": -1.0}, "radius_step"),
         (gbvtd, {"ring_width": 0.0}, "ring_width"),
-        (gbvtd, {"max_wavenumber": 4}, "max_wavenumber"),
+        (gbvtd, {"max_wavenumber": 5}, "max_wavenumber"),
         (gbvtd, {"max_wavenumber": 1.5}, "max_wavenumber"),
         (gbvtd, {"min_points": 1}, "min_points"),
         (gbvtd, {"max_gap": 0.0}, "max_gap"),
@@ -978,6 +1015,8 @@ def test_centre_arguments_and_errors():
         (tc_center, {"guess_spacing": -1.0}, "guess_spacing"),
         (tc_center, {"search_radius": 0.0}, "search_radius"),
         (tc_center, {"inflection_window": -1.0}, "inflection_window"),
+        (tc_center, {"selection": "best"}, "selection"),
+        (tc_center, {"simplex_radius": 0.0}, "simplex_radius"),
         (tc_center, {"k_e": -1.0}, "k_e"),
         (tc_center, {"engine": "gpu"}, "engine"),
     ],
@@ -1045,3 +1084,346 @@ def test_provenance_and_references():
     )
     assert "10.1175/JAMC-D-11-0167.1" in results["tc_center"].attrs[REFERENCES]
     assert "gbvtd(" in results["gbvtd"].attrs[HISTORY]
+
+
+# --------------------------------------------------------------------------
+# the equations and the numbers of Lee et al. (1999) and Lee and Marks (2000)
+# --------------------------------------------------------------------------
+
+
+def lee_1999_coefficients(vtc, vts, vr0, along, cross, sin_a):
+    """``A0, A1, B1, A2, B2, A3, B3, A4, B4`` of Eqs. 13 to 18 (no asymmetric V_R)."""
+    ca = np.sqrt(1.0 - sin_a**2)
+    c = lambda n: vtc.get(n, 0.0)  # noqa: E731
+    s = lambda n: vts.get(n, 0.0)  # noqa: E731
+    return np.array(
+        [
+            0.5 * (along * (1.0 + ca) - s(1)),  # Eq. 13
+            0.5 * (2.0 * vr0 - s(2)),  # Eq. 14
+            0.5 * (c(2) - 2.0 * c(0) - 2.0 * cross * sin_a),  # Eq. 15
+            0.5 * (along * (1.0 - ca) - s(3) + s(1)),  # Eq. 16
+            0.5 * (c(3) - c(1)),  # Eq. 18, n = 2
+            0.5 * (s(2) - s(4)),  # Eq. 17, n = 3
+            0.5 * (c(4) - c(2)),
+            0.5 * (s(3) - s(5)),
+            0.5 * (c(5) - c(3)),
+        ]
+    )
+
+
+def test_closure_inverts_the_fourier_relations_of_lee_et_al_1999():
+    vtc = {0: 40.0, 1: 3.0, 2: -2.0, 3: 1.5}
+    vts = {1: 4.0, 2: 2.5, 3: -1.2}
+    vr0, along, cross, sin_a = -3.0, 5.0, -4.0, 0.4
+    coef = lee_1999_coefficients(vtc, vts, vr0, along, cross, sin_a)
+    rt = 80000.0
+    diag = np.array([100.0, 10.0, 4.0, 0.1])
+    # the mean wind (u, v) = (cross, 0) of a centre north of the radar has the
+    # cross-beam component `cross` and no component along the beam
+    rows = dict(
+        zip(
+            tw._GBVTD_ROWS,
+            tw._derived(coef, diag, 0.0, rt, np.array(sin_a * rt), (cross, 0.0)),
+        )
+    )
+    assert np.isclose(rows["VT0"], vtc[0])
+    assert np.isclose(rows["VR0"], vr0)
+    assert np.isclose(rows["VM_ALONG"], along)  # Eq. 19
+    assert np.isclose(rows["VT1_COS"], vtc[1])  # Eq. 23
+    assert np.isclose(rows["VT1_SIN"], vts[1])  # Eq. 22
+    assert np.isclose(rows["VT2_COS"], vtc[2])  # Eq. 25
+    assert np.isclose(rows["VT2_SIN"], vts[2])  # Eq. 24
+    assert np.isclose(rows["VT3_COS"], vtc[3])  # Eq. 27
+    assert np.isclose(rows["VT3_SIN"], vts[3])  # Eq. 26
+    # without the mean wind the cross-beam wind is aliased into V_T0 (Eq. 20);
+    # the sign of B3 in Eq. 20 is minus: it cancels the V_TC2 of B1 (Eqs. 15, 18)
+    plain = tw._derived(coef, diag, 0.0, rt, np.array(sin_a * rt), (0.0, 0.0))
+    assert np.isclose(plain[0], vtc[0] + cross * sin_a)
+    # a fit of a lower order leaves the higher waves out, and a ring that is too
+    # close to the radar has none
+    low = tw._derived(coef, np.array([100.0, 10.0, 2.0, 0.1]), 0.0, rt, 1000.0, (0, 0))
+    assert np.isfinite(low[[0, 1, 2, 3, 8]]).all() and np.isnan(low[4:8]).all()
+    near = tw._derived(coef, diag, 0.0, rt, np.array(rt), (0.0, 0.0))
+    assert np.isnan(near[:9]).all()
+    # the geometric orders: the wavenumbers 1, 2 and 3 up to sin(alpha) 0.7, 0.5, 0.33
+    orders = [tw._geometric_order(v) for v in (0.2, 0.33, 0.4, 0.5, 0.6, 0.7, 0.8)]
+    assert orders == [4, 4, 3, 3, 2, 2, 1]
+
+
+def paper_sweep(vmax=50.0, **kwargs):
+    """The test vortex of Lee et al. (1999): 50 m/s at 20 km, 60 km from the radar."""
+    options = {
+        "center": (0.0, 60000.0),
+        "vmax": vmax,
+        "rmw": 20000.0,
+        "elevation": 0.0,
+        "azimuth_step": 1.0,
+        "range_step": 500.0,
+        "max_range": 110000.0,
+    }
+    options.update(kwargs)
+    return synthetic_vortex(**options)
+
+
+# Table 1 of Lee and Marks (2000): the centre (km) of the analysis, the amplitude
+# (m/s) of the wavenumbers 1 and 2 and the mean flow retrieved from the
+# axisymmetric vortex, and the radius (km) that contains the highest wavenumber 0
+TABLE1_DISPLACED = {
+    (1, 60): (2.1, 0.3, 2.4, 20),
+    (3, 60): (10.0, 1.1, 6.2, 22),
+    (5, 60): (14.6, 2.7, 8.5, 24),
+    (0, 62): (6.1, 1.9, 0.0, 21),
+    (0, 65): (10.1, 4.8, 0.0, 21),
+}
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_displaced_centre_of_table_1_of_lee_and_marks_2000(engine):
+    ds = paper_sweep()
+    for (x, y), (w1, w2, flow, rmw) in TABLE1_DISPLACED.items():
+        g = gbvtd(
+            ds,
+            (x * 1000.0, y * 1000.0),
+            radii=np.array([rmw * 1000.0]),
+            ring_width=1000.0,
+            engine=engine,
+        )
+        # the apparent wavenumber 1 and 2 of the series in psi, and the apparent
+        # mean flow (zero for a centre displaced along the beam)
+        assert abs(float(g["VT1_AMPLITUDE"].values[0]) - w1) < 0.6, (x, y)
+        assert abs(float(g["VT2_AMPLITUDE"].values[0]) - w2) < 0.8, (x, y)
+        assert abs(float(g["VM_ALONG"].values[0]) - flow) < 0.25, (x, y)
+
+
+def test_displaced_centre_scales_with_the_intensity():
+    # Table 2 of Lee and Marks (2000): the apparent wavenumber 1 is proportional to
+    # the maximum wind (1.3, 1.7, 2.1 and 2.6 m/s at 1 km for 30 to 60 m/s)
+    amp = {}
+    for vmax in (30.0, 60.0):
+        g = gbvtd(
+            paper_sweep(vmax),
+            (3000.0, 60000.0),
+            radii=np.array([22000.0]),
+            ring_width=1000.0,
+        )
+        amp[vmax] = float(g["VT1_AMPLITUDE"].values[0])
+    assert np.isclose(amp[60.0] / amp[30.0], 2.0, rtol=0.02)
+    assert abs(amp[30.0] - 5.9) < 0.6 and abs(amp[60.0] - 11.7) < 1.0
+
+
+@pytest.mark.parametrize(
+    "wavenumber, sin_below, sin_above",
+    [(1, 0.6, 0.8), (2, 0.4, 0.55), (3, 0.3, 0.4)],
+)
+def test_wave_limits_of_lee_et_al_1999(wavenumber, sin_below, sin_above):
+    # Section 7: for a 20 percent bias the wavenumbers 1, 2 and 3 are retrieved up
+    # to sin(alpha_max) of 0.7, 0.5 and 0.33; the series stops at the wavenumber
+    # of the test asymmetry (10 m/s at every radius, the maximum towards the radar)
+    ds = paper_sweep(absolute_asymmetry={wavenumber: (10.0, 90.0 - 180.0)})
+    radii = np.array([sin_below, sin_above]) * 60000.0
+    g = gbvtd(
+        ds,
+        (0.0, 60000.0),
+        radii=radii,
+        ring_width=1000.0,
+        max_wavenumber=wavenumber + 1,
+    )
+    d = tc_decompose(g)
+    bias = d["AZIMUTHAL_AMPLITUDE"].sel(wavenumber=wavenumber).values / 10.0 - 1.0
+    assert abs(bias[0]) < 0.2 < abs(bias[1])
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_geometric_limit_of_the_fourier_order(engine):
+    # a centre 80 km from the radar: sin(alpha_max) = 0.25, 0.4, 0.6 and 0.75
+    ds = vortex(azimuth_step=1.0, range_step=250.0)
+    radii = np.array([20000.0, 32000.0, 48000.0, 60000.0])
+    free = gbvtd(ds, CENTER, radii=radii, engine=engine)
+    limited = gbvtd(ds, CENTER, radii=radii, engine=engine, geometric_limit=True)
+    assert list(free["FIT_ORDER"].values) == [4, 4, 4, 2]  # the far ring has gaps
+    assert list(limited["FIT_ORDER"].values) == [4, 3, 2, 1]
+    # a ring beyond sin(alpha_max) = 0.7 has the wavenumber 0 only
+    assert np.isfinite(limited["VT0"]).all()
+    assert np.isnan(limited["VT1_COS"].values[3]) and np.isnan(
+        limited["VM_ALONG"].values[3]
+    )
+    assert np.isfinite(limited["VT1_COS"].values[:3]).all()
+    assert np.isfinite(limited["VT2_COS"].values[:2]).all()
+    assert np.isnan(limited["VT2_COS"].values[2:]).all()
+    assert np.isfinite(limited["VT3_COS"].values[0])
+    assert np.isnan(limited["VT3_COS"].values[1:]).all()
+    assert limited.attrs["gbvtd_geometric_limit"] == 1
+
+
+@compiled_only
+def test_geometric_limit_agrees_between_kernel_and_numpy():
+    ds = vortex(asymmetry={1: (0.2, 45.0)}, noise=1.0, azimuth_step=1.0)
+    gates = gate_arrays(ds)
+    cfg = dict(CFG, geometric_limit=True)
+    radii = np.array([8000.0, 20000.0, 32000.0, 48000.0, 60000.0])
+    a = tw._rings(gates, [0.0, 1000.0], [80000.0, 79000.0], radii, cfg, True, 2)
+    b = tw._rings(gates, [0.0, 1000.0], [80000.0, 79000.0], radii, cfg, False, None)
+    assert np.allclose(a[0], b[0], rtol=1e-8, atol=1e-8, equal_nan=True)
+    assert np.array_equal(a[1][..., 2], b[1][..., 2])
+    assert list(a[1][0, :, 2]) == [4, 4, 3, 2, 1]
+
+
+def test_tc_center_with_the_geometric_limit_and_the_simplex_radius():
+    c = (30000.0, 70000.0)
+    ds = vortex(center=c, azimuth_step=2.0)
+    kwargs = {"radii": np.array([19000.0, 20000.0, 21000.0]), "guess_grid": 2}
+    base = tc_center(ds, **kwargs)
+    other = tc_center(ds, geometric_limit=True, simplex_radius=2500.0, **kwargs)
+    for res in (base, other):
+        err = np.hypot(float(res["CENTER_X"]) - c[0], float(res["CENTER_Y"]) - c[1])
+        assert err < 1000.0
+    # the first simplex changes the path of the search, not the vortex it finds
+    assert base.attrs["tc_center_geometric_limit"] == 0
+    assert other.attrs["tc_center_geometric_limit"] == 1
+    assert not np.array_equal(base["N_CONVERGING"], other["N_CONVERGING"])
+
+
+def test_selection_of_the_ring_by_the_highest_wind_or_the_norm_score():
+    c = (30000.0, 70000.0)
+    ds = vortex(center=c, asymmetry={1: (0.15, 45.0)}, azimuth_step=2.0)
+    radii = np.arange(14000.0, 27001.0, 1000.0)
+    by_max = tc_center(ds, radii=radii, guess_grid=2, selection="max_vt")
+    by_norm = tc_center(ds, radii=radii, guess_grid=2, selection="norm")
+    ok = by_max["N_CONVERGING"].values > 0
+    top = float(by_max["VT0"].values[ok].max())
+    assert np.isclose(float(by_max["VT_MAX"]), top)
+    assert by_max["SELECTED"].sum() == 1
+    assert by_max["SELECTED"].values[np.nanargmax(by_max["VT0"].values)] == 1
+    best = by_norm["NORM_SCORE"].values
+    assert by_norm["SELECTED"].values[np.nanargmax(best)] == 1
+    # the rings and their scores do not depend on the selection
+    assert np.allclose(by_max["NORM_SCORE"], by_norm["NORM_SCORE"], equal_nan=True)
+    assert abs(float(by_max["RMW"]) - RMW) <= 2000.0
+
+
+def test_synthetic_absolute_asymmetry():
+    r = vortex(absolute_asymmetry={1: (10.0, 0.0), 3: (4.0, 30.0)}, azimuth_step=2.0)
+    plain = vortex(azimuth_step=2.0)
+    sweep = tw._Sweep(r, None, 4.0 / 3.0)
+    gamma = np.rad2deg(
+        np.arctan2(sweep.x.values - CENTER[0], sweep.y.values - CENTER[1])
+    )
+    expected = 10.0 * np.cos(np.deg2rad(gamma)) + 4.0 * np.cos(
+        3 * np.deg2rad(gamma - 30.0)
+    )
+    diff = r["VT_TRUE"].values - plain["VT_TRUE"].values
+    assert np.allclose(diff, expected)  # the same at every radius, not scaled by VT0
+    rel = vortex(asymmetry={1: (0.1, 0.0)}, azimuth_step=2.0)
+    assert np.allclose(
+        rel["VT_TRUE"].values - plain["VT_TRUE"].values,
+        0.1 * plain["VT_TRUE"].values * np.cos(np.deg2rad(gamma)),
+    )
+
+
+def test_azimuthal_waves_of_a_known_wind():
+    az = np.arange(0.0, 360.0, 5.0)
+    phi = np.deg2rad(90.0 - az)  # mathematical angle
+    # wavenumber 1 with the maximum east (azimuth 90), wavenumber 2 with maxima
+    # at 20 and 200 degrees, wavenumber 3 absent
+    vt = np.stack(
+        [
+            5.0
+            + 3.0 * np.cos(np.deg2rad(az - 90.0))
+            + 2.0 * np.cos(2 * np.deg2rad(az - 20.0)),
+            7.0 + 0.0 * az,
+        ]
+    )
+    amp, azi = tw._azimuthal_waves(vt, phi)
+    assert np.allclose(amp[0], [3.0, 2.0, 0.0], atol=1e-10)
+    assert np.allclose(azi[0, :2], [90.0, 20.0])
+    assert np.allclose(amp[1], 0.0, atol=1e-10)
+
+
+def test_first_simplex_of_figure_4_of_lee_and_marks_2000():
+    # the initial guess is (-10, 50) km, the first simplex the equilateral triangle
+    # of circumradius 4 km around it (one vertex to the north); the maximum
+    # axisymmetric winds of the vertices A, B and C, of the reflection of A (R1)
+    # and of the expansion (X1) are 21.35, 29.60, 34.15, 42.12 and 44.81 m/s (the
+    # interpolation of the paper lowers the winds by up to 1 m/s)
+    ds = paper_sweep()
+    h = 0.5 * np.sqrt(3.0) * 4.0
+    a, b, c = (-10.0 - h, 48.0), (-10.0, 54.0), (-10.0 + h, 48.0)
+    mid = (0.5 * (b[0] + c[0]), 0.5 * (b[1] + c[1]))
+    r1 = (2.0 * mid[0] - a[0], 2.0 * mid[1] - a[1])
+    x1 = (3.0 * mid[0] - 2.0 * a[0], 3.0 * mid[1] - 2.0 * a[1])
+    paper = {"A": 21.35, "B": 29.60, "C": 34.15, "R1": 42.12, "X1": 44.81}
+    vertex = {"A": a, "B": b, "C": c, "R1": r1, "X1": x1}
+    radii = np.arange(15000.0, 25001.0, 1000.0)
+    for name, (x, y) in vertex.items():
+        g = gbvtd(ds, (x * 1000.0, y * 1000.0), radii=radii, ring_width=2000.0)
+        assert abs(float(g["VT0"].max()) - paper[name]) < 1.5, name
+    # A is the worst vertex, so it is the one that is reflected and then extended
+    assert paper["A"] < paper["B"] < paper["C"] < paper["R1"] < paper["X1"]
+
+
+# Table 4 of Lee and Marks (2000): the analytic vortex with an asymmetry of 10 m/s
+# (the mathematical angle of its maximum in degrees), the error (km) of the best
+# centre and the axisymmetric wind (m/s) there
+TABLE4 = {
+    "axisymmetric": (None, 0.31, 48.9),
+    "wavenumber 1 at 270": ({1: 270.0}, 0.65, 51.4),
+    "wavenumber 2 at 90": ({2: 90.0}, 0.63, 45.1),
+}
+
+
+def table_4_centre(wave, **kwargs):
+    absolute = None if wave is None else {n: (10.0, 90.0 - p) for n, p in wave.items()}
+    ds = paper_sweep(absolute_asymmetry=absolute)
+    return tc_center(
+        ds,
+        first_guess=(0.0, 60000.0),
+        radii=np.array([19000.0, 20000.0, 21000.0]),
+        ring_width=2000.0,
+        max_wavenumber=2,
+        search_radius=40000.0,
+        selection="max_vt",
+        **kwargs,
+    )
+
+
+@pytest.mark.parametrize("case", sorted(TABLE4))
+def test_centre_finding_of_table_4_of_lee_and_marks_2000(case):
+    wave, error, w0 = TABLE4[case]
+    # 9 starting points 8 km apart (the paper has 36 points 4 km apart)
+    res = table_4_centre(wave, guess_grid=3, guess_spacing=8000.0)
+    err = np.hypot(float(res["CENTER_X"]), float(res["CENTER_Y"]) - 60000.0) / 1000.0
+    # the centres are within the 1 km that Lee and Marks require and not farther
+    # from the truth than theirs (the interpolation of the paper adds error), in
+    # the same direction (towards the radar) and with the intensity of the paper
+    assert err < 1.0 and err <= error
+    assert float(res["CENTER_Y"]) < 60000.0 + 100.0
+    assert abs(float(res["VT_MAX"]) - w0) < 1.0
+    assert float(res["RMW"]) == 20000.0
+    assert float(res["CENTER_UNCERTAINTY"]) < 200.0
+
+
+@compiled_only
+def test_centre_finding_with_the_36_starting_points_and_noise():
+    # Table 5 of Lee and Marks (2000): a random error of 5 m/s changes the centres
+    # little (mean error 0.35 km against 0.34 km without it)
+    errors = []
+    for noise in (0.0, 5.0):
+        ds = paper_sweep(
+            absolute_asymmetry={1: (10.0, 0.0)}, azimuth_step=1.0, noise=noise, seed=3
+        )
+        res = tc_center(
+            ds,
+            first_guess=(0.0, 60000.0),
+            radii=np.arange(18000.0, 22001.0, 1000.0),
+            ring_width=2000.0,
+            max_wavenumber=2,
+            guess_grid=6,
+            guess_spacing=4000.0,
+            search_radius=40000.0,
+            selection="max_vt",
+        )
+        errors.append(
+            np.hypot(float(res["CENTER_X"]), float(res["CENTER_Y"]) - 60000.0) / 1000.0
+        )
+    assert max(errors) < 0.7
+    assert abs(errors[1] - errors[0]) < 0.5
