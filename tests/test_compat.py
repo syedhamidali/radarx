@@ -170,6 +170,8 @@ def test_first_argument_and_list_old_names():
 def test_rotation_couplets_old_threshold_name():
     ds = _sweep()
     ds = ds.assign(azimuthal_shear=ds.VRADH * 1e-3)
+    azimuth = np.deg2rad(ds.azimuth)
+    ds = ds.assign_coords(x=ds.range * np.sin(azimuth), y=ds.range * np.cos(azimuth))
     with pytest.warns(DeprecationWarning, match="'min_reflectivity'.*'min_dbz'"):
         old = rotation_couplets(ds, min_reflectivity=30.0)
     new = rotation_couplets(ds, min_dbz=30.0)

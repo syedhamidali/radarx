@@ -23,6 +23,9 @@ physical diagnostics they can be checked against:
   dealiased velocity, KDP, $\rho_{hv}$, $Z_{DR}$, spectrum width and
   range-folded gates on 0.5° x 250 m gates), runs the network on chips of
   60° x 60 km that tile the sweep, and returns a tornado probability field.
+  The network needs $\rho_{hv}$ and $Z_{DR}$ at both tilts, so a volume with
+  only reflectivity and velocity, from before the dual-polarisation upgrade
+  of the WSR-88D, raises a `ValueError`.
   `radarx.retrieve.rotation_couplets` finds the physical counterpart: compact
   maxima of the LLSD azimuthal shear above 0.006 s⁻¹, the candidate threshold
   of the NWS Tornado Probability Algorithm (Sandmæl et al. 2023).
@@ -181,9 +184,9 @@ its algorithm description gives it; the distance, the thresholds and the
 nearest-couplet choice are radarx's. `n_tilts` is the length of the chain.
 
 ```{code-cell} ipython3
-volume = kgwx.radarx.assign(kgwx.radarx.dealias("VRADH"))
-every = rotation_couplets(volume, "VRADH_dealiased")
-continuous = rotation_couplets(volume, "VRADH_dealiased", min_tilts=3)
+volume = kgwx.xradar.georeference().radarx.assign(kgwx.radarx.dealias("VRADH"))
+every = rotation_couplets(volume)  # uses VRADH_dealiased where a sweep has it
+continuous = rotation_couplets(volume, min_tilts=3)
 count = lambda tree: sum(tree[n].sizes["couplet"] for n in tree.children)
 print(f"{count(every)} couplets above 0.006 s⁻¹ on {len(every.children)} Doppler cuts; "
       f"{count(continuous)} are on a chain of at least 3 tilts")

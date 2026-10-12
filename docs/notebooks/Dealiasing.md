@@ -250,7 +250,21 @@ Python specification gives identical values.
 Because it assumes that the reference radials are not aliased, UNRAVEL is
 built for a Nyquist velocity that is larger than the winds seen on the radials
 of lowest $|v|$; a field folded more than once at those radials is out of its
-reach. On the KGWX volume the two methods agree where both have a value:
+reach. UNRAVEL is much slower than the region method: on a WSR-88D volume of 14
+Doppler sweeps and 1.4 million valid gates the compiled kernels take 0.2 s for
+the region method and 9 to 12 s for UNRAVEL, about 40 to 50 times as long.
+It also leaves some gates without a value. The first step of the algorithm
+takes a gate for noise when its velocity is more than two median absolute
+deviations from the median of its 10-gate window along the ray and neither
+unfolding brings it within $0.3\,V_n$ of the mean of the window gates of
+either sign. That removes 1 to 4 % of the gates of a WSR-88D sweep, and also
+gates of a steep velocity change, such as the core of a vortex. The region
+method gives a value to every gate with data. In both methods a velocity up to
+1 % beyond the Nyquist velocity is data (velocities are coded in steps of
+0.5 m/s, so the largest code of a radar with a Nyquist velocity of 29.97 m/s is
+30.0 m/s) and a larger magnitude is a flag value, which becomes NaN.
+
+On the KGWX volume the two methods agree where both have a value:
 
 ```{code-cell} ipython3
 start = time.perf_counter()
@@ -310,6 +324,99 @@ the paper (0.2 % on its test) is not reproduced on this case: the winds of the
 squall line fold up to four times at 13.3 m/s, which is a harder test than the
 paper's, and radarx fixed the details that the paper leaves open without
 tuning them to this data.
+
+## Vortex cores and the speed limit
+
+The region method joins neighbouring gates whose velocities differ by less than
+$0.3\,V_n$ and shifts regions by whole intervals so that the velocity jumps
+between regions are smallest. A compact vortex signature, with peaks of about
+$\pm 0.95\,V_n$ and a velocity that changes by more than $V_n$ between
+neighbouring gates, can be joined by a chain of small steps to a region that
+really is folded beside it. Most border pairs of the joined region are fold
+lines, so the optimisation shifts the whole region, core included, and the core
+ends up at speeds far beyond $V_n$. A sweep alone cannot tell this from a
+strong real wind: both readings are smooth, and the shifted one has fewer jumps
+across the borders.
+
+The sweep below is built to show it: an inbound flow of 28.5 m/s, a folded patch
+of 34 m/s at the top of an outbound pocket whose rim reaches +28.5 m/s and whose
+core is at -12 m/s. Measured, the patch is at +26 m/s and touches the rim.
+
+```{code-cell} ipython3
+def vortex_sweep(nyquist=30.0, env=-28.5, patch=-34.0, rim=28.5, core=-12.0):
+    ray, gate = np.meshgrid(np.arange(120), np.arange(100), indexing="ij")
+
+    def box(lo, hi, x, width=1.5):
+        return 0.5 * (np.tanh((x - lo) / width) - np.tanh((x - hi) / width))
+
+    truth = np.full(ray.shape, env) + (patch - env) * box(54, 66, ray) * box(38, 46, gate)
+    rho = np.hypot((ray - 60) / 4.0, (gate - 50) / 6.0)
+    local_rim = core + (rim - core) * 0.5 * (1 - np.tanh((ray - 61.0) / 0.6))
+    pocket = rho <= 1
+    truth = np.where(pocket, core + (local_rim - core) * np.minimum(rho, 1.0) ** 2, truth)
+    measured = (truth + nyquist) % (2 * nyquist) - nyquist
+    ds = xr.Dataset(
+        {"VRADH": (("azimuth", "range"), measured, {"units": "m s-1"})},
+        coords={
+            "azimuth": ("azimuth", (np.arange(120) + 0.5) * 3.0),
+            "range": ("range", 2000.0 + 250.0 * np.arange(100)),
+            "elevation": ("azimuth", np.full(120, 0.5)),
+            "nyquist_velocity": ((), nyquist),
+        },
+    )
+    return ds, truth, pocket
+
+
+ds, truth, pocket = vortex_sweep()
+```
+
+The pocket is moved down by a fold with the patch. `max_speed` is the largest
+radial speed the storm can have, in m/s. A gate that the folds put beyond it, in a
+cluster of at most 100 connected gates beyond the limit, goes back by one interval
+at a time while that lowers its velocity differences to the neighbouring gates that
+are folded less than it. The patch stays unfolded: its speed is below the limit and
+it is beside a gate that it matches only with its fold.
+
+```{code-cell} ipython3
+results = {
+    "measured": ds.VRADH.values,
+    "default": radarx.retrieve.dealias_velocity(ds, "VRADH").values,
+    "max_speed 36 m/s": radarx.retrieve.dealias_velocity(ds, "VRADH", max_speed=36.0).values,
+    "max_speed 45 m/s": radarx.retrieve.dealias_velocity(ds, "VRADH", max_speed=45.0).values,
+    "truth": truth,
+}
+for label, values in results.items():
+    wrong = int((abs(values - truth) > 30.0).sum())
+    print(f"{label:17s} pocket {values[pocket].min():6.1f} to {values[pocket].max():5.1f} m/s,"
+          f" gates off by more than Vn: {wrong}")
+```
+
+```{code-cell} ipython3
+fig, axes = plt.subplots(1, 4, figsize=(14, 3.6), sharey=True)
+for ax, (label, values) in zip(axes, [(k, results[k]) for k in ("measured", "default", "max_speed 36 m/s", "truth")]):
+    mesh = ax.pcolormesh(values[40:80, 25:70].T, cmap="RdBu_r", vmin=-75, vmax=75)
+    ax.set_title(label)
+    ax.set_xlabel("ray")
+axes[0].set_ylabel("range gate")
+fig.colorbar(mesh, ax=axes, label="radial velocity (m/s)")
+plt.show()
+```
+
+On the 0.5° cut of the KBMX volume of 27 April 2011, 22:19 UTC (Nyquist velocity
+29.97 m/s), a couplet 64 km from the radar has measured peaks of -30 and +30 m/s.
+In a box of 10 km around it the default result has peaks of -88 and +26 m/s, a
+velocity difference of 114 m/s; 25 gates with measured velocities between -28 and
++14 m/s are moved down by a fold. `max_speed=36` gives -36 and +26 m/s (62 m/s),
+`max_speed=45` -44 and +26 m/s (70 m/s), and UNRAVEL -37 and +30 m/s (67 m/s). The
+other tilts, 0.9° and 1.3°, show peaks of -35 and -37 m/s at the same place, which is
+what makes the shifted core implausible; on the sweep alone the choice is the
+user's. A limit applies to every cluster of gates beyond it in the sweeps it is
+given, also where the winds really are that fast: with 36 m/s the limit changes 161
+gates of the 0.5° cut, 229 of the 0.9° cut and 248 of the 1.3° cut (0.1 to 0.4 % of
+their unfolded gates), and 1 782 of the 1.4 million gates of the volume, and the
+number of neighbouring pairs that differ by more than $V_n$ rises from 6 476 to 7 499
+(UNRAVEL leaves 8 805). Give the limit to the lowest sweeps only, as in
+`dealias_velocity(dtree["sweep_1"], max_speed=...)`.
 
 ## References
 

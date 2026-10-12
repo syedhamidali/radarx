@@ -60,6 +60,8 @@ def column_sweep(el, n_az=360, rng=None, with_dbz=True, dbz_name="DBZH"):
             "range": ("range", rng, {"units": "m"}),
             "elevation": ("azimuth", np.full(n_az, el)),
             "sweep_fixed_angle": el,
+            "x": (("azimuth", "range"), x),
+            "y": (("azimuth", "range"), y),
         },
     )
 

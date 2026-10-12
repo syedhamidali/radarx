@@ -124,6 +124,7 @@ import numpy as np
 import xarray as xr
 
 from .._compat import renamed_arguments
+from .._fields import VELOCITY
 from .._polar import nearest_ray
 from .._provenance import provenance
 from .._registry import accessor_for
@@ -566,8 +567,9 @@ def tornado_probability(
     providers : list of str, optional
         ONNX Runtime execution providers. Default: CPU.
     **kwargs
-        Passed to :func:`tornet_inputs` (``elevations``, ``velocity``,
-        ``dealias``, ``nyquist_velocity``, ``kdp``, ``max_range``).
+        Passed to :func:`tornet_inputs` (``elevations``, ``field``,
+        ``dealias``, ``nyquist_velocity``, ``kdp``, ``max_range``,
+        ``tolerance``).
 
     Returns
     -------
@@ -580,6 +582,17 @@ def tornado_probability(
         every chip, with the azimuth and range of the chip centre. Attributes
         ``ml_model``, ``ml_model_version``, ``ml_model_licence`` and
         ``ml_model_citation``.
+
+    Raises
+    ------
+    ValueError
+        If the volume has no dual-polarisation sweep at an elevation: the
+        network needs ``RHOHV`` and ``ZDR`` (and reflectivity) from a sweep
+        within ``tolerance`` degrees of each of the two elevations (0.5 and 0.9
+        degrees by default), and the velocity ``field`` from a Doppler sweep
+        there. A volume with only reflectivity and velocity, such as a WSR-88D
+        volume from before the dual-polarisation upgrade of 2011-2013, is
+        refused.
 
     Notes
     -----
@@ -715,6 +728,17 @@ def _delta_v(vel, az, rng, peak, diameter):
     return np.nanmax(v) - np.nanmin(v) if np.isfinite(v).any() else np.nan
 
 
+def _velocity_name(ds, field):
+    """
+    The velocity of a sweep: ``field`` if the sweep holds it; with no field,
+    the dealiased velocity, else the first velocity name. None if there is none.
+    """
+    if field is not None:
+        return field if field in ds.data_vars else None
+    names = [f"{name}_dealiased" for name in VELOCITY] + list(VELOCITY)
+    return next((n for n in names if n in ds.data_vars), None)
+
+
 def _couplets_sweep(
     ds,
     field,
@@ -728,6 +752,11 @@ def _couplets_sweep(
 ):
     from .shear import _median_size, llsd
 
+    if "x" not in ds.coords or "y" not in ds.coords:
+        raise ValueError(
+            "rotation_couplets needs georeferenced sweeps (x and y coordinates): "
+            "call dtree.xradar.georeference() first"
+        )
     da = ds[field]
     ray_dim = [d for d in da.dims if d != "range"][0]
     vel = da.transpose(ray_dim, "range").values.astype(np.float64)
@@ -754,8 +783,8 @@ def _couplets_sweep(
     gate_area = (rng * dtheta * dr)[None, :] * np.ones_like(shear)
     ids = np.unique(labels[labels > 0])
     rows = []
-    x = ds["x"].transpose(ray_dim, "range").values if "x" in ds.coords else None
-    y = ds["y"].transpose(ray_dim, "range").values if "y" in ds.coords else None
+    x = ds["x"].transpose(ray_dim, "range").values
+    y = ds["y"].transpose(ray_dim, "range").values
     for i in ids:
         sel = labels == i
         area = gate_area[sel].sum()
@@ -771,8 +800,8 @@ def _couplets_sweep(
                 shear[ia, ir],
                 dv,
                 area,
-                x[ia, ir] if x is not None else np.nan,
-                y[ia, ir] if y is not None else np.nan,
+                x[ia, ir],
+                y[ia, ir],
             )
         )
     rows.sort(key=lambda t: -abs(t[2]))
@@ -917,7 +946,7 @@ def _keep_continuous(nodes, min_tilts, link_distance, max_skip):
 )
 def rotation_couplets(
     obj,
-    field="VRADH",
+    field=None,
     *,
     threshold=0.006,
     window=(750.0, 2500.0),
@@ -936,10 +965,17 @@ def rotation_couplets(
     Parameters
     ----------
     obj : xarray.Dataset or xarray.DataTree
-        A PPI sweep with dealiased radial velocity, or a volume whose sweeps
-        holding ``field`` are processed one by one.
+        A georeferenced PPI sweep (``x`` and ``y`` coordinates, e.g. from
+        ``dtree.xradar.georeference()``) with dealiased radial velocity, or
+        a volume whose sweeps holding the velocity are processed one by one.
     field : str, optional
-        Dealiased radial velocity (m s⁻¹). Default ``"VRADH"``.
+        Dealiased radial velocity (m s⁻¹). Default: the dealiased velocity
+        that the sweep holds (``VRADH_dealiased``, the name that
+        :func:`radarx.retrieve.dealias_velocity` gives it), else the first of
+        ``VRADH``, ``VRAD``, ``VRADV``, ``VEL``, ``VELOCITY``, ``velocity``,
+        ``radial_velocity``. The name used is the attribute ``source_field``
+        of the result. A field that is passed is used as it is; velocity that
+        is not dealiased shows the fold lines as couplets.
     threshold : float, optional
         Azimuthal shear (s⁻¹, its magnitude for the chosen ``rotation``) above
         which gates belong to a candidate circulation. Default 0.006, the threshold that Veillette et al. (2025)
@@ -997,9 +1033,17 @@ def rotation_couplets(
         One entry per couplet along ``couplet``, strongest shear first:
         ``azimuthal_shear`` (peak), ``delta_v``, ``rotational_velocity``
         (``delta_v / 2``) and ``area``, with the ``azimuth``, ``range`` (and
-        ``x``, ``y`` if the sweep is georeferenced) of the peak. A DataTree
-        input gives a DataTree with one such node per sweep that has
-        ``field``. With ``min_tilts``, also ``n_tilts``.
+        ``x``, ``y``) of the peak. A DataTree input gives a DataTree with
+        one such node per sweep that has the velocity. With ``min_tilts``,
+        also ``n_tilts``.
+
+    Raises
+    ------
+    ValueError
+        If a sweep has no ``x`` and ``y`` coordinates (georeference the volume
+        first), or no sweep holds the velocity.
+    KeyError
+        If a sweep is given that does not hold the velocity.
 
     Notes
     -----
@@ -1064,30 +1108,23 @@ def rotation_couplets(
         raise ValueError(f"min_tilts must be a positive integer, not {min_tilts!r}")
     if link_distance <= 0 or int(max_skip) != max_skip or max_skip < 0:
         raise ValueError("link_distance must be positive and max_skip a count")
-    options = (
-        field,
-        threshold,
-        window,
-        min_area,
-        diameter,
-        min_dbz,
-        rotation,
-        median_filter,
-    )
+    options = (threshold, window, min_area, diameter, min_dbz, rotation, median_filter)
     if isinstance(obj, xr.Dataset):
         if min_tilts is not None:
             raise ValueError("min_tilts needs a volume (a DataTree of sweeps)")
-        if field not in obj:
-            raise KeyError(f"{field!r} is not in the sweep")
-        return _couplets_sweep(obj, *options)
+        name = _velocity_name(obj, field)
+        if name is None:
+            raise KeyError(f"{field or 'a radial velocity'!r} is not in the sweep")
+        return _couplets_sweep(obj, name, *options)
     if hasattr(obj, "children"):
+        names = {n: _velocity_name(ds, field) for n, ds in _sweeps(obj)}
         nodes = {
-            name: _couplets_sweep(ds, *options)
+            name: _couplets_sweep(ds, names[name], *options)
             for name, ds in _sweeps(obj)
-            if field in ds.data_vars
+            if names[name] is not None
         }
         if not nodes:
-            raise ValueError(f"No sweep contains {field!r}.")
+            raise ValueError(f"No sweep contains {field or 'a radial velocity'!r}.")
         if min_tilts is not None:
             nodes = _keep_continuous(nodes, min_tilts, link_distance, int(max_skip))
         return product_tree(obj, nodes)
