@@ -1189,9 +1189,9 @@ def echo_mask(
     velocity term (weights 7 instead of 8).
 
     Gourley et al. (2007) [1] is not implemented as a method. Its three-class
-    classifier rests on membership
-    functions that are Gaussian-kernel density estimates of C-band data of
-    one radar (Trappes, Fig. 3 and Eq. 2) published as plots only; the text
+    classifier rests on membership functions that are Gaussian-kernel density
+    estimates of C-band data of one radar (Trappes, Fig. 3 and Eq. 2)
+    published as plots only; the text
     gives the modes (:math:`\\rho_{hv}` 0.97, 0.92 and 0.42 for precipitation,
     ground clutter and clear air; texture of :math:`Z_{DR}` 0.4, 5.2 and 2.5
     dB; texture of :math:`\\Phi_{DP}` 4, 125 and 35 degrees), the overlap
