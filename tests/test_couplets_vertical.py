@@ -36,6 +36,8 @@ def vortices(centres, angle, vmax=40.0, core=700.0, signs=None):
         coords={
             "azimuth": AZ,
             "range": RNG,
+            "x": (("azimuth", "range"), x),
+            "y": (("azimuth", "range"), y),
             "sweep_fixed_angle": angle,
             "elevation": ("azimuth", np.full(AZ.size, angle)),
         },
@@ -245,3 +247,74 @@ def test_median_filter_option_reaches_the_shear():
     vol = volume({"sweep_0": (0.5, [COLUMN]), "sweep_1": (1.5, [COLUMN])})
     out = vol.radarx.rotation_couplets(min_tilts=2, median_filter=3)
     assert out["sweep_1"].sizes["couplet"] == 1
+
+
+# --------------------------------------------------------------------------
+# the velocity that is used, and georeferencing
+# --------------------------------------------------------------------------
+
+
+def folded_pair(angle=0.5, nyquist=10.0):
+    """A sweep with the dealiased velocity ``VRADH_dealiased`` beside a folded ``VRADH``."""
+    ds = vortices([COLUMN], angle, vmax=20.0)
+    folded = (ds["VRADH"] + nyquist) % (2 * nyquist) - nyquist
+    return ds.assign(VRADH_dealiased=ds["VRADH"], VRADH=folded)
+
+
+def test_the_dealiased_velocity_is_used_when_the_sweep_has_it():
+    ds = folded_pair()
+    out = rotation_couplets(ds)
+    assert out.attrs["source_field"] == "VRADH_dealiased"
+    same = rotation_couplets(ds, "VRADH_dealiased")
+    for name in ("azimuthal_shear", "delta_v", "area"):
+        np.testing.assert_array_equal(out[name].values, same[name].values)
+    assert out.sizes["couplet"] >= 1
+
+
+def test_a_field_that_is_passed_is_used_as_it_is():
+    ds = folded_pair()
+    folded = rotation_couplets(ds, "VRADH")
+    assert folded.attrs["source_field"] == "VRADH"
+    assert not np.array_equal(
+        folded["azimuthal_shear"].values,
+        rotation_couplets(ds)["azimuthal_shear"].values,
+    )
+
+
+def test_the_measured_velocity_is_the_default_without_a_dealiased_one():
+    ds = folded_pair().drop_vars("VRADH_dealiased")
+    assert rotation_couplets(ds).attrs["source_field"] == "VRADH"
+    other = ds.rename(VRADH="VEL")
+    assert rotation_couplets(other).attrs["source_field"] == "VEL"
+
+
+def test_a_volume_picks_the_velocity_of_every_sweep():
+    nodes = {
+        "/": xr.Dataset(),
+        "sweep_0": folded_pair(0.5),
+        "sweep_1": folded_pair(1.5).drop_vars("VRADH_dealiased"),
+    }
+    out = rotation_couplets(xr.DataTree.from_dict(nodes))
+    assert out["sweep_0"].attrs["source_field"] == "VRADH_dealiased"
+    assert out["sweep_1"].attrs["source_field"] == "VRADH"
+
+
+def test_sweeps_without_x_and_y_are_refused():
+    ds = folded_pair()
+    bare = ds.drop_vars(["x", "y"])
+    with pytest.raises(ValueError, match="georeferenc"):
+        rotation_couplets(bare)
+    tree = xr.DataTree.from_dict({"/": xr.Dataset(), "sweep_0": bare})
+    with pytest.raises(ValueError, match="georeferenc"):
+        rotation_couplets(tree)
+    with pytest.raises(ValueError, match="georeferenc"):
+        rotation_couplets(tree, min_tilts=1)
+
+
+def test_a_sweep_without_any_velocity_is_reported():
+    ds = folded_pair().drop_vars(["VRADH", "VRADH_dealiased"])
+    ds = ds.assign(DBZH=(("azimuth", "range"), np.zeros((AZ.size, RNG.size))))
+    with pytest.raises(KeyError, match="radial velocity"):
+        rotation_couplets(ds)
+    with pytest.raises(ValueError, match="No sweep contains"):
+        rotation_couplets(xr.DataTree.from_dict({"/": xr.Dataset(), "sweep_0": ds}))

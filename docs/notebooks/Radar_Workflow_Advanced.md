@@ -1312,9 +1312,9 @@ Algorithm), and only the couplets on a chain of at least that many tilts are
 kept. `n_tilts` says how long the chain is:
 
 ```{code-cell} ipython3
-volume = kgwx.radarx.assign(kgwx.radarx.dealias("VRADH"))
-every = rotation_couplets(volume, "VRADH_dealiased")
-continuous = rotation_couplets(volume, "VRADH_dealiased", min_tilts=3)
+volume = kgwx.xradar.georeference().radarx.assign(kgwx.radarx.dealias("VRADH"))
+every = rotation_couplets(volume)  # uses VRADH_dealiased where a sweep has it
+continuous = rotation_couplets(volume, min_tilts=3)
 n_every = sum(every[n].sizes["couplet"] for n in every.children)
 n_kept = sum(continuous[n].sizes["couplet"] for n in continuous.children)
 print(f"{n_every} couplets on {len(every.children)} Doppler cuts; {n_kept} are on a chain of at least 3 tilts")

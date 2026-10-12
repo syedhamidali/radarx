@@ -544,6 +544,16 @@ def test_tornet_inputs_errors(volume):
         tornet_inputs(volume["sweep_0"].to_dataset())
 
 
+def test_tornado_probability_needs_dual_polarisation(volume):
+    single = volume.copy()
+    for name in ("sweep_0", "sweep_2"):
+        single[name] = single[name].to_dataset().drop_vars(["ZDR", "RHOHV"])
+    with pytest.raises(ValueError, match="RHOHV/ZDR"):
+        tornet_inputs(single, dealias=False)
+    with pytest.raises(ValueError, match="RHOHV/ZDR"):
+        tornado_probability(single, dealias=False)
+
+
 def test_tornet_inputs_dealias_and_kdp(volume):
     sub = volume.copy()
     del sub["sweep_0"]["KDP"]
@@ -747,8 +757,11 @@ def test_real_nexrad_inputs_and_couplets():
     # dealiased velocities stay physical; DBZ floor codes are gone
     assert float(np.nanmax(np.abs(inp.VEL))) < 80.0
     assert float(np.nanmin(inp.DBZ)) > -32.0
-    out = rotation_couplets(dtree["sweep_1"].to_dataset(inherit="all_coords"))
-    assert "couplet" in out.dims
+    with pytest.raises(ValueError, match="georeferenc"):
+        rotation_couplets(dtree["sweep_1"].to_dataset(inherit="all_coords"))
+    located = dtree.xradar.georeference()
+    out = rotation_couplets(located["sweep_1"].to_dataset(inherit="all_coords"))
+    assert "couplet" in out.dims and out.attrs["source_field"] == "VRADH"
 
 
 def test_cache_dir_default(monkeypatch):
