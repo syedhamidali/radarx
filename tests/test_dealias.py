@@ -563,3 +563,43 @@ def test_beam_height_uses_the_shared_helper():
         rtol=0,
         atol=1e-9,
     )
+
+
+def _plain_sweep(values, nyquist):
+    nray, ngate = values.shape
+    return xr.Dataset(
+        {"VRADH": (("azimuth", "range"), values, {"units": "m s-1"})},
+        coords={
+            "azimuth": ("azimuth", (np.arange(nray) + 0.5) * 360.0 / nray),
+            "range": ("range", 2000.0 + 250.0 * np.arange(ngate)),
+            "elevation": ("azimuth", np.full(nray, 0.5)),
+            "nyquist_velocity": ((), nyquist),
+        },
+    )
+
+
+@pytest.mark.parametrize("method", ["region", "unravel"])
+@pytest.mark.parametrize("engine", ENGINES)
+def test_the_nyquist_velocity_is_data_and_beyond_one_percent_is_a_flag(method, engine):
+    # codes come in steps of 0.5 m/s: 10.0 m/s lies beyond Vn = 9.97 m/s
+    ramp = np.tile(np.linspace(-10.0, 10.0, 40), (36, 1))
+    ramp[5, 20] = 10.5  # more than 1 % beyond Vn: a flag value
+    ramp[6, 21] = -10.2
+    if method == "unravel" and engine == "compiled" and not dealias.HAS_UNRAVEL_KERNEL:
+        pytest.skip("compiled kernel not built")
+    out = dealias_velocity(
+        _plain_sweep(ramp, 9.97), method=method, engine=engine
+    ).values
+    assert out[0, 0] == -10.0 and out[0, -1] == 10.0
+    assert np.isnan(out[5, 20]) and np.isnan(out[6, 21])
+    assert np.isnan(out).sum() == 2
+
+
+def test_only_unravel_drops_a_gate_that_the_zscore_filter_takes_for_noise():
+    spike = np.full((36, 40), 2.0)
+    spike[10, 20] = 8.0  # inside the Nyquist interval, 6 m/s from the rest
+    sweep = _plain_sweep(spike, 10.0)
+    region = dealias_velocity(sweep, method="region")
+    assert region.values[10, 20] == 8.0 and np.isfinite(region.values).all()
+    unravel = dealias_velocity(sweep, method="unravel")
+    assert np.isnan(unravel.values[10, 20]) and np.isnan(unravel.values).sum() == 1

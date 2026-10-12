@@ -34,6 +34,11 @@
 //    (Browning and Wexler 1968) is the reference for all other components.
 //    Finally, gates that differ by more than Vn from all their neighbours are
 //    moved to the fold closest to the neighbours' mean.
+// 5. Optional speed guard (max_speed > 0): a small cluster of gates that the
+//    folds put beyond the limit is moved back one fold at a time while that
+//    lowers the velocity differences to its less folded neighbours, so the
+//    core of a vortex that was shifted with a folded region next to it is
+//    undone from its edge while the fold lines of the real fold stay.
 //
 // All sums that decide a fold are integers, so the result does not depend
 // on the number of threads and matches the NumPy reference exactly.
@@ -817,14 +822,116 @@ int64_t gate_check(const AbsIn& in, std::vector<int32_t>& f, int passes, int nt)
     return total;
 }
 
+// Speed guard (``max_speed`` > 0). A folded gate (fold f != 0) whose speed is
+// beyond the limit, in a cluster of at most ``guard_size`` connected such
+// gates, goes one fold nearer zero if that lowers the summed absolute
+// velocity difference to its neighbours that are folded less (|fold|
+// smaller); a gate beside a less folded neighbour that it matches only with
+// its fold keeps it. Jacobi passes until nothing moves.
+constexpr int kGuardPasses = 100;
+
+inline int64_t guard_step(const int64_t* uq, const int32_t* f, const int64_t* rays,
+                          int64_t ngate, int64_t j, int64_t g, int64_t cap_q,
+                          int64_t twovn_q) {
+    if (uq[g] == kNoGate || f[g] == 0 || std::llabs(uq[g]) <= cap_q) return 0;
+    const int64_t sgn = f[g] > 0 ? 1 : -1;
+    const int64_t u = uq[g], moved = u - sgn * twovn_q;
+    const int64_t j0 = std::max<int64_t>(0, j - 1);
+    const int64_t j1 = std::min<int64_t>(ngate - 1, j + 1);
+    int64_t net = 0;
+    for (int q = 0; q < 3; ++q) {
+        if (rays[q] < 0) continue;
+        for (int64_t jj = j0; jj <= j1; ++jj) {
+            const int64_t h = rays[q] * ngate + jj;
+            if (h == g || uq[h] == kNoGate || std::abs(f[h]) >= std::abs(f[g])) continue;
+            net += std::llabs(u - uq[h]) - std::llabs(moved - uq[h]);
+        }
+    }
+    return net > 0 ? -sgn : 0;
+}
+
+// Gates in the cluster (connected gates of ``mask``) of every gate of the mask.
+std::vector<int32_t> cluster_sizes(const AbsIn& in, const std::vector<uint8_t>& mask) {
+    const int64_t nray = in.nray, ngate = in.ngate, N = nray * ngate;
+    std::vector<int32_t> parent(N), count(N, 0), size(N, 0);
+    for (int64_t g = 0; g < N; ++g) parent[g] = static_cast<int32_t>(g);
+    for (int64_t r = 0; r < nray; ++r) {
+        int64_t rays[3];
+        neighbour_rays(in, r, rays);
+        for (int64_t j = 0; j < ngate; ++j) {
+            const int64_t g = r * ngate + j;
+            if (!mask[g]) continue;
+            for (int q = 0; q < 3; ++q) {
+                if (rays[q] < 0) continue;
+                for (int64_t jj = std::max<int64_t>(0, j - 1); jj <= std::min(ngate - 1, j + 1);
+                     ++jj) {
+                    const int64_t h = rays[q] * ngate + jj;
+                    if (h != g && mask[h]) unite(parent.data(), int32_t(g), int32_t(h));
+                }
+            }
+        }
+    }
+    for (int64_t g = 0; g < N; ++g)
+        if (mask[g]) ++count[find(parent.data(), int32_t(g))];
+    for (int64_t g = 0; g < N; ++g)
+        if (mask[g]) size[g] = count[find(parent.data(), int32_t(g))];
+    return size;
+}
+
+void speed_guard(const AbsIn& in, std::vector<int32_t>& f, double max_speed, int guard_size,
+                 int nt) {
+    const int64_t nray = in.nray, ngate = in.ngate, N = nray * ngate;
+    const int64_t twovn_q = quant(2.0 * in.nyquist, kVelQ);
+    const int64_t cap_q = quant(max_speed, kVelQ);
+    std::vector<int64_t> vq(N), uq(N);
+    std::vector<int32_t> next(N);
+    std::vector<uint8_t> beyond(N, 0);
+    const int64_t block = 16;
+    parallel_blocks(nray, block, nt, [&](int, int64_t r0, int64_t r1) {
+        for (int64_t g = r0 * ngate; g < r1 * ngate; ++g) {
+            vq[g] = in.comp[g] < 0 ? kNoGate : quant(in.v[g], kVelQ);
+            beyond[g] = vq[g] != kNoGate && f[g] != 0 &&
+                        std::llabs(vq[g] + int64_t(f[g]) * twovn_q) > cap_q;
+        }
+    });
+    const std::vector<int32_t> cluster = cluster_sizes(in, beyond);
+    for (int it = 0; it < kGuardPasses; ++it) {
+        parallel_blocks(nray, block, nt, [&](int, int64_t r0, int64_t r1) {
+            for (int64_t g = r0 * ngate; g < r1 * ngate; ++g)
+                uq[g] = vq[g] == kNoGate ? kNoGate : vq[g] + int64_t(f[g]) * twovn_q;
+        });
+        std::atomic<int64_t> changed{0};
+        parallel_blocks(nray, block, nt, [&](int, int64_t r0, int64_t r1) {
+            int64_t local = 0;
+            for (int64_t r = r0; r < r1; ++r) {
+                int64_t rays[3];
+                neighbour_rays(in, r, rays);
+                for (int64_t j = 0; j < ngate; ++j) {
+                    const int64_t g = r * ngate + j;
+                    const int64_t d =
+                        cluster[g] > guard_size
+                            ? 0
+                            : guard_step(uq.data(), f.data(), rays, ngate, j, g, cap_q, twovn_q);
+                    next[g] = static_cast<int32_t>(f[g] + d);
+                    local += d != 0;
+                }
+            }
+            changed += local;
+        });
+        f.swap(next);
+        if (changed.load() == 0) break;
+    }
+}
+
 // Step 4 for one sweep.
 // 1. The largest component (the anchor) is shifted to the reference (most
 //    common gate vote) if it overlaps one, otherwise to zero mean velocity.
 // 2. A VAD fit of the anchor gives an in-sweep reference; every other
 //    component is shifted to the external reference where available, else
 //    to the VAD (most common vote), else to zero mean.
-// 3. Gate check against the neighbours.
-void absolute_sweep(const AbsIn& in, int64_t vad_window, int gate_passes, int nt, int32_t* out) {
+// 3. Gate check against the neighbours, then the speed guard if max_speed > 0.
+void absolute_sweep(const AbsIn& in, int64_t vad_window, int gate_passes, double max_speed,
+                    int guard_size, int nt, int32_t* out) {
     const int64_t N = in.nray * in.ngate, ngate = in.ngate;
     const int32_t ncomp = static_cast<int32_t>(
         reduce_rays(
@@ -880,6 +987,7 @@ void absolute_sweep(const AbsIn& in, int64_t vad_window, int gate_passes, int nt
         zero_mean(in, ncomp, want, shift, nt);
         fill_folds(false, anchor);
         gate_check(in, f, gate_passes, nt);
+        if (max_speed > 0) speed_guard(in, f, max_speed, guard_size, nt);
     }
     std::copy(f.begin(), f.end(), out);
 }
@@ -948,7 +1056,8 @@ std::vector<py::array_t<int32_t>> absolute_folds(
     const std::vector<IArray>& components, const std::vector<double>& nyquist,
     const std::vector<py::object>& reference, const std::vector<DArray>& ray_sin,
     const std::vector<DArray>& ray_cos, const std::vector<BArray>& ray_link, int64_t vad_window,
-    int gate_passes, const std::vector<int>& previous, const std::vector<IArray>& prev_ray,
+    int gate_passes, double max_speed, int guard_size, const std::vector<int>& previous,
+    const std::vector<IArray>& prev_ray,
     const std::vector<IArray>& prev_gate, int n_threads) {
     const size_t ns = velocity.size();
     if (folds.size() != ns || components.size() != ns || nyquist.size() != ns ||
@@ -1026,13 +1135,13 @@ std::vector<py::array_t<int32_t>> absolute_folds(
                     }
                     cur.ref = refbuf.data();
                 }
-                absolute_sweep(cur, vad_window, gate_passes, nt, op[i]);
+                absolute_sweep(cur, vad_window, gate_passes, max_speed, guard_size, nt, op[i]);
             }
         } else {
             const int outer = static_cast<int>(std::min<int64_t>(nt, std::max<int64_t>(1, ns)));
             const int inner = std::max(1, nt / outer);
             parallel_blocks(int64_t(ns), 1, outer, [&](int, int64_t i0, int64_t) {
-                absolute_sweep(in[i0], vad_window, gate_passes, inner, op[i0]);
+                absolute_sweep(in[i0], vad_window, gate_passes, max_speed, guard_size, inner, op[i0]);
             });
         }
     }
@@ -1162,7 +1271,8 @@ PYBIND11_MODULE(_dealias, m) {
     m.def("absolute_folds", &absolute_folds, py::arg("velocity"), py::arg("folds"),
           py::arg("components"), py::arg("nyquist"), py::arg("reference"), py::arg("ray_sin"),
           py::arg("ray_cos"), py::arg("ray_link"), py::arg("vad_window") = 20,
-          py::arg("gate_passes") = 2, py::arg("previous") = std::vector<int>(),
+          py::arg("gate_passes") = 2, py::arg("max_speed") = 0.0,
+          py::arg("guard_size") = 100, py::arg("previous") = std::vector<int>(),
           py::arg("prev_ray") = std::vector<IArray>(), py::arg("prev_gate") = std::vector<IArray>(),
           py::arg("n_threads") = 0);
     m.def("local_median", &local_median, py::arg("data"), py::arg("wrap"), py::arg("half_start"),

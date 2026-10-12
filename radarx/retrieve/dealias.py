@@ -51,6 +51,8 @@ concepts quoted here are not checked against the papers.
    disconnected groups.
    Finally, a gate that differs by more than :math:`V_n` from all of its
    neighbours is moved to the fold closest to their mean.
+5. **Speed limit** (optional, ``max_speed``). Described under "Vortex cores"
+   below.
 
 All decisions use integer arithmetic, so the compiled C++ kernel
 (multithreaded, all sweeps in one call) and the NumPy fallback give
@@ -66,6 +68,20 @@ errors that dual-PRF velocity data contain, with the local dealiasing step of
 Holleman and Beekhuis (2003) [6]. It is a different problem from the
 region-based dealiasing above, which unfolds the velocity of a single-PRF
 sweep.
+
+**Vortex cores.** The criterion above assumes that the velocity changes by
+less than a Nyquist interval between neighbouring gates, which a compact
+vortex signature breaks. A couplet with peaks of about :math:`\\pm 0.95 V_n`
+beside a region that really is folded can join that region through a chain of
+small steps, and the least-squares folds then shift the whole region, core
+included, because most of its border pairs are fold lines; the core ends up at
+speeds far beyond :math:`V_n`. The sweep alone cannot tell this from a strong
+real wind, so nothing in the default method changes. ``max_speed`` is the
+choice of the user: the largest radial speed the storm can have. A gate that
+the folds put beyond it, in a cluster of at most 100 connected gates beyond the
+limit and next to gates that are folded less and match it better without its
+fold, goes back one fold at a time, so the core is undone from its edge, while
+the plateau of a real fold, whose speed stays below the limit, keeps its fold.
 
 **UNRAVEL.** ``dealias_velocity(..., method="unravel")`` implements the
 algorithm of Louf et al. (2020) [5], which needs no reference velocity. The
@@ -215,6 +231,10 @@ _MIN_NEIGHBOURS = 3
 _MIN_COVERAGE = 180.0  # degrees of azimuth below which zero mean is doubtful
 _MAX_RAY_GAP = 10  # empty rays bridged between regions
 _GATE_PASSES = 2
+_GUARD_PASSES = 100  # passes of the speed guard (it peels a core from its edge)
+_GUARD_SIZE = (
+    100  # gates of the largest cluster beyond the limit that the guard examines
+)
 
 
 @dask_support(
@@ -241,6 +261,7 @@ def dealias_velocity(
     method="region",
     alpha=0.8,
     max_iterations=100,
+    max_speed=None,
     n_threads=None,
     engine="auto",
     products_only=True,
@@ -305,6 +326,11 @@ def dealias_velocity(
         its 3-D check between neighbouring elevation angles (see the module
         documentation for what was implemented). A volume is processed with
         the sweeps in parallel; the passes inside a sweep are sequential.
+        It is much slower than the region method: on a WSR-88D volume of 14
+        Doppler sweeps and 1.4 million valid gates, the compiled kernels take
+        0.2 s for ``"region"`` and 9 to 12 s for ``"unravel"``, about 40 to 50
+        times as long (the NumPy fallback of UNRAVEL is a Python loop over
+        the gates and slower still).
     alpha : float, optional
         UNRAVEL's stringency (Eq. 3 of the paper): a gate is accepted when its
         unfolded velocity is within ``alpha * Vn`` of the reference. Default
@@ -312,6 +338,22 @@ def dealias_velocity(
         Only used with ``method="unravel"``.
     max_iterations : int, optional
         Maximum passes of the fold optimisation. Default 100.
+    max_speed : float, optional
+        Largest radial speed (m/s) that the storm can have. Default None: no
+        limit. With a limit, a gate that the folds put beyond ``max_speed``
+        goes back by one Nyquist interval at a time as long as that lowers the
+        sum of its absolute velocity differences to the neighbouring gates
+        that are folded less than it. Only a small cluster of gates beyond the
+        limit (at most 100 connected gates) is examined, and a gate that is
+        beside a less folded gate that it matches only with its fold keeps
+        its fold, so the fold lines of a real fold survive. This protects the
+        core of a vortex signature that was shifted together with a folded
+        region next to it (see the module documentation). The limit is in m/s
+        and not in units of the Nyquist velocity, because the wind of a
+        folded region can be several times the Nyquist velocity of a short
+        wavelength radar. It applies to every sweep of a volume; the winds are
+        usually faster at the higher tilts, so dealias the lowest sweeps on
+        their own with a limit. Only for ``method="region"``.
     n_threads : int, optional
         Threads for the compiled kernel. Default: all cores.
     engine : {"auto", "compiled", "numpy"}, optional
@@ -331,9 +373,14 @@ def dealias_velocity(
         For a sweep, the dealiased velocity ``name`` with the input's
         coordinates and dtype. For a volume, a DataTree with the input's
         root and one node per sweep that has ``field``, holding the
-        dealiased velocity ``name`` on the sweep's coordinates. Gates with
-        no data, or with values beyond the Nyquist velocity (flag values),
-        are NaN.
+        dealiased velocity ``name`` on the sweep's coordinates. A gate is NaN
+        if it has no data, if its velocity is a flag value (``|v|`` above
+        1.01 times the Nyquist velocity, e.g. the codes of range-folded
+        gates), or, with ``method="unravel"``, if the pre-processing of the
+        method removes it (see the Notes). A velocity at the Nyquist velocity
+        or up to 1 % beyond it is data, in both methods: velocities are coded
+        in steps of 0.5 m/s, so the largest code of a radar with a Nyquist
+        velocity of 29.97 m/s is 30.0 m/s.
 
     Raises
     ------
@@ -361,6 +408,17 @@ def dealias_velocity(
     largest group: ``"wind_profile"``, ``"reference"``, ``"sweep_below"`` or
     ``"zero_mean"``; the other groups follow the same reference, else the
     azimuth wind (VAD) fitted to the largest group, else a zero mean.
+
+    Missing gates of ``method="unravel"``. The region method gives a value to
+    every gate that has data. UNRAVEL makes a gate missing when its first step
+    takes it for noise: the velocity is more than two median absolute
+    deviations from the median of the 10 gates of its window along the ray, and
+    neither unfolding by whole intervals brings it within 0.3 Vn of the mean of
+    the window gates of either sign (steps 1 and the tolerance of the module
+    documentation). That removes isolated noise, 1 to 4 % of the gates of the
+    sweeps of a WSR-88D volume, and also gates where the velocity changes
+    steeply along the ray without being noise, such as the core of a tornadic
+    vortex. The gates are not recovered by the later passes.
 
     References
     ----------
@@ -406,6 +464,10 @@ def dealias_velocity(
             raise ValueError("method='unravel' needs products_only=True")
         if not 0 < alpha <= 2:
             raise ValueError("alpha must be in (0, 2]")
+        if max_speed is not None:
+            raise ValueError("max_speed is only used by method='region'")
+    if max_speed is not None and not max_speed > 0:
+        raise ValueError("max_speed must be positive")
     if confidence and not products_only:
         raise ValueError("confidence=True needs products_only=True")
     if products_only:
@@ -426,6 +488,7 @@ def dealias_velocity(
         "threshold": float(threshold),
         "max_gap": int(max_gap),
         "max_iterations": int(max_iterations),
+        "max_speed": float(max_speed or 0.0),
         "n_threads": int(n_threads or 0),
         "compiled": compiled,
     }
@@ -812,7 +875,7 @@ def _sweep_mapping(source, target):
     return iray.astype(np.int32), igate.astype(np.int32)
 
 
-def _region_folds(sweeps, threshold, max_gap, max_iterations, n_threads, compiled):
+def _region_folds(sweeps, threshold, max_gap, max_iterations, n_threads, compiled, **_):
     """Steps 1-3 for every sweep: (relative folds, component ids)."""
     if compiled:
         return _dealias.region_folds(
@@ -834,7 +897,15 @@ def _region_folds(sweeps, threshold, max_gap, max_iterations, n_threads, compile
 
 
 def _absolute_folds(
-    sweeps, solved, references, n_threads, compiled, previous=None, mapping=None, **_
+    sweeps,
+    solved,
+    references,
+    n_threads,
+    compiled,
+    previous=None,
+    mapping=None,
+    max_speed=0.0,
+    **_,
 ):
     """Step 4 for every sweep: final integer folds (optionally chained)."""
     if compiled:
@@ -851,6 +922,8 @@ def _absolute_folds(
             [s.links for s in sweeps],
             vad_window=_VAD_WINDOW,
             gate_passes=_GATE_PASSES,
+            max_speed=max_speed,
+            guard_size=_GUARD_SIZE,
             previous=previous or [],
             prev_ray=[m[0] for m in mapping] if mapping else [],
             prev_gate=[m[1] for m in mapping] if mapping else [],
@@ -865,7 +938,15 @@ def _absolute_folds(
             )
         out.append(
             _absolute_folds_numpy(
-                s.velocity, k, c, s.nyquist, ref, s.ray_sin, s.ray_cos, s.links
+                s.velocity,
+                k,
+                c,
+                s.nyquist,
+                ref,
+                s.ray_sin,
+                s.ray_cos,
+                s.links,
+                max_speed,
             )
         )
     return out
@@ -1466,13 +1547,14 @@ def _vad_fit(vel, folds, comp, anchor, rsin, rcos, nyq, window):
     return coef[src]
 
 
-def _gate_check(vel, folds, comp, links, nyq, passes):
-    """Refold gates that differ by more than Vn from all (>= 3) neighbours."""
-    nray, ngate = vel.shape
-    valid = comp >= 0
-    twovn_q = int(_quant(2.0 * nyq, _VEL_Q))
-    vn_q = int(_quant(nyq, _VEL_Q))
-    vq = np.where(valid, _quant(np.where(valid, vel, 0.0), _VEL_Q), 0)
+def _neighbours(arrays, valid, links):
+    """
+    The 8 neighbours of every gate: for each of them ``(ok, *shifted)``, the
+    mask of gates that have a valid neighbour there and the ``arrays`` moved
+    onto the gate (0 where there is none). The neighbours are the gates beside
+    it on the ray and the three on each linked ray beside the ray.
+    """
+    nray, ngate = valid.shape
     rays = np.arange(nray)
     prev_ray = (rays - 1) % nray
     next_ray = (rays + 1) % nray
@@ -1482,26 +1564,37 @@ def _gate_check(vel, folds, comp, links, nyq, passes):
         & (next_ray != rays)
         & (next_ray != np.where(use_prev, prev_ray, -1))
     )
+    for source, use in ((rays, None), (prev_ray, use_prev), (next_ray, use_next)):
+        for dj in (-1, 0, 1):
+            if use is None and dj == 0:
+                continue
+            ok = np.zeros(valid.shape, dtype=bool)
+            moved = [np.zeros_like(a) for a in arrays]
+            lo, hi = max(0, -dj), min(ngate, ngate - dj)
+            ok[:, lo:hi] = valid[source][:, lo + dj : hi + dj]
+            if use is not None:
+                ok &= use[:, None]
+            for out, a in zip(moved, arrays):
+                out[:, lo:hi] = a[source][:, lo + dj : hi + dj]
+            yield (ok, *moved)
+
+
+def _gate_check(vel, folds, comp, links, nyq, passes):
+    """Refold gates that differ by more than Vn from all (>= 3) neighbours."""
+    valid = comp >= 0
+    twovn_q = int(_quant(2.0 * nyq, _VEL_Q))
+    vn_q = int(_quant(nyq, _VEL_Q))
+    vq = np.where(valid, _quant(np.where(valid, vel, 0.0), _VEL_Q), 0)
     f = folds.astype(np.int64)
     for _ in range(passes):
         u = vq + f * twovn_q
         cnt = np.zeros(vel.shape, dtype=np.int64)
         far = np.zeros(vel.shape, dtype=np.int64)
         total = np.zeros(vel.shape, dtype=np.int64)
-        for source, use in ((rays, None), (prev_ray, use_prev), (next_ray, use_next)):
-            for dj in (-1, 0, 1):
-                if use is None and dj == 0:
-                    continue
-                w = np.zeros(vel.shape, dtype=np.int64)
-                ok = np.zeros(vel.shape, dtype=bool)
-                lo, hi = max(0, -dj), min(ngate, ngate - dj)
-                w[:, lo:hi] = u[source][:, lo + dj : hi + dj]
-                ok[:, lo:hi] = valid[source][:, lo + dj : hi + dj]
-                if use is not None:
-                    ok &= use[:, None]
-                cnt += ok
-                total += np.where(ok, w, 0)
-                far += ok & (np.abs(w - u) > vn_q)
+        for ok, w in _neighbours((u,), valid, links):
+            cnt += ok
+            total += np.where(ok, w, 0)
+            far += ok & (np.abs(w - u) > vn_q)
         change = valid & (cnt >= _MIN_NEIGHBOURS) & (far == cnt)
         num = total - cnt * u
         den = np.maximum(cnt, 1) * twovn_q
@@ -1512,8 +1605,57 @@ def _gate_check(vel, folds, comp, links, nyq, passes):
     return f.astype(np.int32)
 
 
-def _absolute_folds_numpy(vel, k, comp, nyq, ref, rsin, rcos, links):
-    """Step 4 (NumPy): anchor, in-sweep VAD reference and gate check."""
+def _cluster_sizes(mask, valid, links):
+    """Gates in the cluster (connected gates of ``mask``) of every gate of the mask."""
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+
+    index = np.arange(mask.size).reshape(mask.shape)
+    first, second = [], []
+    for ok, inside, iw in _neighbours((mask, index), valid, links):
+        joined = ok & mask & inside
+        first.append(index[joined])
+        second.append(iw[joined])
+    a, b = np.concatenate(first), np.concatenate(second)
+    graph = coo_matrix((np.ones(a.size), (a, b)), shape=(mask.size,) * 2)
+    _, label = connected_components(graph, directed=False)
+    return np.where(mask, np.bincount(label)[label].reshape(mask.shape), 0)
+
+
+def _speed_guard(vel, folds, comp, links, nyq, max_speed):
+    """
+    Move gates that the folds put beyond ``max_speed`` back by whole intervals.
+
+    Only a cluster of at most ``_GUARD_SIZE`` connected gates beyond the limit
+    is examined. A folded gate of it goes to the fold one step nearer zero when
+    that lowers the summed absolute velocity difference to its neighbours that
+    are folded less than it (|fold| smaller). A gate that matches such a
+    neighbour only with its fold keeps it. Passes repeat until nothing moves,
+    so a core is undone from its edge.
+    """
+    valid = comp >= 0
+    twovn_q = int(_quant(2.0 * nyq, _VEL_Q))
+    cap_q = int(_quant(max_speed, _VEL_Q))
+    vq = np.where(valid, _quant(np.where(valid, vel, 0.0), _VEL_Q), 0)
+    f = folds.astype(np.int64)
+    beyond = valid & (f != 0) & (np.abs(vq + f * twovn_q) > cap_q)
+    small = _cluster_sizes(beyond, valid, links) <= _GUARD_SIZE
+    for _ in range(_GUARD_PASSES):
+        u = vq + f * twovn_q
+        step = np.sign(f) * twovn_q
+        net = np.zeros(vel.shape, dtype=np.int64)
+        for ok, w, fw in _neighbours((u, f), valid, links):
+            less = ok & (np.abs(fw) < np.abs(f))
+            net += np.where(less, np.abs(u - w) - np.abs(u - step - w), 0)
+        back = small & beyond & (np.abs(u) > cap_q) & (net > 0)
+        if not back.any():
+            break
+        f = f - np.where(back, np.sign(f), 0)
+    return f.astype(np.int32)
+
+
+def _absolute_folds_numpy(vel, k, comp, nyq, ref, rsin, rcos, links, max_speed=0.0):
+    """Step 4 (NumPy): anchor, in-sweep VAD reference, gate check and speed guard."""
     folds = np.zeros(vel.shape, dtype=np.int32)
     valid = comp >= 0
     if not valid.any():
@@ -1565,8 +1707,11 @@ def _absolute_folds_numpy(vel, k, comp, nyq, ref, rsin, rcos, links):
     _zero_mean(gc, gv, gk, nyq, ncomp, shift, want)
     folds[valid] = gk + shift[gc]
 
-    # 3. gate check
-    return _gate_check(vel, folds, comp, links, nyq, _GATE_PASSES)
+    # 3. gate check, then the speed limit
+    folds = _gate_check(vel, folds, comp, links, nyq, _GATE_PASSES)
+    if max_speed > 0:
+        folds = _speed_guard(vel, folds, comp, links, nyq, max_speed)
+    return folds
 
 
 # --------------------------------------------------------------------------
