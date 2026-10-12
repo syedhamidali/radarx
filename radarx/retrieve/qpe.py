@@ -120,8 +120,8 @@ to switch such a class on, for example ``{"wet_snow": ("z", 0.6)}``.
 The ``z_zdr`` of those authors for heavy rain and big drops is the S-band
 relation of this module; the "synthetic" algorithm of Ryzhkov et al. (2005),
 which chooses among relations by the rain rate :math:`R(Z)` and uses another
-:math:`R(Z, Z_{DR})`, is not implemented because its final coefficients could
-not be verified.
+:math:`R(Z, Z_{DR})`, is not implemented because its final coefficients have
+not been verified.
 
 Implementation
 --------------
@@ -782,8 +782,8 @@ def rain_rate_z(
     Climatol.*, **47** (9), 2445-2462,
     https://doi.org/10.1175/2008JAMC1753.1 (the relations and the 53 dBZ
     cap are taken from the extended abstract of the same title, 33rd Conf. on
-    Radar Meteorology, 2007, paper P6B.7, Eq. 1; the journal article was not
-    available).
+    Radar Meteorology, 2007, paper P6B.7, Eq. 1; the journal article has not
+    been compared).
 
     Examples
     --------
@@ -876,7 +876,7 @@ def rain_rate_kdp(
     Climatol.*, **47** (9), 2445-2462,
     https://doi.org/10.1175/2008JAMC1753.1 (the S-band relation is taken from
     the extended abstract of the same title, 33rd Conf. on Radar Meteorology,
-    2007, paper P6B.7, Eq. 2; the journal article was not available).
+    2007, paper P6B.7, Eq. 2; the journal article has not been compared).
 
     Examples
     --------
@@ -976,13 +976,13 @@ def rain_rate_z_zdr(
     Climatol.*, **47** (9), 2445-2462,
     https://doi.org/10.1175/2008JAMC1753.1 (the relation is taken from the
     extended abstract of the same title, 33rd Conf. on Radar Meteorology,
-    2007, paper P6B.7, Eq. 3; the journal article was not available).
+    2007, paper P6B.7, Eq. 3; the journal article has not been compared).
 
     Ryzhkov, A. V., S. E. Giangrande, and T. J. Schuur, 2005: Rainfall
     estimation with a polarimetric prototype of WSR-88D. *J. Appl. Meteor.*,
     **44** (4), 502-515, https://doi.org/10.1175/JAM2213.1 (the form of the
     relation; the same coefficients are in a conference preprint of that
-    paper, the journal article was not available).
+    paper, the journal article has not been compared).
 
     Examples
     --------
@@ -1429,7 +1429,7 @@ def rain_rate(
     Climatol.*, **47** (9), 2445-2462,
     https://doi.org/10.1175/2008JAMC1753.1 (the class table is taken from the
     extended abstract of the same title, 33rd Conf. on Radar Meteorology,
-    2007, paper P6B.7, Eq. 4; the journal article was not available).
+    2007, paper P6B.7, Eq. 4; the journal article has not been compared).
 
     Ryzhkov, A. V., S. E. Giangrande, and T. J. Schuur, 2005: Rainfall
     estimation with a polarimetric prototype of WSR-88D. *J. Appl. Meteor.*,

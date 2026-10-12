@@ -17,14 +17,14 @@ gate is weather when the weather probability of its sweep, or the mean weather
 probability of the five sweeps, exceeds 0.45; all other gates with
 reflectivity are biological.
 
-Where the numbers come from. The paper of Lin et al. (2019) was not consulted,
-so none of its statements (the training data, the labelling, the architecture
-description, skill scores) is repeated as checked. The numbers are checked
-against the reference implementation, the vol2bird
-package (Dokter et al. 2011 [2]_ for the algorithm it implements; MIT licence;
-file ``lib/constants.h`` and ``lib/librender.c`` of github.com/adokter/vol2bird
-at commit ``b1e591a`` of the master branch, 2025-09-06) and the upstream
-weights file:
+Where the numbers come from. The paper of Lin et al. (2019) has not been
+compared, so none of its statements (the training data, the labelling, the
+architecture description, skill scores) is repeated as checked. The numbers are
+checked against the reference implementation, the vol2bird package (Dokter et
+al. 2011 [2]_ for the algorithm it implements; MIT licence; file
+``lib/constants.h`` and ``lib/librender.c`` of github.com/adokter/vol2bird at
+commit ``b1e591a`` of the master branch, 2025-09-06) and the upstream weights
+file:
 
 * 608 cells of 500 m (``MISTNET_DIMENSION``, ``MISTNET_RESOLUTION``; "including
   a 4 pixel padding around the image", ``MISTNET_BLEED`` = 8), five elevation

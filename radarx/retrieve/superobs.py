@@ -59,7 +59,7 @@ from) stands for the errors that averaging does not remove (observation
 operator, model, calibration); the second term is the sampling error of the
 mean of ``n`` gates that differ by ``spread``, so that a box with a large
 spread and few gates gets a larger error. This is a radarx choice. The
-super-ob error model of Alpert and Kumar (2007) could not be checked against
+super-ob error model of Alpert and Kumar (2007) has not been checked against
 the paper.
 
 Echo-free boxes

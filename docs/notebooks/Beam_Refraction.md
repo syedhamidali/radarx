@@ -241,4 +241,4 @@ The median `k_e` of the traced beams is the factor to pass as `k_e` to
 - Smith, E. K., and S. Weintraub, 1953: The constants in the equation for
   atmospheric refractive index at radio frequencies. *Proc. IRE*, **41**,
   1035–1037, <https://doi.org/10.1109/JRPROC.1953.274297> (the constants as
-  reported by Bean and Dutton; the paper was not read)
+  reported by Bean and Dutton; the paper has not been compared)
