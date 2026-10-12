@@ -73,6 +73,16 @@ local development.
     $ pre-commit install
     ```
 
+    To rebuild the compiled kernels in place, for example after you change
+    a `.cpp` file, the environment itself needs `pybind11` and `setuptools`
+    (`setup.py` imports both; `pip install -e` only installs them in its
+    isolated build environment):
+
+    ```bash
+    $ python -m pip install pybind11 setuptools
+    $ python setup.py build_ext --inplace
+    ```
+
 4.  Create a branch for local development:
 
     ```bash
