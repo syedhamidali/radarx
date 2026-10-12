@@ -20,8 +20,8 @@ velocity on such rings. This module has three steps:
   maximum wind and the centre from the consensus of the searches (Bell and Lee
   2012).
 - :func:`gbvtd` retrieves, on rings around a centre, the axisymmetric
-  tangential and radial wind, the wavenumber-1 and wavenumber-2 tangential
-  wind and the along-beam mean wind, and the radius of maximum wind.
+  tangential and radial wind, the wavenumber-1, 2 and 3 tangential wind and
+  the along-beam mean wind, and the radius of maximum wind.
 - :func:`tc_decompose` rebuilds the winds on a polar grid and splits them into
   the symmetric part and the asymmetric parts.
 
@@ -30,29 +30,56 @@ velocity on such rings. This module has three steps:
 al. 2013) with a mean wind, asymmetries, noise, beam height and data gaps, to
 test the retrieval against a known truth.
 
-Sources, and what was and was not read
---------------------------------------
-Not read: the text of Lee et al. (1999) and of Lee and Marks (2000); the
-publisher's server refused anonymous downloads. The GBVTD equations below are
-taken from the conference paper of Liou et al. (2005), which reproduces the
-equations of Lee et al. (1999) (its Eqs. 1 to 11), and from Chen et al. (2013,
-Eq. 1, with the sign of the :math:`B_3` term that Chen et al. corrected), and
-the Doppler-velocity projection (Eq. 1 of Liou et al.) was rebuilt from the
-geometry. The derivation reproduces Eqs. 5 to 11 of Liou et al. and Eq. 1 of
-Chen et al. from it. Everything that depends on the paper itself (the exact
-treatment of the angle :math:`\psi` and of the data gaps, the ring spacing) is
-*not checked against Lee et al. (1999)*. The centre finding follows the
-description of Bell and Lee (2012, section 2 and 3a, including the weights; the
-NORM score gives the values of their Table 1 for the best peak and a ranking
-that agrees with it, but values 0.03 to 0.06 lower for the second peak); the simplex cost
-function is the one Bell and Lee describe in words (the axisymmetric tangential
-wind of GBVTD) and the details of Lee and Marks (2000), which were not read,
-are not reproduced. The temporal steps of Bell and Lee (polynomial fits over
-time and the simplex centre likelihood, their sections 3b and 3c) need a series
-of volumes and are not implemented. Not implemented either: the modified GBVTD
-that retrieves the cross-beam mean wind (Chen et al. 2013, MGBVTD), because its
-HVVP step was only partly readable, the extended GBVTD with two radars (Liou et
-al. 2005), and diagnostics of the eyewall or the rainbands.
+Sources and checks
+------------------
+The geometry, the Fourier relations and the closure are those of Lee et al.
+(1999, Part I, Eqs. 2 to 27). Each of them was compared with the paper and
+with an independent least squares fit of an analytic vortex; the centre
+finding follows Lee and Marks (2000, Part II) and Bell and Lee (2012, sections
+2 and 3a, including the weights; the NORM score gives the values of their Table
+1 for the best peak and a ranking that agrees with it, but values 0.03 to 0.06
+lower for the second peak). Lee et al. (2000, Part III) gives the width of the
+annulus, the truncation of the series for data gaps and the limits of
+:math:`\sin\alpha_{max}`. What was checked:
+
+- Part I: Eqs. 3 to 7 (the Doppler velocity of a vortex with a mean wind in the
+  angle :math:`\psi`) and Eqs. 8 to 27 (the coefficient relations and the
+  closure) agree with the code, with one exception. Eq. 20 is printed with
+  :math:`+B_3`; Eqs. 15 and 18 of the same paper give :math:`-B_3`, which is
+  what the code uses (as Liou et al. 2005 and Chen et al. 2013 do). The test
+  vortex of Eqs. 28 to 31 (50 m/s, 20 km, the radial wind with the distances
+  in km, an asymmetry of 10 m/s per wavenumber) is made by
+  :func:`synthetic_vortex` and :func:`vortex_profile`. The axisymmetric
+  retrieval is exact to 0.3 percent, the cross-beam mean wind aliases into
+  :math:`V_{T0}` as :math:`V_M\sin(\theta_T-\theta_M)\sin\alpha_{max}` (Eq. 20,
+  Fig. 11). With the series stopped at the wavenumber of the asymmetry the
+  biases of the wavenumber 1 at the contours of Fig. 13 that could be read
+  (amplitude -8, -16 and -24 percent at :math:`\sin\alpha_{max}` of 0.5, 0.65
+  and 0.8 for the paper, -10, -17 and -27 percent here; phase up to 12 degrees
+  in both) and the limits of :math:`\sin\alpha_{max}` of 0.7, 0.5 and 0.33 for a
+  20 percent error in the wavenumbers 1, 2 and 3 (0.72, 0.46 and 0.34 here) are
+  reproduced.
+- Part II: Tables 1 and 2 (the apparent waves and mean flow of a displaced
+  centre) are reproduced to 0.4 m/s (the wavenumber 0 for a centre moved along
+  the beam is not: 1.6 to 4.8 m/s lower than the paper), the maximum winds of
+  Table 4 to 0.6 m/s, and the centre errors of Tables 4 and 5 are smaller (0.17
+  km without and 0.20 km with noise against 0.34 and 0.35 km: the interpolation
+  of the paper adds error). The maxima of the axisymmetric wind at the corners
+  of the first simplex of Fig. 4 agree to 1.4 m/s. The notebook lists the
+  numbers.
+- Part III: the limits of :math:`\sin\alpha_{max}` are an option
+  (``geometric_limit``); its table of gap limits is discussed below.
+
+Not checked: the interpolation of the PPI to constant-altitude maps that the
+papers use (radarx fits the gates of the sweep), the wavenumber-1 criterion of
+Part II (the paper itself prefers the axisymmetric wind, which is used here),
+the contours of the figures of Part I other than those named above, and the
+application to Typhoon Alex. The temporal steps of Bell and Lee (polynomial
+fits over time and the simplex centre likelihood, their sections 3b and 3c)
+need a series of volumes and are not implemented. Not implemented either: the
+modified GBVTD that retrieves the cross-beam mean wind (Chen et al. 2013,
+MGBVTD), the extended GBVTD with two radars (Liou et al. 2005), and diagnostics
+of the eyewall or the rainbands.
 
 Geometry and the equations
 --------------------------
@@ -61,12 +88,13 @@ The radar is at the origin, the vortex centre at the horizontal distance
 around the centre has :math:`\sin\alpha_{max} = R / R_T` (the radar must be
 outside the ring). At a gate on the ring the angle :math:`\psi` is measured from
 the beam to the outward radial direction of the ring (so that :math:`\psi = 0`
-at the far side of the ring and :math:`\pi` at the near side), and the
-horizontal projection of the Doppler velocity, :math:`\hat V_d = V_d /
-\cos\phi` for the beam elevation :math:`\phi`, is, for a uniform mean wind
-:math:`V_M` blowing towards :math:`\theta_M`, a tangential wind :math:`V_T`
-(positive anticlockwise, cyclonic in the northern hemisphere) and a radial wind
-:math:`V_R` (positive outward),
+at the far side of the ring and :math:`\pi` at the near side; :math:`\sin\alpha =
+\sin\alpha_{max}\sin\psi` for the angle :math:`\alpha` between the beam and the
+line to the centre, Eq. 6), and the horizontal projection of the Doppler
+velocity, :math:`\hat V_d = V_d / \cos\phi` for the beam elevation :math:`\phi`,
+is, for a uniform mean wind :math:`V_M` blowing towards :math:`\theta_M`, a
+tangential wind :math:`V_T` (positive anticlockwise, cyclonic in the northern
+hemisphere) and a radial wind :math:`V_R` (positive outward), Eq. 7,
 
 .. math::
 
@@ -77,49 +105,69 @@ horizontal projection of the Doppler velocity, :math:`\hat V_d = V_d /
         - V_T \sin\psi + V_R \cos\psi .
 
 (The mean-wind term is the exact projection with
-:math:`\cos\beta = \sqrt{1 - \sin^2\alpha_{max}\sin^2\psi}` replaced by its
-value at :math:`\psi = 0, \pi/2, \pi`, :math:`1 - (1 - \cos\alpha_{max})\sin^2\psi`.)
-Expanding :math:`V_T` and :math:`V_R` in Fourier series of :math:`\psi` and
-fitting
+:math:`\cos\alpha = \sqrt{1 - \sin^2\alpha_{max}\sin^2\psi}` replaced by its
+value at :math:`\psi = 0, \pi/2, \pi`, Eq. 5; the error is below 1 percent of
+:math:`V_M` for :math:`\sin\alpha_{max} < 0.9`.) Expanding :math:`V_T` and
+:math:`V_R` in Fourier series of :math:`\psi` and fitting
 
 .. math::
 
-    \hat V_d(\psi) = \sum_{n=0}^{3} \big(A_n \cos n\psi + B_n \sin n\psi\big)
+    \hat V_d(\psi) = \sum_{n=0}^{4} \big(A_n \cos n\psi + B_n \sin n\psi\big)
 
-by weighted least squares gives (Liou et al. 2005, Eqs. 5 to 11)
+by weighted least squares gives, with :math:`V_{RCn} = V_{RSn} = 0` for
+:math:`n \ge 1` (Eqs. 19 to 27),
 
 .. math::
 
-    V_M \cos(\theta_T - \theta_M) &= A_0 + A_2 - V_{RC1}, \\
-    V_{TC0} &= -B_1 - B_3 - V_M \sin(\theta_T - \theta_M)\sin\alpha_{max}
-        + V_{RS2}, \\
-    V_{RC0} &= A_1 + A_3 - V_{RC2}, \\
-    V_{TS1} &= A_2 - A_0 + (A_0 + A_2 - V_{RC1})\cos\alpha_{max}, \\
-    V_{TC1} &= -2 B_2 + V_{RS1}, \\
-    V_{TS2} &= 2 A_3 - V_{RC2}, \qquad V_{TC2} = -2 B_3 + V_{RS2},
+    V_M \cos(\theta_T - \theta_M) &= A_0 + A_2 + A_4, \\
+    V_{TC0} &= -B_1 - B_3 - V_M \sin(\theta_T - \theta_M)\sin\alpha_{max}, \\
+    V_{RC0} &= A_1 + A_3, \\
+    V_{TS1} &= A_2 - A_0 + A_4 + (A_0 + A_2 + A_4)\cos\alpha_{max}, \\
+    V_{TC1} &= -2 (B_2 + B_4), \\
+    V_{TS2} &= 2 A_3, \qquad V_{TC2} = -2 B_3, \\
+    V_{TS3} &= 2 A_4, \qquad V_{TC3} = -2 B_4,
 
 where :math:`V_{TCn}` and :math:`V_{TSn}` are the cosine and sine parts of the
 wavenumber :math:`n` of :math:`V_T` (and likewise for :math:`V_R`). There are
-more unknowns than equations. Lee et al. (1999) close the system by neglecting
-the asymmetric radial wind (:math:`V_{RCn} = V_{RSn} = 0` for :math:`n \ge 1`),
-which is what :func:`gbvtd` does. The along-beam mean wind
-:math:`V_M\cos(\theta_T - \theta_M)` is then :math:`A_0 + A_2`. The cross-beam
-mean wind :math:`V_M\sin(\theta_T - \theta_M)` cannot be found and goes into
-:math:`V_{TC0}`; if a mean wind is given (the storm motion is used as a proxy,
-Chen et al. 2013, Harasti et al. 2004 as cited there) the term is removed.
-The largest Fourier order that the data allow depends on the largest angular
-gap on the ring; gaps up to 30, 60 and 120 degrees allow orders 3, 2 and 1
-(Chen et al. 2013), and a ring with a wider gap is not retrieved.
+more unknowns than equations: the cosine part of :math:`V_T` and the sine part
+of :math:`V_R` of the same wavenumber have the same form. Lee et al. (1999)
+close the system by neglecting the asymmetric radial wind, which is what
+:func:`gbvtd` does; the neglected terms are the aliasing of the asymmetric
+radial wind into :math:`V_T` and :math:`V_M` (Eqs. 19 to 27 with the
+:math:`V_R` terms). The along-beam mean wind :math:`V_M\cos(\theta_T -
+\theta_M)` is then :math:`A_0 + A_2 + A_4`. The cross-beam mean wind
+:math:`V_M\sin(\theta_T - \theta_M)` cannot be found and goes into
+:math:`V_{TC0}`, with an error that grows with :math:`\sin\alpha_{max}` and is
+largest for a mean wind across the line between the radar and the centre; if a
+mean wind is given (the storm motion is used as a proxy, Chen et al. 2013,
+Harasti et al. 2004 as cited there) the term is removed. The wavenumber n of the
+tangential wind needs the Fourier order n + 1, so the series stops at order 4
+(the wavenumber 3, nine coefficients, as in Part III). The orders that the data
+allow depend on the largest angular gap on the ring: gaps up to 30, 60 and 120
+degrees allow the orders 4 (3 if that is the maximum asked for), 2 and 1 (Chen
+et al. 2013), and a ring with a wider gap is not retrieved. Part III (its
+Table 2) gives the single largest gap for the wavenumbers 0, 1, 2 and 3 as 180,
+90, 60 and 30 degrees. If its wavenumber is the order of the fit, the limits
+agree with those used here except for the order 1 (90 degrees in the table, 120
+here); if it is the wavenumber of the tangential wind, the table allows gaps of
+180, 90, 60 and 30 degrees for the orders 1 to 4. The table does not say which.
+With ``geometric_limit=True`` the order is
+also limited by :math:`\sin\alpha_{max}`: the wavenumbers 1, 2 and 3 are fitted
+only for :math:`\sin\alpha_{max}` up to 0.7, 0.5 and 0.33 (Part I, Part III).
 
 The angle :math:`\psi` is not the azimuth around the centre :math:`\gamma`
 (measured clockwise from north): :math:`\gamma = \theta_T + \psi +
-\arcsin(\sin\alpha_{max}\sin\psi)` in mathematical angles. The Fourier
-coefficients belong to :math:`\psi`; the series in :math:`\psi` therefore
-distorts the shape of a vortex asymmetry seen at the azimuth (the geometric
-distortion of GBVTD, Lee et al. 1999, Lee et al. 2006). :func:`gbvtd` reports the
-coefficients and the azimuth of the maximum of the wavenumber-1 wind mapped
-with this relation, which is plain geometry; whether Lee et al. (1999) map the
-coefficients in this way was not checked.
+\arcsin(\sin\alpha_{max}\sin\psi)` in mathematical angles (plane geometry of
+the triangle radar, centre, gate; the two angles agree only at the near and far
+side). The Fourier coefficients belong to :math:`\psi`; a wave of the
+azimuth :math:`\gamma` has a spectrum in :math:`\psi` that is truncated by the
+fit, so the retrieved waves are distorted (Part I, section 5). The amplitudes
+of the coefficients in :math:`\psi` (``VT1_AMPLITUDE``) are the quantities of
+Table 1 of Part II; Figs. 13 to 15 of Part I compare the waves of the
+azimuth. :func:`tc_decompose` gives them as ``AZIMUTHAL_AMPLITUDE`` and
+``AZIMUTHAL_PHASE``. ``VT1_AZIMUTH`` maps the wavenumber-1 term in :math:`\psi`
+alone to the azimuth, which is only a rough position when the series has
+higher orders.
 
 Ring fit
 --------
@@ -128,33 +176,47 @@ Every gate with :math:`|d - R| < h` (:math:`d` the distance from the centre,
 :math:`w\,(1 - |d - R|/h)`, where :math:`w` is the ground range of the gate
 (the area of a polar gate is proportional to its range, so the fit sees the
 ring like a uniformly sampled annulus), so the fit is a continuous function of
-the centre, which the simplex search needs. Lee et al. (1999) and Bell and Lee
-(2012) analyse constant-altitude maps on a Cartesian grid; radarx fits the gates
-of a sweep directly and does not interpolate. A plan position indicator is not
-at constant height: the winds of rings at different ranges are sampled at
-different heights (the beam height is returned by :func:`synthetic_vortex` for
-tests). The elevation of the beam at a gate is that of the effective Earth
-radius model, :math:`\phi_g = \phi_0 + s / (k_e a)` for the ground distance
-:math:`s`; :math:`\hat V_d = V_d / \cos\phi_g`. The vertical wind and the fall
-speed are neglected.
+the centre, which the simplex search needs. Lee et al. (1999) interpolate the
+sweep to a constant-altitude map and the map to 90 points on the ring at 4
+degrees; Lee and Marks (2000) use an annulus of 2 km, and Lee et al. (2000)
+all data within an annulus of 4 km. radarx fits the gates of a sweep directly and
+does not interpolate (the interpolation smooths the maximum of the wind: the
+retrieved axisymmetric wind of the paper's Rankine vortex is 48.2 m/s for 50
+m/s, radarx gives 49.2 m/s with the ring width of 2 km). A plan position
+indicator is not at constant height: the winds of rings at different ranges are
+sampled at different heights (the beam height is returned by
+:func:`synthetic_vortex` for tests). The elevation of the beam at a gate is that
+of the effective Earth radius model, :math:`\phi_g = \phi_0 + s / (k_e a)` for
+the ground distance :math:`s`; :math:`\hat V_d = V_d / \cos\phi_g`. The vertical
+wind and the fall speed are neglected (Eq. 2 of Part I keeps them; Part III
+estimates the error as 2 m/s or less).
 
 Centre finding
 --------------
-A first guess of the centre and of the radius of maximum wind comes from the
+The first guess of the centre and of the radius of maximum wind comes from the
 user or, when none is given, from the midpoint and half the separation of the
 strongest inbound and outbound velocities (a velocity dipole, the idea behind
 Wood and Brown 1992 as described by Chen et al. 2013; the details here are
 radarx's own: the mean position of the 0.5 percent most inbound and 0.5 percent
-most outbound gates). Following Bell and Lee (2012) a grid of starting centres
-around the first guess (4 by 4) is each refined for every ring radius by a
-Nelder and Mead (1965) simplex search that maximises the axisymmetric
-tangential wind of GBVTD with the Fourier orders 0, 1 and 2 (the choice of
-Murillo et al. 2011 as reported by Bell and Lee: only the wavenumbers 0 and 1).
-The mean and the spread of the centres that converge are formed, the centres
-farther than one standard deviation from the mean are dropped and the mean and
-spread recomputed (their steps 4 to 6). Radii within 1 km of a local maximum of
-the tangential wind profile qualify as radius of maximum wind and the
-normalised NORM score ranks them,
+most outbound gates). Following Lee and Marks (2000) and Bell and Lee (2012) a
+grid of starting centres around the first guess (4 by 4, as in the example of
+Alex; the analytic tests of the paper use 6 by 6, spaced 4 km) is refined for
+every ring radius by a Nelder and Mead (1965) simplex search that maximises the
+axisymmetric tangential wind of GBVTD with the Fourier orders 0, 1 and 2 (the
+wavenumbers 0 and 1; the maximum winds of Table 4 of Lee and Marks are those of
+this fit and not of the order 4, and Murillo et al. 2011 chose it as reported
+by Bell and Lee). The
+first simplex is the equilateral triangle of circumradius 4 km around the
+starting point, the reflection, expansion and contraction coefficients are 1, 2
+and 0.5 (Lee and Marks list 1.0, 1.0 and 0.5, which is the same if the 1.0 of the
+expansion is the extension beyond the reflected vertex), and the search ends when
+all sides of the simplex are shorter than 50 m. The mean and the spread of the
+centres that converge are formed, the centres farther than one standard
+deviation from the mean are dropped and the mean and spread recomputed (Lee and
+Marks 2000, section 5; Bell and Lee 2012, steps 4 to 6). Lee and Marks choose
+the ring with the highest axisymmetric tangential wind (``selection="max_vt"``).
+Bell and Lee (2012) rank the radii within 1 km of a local maximum of the
+tangential wind profile with the normalised NORM score (the default),
 
 .. math::
 
@@ -168,19 +230,25 @@ peak (15 to 17 km) and the same ranking of the radii; for the second peak (22 to
 km) it gives 0.03 to 0.06 less than the table, whose printed parts do not add up to
 the printed scores with these weights. The centre of the
 best radius is the result and its spread an estimate of its uncertainty. Not
-from the paper: the use of the first guess for the range of radii (a fixed grid
+from the papers: the use of the first guess for the range of radii (a fixed grid
 is used), the floor of 10 m for :math:`\sigma`, the convergence criterion of the
 simplex (0.05 km), the limit on the distance between the centre and the first
 guess, and the mean tangential wind of a radius being the mean of the winds of
-the converging centres (their Table 1 does not say how it is formed).
+the converging centres (Table 1 of Bell and Lee does not say how it is formed).
+Lee and Marks (2000) also test the minimum of the wavenumber-1 amplitude as the
+criterion; it fails for a vortex with a real wavenumber 1 and is not
+implemented.
 
 Sensitivity to the centre
 -------------------------
-The retrieval depends strongly on the centre. Lee and Marks (2000) found, as
-reported by Bell and Lee (2012), errors of more than 20 percent in the
-wavenumber-1 asymmetry for a displacement of 1 km in a storm with a radius of
-maximum wind of 20 km. The tests and the notebook of radarx repeat this with
-displacements of 1, 2 and 5 km.
+The retrieval depends strongly on the centre. Lee and Marks (2000, Tables 1 and
+2) displace the centre of the axisymmetric test vortex by 1 to 5 km: the
+apparent wavenumber-1 amplitude grows with the displacement and in proportion
+to the maximum wind, from 2 to 15 m/s for a vortex of 50 m/s and a radius of
+maximum wind of 20 km, so that a displacement of 1 km gives an error of 20
+percent for a real wavenumber 1 of 10 m/s. The tests and the notebook of radarx
+repeat this with displacements of 1 to 5 km and reproduce the table to 0.4 m/s
+in the wavenumber-1 amplitude and 0.1 m/s in the apparent mean wind.
 
 Compiled kernel
 ---------------
@@ -234,7 +302,7 @@ _DEG = np.pi / 180.0
 _TWO_PI = 2.0 * np.pi
 _BAD = 1.0e30
 _RANGE = "range"
-_NCOEF = 7  # A0, A1, B1, A2, B2, A3, B3
+_NCOEF = 9  # A0, A1, B1, A2, B2, A3, B3, A4, B4
 
 # order of the rows returned by the blocks
 _CENTER_ROWS = (
@@ -256,6 +324,8 @@ _GBVTD_ROWS = (
     "VT1_SIN",
     "VT2_COS",
     "VT2_SIN",
+    "VT3_COS",
+    "VT3_SIN",
     "VM_ALONG",
     "N_POINTS",
     "DATA_GAP",
@@ -267,7 +337,7 @@ _NORM_WEIGHTS = (1.0, 3.0, 1.0)  # tangential wind, centre spread, converging ce
 _NORM_EFOLD = 1.0  # m s-1
 _SIGMA_FLOOR = 10.0  # m
 _DIPOLE_FRACTION = 0.005
-_SIMPLEX_STEP = 2000.0  # m, size of the first simplex
+_SIMPLEX_RADIUS = 4000.0  # m, circumradius of the first simplex (Lee and Marks 2000)
 
 _UNITS = {
     "VT0": ("Axisymmetric tangential wind", "m s-1"),
@@ -276,7 +346,9 @@ _UNITS = {
     "VT1_SIN": ("Sine part of the wavenumber-1 tangential wind in psi", "m s-1"),
     "VT2_COS": ("Cosine part of the wavenumber-2 tangential wind in psi", "m s-1"),
     "VT2_SIN": ("Sine part of the wavenumber-2 tangential wind in psi", "m s-1"),
-    "VM_ALONG": ("Along-beam mean wind of the fit, A0 + A2", "m s-1"),
+    "VT3_COS": ("Cosine part of the wavenumber-3 tangential wind in psi", "m s-1"),
+    "VT3_SIN": ("Sine part of the wavenumber-3 tangential wind in psi", "m s-1"),
+    "VM_ALONG": ("Along-beam mean wind of the fit, A0 + A2 + A4", "m s-1"),
     "N_POINTS": ("Number of gates in the ring", "1"),
     "DATA_GAP": ("Largest angular gap of the data on the ring", "degree"),
     "FIT_ORDER": ("Highest Fourier order of the fit", "1"),
@@ -293,13 +365,13 @@ def vortex_profile(radius, vmax, rmw, xt=1.0, radial=None):
     """
     Axisymmetric winds of the modified Rankine-combined vortex.
 
-    Eqs. 15 and 16 of Chen et al. (2013): the tangential wind rises linearly
-    to ``vmax`` at ``rmw`` and decays as ``(rmw / radius) ** xt`` outside. The
-    optional radial wind is outflow ``c1 sqrt((rmw - R) R)`` inside the radius
-    of maximum wind and inflow ``-c2 sqrt(R - rmw) rmw / R`` outside, with the
-    radii in km and the winds in m s-1 (the units of ``c1`` and ``c2`` in the
-    paper are not consistent, so these are the units that give winds of a few
-    m s-1).
+    Eqs. 28 to 31 of Lee et al. (1999) (with the exponent of Eqs. 15 and 16 of
+    Chen et al. 2013): the tangential wind rises linearly to ``vmax`` at ``rmw``
+    and decays as ``(rmw / radius) ** xt`` outside. The optional radial wind is
+    outflow ``c1 sqrt((rmw - R) R)`` inside the radius of maximum wind and
+    inflow ``-c2 sqrt(R - rmw) rmw / R`` outside, with the radii in km and the
+    winds in m s-1. The paper has ``c1 = 0.1`` and ``c2 = 3``; with the radii
+    in km the inflow is 6 m s-1 at 27 km, the value of its Fig. 3d.
 
     Parameters
     ----------
@@ -357,6 +429,7 @@ def synthetic_vortex(
     radial=None,
     asymmetry=None,
     radial_asymmetry=None,
+    absolute_asymmetry=None,
     mean_wind=(0.0, 0.0),
     height_scale=None,
     elevation=0.5,
@@ -382,10 +455,12 @@ def synthetic_vortex(
     approximation of the mean-wind term), :math:`V_d = (u \sin\alpha + v
     \cos\alpha)\cos\phi_g`, with the azimuth :math:`\alpha` and the local beam
     elevation :math:`\phi_g = \phi_0 + s/(k_e a)` of the effective Earth radius
-    model. The vertical wind and fall speed are zero. This is the construction
-    of the test vortex of Lee et al. (1999) as described by Chen et al. (2013)
-    (a radar at the origin, the vortex 60 to 80 km away, a modified Rankine
-    vortex); the asymmetric radial wind is zero by default, as there.
+    model. The vertical wind and fall speed are zero. This is the test vortex of
+    Lee et al. (1999) (section 3: a radar at the origin, the vortex 60 km away,
+    50 m s-1 at 20 km, an asymmetry of 10 m s-1 per wavenumber and a mean wind of
+    10 m s-1; use ``absolute_asymmetry`` for it), also used by Lee and Marks
+    (2000) and Chen et al. (2013); the asymmetric radial wind is zero by
+    default, as there.
 
     Parameters
     ----------
@@ -405,6 +480,11 @@ def synthetic_vortex(
     radial_asymmetry : dict, optional
         ``{n: (a_n, delta_n)}``: the amplitude (m s-1, the same at all radii) of
         an asymmetric radial wind. GBVTD assumes that there is none.
+    absolute_asymmetry : dict, optional
+        ``{n: (a_n, delta_n)}``: wavenumber-``n`` tangential wind of the amplitude
+        ``a_n`` (m s-1, the same at all radii) added to the tangential wind, as
+        in the test vortex of Lee et al. (1999), where every wavenumber has
+        10 m s-1. ``asymmetry`` is relative to the axisymmetric wind instead.
     mean_wind : tuple of float, optional
         ``(u, v)`` of the uniform mean wind (m s-1).
     height_scale : float, optional
@@ -441,7 +521,12 @@ def synthetic_vortex(
 
     References
     ----------
-    .. [1] Chen, X., K. Zhao, W.-C. Lee, B. J.-D. Jou, M. Xue, and P. R.
+    .. [1] Lee, W.-C., B. J.-D. Jou, P.-L. Chang, and S.-M. Deng, 1999: Tropical
+       cyclone kinematic structure retrieved from single-Doppler radar
+       observations. Part I: Interpretation of Doppler velocity patterns and
+       the GBVTD technique. *Mon. Wea. Rev.*, **127** (10), 2419-2439,
+       https://doi.org/10.1175/1520-0493(1999)127<2419:TCKSRF>2.0.CO;2
+    .. [2] Chen, X., K. Zhao, W.-C. Lee, B. J.-D. Jou, M. Xue, and P. R.
        Harasti, 2013: The improvement to the environmental wind and tropical
        cyclone circulation retrievals with the modified GBVTD (MGBVTD)
        technique. *J. Appl. Meteor. Climatol.*, **52** (11), 2493-2508,
@@ -466,7 +551,9 @@ def synthetic_vortex(
     dist = np.hypot(dx, dy)
     vt0, vr0 = vortex_profile(dist, vmax, rmw, xt, radial)
     gamma = np.arctan2(dx, dy) / _DEG
-    vt = vt0 * (1.0 + _asymmetry(gamma, asymmetry))
+    vt = vt0 * (1.0 + _asymmetry(gamma, asymmetry)) + _asymmetry(
+        gamma, absolute_asymmetry
+    )
     vr = vr0 + _asymmetry(gamma, radial_asymmetry)
     z = beam_center_height(rng[None, :], elevation, radar_height=alt0, reff=reff) - alt0
     z = np.broadcast_to(z, s.shape)
@@ -610,6 +697,18 @@ def _crop(gates, anchor, radius):
     return x[keep], y[keep], v[keep], w[keep]
 
 
+def _geometric_order(sin_alpha):
+    """Highest Fourier order whose wavenumber is distorted by less than 20 percent.
+
+    Wavenumbers 0, 1, 2 and 3 of the tangential wind need ``sin(alpha_max)`` up to
+    1, 0.7, 0.5 and 0.33 (Lee et al. 1999); the wavenumber n needs the order n + 1.
+    """
+    for limit, order in ((0.33, 4), (0.5, 3), (0.7, 2)):
+        if sin_alpha <= limit:
+            return order
+    return 1
+
+
 class _NumpyGates:
     """NumPy implementation of the ring fit of the kernel (same steps)."""
 
@@ -617,8 +716,9 @@ class _NumpyGates:
         self.x, self.y, self.v, self.w = gates
         self.azim = np.arctan2(self.y, self.x)
 
-    def fit(self, cx, cy, radius, half_width, max_order, min_points, max_gap):
+    def fit(self, cx, cy, radius, cfg):
         """``(coefficients, diagnostics)`` of one ring, None if it cannot be fitted."""
+        half_width, min_points = cfg["half_width"], cfg["min_points"]
         t = 1.0 - np.abs(np.hypot(self.x - cx, self.y - cy) - radius) / half_width
         sel = (t > 0.0) & np.isfinite(self.v)
         m = int(sel.sum())
@@ -632,12 +732,14 @@ class _NumpyGates:
             float(np.max(np.diff(ordered))) if m > 1 else 0.0,
         )
         order = 0
-        for limit, value in ((30.0, 3), (60.0, 2), (120.0, 1)):
+        for limit, value in ((30.0, 4), (60.0, 2), (120.0, 1)):
             if gap <= limit * _DEG:
                 order = value
                 break
-        order = min(order, max_order)
-        if gap > max_gap * _DEG or order < 1:
+        order = min(order, cfg["max_order"])
+        if cfg["geometric_limit"]:
+            order = min(order, _geometric_order(radius / np.hypot(cx, cy)))
+        if gap > cfg["max_gap"] * _DEG or order < 1:
             return None
         ncol = 2 * order + 1  # fewer gates than columns would leave a gap > 120 degrees
         wt = self.w[sel] * t[sel]
@@ -663,15 +765,7 @@ def _rings_numpy(gates, cx, cy, radii, cfg):
     diag = np.full((len(cx), len(radii), 4), np.nan)
     for i, (xc, yc) in enumerate(zip(cx, cy)):
         for k, radius in enumerate(radii):
-            res = ng.fit(
-                xc,
-                yc,
-                radius,
-                cfg["half_width"],
-                cfg["max_order"],
-                cfg["min_points"],
-                cfg["max_gap"],
-            )
+            res = ng.fit(xc, yc, radius, cfg)
             if res is not None:
                 coef[i, k], diag[i, k] = res
     return coef, diag
@@ -698,15 +792,7 @@ def _search_numpy(gates, starts, radii, cfg, search):
             rt = np.hypot(px, py)
             if not rt > radius * 1.0001:
                 return _BAD
-            res = ng.fit(
-                px,
-                py,
-                radius,
-                cfg["half_width"],
-                cfg["max_order"],
-                cfg["min_points"],
-                cfg["max_gap"],
-            )
+            res = ng.fit(px, py, radius, cfg)
             if res is None:
                 return _BAD
             return -float(_vt0_of(res[0], px, py, radius, um, vm))
@@ -718,8 +804,8 @@ def _search_numpy(gates, starts, radii, cfg, search):
         for ir, radius in enumerate(radii):
             counter = [0]
             cost = make_cost(radius, counter)
-            vx = np.array([sx, sx + step, sx])
-            vy = np.array([sy, sy, sy + step])
+            vx = sx + step * np.array([0.0, -0.5 * np.sqrt(3.0), 0.5 * np.sqrt(3.0)])
+            vy = sy + step * np.array([1.0, -0.5, -0.5])
             fv = np.array([cost(vx[k], vy[k]) for k in range(3)])
             converged = False
             for _ in range(max_iter):
@@ -728,6 +814,7 @@ def _search_numpy(gates, starts, radii, cfg, search):
                 size = max(
                     np.hypot(vx[im] - vx[ib], vy[im] - vy[ib]),
                     np.hypot(vx[iw] - vx[ib], vy[iw] - vy[ib]),
+                    np.hypot(vx[iw] - vx[im], vy[iw] - vy[im]),
                 )
                 if fv[ib] >= _BAD:
                     break
@@ -789,6 +876,7 @@ def _rings(gates, cx, cy, radii, cfg, compiled, n_threads):
             cfg["max_order"],
             cfg["min_points"],
             cfg["max_gap"],
+            cfg["geometric_limit"],
             int(n_threads or 0),
         )
     return _rings_numpy(gates, cx, cy, radii, cfg)
@@ -805,6 +893,7 @@ def _search(gates, starts, radii, cfg, search, compiled, n_threads):
             cfg["max_order"],
             cfg["min_points"],
             cfg["max_gap"],
+            cfg["geometric_limit"],
             um,
             vm,
             search["step"],
@@ -896,6 +985,11 @@ def _norm_scores(vt, spread, n_conv, n_start, qualified):
     return score
 
 
+def _converged_wind(cons):
+    """Tangential wind of the rings with converging searches, NaN elsewhere."""
+    return np.where(cons[4] > 0, cons[0], np.nan)
+
+
 def _center_block(vh, x, y, w, *, radii, cfg, opts, compiled, n_threads):
     """Rows of ``_CENTER_ROWS`` for one sweep (all NaN if there is no first guess)."""
     nr = len(radii)
@@ -934,8 +1028,9 @@ def _center_block(vh, x, y, w, *, radii, cfg, opts, compiled, n_threads):
     out[0:5] = cons[0:5]
     out[5] = score
     out[6] = 0.0
-    if np.isfinite(score).any():
-        out[6, int(np.nanargmax(score))] = 1.0
+    best = score if opts["selection"] == "norm" else _converged_wind(cons)
+    if np.isfinite(best).any():
+        out[6, int(np.nanargmax(best))] = 1.0
     return out
 
 
@@ -993,12 +1088,12 @@ def _mean_wind(mean_wind):
     return (u, v)
 
 
-def _fit_config(ring_width, max_wavenumber, min_points, max_gap, mean_wind):
+def _fit_config(ring_width, max_wavenumber, min_points, max_gap, mean_wind, geometric):
     if not ring_width > 0:
         raise ValueError(f"ring_width must be positive, not {ring_width!r}")
-    if int(max_wavenumber) != max_wavenumber or not 1 <= max_wavenumber <= 3:
+    if int(max_wavenumber) != max_wavenumber or not 1 <= max_wavenumber <= 4:
         raise ValueError(
-            f"max_wavenumber (the Fourier order of the fit) must be 1, 2 or 3, "
+            f"max_wavenumber (the Fourier order of the fit) must be 1, 2, 3 or 4, "
             f"not {max_wavenumber!r}"
         )
     if int(min_points) != min_points or min_points < 2:
@@ -1012,6 +1107,7 @@ def _fit_config(ring_width, max_wavenumber, min_points, max_gap, mean_wind):
         "max_order": int(max_wavenumber),
         "min_points": int(min_points),
         "max_gap": float(max_gap),
+        "geometric_limit": bool(geometric),
         "mean_wind": _mean_wind(mean_wind),
     }
 
@@ -1155,8 +1251,11 @@ def tc_center(
     guess_spacing=None,
     search_radius=None,
     inflection_window=1000.0,
+    selection="norm",
+    simplex_radius=_SIMPLEX_RADIUS,
     min_points=30,
     max_gap=120.0,
+    geometric_limit=False,
     k_e=4.0 / 3.0,
     n_threads=None,
     engine="auto",
@@ -1198,8 +1297,8 @@ def tc_center(
     ring_width : float, optional
         Full width of the triangular weight of a ring (m). Default 2000.
     max_wavenumber : int, optional
-        Highest Fourier order of the ring fit (1 to 3). Default 2, the
-        wavenumbers 0 and 1 of the vortex.
+        Highest Fourier order of the ring fit (1 to 4). Default 2, the
+        wavenumbers 0 and 1 of the vortex (the fit of Lee and Marks 2000).
     mean_wind : tuple of float, optional
         ``(u, v)`` mean wind or storm motion (m s-1) that removes the cross-beam
         mean wind from the tangential wind. Default None: not removed.
@@ -1216,10 +1315,22 @@ def tc_center(
     inflection_window : float, optional
         Radii within this distance (m) of a local maximum of the tangential
         wind profile qualify as radius of maximum wind. Default 1000.
+    selection : {"norm", "max_vt"}, optional
+        How the radius of maximum wind, and with it the centre, is chosen among
+        the rings. ``"norm"`` (default) takes the best NORM score (Bell and Lee
+        2012), ``"max_vt"`` the ring with the highest tangential wind (Lee and
+        Marks 2000).
+    simplex_radius : float, optional
+        Circumradius (m) of the equilateral first simplex around a starting
+        point. Default 4000, the value of Lee and Marks (2000).
     min_points : int, optional
         Fewest gates in a ring. Default 30.
     max_gap : float, optional
         Largest angular gap (degrees) of the data of a ring. Default 120.
+    geometric_limit : bool, optional
+        Limit the Fourier order of a ring by ``sin(alpha_max) = R / R_T``
+        (wavenumbers 1, 2 and 3 only up to 0.7, 0.5 and 0.33, Lee et al. 1999).
+        Default False.
     k_e : float, optional
         Effective Earth radius factor of the beam geometry. Default 4/3.
     n_threads : int, optional
@@ -1251,8 +1362,11 @@ def tc_center(
 
     Notes
     -----
-    Not checked against Lee and Marks (2000) (not read); see the module
-    documentation for the choices that are radarx's own.
+    Checked against Lee and Marks (2000): the objective (the axisymmetric
+    tangential wind of the ring), the first simplex, the termination, the
+    consensus of the starting points and the choice of the ring; their analytic
+    tests are reproduced to the accuracy given in the module documentation. The
+    choices that are radarx's own are listed there too.
 
     References
     ----------
@@ -1275,11 +1389,18 @@ def tc_center(
        extended GBVTD and the recovery of the tropical cyclones asymmetric
        structures. *Preprints, 32nd Conf. on Radar Meteorology*, Albuquerque,
        NM, Amer. Meteor. Soc., JP2J.8 (conference paper, no DOI).
+    .. [6] Lee, W.-C., B. J.-D. Jou, P.-L. Chang, and F. D. Marks, 2000:
+       Tropical cyclone kinematic structure retrieved from single-Doppler radar
+       observations. Part III: Evolution and structures of Typhoon Alex (1987).
+       *Mon. Wea. Rev.*, **128** (12), 3982-4001,
+       https://doi.org/10.1175/1520-0493(2000)129<3982:TCKSRF>2.0.CO;2
     """
     check_object(obj)
     compiled = choose_engine(engine, HAS_COMPILED_KERNEL, "tc_winds")
     radii = _radii_of(radii, min_radius, max_radius, radius_step)
-    cfg = _fit_config(ring_width, max_wavenumber, min_points, max_gap, mean_wind)
+    cfg = _fit_config(
+        ring_width, max_wavenumber, min_points, max_gap, mean_wind, geometric_limit
+    )
     if int(guess_grid) != guess_grid or guess_grid < 1:
         raise ValueError(f"guess_grid must be a positive integer, not {guess_grid!r}")
     for name, value in (
@@ -1290,6 +1411,10 @@ def tc_center(
             raise ValueError(f"{name} must be positive, not {value!r}")
     if not inflection_window >= 0:
         raise ValueError("inflection_window must not be negative")
+    if selection not in ("norm", "max_vt"):
+        raise ValueError(f"selection must be 'norm' or 'max_vt', not {selection!r}")
+    if not simplex_radius > 0:
+        raise ValueError(f"simplex_radius must be positive, not {simplex_radius!r}")
     if not (np.isfinite(k_e) and k_e > 0):
         raise ValueError(f"k_e must be positive, not {k_e!r}")
 
@@ -1301,7 +1426,8 @@ def tc_center(
             "guess_spacing": guess_spacing,
             "search_radius": search_radius,
             "inflection_window": float(inflection_window),
-            "step": _SIMPLEX_STEP,
+            "selection": selection,
+            "step": float(simplex_radius),
             "tolerance": 50.0,
             "max_iter": 200,
         }
@@ -1325,6 +1451,7 @@ def tc_center(
             {
                 "tc_center_ring_width": float(ring_width),
                 "tc_center_max_wavenumber": int(max_wavenumber),
+                "tc_center_geometric_limit": int(cfg["geometric_limit"]),
                 "tc_center_mean_wind": cfg["mean_wind"],
             }
         )
@@ -1340,7 +1467,7 @@ def tc_center(
 
 def _derived(coef, diag, cx, cy, radii, mean_wind):
     """Wind quantities of the rows of ``_GBVTD_ROWS`` from the ring coefficients."""
-    a0, a1, b1, a2, b2, a3, b3 = (coef[..., i] for i in range(_NCOEF))
+    a0, a1, b1, a2, b2, a3, b3, a4, b4 = (coef[..., i] for i in range(_NCOEF))
     rt = np.hypot(cx, cy)
     um, vm = mean_wind
     with np.errstate(invalid="ignore", divide="ignore"):
@@ -1348,22 +1475,28 @@ def _derived(coef, diag, cx, cy, radii, mean_wind):
         cos_a = np.sqrt(1.0 - sin_a * sin_a)
         valid = sin_a < 1.0
         cross = (cy * um - cx * vm) / rt  # V_M sin(theta_T - theta_M)
-        vt0 = -b1 - b3 - cross * sin_a
-        vr0 = a1 + a3
-        vt1c = -2.0 * b2
-        vt1s = a2 - a0 + (a0 + a2) * cos_a
-        vt2c = -2.0 * b3
-        vt2s = 2.0 * a3
-    rows = np.stack(
-        [vt0, vr0, vt1c, vt1s, vt2c, vt2s, a0 + a2]
-        + [diag[..., 0], diag[..., 1], diag[..., 2], diag[..., 3]]
-    )
+        along = a0 + a2 + a4  # V_M cos(theta_T - theta_M), Eq. 19
+        vals = {
+            "VT0": -b1 - b3 - cross * sin_a,  # Eq. 20 with the sign of Eq. 15 and 18
+            "VR0": a1 + a3,  # Eq. 21
+            "VT1_COS": -2.0 * (b2 + b4),  # Eq. 23
+            "VT1_SIN": a2 - a0 + a4 + along * cos_a,  # Eq. 22
+            "VT2_COS": -2.0 * b3,  # Eq. 25
+            "VT2_SIN": 2.0 * a3,  # Eq. 24
+            "VT3_COS": -2.0 * b4,  # Eq. 27
+            "VT3_SIN": 2.0 * a4,  # Eq. 26
+            "VM_ALONG": along,
+        }
     order = diag[..., 2]
-    rows[6:7, order < 2] = np.nan  # the along-beam wind needs A2
-    rows[2:4, order < 2] = np.nan  # the wavenumber-1 wind needs B2 and A2
-    rows[4:6, order < 3] = np.nan  # the wavenumber-2 wind needs A3 and B3
-    rows[:, ~valid] = np.nan
-    return rows
+    # a wavenumber n of the tangential wind needs the Fourier order n + 1; the
+    # along-beam wind and the wavenumber-1 wind are also corrected with A2 and A4
+    needs = {"VM_ALONG": 2, "VT1": 2, "VT2": 3, "VT3": 4}
+    rows = []
+    for name in _GBVTD_ROWS[:9]:
+        v = np.where(valid, vals[name], np.nan)
+        need = needs.get(name, needs.get(name[:3], 1))
+        rows.append(np.where(order >= need, v, np.nan))
+    return np.stack(rows + [diag[..., i] for i in range(4)])
 
 
 def _gbvtd_block(vh, x, y, w, *, center, radii, cfg, compiled, n_threads):
@@ -1451,16 +1584,17 @@ def gbvtd(
     max_radius=80000.0,
     radius_step=1000.0,
     ring_width=2000.0,
-    max_wavenumber=3,
+    max_wavenumber=4,
     mean_wind=None,
     min_points=30,
     max_gap=120.0,
+    geometric_limit=False,
     k_e=4.0 / 3.0,
     n_threads=None,
     engine="auto",
 ):
     """
-    Axisymmetric and wavenumber-1 and 2 winds of a vortex from one radar.
+    Axisymmetric and wavenumber-1 to 3 winds of a vortex from one radar.
 
     Fits Fourier series to the Doppler velocity on rings around ``center``
     (the ground-based velocity track display of Lee et al. 1999, equations in
@@ -1489,11 +1623,12 @@ def gbvtd(
     ring_width : float, optional
         Full width of the triangular weight of a ring (m). Default 2000.
     max_wavenumber : int, optional
-        Highest Fourier order of the fit (1 to 3), reduced where the data have
-        wide gaps. Default 3, which gives the wavenumbers 0 to 2 of the vortex.
+        Highest Fourier order of the fit (1 to 4), reduced where the data have
+        wide gaps. Default 4 (nine coefficients), which gives the wavenumbers 0
+        to 3 of the vortex; the wavenumber n needs the order n + 1.
     mean_wind : tuple of float, optional
         ``(u, v)`` of the mean wind or storm motion (m s-1). Its cross-beam
-        part is removed from ``VT0`` (Eq. 6 of Liou et al. 2005); without it
+        part is removed from ``VT0`` (Eq. 20 of Lee et al. 1999); without it
         the cross-beam mean wind is aliased into ``VT0``, with an error that
         grows with the radius as ``sin(alpha_max)``. The winds are relative to
         the mean wind. Default None: not removed.
@@ -1501,6 +1636,12 @@ def gbvtd(
         Fewest gates in a ring. Default 30.
     max_gap : float, optional
         Largest angular gap (degrees) of the data of a ring. Default 120.
+    geometric_limit : bool, optional
+        Limit the Fourier order of a ring by ``sin(alpha_max) = R / R_T``: the
+        wavenumbers 1, 2 and 3 are fitted only up to 0.7, 0.5 and 0.33 (the
+        limits for a 20 percent error of Lee et al. 1999, used in Lee et al.
+        2000), so that a ring beyond them has the wavenumber 0 only. Default
+        False.
     k_e : float, optional
         Effective Earth radius factor of the beam geometry. Default 4/3.
     n_threads : int, optional
@@ -1515,9 +1656,12 @@ def gbvtd(
         tangential and radial wind, m s-1), ``VT1_COS`` and ``VT1_SIN`` (the
         wavenumber-1 tangential wind in the angle ``psi`` of the fit),
         ``VT1_AMPLITUDE`` (m s-1) and ``VT1_AZIMUTH`` (degrees clockwise from
-        north, seen from the centre, where the wavenumber-1 tangential wind is
-        largest), ``VT2_COS``, ``VT2_SIN`` and ``VT2_AMPLITUDE``, ``VM_ALONG``
-        (the along-beam mean wind of the fit), and ``N_POINTS``, ``DATA_GAP``,
+        north, seen from the centre, where the wavenumber-1 term in ``psi``
+        alone is largest: a rough position, see :func:`tc_decompose` for the
+        wave in azimuth), ``VT2_COS``, ``VT2_SIN`` and ``VT2_AMPLITUDE`` and
+        the same for the wavenumber 3 (``VT3_COS``, ``VT3_SIN``,
+        ``VT3_AMPLITUDE``), ``VM_ALONG`` (the along-beam mean wind of the fit,
+        ``A0 + A2 + A4``), and ``N_POINTS``, ``DATA_GAP``,
         ``FIT_ORDER`` and ``FIT_RMS`` of the fits. Scalars: ``CENTER_X``,
         ``CENTER_Y`` (m), ``CENTER_LATITUDE``, ``CENTER_LONGITUDE``, ``RMW``
         (the radius of the maximum of ``VT0`` refined with a parabola, NaN if
@@ -1536,11 +1680,13 @@ def gbvtd(
 
     Notes
     -----
-    The equations are from the conference paper of Liou et al. (2005) and
-    Chen et al. (2013); the paper of Lee et al. (1999) was not read and the
-    code is not checked against it. The retrieval is sensitive to the centre
-    (see :mod:`radarx.retrieve.tc_winds`). The wavenumber-1 radial wind is
-    assumed zero; a real one leaks into the wavenumber-1 tangential wind.
+    The equations are Eqs. 3 to 27 of Lee et al. (1999) and were compared with
+    them one by one (Eq. 20 is printed with ``+B3``, the code has ``-B3``, which
+    follows from Eqs. 15 and 18; see :mod:`radarx.retrieve.tc_winds`). The
+    retrieval is sensitive to the centre. The asymmetric radial wind is assumed
+    zero; a real one leaks into the tangential wind and the along-beam mean
+    wind. A wave of the azimuth is distorted by the fit in ``psi``, more for a
+    larger ``sin(alpha_max) = R / R_T`` and a higher wavenumber.
 
     References
     ----------
@@ -1562,11 +1708,18 @@ def gbvtd(
        2006: Doppler velocity signatures of idealized elliptical vortices.
        *Terr. Atmos. Ocean. Sci.*, **17** (2), 429-446,
        https://doi.org/10.3319/TAO.2006.17.2.429(A)
+    .. [5] Lee, W.-C., B. J.-D. Jou, P.-L. Chang, and F. D. Marks, 2000:
+       Tropical cyclone kinematic structure retrieved from single-Doppler radar
+       observations. Part III: Evolution and structures of Typhoon Alex (1987).
+       *Mon. Wea. Rev.*, **128** (12), 3982-4001,
+       https://doi.org/10.1175/1520-0493(2000)129<3982:TCKSRF>2.0.CO;2
     """
     check_object(obj)
     compiled = choose_engine(engine, HAS_COMPILED_KERNEL, "tc_winds")
     radii = _radii_of(radii, min_radius, max_radius, radius_step)
-    cfg = _fit_config(ring_width, max_wavenumber, min_points, max_gap, mean_wind)
+    cfg = _fit_config(
+        ring_width, max_wavenumber, min_points, max_gap, mean_wind, geometric_limit
+    )
     if not (np.isfinite(k_e) and k_e > 0):
         raise ValueError(f"k_e must be positive, not {k_e!r}")
 
@@ -1603,6 +1756,7 @@ def _gbvtd_dataset(sweep, out, radii, center, cfg):
     phi = np.arctan2(cy, cx) + psi + np.arcsin(sin_a * np.sin(psi))
     ds["VT1_AZIMUTH"] = (90.0 - phi / _DEG) % 360.0
     ds["VT2_AMPLITUDE"] = np.hypot(ds["VT2_COS"], ds["VT2_SIN"])
+    ds["VT3_AMPLITUDE"] = np.hypot(ds["VT3_COS"], ds["VT3_SIN"])
     peak = xr.apply_ufunc(
         lambda r, v: _peak(r, v),
         ds["radius"],
@@ -1635,6 +1789,10 @@ def _gbvtd_dataset(sweep, out, radii, center, cfg):
         "long_name": "Amplitude of the wavenumber-2 tangential wind",
         "units": "m s-1",
     }
+    ds["VT3_AMPLITUDE"].attrs = {
+        "long_name": "Amplitude of the wavenumber-3 tangential wind",
+        "units": "m s-1",
+    }
     ds["VT1_AZIMUTH"].attrs = {
         "long_name": "Azimuth of the maximum wavenumber-1 tangential wind",
         "units": "degree",
@@ -1658,6 +1816,7 @@ def _gbvtd_dataset(sweep, out, radii, center, cfg):
             "gbvtd_ring_width": 2.0 * cfg["half_width"],
             "gbvtd_max_wavenumber": cfg["max_order"],
             "gbvtd_mean_wind": cfg["mean_wind"],
+            "gbvtd_geometric_limit": int(cfg["geometric_limit"]),
             "gbvtd_closure": "asymmetric radial wind neglected",
         }
     )
@@ -1690,15 +1849,27 @@ def _decompose(ds, azimuth):
     phi = (90.0 - az[None, :]) * _DEG  # mathematical angle seen from the centre
     with np.errstate(invalid="ignore"):
         psi = _psi_of_azimuth(phi, np.arctan2(cy, cx), sin_a)
-    coef = {
-        k: np.asarray(ds[k].values, dtype=np.float64)[:, None] for k in _GBVTD_ROWS[:6]
-    }
-    vt0 = np.broadcast_to(coef["VT0"], psi.shape)
-    wn1 = coef["VT1_COS"] * np.cos(psi) + coef["VT1_SIN"] * np.sin(psi)
-    wn2 = coef["VT2_COS"] * np.cos(2 * psi) + coef["VT2_SIN"] * np.sin(2 * psi)
-    vr = np.broadcast_to(coef["VR0"], psi.shape)
-    vt = vt0 + wn1 + wn2
-    return phi, vt0, wn1, wn2, vt, vr
+    vt0 = np.broadcast_to(
+        np.asarray(ds["VT0"].values, dtype=np.float64)[:, None], psi.shape
+    )
+    vr = np.broadcast_to(
+        np.asarray(ds["VR0"].values, dtype=np.float64)[:, None], psi.shape
+    )
+    # waves above the Fourier order that was asked for are zero; waves that a ring
+    # could not resolve (wide gaps) are NaN
+    top = int(ds.attrs.get("gbvtd_max_wavenumber", 3)) - 1
+    waves = []
+    for n in (1, 2, 3):
+        if n > top or f"VT{n}_COS" not in ds:
+            waves.append(np.zeros_like(psi))
+            continue
+        c, s = (
+            np.asarray(ds[f"VT{n}_{k}"].values, dtype=np.float64)[:, None]
+            for k in ("COS", "SIN")
+        )
+        waves.append(c * np.cos(n * psi) + s * np.sin(n * psi))
+    vt = vt0 + sum(waves)
+    return (phi, vt0, *waves, vt, vr)
 
 
 @dask_support("lazy_only")
@@ -1714,7 +1885,10 @@ def tc_decompose(result, *, azimuth=None):
     The coefficients of :func:`gbvtd` belong to the angle ``psi`` of the ring
     fit; they are evaluated at the physical azimuths with the exact relation
     between ``psi`` and the azimuth seen from the centre (geometry of
-    :mod:`radarx.retrieve.tc_winds`, not checked against Lee et al. 1999).
+    :mod:`radarx.retrieve.tc_winds`; Lee et al. 1999 decompose the winds in the
+    same way to assess the retrieval, their section 5). The waves above the
+    Fourier order that ``gbvtd`` was asked for are zero, the waves that a ring
+    could not resolve because of data gaps are NaN.
 
     Parameters
     ----------
@@ -1730,12 +1904,18 @@ def tc_decompose(result, *, azimuth=None):
     xarray.Dataset or xarray.DataTree
         On the dimensions ``radius`` and ``azimuth``: ``VT_SYMMETRIC`` (the
         axisymmetric tangential wind ``VT0``), ``VT_WAVENUMBER1`` and
-        ``VT_WAVENUMBER2`` (the asymmetric parts), ``VT`` (their sum), ``VR``
+        ``VT_WAVENUMBER2`` and ``VT_WAVENUMBER3`` (the asymmetric parts), ``VT``
+        (their sum), ``VR``
         (the axisymmetric radial wind: the asymmetric radial wind is not
         retrieved) and the Cartesian winds ``U`` and ``V`` relative to the mean
         wind and the positions ``X`` and ``Y`` (m east and north of the radar).
         On ``radius``: ``ASYMMETRY`` (the root mean square of the asymmetric
-        tangential wind over the azimuths divided by ``VT0``). On ``azimuth``:
+        tangential wind over the azimuths divided by ``VT0``). On ``radius``
+        and ``wavenumber`` (1, 2, 3): ``AZIMUTHAL_AMPLITUDE`` (m s-1) and
+        ``AZIMUTHAL_PHASE`` (degrees clockwise from north, seen from the
+        centre, where the wave is largest), the Fourier components of ``VT``
+        in azimuth, the waves that Lee et al. (1999) compare with the analytic
+        winds. On ``azimuth``:
         ``RMW_AZIMUTH``, the radius of the maximum of ``VT`` at the azimuth
         (the radius of maximum wind of ``VT0`` per azimuth, NaN at the edge of
         the radii). Scalars ``CENTER_X`` and ``CENTER_Y`` and the radius of
@@ -1773,6 +1953,22 @@ def tc_decompose(result, *, azimuth=None):
     return _decompose_one(result, azimuth)
 
 
+def _azimuthal_waves(vt, phi, waves=(1, 2, 3)):
+    """Amplitude and azimuth of the wavenumbers ``waves`` of ``vt`` on the azimuths ``phi``.
+
+    Least squares fit of ``a cos(n phi) + b sin(n phi)`` to the tangential wind of
+    every radius (the Fourier coefficients for evenly spaced azimuths). The
+    azimuth is that of the maximum, in degrees clockwise from north.
+    """
+    amp, azi = [], []
+    for n in waves:
+        basis = np.stack([np.cos(n * phi), np.sin(n * phi)], axis=1)
+        a, b = (vt @ np.linalg.pinv(basis).T).T
+        amp.append(np.hypot(a, b))
+        azi.append((90.0 - np.degrees(np.arctan2(b, a)) / n) % (360.0 / n))
+    return np.stack(amp, axis=1), np.stack(azi, axis=1)
+
+
 def _decompose_one(ds, azimuth):
     needed = (
         "VT0",
@@ -1795,21 +1991,23 @@ def _decompose_one(ds, azimuth):
     if az.ndim != 1 or az.size == 0:
         raise ValueError("azimuth must be a non-empty 1-D array (degrees)")
     ds = ds.compute()
-    phi, vt0, wn1, wn2, vt, vr = _decompose(ds, az)
+    phi, vt0, wn1, wn2, wn3, vt, vr = _decompose(ds, az)
     radius = np.asarray(ds["radius"].values)
     cx, cy = float(ds["CENTER_X"]), float(ds["CENTER_Y"])
     xx = cx + radius[:, None] * np.cos(phi)
     yy = cy + radius[:, None] * np.sin(phi)
     u = vr * np.cos(phi) - vt * np.sin(phi)
     v = vr * np.sin(phi) + vt * np.cos(phi)
-    asym = np.sqrt(np.mean((wn1 + wn2) ** 2, axis=1)) / np.abs(vt0[:, 0])
+    asym = np.sqrt(np.mean((wn1 + wn2 + wn3) ** 2, axis=1)) / np.abs(vt0[:, 0])
     rmw_az = np.array([_peak(radius, vt[:, j])[0] for j in range(az.size)])
+    wave_amp, wave_azi = _azimuthal_waves(vt, phi[0])
     dims = ("radius", "azimuth")
     out = xr.Dataset(
         {
             "VT_SYMMETRIC": (dims, vt0),
             "VT_WAVENUMBER1": (dims, wn1),
             "VT_WAVENUMBER2": (dims, wn2),
+            "VT_WAVENUMBER3": (dims, wn3),
             "VT": (dims, vt),
             "VR": (dims, vr),
             "U": (dims, u),
@@ -1817,6 +2015,8 @@ def _decompose_one(ds, azimuth):
             "X": (dims, xx),
             "Y": (dims, yy),
             "ASYMMETRY": (("radius",), asym),
+            "AZIMUTHAL_AMPLITUDE": (("radius", "wavenumber"), wave_amp),
+            "AZIMUTHAL_PHASE": (("radius", "wavenumber"), wave_azi),
             "RMW_AZIMUTH": (("azimuth",), rmw_az),
             "CENTER_X": ((), cx),
             "CENTER_Y": ((), cy),
@@ -1825,12 +2025,14 @@ def _decompose_one(ds, azimuth):
         coords={
             "radius": ("radius", radius, {"units": "m"}),
             "azimuth": ("azimuth", az, {"units": "degree"}),
+            "wavenumber": ("wavenumber", np.array([1, 2, 3])),
         },
     )
     for name in (
         "VT_SYMMETRIC",
         "VT_WAVENUMBER1",
         "VT_WAVENUMBER2",
+        "VT_WAVENUMBER3",
         "VT",
         "VR",
         "U",
@@ -1843,8 +2045,18 @@ def _decompose_one(ds, azimuth):
         "long_name": "Asymmetric tangential wind relative to the axisymmetric wind",
         "units": "1",
     }
+    out["AZIMUTHAL_AMPLITUDE"].attrs = {
+        "long_name": "Amplitude of the wavenumber of the tangential wind in azimuth",
+        "units": "m s-1",
+    }
+    out["AZIMUTHAL_PHASE"].attrs = {
+        "long_name": "Azimuth of the maximum of the wavenumber in azimuth",
+        "units": "degree",
+        "comment": "clockwise from north, seen from the centre",
+    }
     out["VT_WAVENUMBER1"].attrs["long_name"] = "Wavenumber-1 tangential wind"
     out["VT_WAVENUMBER2"].attrs["long_name"] = "Wavenumber-2 tangential wind"
+    out["VT_WAVENUMBER3"].attrs["long_name"] = "Wavenumber-3 tangential wind"
     out["VT_SYMMETRIC"].attrs["long_name"] = "Axisymmetric tangential wind"
     return out
 
@@ -1871,7 +2083,7 @@ def _tc_center_accessor(self):
 @accessor_method("dataarray", "dataset", "datatree", name="gbvtd", wraps=gbvtd)
 def _gbvtd_accessor(self):
     """
-    Axisymmetric and wavenumber-1 and 2 winds of a vortex from one radar (GBVTD).
+    Axisymmetric and wavenumber-1 to 3 winds of a vortex from one radar (GBVTD).
 
     See :func:`radarx.retrieve.gbvtd` for the parameters.
 

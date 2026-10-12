@@ -26,7 +26,7 @@ gate of every other sweep at its beam height; a grid (``xarray.Dataset`` with
 Equations
 ---------
 
-All equations are those of Witt et al. (1998), read in a copy of the paper
+All equations are those of Witt et al. (1998)
 (Eqs. 1 to 6 and the worked example of their Fig. 4). With ``Z`` in dBZ and
 heights ``H`` above the radar,
 
@@ -76,8 +76,8 @@ lowest sample of each column, the closest to the ground. The relation between
 reflectivity and the kinetic energy flux of hail is from the hailstone spectra
 of Waldvogel et al. (1978a, b), as given in Eq. 1 of Witt et al. (1998) and in
 Eq. 2.4 of Holleman (2001), who writes it as ``E = 5.0e-6 Z^0.84`` with ``Z``
-in mm6 m-3, the same law. Waldvogel et al. (1978) were not read, so the fit,
-its scatter and its range of validity are not checked against them.
+in mm6 m-3, the same law. The fit, its scatter and its range of validity are not
+checked against Waldvogel et al. (1978).
 
 Heights and levels
 ------------------
@@ -96,10 +96,10 @@ Not implemented
 ---------------
 
 * The probability of hail of any size (POH) of Witt et al. (1998) is read off a
-  figure (their Fig. 2) that is derived from Waldvogel et al. (1979), which was
-  not read; the paper gives no equation. It is left out.
+  figure (their Fig. 2) that is derived from Waldvogel et al. (1979), which has
+  not been compared; the paper gives no equation. It is left out.
 * Alternative fits of MESH to hail reports (e.g. 75th and 95th percentiles of
-  Murillo and Homeyer 2019) were not read and are not included.
+  Murillo and Homeyer 2019) are not included.
 * Witt et al. (1998) apply the equations to the storm cells of a cell tracking
   algorithm (the maximum reflectivity of each 2D component). Here the same sum
   is applied to the reflectivity of every column, which is what the MRMS
@@ -590,8 +590,8 @@ _P_WARNING = """
         (Graham and Nelson 1998) reports that the threshold model over-warned
         for radars high above sea level and quotes ``WT = 57.5 H0 - 5.8`` and an
         offset of 30 % for summer storms as the later NSSL adjustment, which
-        these two options can reproduce. That document was read as a scan; the
-        operational values were not checked in another source."""
+        these two options can reproduce. The operational values were not checked in
+        another source."""
 
 _P_COLUMNS = """
     kind : {"volume", "grid", "qvp"}, optional
@@ -638,19 +638,20 @@ _REFERENCES = """
     K. W. Thomas, 1998: An enhanced hail detection algorithm for the WSR-88D.
     *Wea. Forecasting*, **13** (2), 286-303,
     https://doi.org/10.1175/1520-0434(1998)013<0286:AEHDAF>2.0.CO;2
-    (Eqs. 1-6 and Fig. 4, read in a copy of the paper).
+    (Eqs. 1-6 and Fig. 4).
 
     Waldvogel, A., W. Schmid, and B. Federer, 1978: The kinetic energy of
     hailfalls. Part I: Hailstone spectra. *J. Appl. Meteor.*, **17** (4),
     515-520, https://doi.org/10.1175/1520-0450(1978)017<0515:TKEOHP>2.0.CO;2
-    (not read; the reflectivity to energy flux relation is taken from Witt et
-    al. 1998 and Holleman 2001).
+    (the reflectivity to energy flux relation is taken from Witt et al. 1998
+    and Holleman 2001; not compared with this paper).
 
     Waldvogel, A., B. Federer, W. Schmid, and J. F. Mezeix, 1978: The kinetic
     energy of hailfalls. Part II: Radar and hailpads. *J. Appl. Meteor.*,
     **17** (11), 1680-1693,
     https://doi.org/10.1175/1520-0450(1978)017<1680:TKEOHP>2.0.CO;2
-    (not read; the relation is taken from Witt et al. 1998 and Holleman 2001).
+    (the relation is taken from Witt et al. 1998 and Holleman 2001; not
+    compared with this paper).
 
     Holleman, I., 2001: Hail detection using single-polarization radar.
     KNMI Scientific Report WR-2001-01 (Eq. 2.4 for ``E = 5.0e-6 Z^0.84`` and

@@ -34,9 +34,10 @@ columns as the VIL products (see the VIL notebook):
 
 `hail_products` returns them together. The column sums run in a compiled,
 multithreaded kernel with a NumPy implementation that gives the same numbers.
-The equations were read in the paper itself; the Waldvogel et al. (1978) papers
-were not, and the probability of hail (POH) and the alternative MESH fits of
-Murillo and Homeyer (2019) are not implemented (see the end of the notebook).
+The equations are those of Witt et al. (1998); they have not been compared with
+the Waldvogel et al. (1978) papers. The probability of hail (POH) and the
+alternative MESH fits of Murillo and Homeyer (2019) are not implemented (see the
+end of the notebook).
 
 ```{code-cell} ipython3
 import warnings
@@ -404,9 +405,9 @@ plt.show()
   and was not resolved. The paper is followed here.
 - **POH.** The probability of hail of any size of Witt et al. (1998) is read off a
   figure that comes from Waldvogel et al. (1979); the paper gives no equation and
-  the original was not read.
+  the original has not been compared.
 - **Other MESH fits.** Murillo and Homeyer (2019) fitted MESH to many more reports;
-  that paper was not read.
+  that paper is not used.
 - **Rounding.** The operational POSH is rounded to 10 % and MESH to 6.35 mm, the
   values here are not.
 - **Cells.** The paper applies the sums to the maximum reflectivity of each

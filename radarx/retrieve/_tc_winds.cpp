@@ -14,12 +14,12 @@
 // direction of the ring at the gate (atan2(y - cy, x - cx) - atan2(y, x), in [0, 2 pi)),
 // and the weighted least squares fit is
 //
-//     v = sum_{n=0..L} (A_n cos(n psi) + B_n sin(n psi)),   L <= 3,
+//     v = sum_{n=0..L} (A_n cos(n psi) + B_n sin(n psi)),   L <= 4,
 //
-// with L reduced when the largest angular gap of the data is wide (Chen et al. 2013:
-// gaps up to 30, 60, 120 degrees allow L = 3, 2, 1). The module radarx/retrieve/tc_winds.py
-// has the equations and the references; every step follows its NumPy implementation in the
-// same order of operations.
+// with L reduced when the largest angular gap of the data is wide (gaps up to 30, 60,
+// 120 degrees allow L = 4, 2, 1; L = 3 when 3 is the requested maximum). The module
+// radarx/retrieve/tc_winds.py has the equations and the references; every step follows its
+// NumPy implementation in the same order of operations.
 //
 // The data are binned in a uniform grid (counting sort) once, so a ring only visits the
 // cells that touch it. Independent simplex searches and rings run on a pool of threads,
@@ -48,7 +48,7 @@ constexpr double kPi = 3.14159265358979323846;
 constexpr double kTwoPi = 2.0 * kPi;
 constexpr double kDeg = kPi / 180.0;
 constexpr double kBad = 1.0e30;  // cost of a centre that cannot be evaluated
-constexpr int kMaxOrder = 3;
+constexpr int kMaxOrder = 4;
 constexpr int kCoef = 2 * kMaxOrder + 1;
 
 template <class F>
@@ -75,12 +75,23 @@ void parallel_blocks(int64_t total, int n_threads, int64_t block, F&& body) {
 
 struct FitSettings {
     double half_width;  // half width of the ring (m)
-    int max_order;      // largest Fourier order requested (0..3)
+    int max_order;      // largest Fourier order requested (0..4)
     int min_points;     // fewest gates in a ring
     double max_gap;     // largest angular gap of the data (rad)
+    bool geometric_limit;  // cap the order by sin(alpha_max) = R / RT (Lee et al. 1999)
 };
 
-// Result of one ring: the coefficients (A0, A1, B1, A2, B2, A3, B3), and diagnostics.
+// Highest Fourier order that keeps the geometric distortion of the wavenumber below 20 percent:
+// the wavenumbers 0, 1, 2 and 3 of the tangential wind need sin(alpha_max) up to 1, 0.7, 0.5
+// and 0.33, and the wavenumber n needs the order n + 1.
+inline int geometric_order(double sin_alpha) {
+    if (sin_alpha <= 0.33) return 4;
+    if (sin_alpha <= 0.5) return 3;
+    if (sin_alpha <= 0.7) return 2;
+    return 1;
+}
+
+// Result of one ring: the coefficients (A0, A1, B1, A2, B2, A3, B3, A4, B4), and diagnostics.
 struct RingFit {
     double coef[kCoef];
     double n_points = 0.0;
@@ -160,10 +171,11 @@ public:
         double gap = sorted.front() + kTwoPi - sorted.back();
         for (int64_t i = 1; i < m; ++i) gap = std::max(gap, sorted[i] - sorted[i - 1]);
         int order = 0;
-        if (gap <= 30.0 * kDeg) order = 3;
+        if (gap <= 30.0 * kDeg) order = 4;
         else if (gap <= 60.0 * kDeg) order = 2;
         else if (gap <= 120.0 * kDeg) order = 1;
         order = std::min(order, s.max_order);
+        if (s.geometric_limit) order = std::min(order, geometric_order(R / std::hypot(cx, cy)));
         if (gap > s.max_gap || order < 1) return false;
         const int nc = 2 * order + 1;  // fewer gates than columns would leave a gap > 120 degrees
         double ata[kCoef][kCoef] = {}, atb[kCoef] = {};
@@ -275,13 +287,13 @@ struct Search {
 }  // namespace
 
 // x, y, v, w: (n,) gate arrays. cx, cy: (nc,) centres, radii: (nr,). Returns the
-// coefficients (nc, nr, 7) and the diagnostics (nc, nr, 4): number of gates, largest
+// coefficients (nc, nr, 9) and the diagnostics (nc, nr, 4): number of gates, largest
 // angular gap (deg), order of the fit and the weighted rms residual; NaN for a ring
 // that cannot be fitted.
 std::tuple<py::array_t<double>, py::array_t<double>> gbvtd_rings_py(
     const DArray& x, const DArray& y, const DArray& v, const DArray& w, const DArray& cx,
     const DArray& cy, const DArray& radii, double half_width, int max_order, int min_points,
-    double max_gap_deg, int n_threads) {
+    double max_gap_deg, bool geometric_limit, int n_threads) {
     if (x.ndim() != 1 || y.ndim() != 1 || v.ndim() != 1 || w.ndim() != 1 ||
         x.shape(0) != y.shape(0) || x.shape(0) != v.shape(0) || x.shape(0) != w.shape(0))
         throw std::invalid_argument("x, y, v and w must be 1-D arrays of the same length");
@@ -289,7 +301,7 @@ std::tuple<py::array_t<double>, py::array_t<double>> gbvtd_rings_py(
         throw std::invalid_argument("cx and cy must be 1-D of the same length, radii 1-D");
     if (!(half_width > 0.0)) throw std::invalid_argument("half_width must be positive");
     if (max_order < 0 || max_order > kMaxOrder)
-        throw std::invalid_argument("max_order must be between 0 and 3");
+        throw std::invalid_argument("max_order must be between 0 and 4");
     const int64_t nc = cx.shape(0), nr = radii.shape(0);
     py::array_t<double> coef({static_cast<py::ssize_t>(nc), static_cast<py::ssize_t>(nr),
                               static_cast<py::ssize_t>(kCoef)});
@@ -300,7 +312,7 @@ std::tuple<py::array_t<double>, py::array_t<double>> gbvtd_rings_py(
     {
         py::gil_scoped_release release;
         const Gates gates(x.data(), y.data(), v.data(), w.data(), x.shape(0), 2.0 * half_width);
-        const FitSettings fs{half_width, max_order, min_points, max_gap_deg * kDeg};
+        const FitSettings fs{half_width, max_order, min_points, max_gap_deg * kDeg, geometric_limit};
         const double* cxp = cx.data();
         const double* cyp = cy.data();
         const double* rp = radii.data();
@@ -322,14 +334,16 @@ std::tuple<py::array_t<double>, py::array_t<double>> gbvtd_rings_py(
 
 // Nelder-Mead search (reflection 1, expansion 2, contraction 0.5, shrink 0.5) of the
 // centre that maximises the axisymmetric tangential wind of the ring of every radius,
-// from every start. starts: (ng, 2). Returns (ng, nr, 5): the centre x and y, the
+// from every start. The first simplex is the equilateral triangle of circumradius `step`
+// around the start (one vertex to the north), the search ends when all three sides are
+// shorter than `tol` (Lee and Marks 2000). starts: (ng, 2). Returns (ng, nr, 5): the centre x and y, the
 // tangential wind, the number of evaluations and 1 if the simplex converged.
 py::array_t<double> center_search_py(const DArray& x, const DArray& y, const DArray& v,
                                      const DArray& w, const DArray& starts, const DArray& radii,
                                      double half_width, int max_order, int min_points,
-                                     double max_gap_deg, double um, double vm, double step,
-                                     double tol, int max_iter, double limit, double anchor_x,
-                                     double anchor_y, int n_threads) {
+                                     double max_gap_deg, bool geometric_limit, double um, double vm,
+                                     double step, double tol, int max_iter, double limit,
+                                     double anchor_x, double anchor_y, int n_threads) {
     if (x.ndim() != 1 || y.ndim() != 1 || v.ndim() != 1 || w.ndim() != 1 ||
         x.shape(0) != y.shape(0) || x.shape(0) != v.shape(0) || x.shape(0) != w.shape(0))
         throw std::invalid_argument("x, y, v and w must be 1-D arrays of the same length");
@@ -338,7 +352,7 @@ py::array_t<double> center_search_py(const DArray& x, const DArray& y, const DAr
     if (!(half_width > 0.0) || !(step > 0.0) || !(tol > 0.0) || max_iter < 1)
         throw std::invalid_argument("half_width, step and tol must be positive, max_iter at least 1");
     if (max_order < 0 || max_order > kMaxOrder)
-        throw std::invalid_argument("max_order must be between 0 and 3");
+        throw std::invalid_argument("max_order must be between 0 and 4");
     const int64_t ng = starts.shape(0), nr = radii.shape(0);
     py::array_t<double> out({static_cast<py::ssize_t>(ng), static_cast<py::ssize_t>(nr),
                              static_cast<py::ssize_t>(5)});
@@ -346,7 +360,9 @@ py::array_t<double> center_search_py(const DArray& x, const DArray& y, const DAr
     {
         py::gil_scoped_release release;
         const Gates gates(x.data(), y.data(), v.data(), w.data(), x.shape(0), 2.0 * half_width);
-        const Search search{&gates, FitSettings{half_width, max_order, min_points, max_gap_deg * kDeg},
+        const Search search{&gates,
+                            FitSettings{half_width, max_order, min_points, max_gap_deg * kDeg,
+                                        geometric_limit},
                             um, vm, anchor_x, anchor_y, limit};
         const double* sp = starts.data();
         const double* rp = radii.data();
@@ -355,8 +371,9 @@ py::array_t<double> center_search_py(const DArray& x, const DArray& y, const DAr
                 const int64_t ig = t / nr, ir = t % nr;
                 const double R = rp[ir];
                 int64_t n_eval = 0;
-                double vx[3] = {sp[ig * 2], sp[ig * 2] + step, sp[ig * 2]};
-                double vy[3] = {sp[ig * 2 + 1], sp[ig * 2 + 1], sp[ig * 2 + 1] + step};
+                const double half = 0.5 * step, wide = 0.5 * std::sqrt(3.0) * step;
+                double vx[3] = {sp[ig * 2], sp[ig * 2] - wide, sp[ig * 2] + wide};
+                double vy[3] = {sp[ig * 2 + 1] + step, sp[ig * 2 + 1] - half, sp[ig * 2 + 1] - half};
                 double fv[3];
                 for (int k = 0; k < 3; ++k) fv[k] = search.cost(vx[k], vy[k], R, n_eval);
                 bool converged = false;
@@ -366,8 +383,9 @@ py::array_t<double> center_search_py(const DArray& x, const DArray& y, const DAr
                     for (int a = 1; a < 3; ++a)
                         for (int b = a; b > 0 && fv[o[b]] < fv[o[b - 1]]; --b) std::swap(o[b], o[b - 1]);
                     const int ib = o[0], im = o[1], iw = o[2];
-                    const double size = std::max(std::hypot(vx[im] - vx[ib], vy[im] - vy[ib]),
-                                                 std::hypot(vx[iw] - vx[ib], vy[iw] - vy[ib]));
+                    const double size = std::max({std::hypot(vx[im] - vx[ib], vy[im] - vy[ib]),
+                                                  std::hypot(vx[iw] - vx[ib], vy[iw] - vy[ib]),
+                                                  std::hypot(vx[iw] - vx[im], vy[iw] - vy[im])});
                     if (fv[ib] >= kBad) break;
                     if (size < tol) {
                         converged = true;
@@ -423,12 +441,12 @@ PYBIND11_MODULE(_tc_winds, m) {
     m.doc() = "GBVTD ring fits and the simplex centre search of tropical cyclones";
     m.def("gbvtd_rings", &gbvtd_rings_py, py::arg("x"), py::arg("y"), py::arg("v"), py::arg("w"),
           py::arg("cx"), py::arg("cy"), py::arg("radii"), py::arg("half_width"),
-          py::arg("max_order") = 3, py::arg("min_points") = 12, py::arg("max_gap") = 120.0,
-          py::arg("n_threads") = 0);
+          py::arg("max_order") = 4, py::arg("min_points") = 12, py::arg("max_gap") = 120.0,
+          py::arg("geometric_limit") = false, py::arg("n_threads") = 0);
     m.def("center_search", &center_search_py, py::arg("x"), py::arg("y"), py::arg("v"),
           py::arg("w"), py::arg("starts"), py::arg("radii"), py::arg("half_width"),
           py::arg("max_order") = 2, py::arg("min_points") = 12, py::arg("max_gap") = 120.0,
-          py::arg("um") = 0.0, py::arg("vm") = 0.0, py::arg("step") = 2000.0,
-          py::arg("tol") = 50.0, py::arg("max_iter") = 200, py::arg("limit") = 1.0e30,
-          py::arg("anchor_x") = 0.0, py::arg("anchor_y") = 0.0, py::arg("n_threads") = 0);
+          py::arg("geometric_limit") = false, py::arg("um") = 0.0, py::arg("vm") = 0.0,
+          py::arg("step") = 4000.0, py::arg("tol") = 50.0, py::arg("max_iter") = 200,
+          py::arg("limit") = 1.0e30, py::arg("anchor_x") = 0.0, py::arg("anchor_y") = 0.0, py::arg("n_threads") = 0);
 }

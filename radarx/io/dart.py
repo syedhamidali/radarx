@@ -11,8 +11,8 @@ Writes the super-observations of :func:`radarx.retrieve.superobs` as an ASCII
 
 The layout was written from the DART source and documentation (the files of
 the ``NCAR/DART`` repository named below), not from memory. **The file was not
-tested with DART itself**, which is not installed where radarx is developed:
-the tests read the file back with a reader that uses only the layout below.
+tested with DART itself**: the tests read the file back with a reader that
+uses only the layout below.
 
 Layout (``obs_sequence_mod.f90``, ``write_obs_seq`` and ``write_obs``)::
 

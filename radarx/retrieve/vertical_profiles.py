@@ -2002,8 +2002,8 @@ def rd_qvp(
     precipitation is the same all around the radar (Murphy et al. 2020 [2]_,
     who describe it).
 
-    The paper of Tobin and Kumjian (2017) could not be read (it is not open
-    access); this function follows the description of Murphy et al. (2020):
+    This function follows the description of Murphy et al. (2020); the paper
+    of Tobin and Kumjian (2017) has not been compared:
     QVPs of several elevations, each from data within 50 km of the radar,
     combined by inverse distance weighting. What is radarx's own, and **not
     checked against the paper**: the form of the weight, ``ground_range **

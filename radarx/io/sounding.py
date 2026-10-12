@@ -175,8 +175,8 @@ same constants). Formulas and constants, with what is and is not traceable:
 - Radio refractivity :math:`N = (n - 1) 10^6` of :func:`refractivity`: the
   two-term formula of Bean and Dutton [10], Eq. (1.17),
   :math:`N = 77.6\\,p/T + 3.73\\times10^5\\,e/T^2` (p and e in hPa, T in K),
-  read in the book (the constants are those of Smith and Weintraub [11], as
-  the book reports them; that paper itself was not read), and the two
+  as given in the book (the constants are those of Smith and Weintraub [11],
+  as the book reports them; the paper has not been compared), and the two
   variants listed there and in ITU-R P.453-9 (``form``).
 - Wind: the meteorological convention, direction the wind blows *from*
   clockwise from north, :math:`u = -s \\sin\\phi`, :math:`v = -s \\cos\\phi`
@@ -876,8 +876,8 @@ def refractivity(
         :math:`N = 77.6\\,p/T + 3.732\\times10^5\\,e/T^2`, Eqs. (2)-(4) of
         ITU-R P.453-9 [3] (the wet constant differs by 0.05 %).
 
-    The equations were read in the book [1] and the recommendation [3]; the
-    paper of Smith and Weintraub [2] was not read. Heights, units and the
+    The equations follow the book [1] and the recommendation [3]; the
+    paper of Smith and Weintraub [2] has not been compared. Heights, units and the
     saturation and humidity functions are those of this module: the vapour
     pressure comes from :func:`saturation_vapor_pressure` times the relative
     humidity, or from the specific humidity or dew point.

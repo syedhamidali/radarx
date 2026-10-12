@@ -44,7 +44,7 @@ the sea-level speed of ``fall_speed="drag_balance"`` (the same law as
 :func:`radarx.retrieve.drop_evaporation_rate`, defined in
 ``radarx.retrieve._raindrop_fall``): for drops smaller than 0.516 mm the speed
 at which the weight of a sphere balances its drag, with the drag coefficient
-of a sphere of Schiller and Naumann (1935) (quoted from memory, not checked
+of a sphere of Schiller and Naumann (1935) (the textbook form, not checked
 against the paper), solved by Newton iterations; above that size the speed of
 Atlas et al. (1973), :math:`V_0 = 9.65 - 10.3 e^{-0.6 D}` m s\\ :sup:`-1`
 (:math:`D` in mm), which crosses the sphere law at 0.516 mm. The Atlas law

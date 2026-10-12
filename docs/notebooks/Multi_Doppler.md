@@ -261,8 +261,8 @@ at 10 km. `w_boundary` accepts `"obrien"`: after the minimisation the mass
 flux is corrected, in each column, by the part of its value at the top that
 grows as the square of the height (`obrien_error="constant"`: linearly), so
 that `w = 0` there (O'Brien 1970). The option follows the open ARPS code and
-documentation of the adjustment; the paper itself could not be read, see the
-docstring.
+documentation of the adjustment; the equations of the paper itself have not been
+compared, see the docstring.
 
 ```{code-cell} ipython3
 adjusted = rx.retrieve.multi_doppler(coarse, coarse_bg, fall_speed_correction=False,

@@ -1940,8 +1940,8 @@ def multi_doppler(
     radar :math:`k` in :math:`J_o` is :math:`C_o / \\sigma_k^2`; radarx has no
     model of :math:`\\sigma_k` from the signal to noise ratio or the
     reflectivity, since the formula for the variance of the pulse-pair
-    velocity estimate (Zrnic 1977; Doviak and Zrnic 1993) could not be read
-    here; give the error from the radar's own noise model. The error of the
+    velocity estimate (Zrnic 1977; Doviak and Zrnic 1993) is not implemented;
+    give the error from the radar's own noise model. The error of the
     horizontal wind from two radars depends on the crossing angle of the beams
     (derived in :func:`dual_doppler_analytic`): the minimiser of :math:`J_o`
     already weights the observations through this geometry, and
@@ -2340,10 +2340,9 @@ def dual_doppler_analytic(
     mass-weighted divergence error constant instead, :math:`s = (z - z_0)/
     (z_{top} - z_0)` (the exponent 1), the minimiser of the integral of
     :math:`(\\rho\\,\\delta D)^2` with :math:`w = 0` at the top, derived here
-    from first principles. The paper itself could not be read (the publisher
-    refuses anonymous access and no open copy was found), so its equations,
-    its weighting and the choice of the default are not checked against it;
-    the implementation follows the open code and the description cited above.
+    from first principles. The equations and the weighting of the paper itself
+    and the choice of the default have not been checked against it; the
+    implementation follows the open code and the description cited above.
     The adjustment uses the highest grid level as the top and needs a full
     column, so in ``dual_doppler_analytic`` a column with a gap in the
     divergence is NaN.

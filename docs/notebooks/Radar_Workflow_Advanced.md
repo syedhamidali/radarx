@@ -1786,17 +1786,18 @@ with xr.open_dataset(work / "grid.nc") as cf_grid:
 ## 13. Tropical-cyclone winds from one radar
 
 `synthetic_vortex` forward-models a modified Rankine-combined vortex
-(Chen et al. 2013) with a mean wind, a wavenumber-1 asymmetry and noise to the
+(Lee et al. 1999) with a mean wind, a wavenumber-1 asymmetry and noise to the
 Doppler velocity of one radar 70 km away, and `vortex_profile` gives its
 axisymmetric truth. `tc_center` finds the circulation centre and the radius of
-maximum wind (the simplex consensus of Bell and Lee 2012), `gbvtd` retrieves the
-axisymmetric tangential and radial wind and the wavenumber-1 asymmetry on rings
-around it (the ground-based velocity track display, Lee et al. 1999, with the
-equations of Liou et al. 2005) and `tc_decompose` splits the result into the
-symmetric and asymmetric winds on a polar grid. The
+maximum wind (the GBVTD-simplex of Lee and Marks 2000 with the consensus of Bell
+and Lee 2012), `gbvtd` retrieves the axisymmetric tangential and radial wind and the
+wavenumber 1 to 3 asymmetries on rings around it (the ground-based velocity track
+display, Lee et al. 1999) and `tc_decompose` splits the result into the symmetric
+and asymmetric winds on a polar grid. The
 [tropical-cyclone notebook](Tropical_Cyclone_Winds) tests the retrieval against
-the vortex, shows the sensitivity to the centre (1, 2 and 5 km) and tries the
-Tauktae (2021) volume of the Goa radar, which is too far away to be retrieved.
+the vortex, reproduces the numbers of the three papers of the GBVTD series, shows
+the sensitivity to the centre (1, 2 and 5 km) and tries the Tauktae (2021) volume
+of the Goa radar, which is too far away to be retrieved.
 
 ```{code-cell} ipython3
 tc_true = (0.0, 70000.0)  # centre, m east and north of the radar
@@ -1804,8 +1805,8 @@ tc_sweep = synthetic_vortex(
     center=tc_true, vmax=45.0, rmw=18000.0, xt=0.6, asymmetry={1: (0.2, 60.0)},
     mean_wind=(6.0, 0.0), noise=1.5, seed=2, azimuth_step=2.0, max_range=120000.0,
 )
-tc_found = tc_center(tc_sweep, min_radius=10000.0, max_radius=30000.0, max_wavenumber=1)
-tc_acc = tc_sweep.radarx.tc_center(min_radius=10000.0, max_radius=30000.0, max_wavenumber=1)  # the accessor
+tc_found = tc_center(tc_sweep, min_radius=10000.0, max_radius=30000.0)
+tc_acc = tc_sweep.radarx.tc_center(min_radius=10000.0, max_radius=30000.0)  # the accessor
 tc_radii = np.arange(4000.0, 40001.0, 2000.0)
 tc_rings = gbvtd(tc_sweep, tc_found, radii=tc_radii, mean_wind=(6.0, 0.0))
 tc_rings_acc = tc_sweep.radarx.gbvtd(tc_true, radii=tc_radii, mean_wind=(6.0, 0.0))  # the accessor
@@ -1814,8 +1815,8 @@ tc_polar = tc_decompose(tc_rings, azimuth=np.arange(0.0, 360.0, 10.0))
 print(f"centre error {np.hypot(float(tc_found.CENTER_X) - tc_true[0], float(tc_found.CENTER_Y) - tc_true[1]):.0f} m, "
       f"RMW {float(tc_found.RMW) / 1e3:.1f} km (truth 18), maximum {float(tc_found.VT_MAX):.1f} m/s (truth 45)")
 print(f"VT0 rms error {float(np.sqrt(np.nanmean((tc_rings.VT0 - tc_vt) ** 2))):.2f} m/s; "
-      f"wavenumber-1 amplitude {float(tc_rings.VT1_AMPLITUDE.sel(radius=30000.0)):.1f} m/s "
-      f"(truth {0.2 * float(tc_vt[13]):.1f}) towards {float(tc_rings.VT1_AZIMUTH.sel(radius=30000.0)):.0f} deg (truth 60)")
+      f"wavenumber-1 amplitude {float(tc_polar.AZIMUTHAL_AMPLITUDE.sel(wavenumber=1, radius=30000.0)):.1f} m/s "
+      f"(truth {0.2 * float(tc_vt[13]):.1f}) towards {float(tc_polar.AZIMUTHAL_PHASE.sel(wavenumber=1, radius=30000.0)):.0f} deg (truth 60)")
 print("accessors agree:", bool(np.isclose(float(tc_acc.CENTER_X), float(tc_found.CENTER_X))
                            and np.allclose(tc_rings_acc.VT0, gbvtd(tc_sweep, tc_true, radii=tc_radii, mean_wind=(6.0, 0.0)).VT0)))
 ```

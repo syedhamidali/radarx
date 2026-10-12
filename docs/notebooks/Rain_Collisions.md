@@ -26,8 +26,8 @@ mass flux, that is the rain rate, to rounding.
 
 This notebook checks the scheme against the tables of the two papers, runs a
 Marshall-Palmer rain through a 4 km shaft, and shows what the choices of
-radarx are. The equations, the places where the printed equations had to be
-read with care, and the limits are in the documentation of
+radarx are. The equations, the places where the printed equations are not used
+as printed, and the limits are in the documentation of
 `radarx.retrieve.rain_collisions`.
 
 ```{code-cell} ipython3
@@ -213,7 +213,7 @@ for rr in rates.values:
 ## What is, and is not, in the scheme
 
 - The parameters come from the two papers as printed, except for four places
-  where the scan cannot be taken literally (listed in the module
+  where the printed equations are not used as printed (listed in the module
   documentation); the numbers of the tables above are reproduced.
 - The large drop that is left after a breakup is not the Gaussian of the paper
   but a drop whose size makes the event conserve mass (as in McFarquhar 2004):

@@ -761,11 +761,10 @@ def vil(
     ``Z`` in mm6 m-3 and ``dh`` in m. See :mod:`radarx.retrieve.vil` for the
     columns of the three kinds of input and the integration limits.
 
-    Not checked against Greene and Clark (1972), which could not be
-    obtained. The coefficient, the exponent and the units are confirmed by the
-    integral form in Seo et al. (2020, Eq. 3-4); the 56 dBZ cap, the 0 dBZ
-    ``min_dbz`` and the linear variation of Z with height between samples are
-    radarx choices.
+    Not checked against Greene and Clark (1972). The coefficient, the exponent
+    and the units are confirmed by the integral form in Seo et al. (2020, Eq.
+    3-4); the 56 dBZ cap, the 0 dBZ ``min_dbz`` and the linear variation of Z
+    with height between samples are radarx choices.
 
     Parameters
     ----------
@@ -1103,13 +1102,12 @@ def vil_density(
     above about 3.5 g m-3 are used as a sign of large hail in the literature
     on the product (not checked against the paper).
 
-    Not checked against Amburn and Wolf (1997), which could not be
-    obtained, so the definition of the echo top there (threshold, above ground
-    or sea level) is not confirmed. Here the echo top is that of
-    :func:`echo_top` (18 dBZ by default) and the height is taken above
-    ``base_height``, a radarx choice. Both products use the same options as in
-    :func:`vil` and :func:`echo_top`, so the density is a lower bound where
-    ``VIL_LOWER_BOUND`` of :func:`vil` is set.
+    Not checked against Amburn and Wolf (1997), so the definition of the echo
+    top there (threshold, above ground or sea level) is not confirmed. Here the
+    echo top is that of :func:`echo_top` (18 dBZ by default) and the height is
+    taken above ``base_height``, a radarx choice. Both products use the same
+    options as in :func:`vil` and :func:`echo_top`, so the density is a lower
+    bound where ``VIL_LOWER_BOUND`` of :func:`vil` is set.
 
     Parameters
     ----------

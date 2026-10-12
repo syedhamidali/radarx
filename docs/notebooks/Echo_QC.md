@@ -209,7 +209,7 @@ The MetSignal score has no 3 x 3 averaging and no speckle filter; `min_size`
 adds the radarx filter if wanted. The default scheme is unchanged and removes
 less echo.
 
-The method of Gourley et al. (2007) is not available: its membership functions
+The method of Gourley et al. (2007) is not implemented: its membership functions
 are density estimates of the C-band data of one radar that the paper shows as
 plots only, so their numbers cannot be taken from it.
 
