@@ -21,11 +21,11 @@ that contributed to it (Thomas et al. 2004 [2]_, as described by [3]_, p.
 8628).
 
 Source of the file layout. The ASCII layout is that of files written by
-``lma_analysis``. Rison et al. (1999) and Thomas et al. (2004) were not
-consulted for it, and no published format specification is cited. The column set
-and header lines below were taken from sample ``lma_analysis`` files, and the
-output was compared with the xlma-python package (variable names and
-flash-density products); this is a description of what the reader accepts,
+``lma_analysis``. The layout has not been compared with Rison et al. (1999) or
+Thomas et al. (2004), and no published format specification is cited. The
+column set and header lines below were taken from sample ``lma_analysis``
+files, and the output was compared with the xlma-python package (variable names
+and flash-density products); this is a description of what the reader accepts,
 not a citation of a specification. The CF variable names follow xlma-python
 (https://github.com/deeplycloudy/xlma-python, MIT licence).
 

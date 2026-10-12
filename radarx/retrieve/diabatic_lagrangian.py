@@ -194,7 +194,7 @@ cloud, rain evaporation and freezing, graupel sublimation and graupel melting
 "follow the modified LFO formulation used by G04", i.e. Gilmore et al. (2004a)
 [7], and refers to the supplemental material of that paper for the equations;
 that supplement (doi:10.1175/MWR2760s1; cited by Gilmore et al. 2004a, pp.
-1897, 1899, 1900 and 1901, and 2004b, p. 2611) was not consulted.
+1897, 1899, 1900 and 1901, and 2004b, p. 2611) has not been compared.
 radarx implements the rates from the original equations of LFO83
 [12] (which the supplement is stated to be "based upon", Gilmore et al.
 2004a, p. 1899), with the rain and graupel size distributions of the DLA.
@@ -251,7 +251,7 @@ Differences from Gilmore et al. (2004a, b) and Z13a, as far as the
 published papers state them: (i) the "Li" scheme of Gilmore et al. 2004a [7]
 (p. 1900) does not assume, contrary to LFO83, that the diameter and terminal
 fall speed of cloud ice and cloud water are zero in the accretion equations,
-and its modified forms were in the supplement, which was not consulted; radarx
+and its modified forms were in the supplement, which has not been compared; radarx
 uses the LFO83 forms (40) and (51); (ii) Gilmore et al. (2004a, p. 1901, eq. 1-2
 and the text below them) used constant intercepts and densities
 (:math:`n_{0r} = 8 \\times 10^6`, :math:`n_{0h} = 4 \\times 10^4` m\\ :sup:`-4`,
@@ -1487,7 +1487,7 @@ def microphysical_rates(
     (1983) [1], with the constants listed in the module documentation (the
     equation, appendix and page pointers are given there). Z13a [2] says the
     DLA uses the modified LFO formulation of Gilmore et al. (2004a), whose
-    supplement was not consulted; see the module documentation for what
+    supplement has not been compared; see the module documentation for what
     differs. The tendencies are limited as a numerical safeguard of radarx.
 
     Parameters

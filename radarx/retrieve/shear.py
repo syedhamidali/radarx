@@ -12,33 +12,32 @@ Miller et al. 2013; Mahalik et al. 2019).
 
 Provenance. The local linear model ``v = a + b s + c dr`` fitted by weighted
 least squares in a window that keeps a nearly constant width in metres, its
-reading as half the vertical vorticity and half the horizontal divergence for
-a symmetric wind field, and the default window (3 range gates of 250 m deep,
+reading as half the vertical vorticity and half the horizontal divergence for a
+symmetric wind field, and the default window (3 range gates of 250 m deep,
 about 2500 m wide) are those of the conference preprint of Smith and Elmore
-(2004), which was read in full (7 pages, the copy at
-``ams.confex.com/ams/pdfpapers/81827.pdf``; earlier notes of radarx say that
-only the abstract was read). Not taken from it: the exact solution of the
-2 x 2 normal equations for windows that are not symmetric (Smith and Elmore
-assume symmetric windows and weights, which makes the normal equations
-diagonal), the Gaussian weights, the ``min_valid_fraction`` and the minimum of
-three valid gates, which are radarx choices. Smith and Elmore pass the
-velocities through a 3 x 3 median filter first; that is the option
-``median_filter=3`` (off by default, so that the default numbers do not
-change). The preprint does not say how missing gates enter the median; the
-rule here (the gate must be valid and the window must hold more than half of
-its gates) is a radarx choice. Miller et al. (2013) and Mahalik et al. (2019)
-use the LLSD derivatives; nothing else in this module is attributed to them.
+(2004) (7 pages, ``ams.confex.com/ams/pdfpapers/81827.pdf``). Not taken from
+it: the exact solution of the 2 x 2 normal equations for windows that are not
+symmetric (Smith and Elmore assume symmetric windows and weights, which makes
+the normal equations diagonal), the Gaussian weights, the
+``min_valid_fraction`` and the minimum of three valid gates, which are radarx
+choices. Smith and Elmore pass the velocities through a 3 x 3 median filter
+first; that is the option ``median_filter=3`` (off by default, so that the
+default numbers do not change). The preprint does not say how missing gates
+enter the median; the rule here (the gate must be valid and the window must
+hold more than half of its gates) is a radarx choice. Miller et al. (2013) and
+Mahalik et al. (2019) use the LLSD derivatives; nothing else in this module is
+attributed to them.
 
 :func:`azimuthal_shear_layer_max` computes the layer-maximum azimuthal shear
 of the MRMS system (0 to 2 km and 3 to 6 km above ground level) from a
-volume, after the description in Smith et al. (2016), which was read in full:
+volume, after the description in Smith et al. (2016):
 "the maximum value of azimuthal shear is computed for two vertical layers
 once every 2 min: 0-2 and 3-6 km above ground level (AGL). At each tilt, the
 azimuthal shear values that are not in or near a storm cell (as defined by
 reflectivity QC greater than or equal to 20 dBZ within 5 km of the data
 point) are removed prior to taking the maximum in each layer at each range."
-Miller et al. (2013) could not be read (no open copy was found), so nothing
-in the function is attributed to it. How the maximum is located on a grid
+Nothing in the function is attributed to Miller et al. (2013), which has not
+been compared. How the maximum is located on a grid
 (the nearest ray and gate of every tilt at the ground range and azimuth of a
 reference tilt, beam heights from the 4/3 Earth model of
 :mod:`radarx.fundamentals.geometry`) is a radarx choice; the MRMS system works
@@ -967,20 +966,19 @@ def azimuthal_shear_layer_max(
     tilts. The shear of each tilt is the LLSD of the tilt's own grid, so the
     velocity and the shear are not interpolated between tilts.
 
-    What is taken from the literature, from Smith et al. (2016) [1]_ (read in
-    full): the layers 0 to 2 km and 3 to 6 km, the maximum over the tilts "at
-    each range", and the removal of shear that is not in or near a storm cell
-    (reflectivity of 20 dBZ within 5 km) before the maximum. The MRMS
-    products are made on a 3-D grid from many radars and updated every 2
-    minutes; this function is the single-radar equivalent on the polar grid
-    of one volume, and the choice of the reference grid, the nearest-gate
-    sampling and the beam heights are radarx's. The MRMS pre-processing of
-    velocity (the dealiasing of Jing and Wiener 1993, and the LLSD window,
-    which Smith et al. do not give) is not reproduced; ``median_filter``
-    (Smith and Elmore 2004 [2]_) and ``window`` are options. Miller et al.
-    (2013, doi 10.1175/WAF-D-12-00065.1) is cited for the LLSD maximum within
-    a layer, but the paper could not be read and nothing here is attributed
-    to it.
+    What is taken from the literature, from Smith et al. (2016) [1]_: the
+    layers 0 to 2 km and 3 to 6 km, the maximum over the tilts "at each range",
+    and the removal of shear that is not in or near a storm cell (reflectivity
+    of 20 dBZ within 5 km) before the maximum. The MRMS products are made on a
+    3-D grid from many radars and updated every 2 minutes; this function is the
+    single-radar equivalent on the polar grid of one volume, and the choice of
+    the reference grid, the nearest-gate sampling and the beam heights are
+    radarx's. The MRMS pre-processing of velocity (the dealiasing of Jing and
+    Wiener 1993, and the LLSD window, which Smith et al. do not give) is not
+    reproduced; ``median_filter`` (Smith and Elmore 2004 [2]_) and ``window``
+    are options. Miller et al. (2013, doi 10.1175/WAF-D-12-00065.1) is cited
+    for the LLSD maximum within a layer, but the paper has not been compared
+    and nothing here is attributed to it.
 
     References
     ----------

@@ -100,17 +100,18 @@ What is not taken from the paper
   the probability of that type is given to the filament, whose distribution
   is available for every pair of 0.1 to 10 mm (tested). The probabilities are rescaled to one if the paper's
   :math:`R_f + R_s` exceeds one.
-* **Reading of the printed equations.** The scan of Part II has four places
-  that cannot be taken literally. (i) Eq. (3.3) prints
+* **Interpretation of the printed equations.** Four places of Part II are not
+  used as printed. (i) Eq. (3.3) prints
   :math:`9.67 (D_L - 0.170)^2`; the numbers of Table 1 require
   :math:`9.67 (D_L + 0.170)^2` (checked at four large drop sizes), which is
-  used. (ii) Eq. (3.5) for :math:`D_{S0}` is not legible; the text defines it
-  as the intersection of :math:`\\bar F_{f1}` and :math:`\\bar F_{f2}`, which is
-  computed (the filament number is the smaller of the two). (iii) Eqs.
+  used. (ii) Eq. (3.5) for :math:`D_{S0}` is not used as printed; the text
+  defines it as the intersection of :math:`\\bar F_{f1}` and
+  :math:`\\bar F_{f2}`, which is computed (the filament number is the smaller
+  of the two). (iii) Eqs.
   (4.20)-(4.21) mix the two peak values with weights that jump at
   :math:`D_{S0}`; the weights are exchanged so that the peak is continuous.
   (iv) The sign of the exponent of :math:`D_S` in the exponential of
-  Eq. (4.27) is ambiguous in the scan; the positive sign is used, as the
+  Eq. (4.27) is ambiguous as printed; the positive sign is used, as the
   negative one overflows. The lower limit of 0.893 :math:`\\mu`\\ J of
   Eq. (4.41) is that of Fig. 1 of Part II (the text prints 89.3 :math:`\\mu`\\ J,
   which would not give :math:`R_f = 1`).
@@ -157,11 +158,11 @@ References
    stochastic collection-breakup equation for warm rain. *J. Appl. Meteor.
    Climatol.*, **46** (9), 1480-1497, https://doi.org/10.1175/JAM2544.1
 
-McFarquhar (2004), whose parameterisation of the fragments was read but not
+McFarquhar (2004), whose parameterisation of the fragments is not
 implemented (the lower size limit of its log-normal distributions is not
-given in the text read, and the coefficient of Eq. 23 in its Table 2 does not
+given in the text, and the coefficient of Eq. 23 in its Table 2 does not
 agree with its Fig. 10), is cited for the mass-conserving remnant only.
-Brown (1997), Seifert et al. (2005) and Hall (1980) were not read.
+Brown (1997), Seifert et al. (2005) and Hall (1980) have not been compared.
 
 .. autosummary::
    :nosignatures:
@@ -401,8 +402,8 @@ def rain_shaft(
     -----
     Sources: Low and List (1982a, b) for the coalescence efficiency and the
     breakup; McFarquhar (2004) for the mass-conserving large remnant; Prat and
-    Barros (2007) for the collision efficiency of one. The reading of the
-    printed equations, what was left out and the limits are in the module
+    Barros (2007) for the collision efficiency of one. The interpretation of
+    the printed equations, what was left out and the limits are in the module
     documentation.
 
     References

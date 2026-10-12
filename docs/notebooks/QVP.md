@@ -197,10 +197,10 @@ the other sweeps of the volume.
 [Tobin and Kumjian (2017)](https://doi.org/10.1175/WAF-D-17-0054.1): the
 azimuthal means of all sweeps, from the gates within `rmax` (50 km) of the radar,
 are combined on a regular height grid with weights that fall with the distance
-from the radar, so the profile reaches the ground. That paper is not open access;
-the function follows the description of
-[Murphy et al. (2020)](https://doi.org/10.1175/JTECH-D-20-0011.1), and the form
-of the weight (`ground_range ** -power`) is radarx's own.
+from the radar, so the profile reaches the ground. The function follows the
+description of [Murphy et al. (2020)](https://doi.org/10.1175/JTECH-D-20-0011.1);
+the paper of Tobin and Kumjian has not been compared, and the form of the weight
+(`ground_range ** -power`) is radarx's own.
 
 `cvp` is the columnar vertical profile of Murphy et al. (2020): the sweeps are
 reduced over a sector (here 20 km in range and 20° in azimuth) around a chosen

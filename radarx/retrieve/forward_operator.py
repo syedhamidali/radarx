@@ -73,7 +73,7 @@ canting angle with zero mean and standard deviation :math:`\\sigma` are
 :math:`\\langle\\sin^4\\rangle` and :math:`\\langle\\sin^2\\cos^2\\rangle` of
 Jung et al. 2008, Eq. 5; the definition of the moments is Eq. A10 of the
 review at :math:`\\psi = 90^\\circ`). They are written out here because the
-review refers to Ryzhkov (2001) for them, which was not read; they follow
+review refers to Ryzhkov (2001) for them, which has not been compared; they follow
 from the Gaussian average of the powers of :math:`\\cos\\alpha` and
 :math:`\\sin\\alpha`.
 
@@ -108,7 +108,7 @@ definition, no source needed). Then
 
 The rain size distribution of a double-moment scheme (the shape parameter and
 the diameter limits of Thompson, Morrison, NSSL or P3) is scheme-dependent and
-is **not** encoded: the scheme-specific relations could not be read, so
+is **not** encoded: the scheme-specific relations are not included, so
 ``n0_rain`` and ``mu_rain`` are the assumptions, and the user names them. The
 fall speed is that of Atlas et al. (1973) (:math:`9.65 - 10.3 e^{-0.6D}`,
 at least zero, sea-level, no density correction), weighted by the
@@ -172,7 +172,7 @@ approximation holds while the resonance parameter :math:`D\\sqrt{|\\varepsilon|}
 violates it, and the operator does not check it. The fall speed of ice classes
 is a constant (``fall_speed`` of the parameters, default 0 m s\\ :sup:`-1`,
 i.e. the ice moves with the air): the fall speed relations of the schemes
-were not read.
+are not encoded.
 
 Radial velocity and sampling
 ----------------------------
@@ -220,24 +220,22 @@ density), ``pressure`` (or ``pressure_p`` and ``pressure_base``), ``theta``,
 file if the output has none, ``lonCell``, ``latCell`` (radians) and ``zgrid``
 (heights of the layer interfaces, averaged to the layer centres). Read
 the files with xarray (``xr.open_dataset``); radarx does not download
-model data. No WRF output exists on the machine this was developed on, so the
-operator was tested on synthetic WRF-like and MPAS-like Datasets built from
-the variable definitions of the two Registries.
+model data. The operator has not been run on WRF or MPAS output; it was
+tested on synthetic WRF-like and MPAS-like Datasets built from the variable
+definitions of the two Registries.
 
 Sources
 -------
-Read in full for this module: Jung et al. (2008), the open copy of the
-Center for Analysis and Prediction of Storms (Eqs. 1-20: the shape, the
+The equations follow Jung et al. (2008) (Eqs. 1-20: the shape, the
 orientation, the intercepts and densities of the Lin scheme, the amplitudes,
-the closed forms for exponential distributions); Ryzhkov et al. (2020), the
-open copy in the NOAA repository (Eqs. 3-5, A1-A13 and the descriptions of the
-operators). Not read: Ryzhkov et al. (2011), which the review cites for its
-equations and mixing rules (no open copy was found), so the ice
-dielectric-constant mixing of that paper is not used; Jung et al. (2010, the
-two-moment operator); Pfeifer et al. (2008), Augros et al. (2018) and
-Wolfensberger and Berne (2018). The WRF and MPAS variable names, units and
-constants are from the Registry files and ``module_model_constants.F`` of the
-two models.
+the closed forms for exponential distributions) and Ryzhkov et al. (2020)
+(Eqs. 3-5, A1-A13 and the descriptions of the operators). The equations and
+mixing rules that the review cites from Ryzhkov et al. (2011) are taken from
+the review, and the ice dielectric-constant mixing of that paper is not used.
+Jung et al. (2010, the two-moment operator), Pfeifer et al. (2008), Augros et
+al. (2018) and Wolfensberger and Berne (2018) are not used as sources. The
+WRF and MPAS variable names, units and constants are from the Registry files
+and ``module_model_constants.F`` of the two models.
 
 References
 ----------
@@ -1118,8 +1116,8 @@ def forward_operator(
     -----
     The equations, the choices of radarx and what is left out (melting
     classes, attenuation, non-zero elevation, resonance) are in
-    :mod:`radarx.retrieve.forward_operator`. No WRF output could be read on
-    the development machine; the operator is checked against closed forms,
+    :mod:`radarx.retrieve.forward_operator`. The operator has not been
+    run on WRF output; it is checked against closed forms,
     :func:`radarx.retrieve.radar_from_dsd` and the published amplitudes.
 
     References

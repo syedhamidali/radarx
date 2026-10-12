@@ -17,7 +17,7 @@ Hail
 ----
 :func:`hail_fall_speed` gives the terminal velocity of hail from its maximum
 dimension :math:`D` (cm) with the power laws of the corrigendum of Heymsfield
-et al. (2020) to Heymsfield et al. (2018), read in the corrigendum:
+et al. (2020) to Heymsfield et al. (2018):
 
 * ``"heymsfield2020"`` (default): :math:`V_t = 7.6 D^{0.89}` m s\\ :sup:`-1`
   for :math:`D < D_x` and :math:`V_t = 8.4 D^{0.67}` for :math:`D > D_x`
@@ -41,7 +41,7 @@ it give a warning, because the laws fall off from the measured speeds there.
 Earlier versions: the single law of Heymsfield et al. (2018) was in error and
 is replaced by the corrigendum (the corrected laws are used here); Knight and
 Heymsfield (1983) and Heymsfield and Wright (2014), the other forms named in
-the literature, could not be read and are not implemented.
+the literature, are not implemented.
 
 Melting snow
 ------------
@@ -58,10 +58,10 @@ with the liquid water fraction :math:`\\ell` between 0 and 1. This is Eqs. (14)
 and (15) of Frick et al. (2013), who took the form from the wind-tunnel
 experiments of Mitra et al. (1990, their Fig. 2): the speed rises slowly
 and linearly with :math:`\\ell` for small :math:`\\ell` and fast for :math:`\\ell
-> 0.7`; the coefficient :math:`\\alpha_\\Psi` fits their Fig. 2. Mitra et al.
-was not read; the equations are those of Frick et al. The speed
-:math:`V_s` is not given by a relation that could be read: Frick et al. take it
-from Khvorostyanov and Curry (2005), which is not available here. Pass a
+> 0.7`; the coefficient :math:`\\alpha_\\Psi` fits their Fig. 2. The equations
+are those of Frick et al.; Mitra et al. has not been compared. The speed
+:math:`V_s` is not given by a relation: Frick et al. take it from
+Khvorostyanov and Curry (2005), which has not been compared. Pass a
 power law :math:`V_s = a D^b` of the diameter :math:`D` (mm) of the raindrop
 of the same mass (``snow=(a, b)``, m s\\ :sup:`-1`), from the mass-diameter and
 fall-speed relations of the snow of your case; there is no default. The speed

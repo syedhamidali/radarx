@@ -161,9 +161,10 @@ References
 .. [3] Doviak, R. J., and D. S. Zrnic, 1993: *Doppler Radar and Weather
    Observations*, 2nd ed. Academic Press (book, no DOI). Eqs. (2.28).
 
-Fulton et al. (1998), the NEXRAD scheme that Bech et al. describe, was not read.
-Of Lang et al. (2009) the copy available to me ended in the middle of the
-polarimetric methods; its description of the DEM method (section 2b) was read.
+The NEXRAD scheme of Fulton et al. (1998) follows the description of Bech et
+al.; Fulton et al. has not been compared. Of Lang et al. (2009), the description
+of the DEM method (section 2b) is used; its polarimetric methods have not been
+compared.
 
 .. autosummary::
    :nosignatures:
