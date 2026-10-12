@@ -38,7 +38,8 @@ shape, orientation and density of the operators of
 equations of the review of
 [Ryzhkov et al. (2020)](https://doi.org/10.3390/atmos11040362) (the
 operator of [Ryzhkov et al. 2011](https://doi.org/10.1175/2010JAMC2363.1) is
-reproduced there; the 2011 paper itself has no open copy and was not read). A
+reproduced there; the equations of the 2011 paper are taken from the 2020
+review). A
 threaded C++ kernel does the work per cell and per gate, with a NumPy fallback
 that gives the same numbers.
 
@@ -47,11 +48,10 @@ gives fitted amplitudes but not the size distribution of the mixture, so a
 bright band is missing), attenuation, the beam pattern (a gate is the beam
 centre), non-zero elevation in the orientation moments, resonance scattering of
 large ice, and the rain size distribution of any double-moment scheme: that is
-scheme-specific, was not readable in a source, and is therefore an explicit
-assumption (`n0_rain`, `mu_rain`, or the number concentration). No WRF output
-exists on the machine that built this page, so the model data below are
-synthetic Datasets that follow the variable definitions of the WRF and MPAS
-Registries.
+scheme-specific and not encoded, and is therefore an explicit assumption
+(`n0_rain`, `mu_rain`, or the number concentration). The operator has not been
+run on WRF output; the model data below are synthetic Datasets that follow the
+variable definitions of the WRF and MPAS Registries.
 
 ```{code-cell} ipython3
 import time

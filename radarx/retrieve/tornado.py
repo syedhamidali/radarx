@@ -37,7 +37,7 @@ Two independent tornado diagnostics on WSR-88D volumes:
 
 What is taken from the TorNet paper and what is not. Checked against the
 arXiv preprint of Veillette et al. (arXiv:2401.16437v1, January 2024); the
-published version (doi below) was not consulted, and its wording and
+published version (doi below) has not been compared, and its wording and
 numbers may differ.
 
 * Chip shape, tilts, variables, range-folded mask, the -3 fill of gates
@@ -980,8 +980,7 @@ def rotation_couplets(
         the same sense of rotation on neighbouring tilts for them to be linked.
         Default 5000, a radarx choice (the NSSL Mesocyclone
         Detection Algorithm derives a maximum feature distance from the sizes
-        of the two features; the formula could not be read reliably in the
-        copy of the algorithm description that was available).
+        of the two features; that formula is not used here).
     max_skip : int, optional
         Tilts that may be missing between two linked couplets: when no couplet
         of the tilt directly below matches, up to ``max_skip`` tilts further
@@ -1028,14 +1027,13 @@ def rotation_couplets(
     description [4]_: a feature at one elevation angle is correlated with a
     feature at the previous angle when their centres are closer than a maximum
     feature distance (the description takes the first match in its list; the
-    nearest is taken here), and a second previous angle is tried when the
-    first has no match; a vortex with two or more features is "3-D shear" or a
-    mesocyclone. Not taken from it: the distance (the formula of the copy
-    read is garbled), the thresholds on shear, momentum and aspect of its
-    features, and the time continuity it also requires. The published
-    algorithm papers (Stumpf et al. 1998; Mitchell et al. 1998) were not
-    read. The association is made on the (few) couplets in Python: the
-    numerical work is the LLSD.
+    nearest is taken here), and a second previous angle is tried when the first
+    has no match; a vortex with two or more features is "3-D shear" or a
+    mesocyclone. Not taken from it: the distance (its formula is not used), the
+    thresholds on shear, momentum and aspect of its features, and the time
+    continuity it also requires. The published algorithm papers (Stumpf et al.
+    1998; Mitchell et al. 1998) have not been compared. The association is made
+    on the (few) couplets in Python: the numerical work is the LLSD.
 
     References
     ----------

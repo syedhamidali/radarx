@@ -1188,8 +1188,8 @@ def echo_mask(
     surveillance cut of a split cut, so that cut is classified without the
     velocity term (weights 7 instead of 8).
 
-    Gourley et al. (2007) [1] is not implemented as a method. The paper was
-    read in full, but its three-class classifier rests on membership
+    Gourley et al. (2007) [1] is not implemented as a method. Its three-class
+    classifier rests on membership
     functions that are Gaussian-kernel density estimates of C-band data of
     one radar (Trappes, Fig. 3 and Eq. 2) published as plots only; the text
     gives the modes (:math:`\\rho_{hv}` 0.97, 0.92 and 0.42 for precipitation,
@@ -1198,7 +1198,7 @@ def echo_mask(
     areas of the weights (0.243, 0.203, 0.081 giving 1 : 1.20 : 3.00 by
     Eq. 4) and one membership example, not the curves. The slope of the
     range correction of the texture (Eq. 1, Fig. 2) and the pulse-to-pulse
-    variability of Z of Table 1 are not available either. Curves digitised
+    variability of Z of Table 1 are not given either. Curves digitised
     from the figure would be an invention at S band. The method is built to
     be refitted for each radar and wavelength.
 

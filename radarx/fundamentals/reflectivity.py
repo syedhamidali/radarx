@@ -7,8 +7,8 @@ and reflectivity conversions. These functions are based on established
 meteorological principles and are commonly used in radar meteorology.
 
 The Marshall-Palmer Z-R pair (Z = 200 R^1.6) is attributed to Marshall and
-Palmer [1]_ by Rinehart [2]_ and Bringi and Chandrasekar [3]_; the paper [1]_
-itself was not consulted for the pair.
+Palmer [1]_ by Rinehart [2]_ and Bringi and Chandrasekar [3]_; the pair has
+not been compared with the paper [1]_.
 :func:`hitschfeld_bordan_correction` corrects the attenuation along the ray
 with the solution of Hitschfeld and Bordan [4]_.
 :func:`dbz_attenuation_correction` is not a published method, it is
@@ -214,7 +214,7 @@ def hitschfeld_bordan_correction(
     so that the correction in dB is the path-integrated attenuation
     ``PIA = -(10 / b) log10(1 - c S)``, added to the measured dBZ. The closed
     form above is derived here from the power law and the definition of
-    ``Zm``; the text of [1]_ could not be read for this, and the form agrees
+    ``Zm``; it has not been compared with the text of [1]_, and the form agrees
     with a forward model of the attenuation in the tests.
 
     ``S`` is evaluated at the centre of each gate (the gates before it in

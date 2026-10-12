@@ -17,8 +17,8 @@ Two laws are available:
     For drops smaller than ``D_JOIN`` (0.516 mm) the speed at which the weight
     of a sphere, less its buoyancy, balances the drag, with the drag
     coefficient of a sphere :math:`C_D = 24 / Re\\,(1 + 0.15 Re^{0.687})`
-    (Schiller and Naumann 1935; the formula is quoted from memory of the
-    textbook form and not checked against the paper). Dividing the balance by
+    (Schiller and Naumann 1935; the textbook form of the formula, not
+    checked against the paper). Dividing the balance by
     the Reynolds number squared gives the Best number
     :math:`C_D Re^2 = (4/3)\\, g\\, \\rho_a (\\rho_w - \\rho_a) D^3 / \\mu^2 =
     24 Re + 3.6 Re^{1.687}`, solved for :math:`Re = \\rho_a V D / \\mu` by
@@ -30,10 +30,10 @@ Two laws are available:
     :math:`g` = 9.81 m s-2, radarx choices.
 
 The speed of a sphere under 0.5 mm is the standard small-drop physics but
-was not compared with the Gunn and Kinzer (1949) table or Beard (1976) here,
-whose texts could not be read. The 0.71 m s-1 at 0.2 mm and 0.25 m s-1 at
+has not been compared with the Gunn and Kinzer (1949) table or Beard (1976).
+The 0.71 m s-1 at 0.2 mm and 0.25 m s-1 at
 0.1 mm it gives are the values of an independent drag-balance calculation of
-the validation of issue 231; from memory Gunn and Kinzer give about 0.7 m s-1
+the validation of issue 231; Gunn and Kinzer give about 0.7 m s-1
 at 0.2 mm (not checked). Between 0.6 and 2 mm the Atlas law is within 0.05
 m s-1 of the Gunn-Kinzer fit of Bringi and Chandrasekar (as quoted in that
 issue; not checked).

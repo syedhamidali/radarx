@@ -69,7 +69,7 @@ sweep.
 
 **UNRAVEL.** ``dealias_velocity(..., method="unravel")`` implements the
 algorithm of Louf et al. (2020) [5], which needs no reference velocity. The
-paper was read in full; the reference implementation of the authors (open
+implementation follows the paper; the reference implementation of the authors (open
 source, ``github.com/vlouf/dealias``) was used to cross-check the order of the
 steps and the values the paper does not give, and no code was taken from it.
 A gate carries the flag -3 (missing), 0 (not processed), 1 (processed,
@@ -2097,7 +2097,7 @@ def correct_dual_prf(
     description). The window is cut at the ends of a ray and wraps around
     north for full-circle sweeps.
 
-    What is taken from the paper (read in full) is the local dealiasing step:
+    What is taken from the paper is the local dealiasing step:
     the median of at least nine valid gates in a 3 x 3 square enlarged when
     needed, the test against the unambiguous velocity and the correction by
     multiples of twice the unambiguous velocity of the ray's PRF, with several
@@ -2110,7 +2110,7 @@ def correct_dual_prf(
     labels. The window rule of the paper relies on the minimum group size of
     its first step; a fixed ``min_points`` is used here. The algorithm of Joe
     and May (2003, https://doi.org/10.1175/1520-0426(2003)20<429:CODPVE>2.0.CO;2)
-    could not be read and is not implemented. The paper tests the algorithm
+    is not implemented. The paper tests the algorithm
     on one C-band radar with an unfolding factor of 3; where outliers cluster
     (strong shear, large spectrum width) several passes are needed, and the
     median of a window that holds genuine strong shear can move true gates.

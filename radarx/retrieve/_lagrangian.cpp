@@ -13,7 +13,7 @@
 // and Orville (1983, J. Climate Appl. Meteor. 22, 1065-1092,
 // doi:10.1175/1520-0450(1983)022<1065:BPOTSF>2.0.CO;2). The LFO83 rates are
 // implemented from LFO83 itself, not from the "modified LFO" supplement of
-// Gilmore et al. (2004a), which was not consulted. Numbers without a pointer
+// Gilmore et al. (2004a), which has not been compared. Numbers without a pointer
 // are radarx choices. The NumPy reference implementation in
 // radarx/retrieve/_lagrangian_numpy.py follows the same steps in the same
 // order and is the test oracle of this file.

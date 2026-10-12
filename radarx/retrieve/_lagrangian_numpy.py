@@ -23,7 +23,7 @@ https://doi.org/10.1175/1520-0493(1989)117<0231:AIWSA>2.0.CO;2); Hsie et al.
 https://doi.org/10.1175/1520-0450(1980)019<0950:NSOIPC>2.0.CO;2). Numbers
 without a pointer are radarx choices. The LFO83 rates are implemented from
 LFO83, not from the "modified LFO" supplement of Gilmore et al. (2004a), which
-was not consulted.
+has not been compared.
 """
 
 import math
