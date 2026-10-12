@@ -299,7 +299,7 @@ LABELS = {
 
 def documented():
     """Function names of the table in docs/usage.md by behaviour."""
-    text = (Path(__file__).parents[1] / "docs" / "usage.md").read_text()
+    text = (Path(__file__).parents[1] / "docs" / "usage.md").read_text(encoding="utf-8")
     found = {kind: set() for kind in LABELS.values()}
     for line in text.splitlines():
         cells = [c.strip() for c in line.strip("|").split("|")]

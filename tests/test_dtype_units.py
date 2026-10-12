@@ -322,7 +322,7 @@ def test_units_written_by_the_source_are_udunits():
     for path in sorted(root.rglob("*.py")):
         if path.name == "imd.py":
             continue
-        for lineno, text in _units_values(ast.parse(path.read_text())):
+        for lineno, text in _units_values(ast.parse(path.read_text(encoding="utf-8"))):
             found += 1
             assert valid_units(text), f"{path.relative_to(root)}:{lineno}: {text!r}"
     assert found > 300
@@ -333,6 +333,6 @@ def test_old_unit_spellings_do_not_appear_in_the_source():
     for path in sorted(root.rglob("*.py")):
         if path.name in READS_OR_MIMICS:
             continue
-        for node in ast.walk(ast.parse(path.read_text())):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if isinstance(node, ast.Constant) and node.value in OLD_SPELLINGS:
                 pytest.fail(f"{path.relative_to(root)}:{node.lineno}: {node.value!r}")
