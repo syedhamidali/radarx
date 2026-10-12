@@ -162,15 +162,27 @@ __all__ = ["dealias_velocity", "correct_dual_prf", "dealias_confidence"]
 
 __doc__ = __doc__.format("\n   ".join(__all__))
 
+import copy
+import functools
 import warnings
 from itertools import pairwise
 
 import numpy as np
 import xarray as xr
 
+from .._compat import renamed_arguments
 from .._fields import VELOCITY, as_sweep, find_field
 from .._provenance import provenance
-from .._registry import accessor_method
+from .._registry import accessor_for
+from .._sweepwise import (
+    Output,
+    Sweep,
+    apply_sweeps,
+    dask_support,
+    is_plain,
+    ray_coordinate,
+    ray_dimension,
+)
 from ..fundamentals.geometry import beam_center_height
 from ._products import product_tree
 
@@ -205,12 +217,17 @@ _MAX_RAY_GAP = 10  # empty rays bridged between regions
 _GATE_PASSES = 2
 
 
+@dask_support(
+    "lazy",
+    "With ``sweep_continuity=True`` a volume of several sweeps is computed, because each sweep follows the one below it; pass ``sweep_continuity=False`` to keep the sweeps lazy.",
+)
+@renamed_arguments(radar="obj")
 @provenance(
     "Velocity dealiasing: region-based (radarx's combination of published "
     "concepts) or UNRAVEL (Louf et al. 2020)"
 )
 def dealias_velocity(
-    radar,
+    obj,
     field=None,
     nyquist_velocity=None,
     *,
@@ -233,7 +250,7 @@ def dealias_velocity(
 
     Parameters
     ----------
-    radar : xarray.Dataset or xarray.DataTree
+    obj : xarray.Dataset or xarray.DataTree
         A PPI sweep on ``(azimuth, range)`` with ``azimuth`` and
         ``elevation`` coordinates, a single sweep node of a volume
         (``dtree["sweep_0"]``), or a volume with ``sweep_*`` groups, e.g. from
@@ -375,8 +392,8 @@ def dealias_velocity(
     >>> products = dtree.radarx.dealias("VRADH")  # doctest: +SKIP
     >>> dtree = dtree.radarx.assign(products)  # doctest: +SKIP
     """
-    radar = as_sweep(radar)
-    field = find_field(radar, VELOCITY, field)
+    obj = as_sweep(obj)
+    field = find_field(obj, VELOCITY, field)
     if method not in ("region", "unravel"):
         raise ValueError(f"method must be 'region' or 'unravel', not {method!r}")
     if method == "unravel":
@@ -417,30 +434,22 @@ def dealias_velocity(
             raise ImportError("the compiled UNRAVEL kernel is not available")
         options["compiled"] = HAS_UNRAVEL_KERNEL and engine != "numpy"
         options["alpha"] = float(alpha)
-    if isinstance(radar, xr.Dataset):
-        sweep = _Sweep(radar, field, _nyquist(radar, field, nyquist_velocity))
-        if method == "unravel":
-            (folds,) = _unravel_folds([radar], [sweep], False, options)
-            result = sweep.wrap(folds, "unravel", "unravel").rename(name)
-            return _with_confidence(result, sweep, options) if confidence else result
-        ref = None
-        if reference is not None:
-            ref = reference.broadcast_like(sweep.da).transpose(sweep.ray, "range")
-            ref = ref.values.astype(np.float64)
-        if wind_profile is not None:
-            ref = _fill(ref, _wind_reference(radar, sweep, wind_profile))
-        (solved,) = _region_folds([sweep], **options)
-        (folds,) = _absolute_folds([sweep], [solved], [ref], **options)
-        source = "reference" if reference is not None else "wind_profile"
-        anchor = _anchor_of(sweep, solved[1], ref, source, "")
-        result = sweep.wrap(folds, anchor).rename(name)
-        if confidence:
-            result = _with_confidence(result, sweep, options)
-        return result
+    if isinstance(obj, xr.Dataset):
+        sweep, result = _dealias_sweep(
+            obj,
+            field,
+            _nyquist(obj, field, nyquist_velocity),
+            reference,
+            wind_profile,
+            method,
+            options,
+        )
+        result = result.rename(name)
+        return _with_confidence(result, sweep, options) if confidence else result
     if reference is not None:
         raise ValueError("reference is only supported for a single sweep.")
     return _dealias_tree(
-        radar,
+        obj,
         field,
         nyquist_velocity,
         wind_profile=wind_profile,
@@ -455,23 +464,106 @@ def dealias_velocity(
 
 def _with_confidence(result, sweep, options):
     """Dataset of a dealiased DataArray and its confidence (see :func:`dealias_confidence`)."""
-    values = np.ascontiguousarray(
-        result.transpose(sweep.ray, "range").values, dtype=np.float64
-    )
     opts = _confidence_options(
         1, _MIN_NEIGHBOURS, 1.0, options["n_threads"], options["compiled"]
     )
-    conf = _confidence_values(values, sweep.azimuth, sweep.nyquist, opts)
-    if result.dims[0] != sweep.ray:
-        conf = conf.T
+    conf = _confidence(result, sweep.azimuth, sweep.nyquist, opts)
     out = result.to_dataset()
     out[f"{result.name}_confidence"] = xr.DataArray(
-        conf,
-        dims=result.dims,
+        conf.data,
+        dims=conf.dims,
         coords=result.coords,
         attrs=_confidence_attrs(opts, sweep.nyquist),
     )
     return out
+
+
+def _confidence_core(batch, options):
+    """Confidence of sweeps given as ``((azimuth, nyquist), (velocity,))``."""
+    return [
+        (
+            _confidence_values(
+                np.ascontiguousarray(arrays[0], dtype=np.float64),
+                azimuth,
+                nyquist,
+                options,
+            ),
+        )
+        for (azimuth, nyquist), arrays in batch
+    ]
+
+
+def _confidence(da, azimuth, nyquist, options):
+    """Confidence of a field on (..., ray, range), lazy for dask arrays."""
+    core = functools.partial(_confidence_core, options=options)
+    (conf,) = apply_sweeps(
+        core, Sweep([da], context=(azimuth, nyquist)), (Output(np.float32),)
+    )
+    return conf
+
+
+_ANCHORS = ("zero_mean", "wind_profile", "reference", "sweep_below", "unravel")
+
+
+def _dealias_core(batch, method, options):
+    """
+    Dealiased velocity of sweeps given as ``((sweep, wind, geometry), (velocity,
+    reference))``: the velocity and the code of the anchor of each.
+    """
+    sweeps = [ctx[0].with_velocity(arrays[0]) for ctx, arrays in batch]
+    if method == "unravel":
+        folds = _unravel_folds_of(sweeps, [ctx[2] for ctx, _ in batch], options)
+        codes = [_ANCHORS.index("unravel")] * len(sweeps)
+    else:
+        refs = [
+            _fill(
+                (
+                    None
+                    if arrays[1] is None
+                    else np.ascontiguousarray(arrays[1], dtype=np.float64)
+                ),
+                ctx[1],
+            )
+            for ctx, arrays in batch
+        ]
+        solved = _region_folds(sweeps, **options)
+        folds = _absolute_folds(sweeps, solved, refs, **options)
+        codes = [
+            _ANCHORS.index(
+                _anchor_of(
+                    sw,
+                    sol[1],
+                    ref,
+                    "wind_profile" if arrays[1] is None else "reference",
+                    "",
+                )
+            )
+            for sw, sol, ref, (_, arrays) in zip(sweeps, solved, refs, batch)
+        ]
+    return [
+        (sw.velocity + 2.0 * sw.nyquist * f, code)
+        for sw, f, code in zip(sweeps, folds, codes)
+    ]
+
+
+def _dealias_sweep(ds, field, nyquist, reference, wind_profile, method, options):
+    """The sweep and its dealiased velocity (lazy for dask or a stack)."""
+    sweep = _Sweep(ds, field, nyquist, load=False)
+    wind = None
+    if wind_profile is not None:
+        wind = _wind_reference(ds, sweep, wind_profile)
+    ref = None if reference is None else reference.broadcast_like(sweep.da)
+    geometry = _unravel_geometry(ds, sweep) if method == "unravel" else None
+    core = functools.partial(_dealias_core, method=method, options=options)
+    result, code = apply_sweeps(
+        core,
+        Sweep([sweep.da, ref], context=(sweep, wind, geometry)),
+        (Output(sweep.dtype), Output(np.int8, "scalar")),
+    )
+    anchor = None
+    if is_plain(sweep.da):
+        anchor = _ANCHORS[int(code.values)]
+    return sweep, sweep.decorate(result.data, anchor, method)
 
 
 # --------------------------------------------------------------------------
@@ -488,13 +580,6 @@ def _use_compiled(engine):
     if engine == "compiled" and not HAS_COMPILED_KERNEL:
         raise ImportError("the compiled dealiasing kernel is not available")
     return HAS_COMPILED_KERNEL and engine != "numpy"
-
-
-def _ray_dim(da):
-    dims = [d for d in da.dims if d != "range"]
-    if da.ndim != 2 or len(dims) != 1 or "range" not in da.dims:
-        raise ValueError(f"{da.name!r} must be 2-D on (azimuth, range).")
-    return dims[0]
 
 
 def _nyquist(ds, field, override, sweep=None):
@@ -529,28 +614,48 @@ def _ray_links(azimuth, max_gap=2.0):
 
 
 class _Sweep:
-    """A sweep's velocity as contiguous (ray, range) float64 plus metadata."""
+    """
+    A sweep's geometry and its velocity as contiguous (ray, range) float64.
 
-    def __init__(self, ds, field, nyquist):
+    The velocity is read when the sweep is made (``load=True``) or set later
+    for the sweeps of a stack or of dask arrays (:meth:`with_velocity`).
+    """
+
+    def __init__(self, ds, field, nyquist, load=True):
         self.da = ds[field]
-        self.ray = _ray_dim(self.da)
+        self.ray = ray_dimension(self.da)
         self.nyquist = nyquist
-        vel = np.array(self.da.transpose(self.ray, "range").values, dtype=np.float64)
-        # values beyond the Nyquist velocity are flags (e.g. range folded)
-        vel[~(np.abs(vel) <= _NYQUIST_TOLERANCE * nyquist)] = np.nan
-        self.velocity = np.ascontiguousarray(vel)
+        self.velocity = None
         self.links = _ray_links(ds["azimuth"].values)
-        self.azimuth = np.asarray(ds["azimuth"].values, dtype=np.float64)
-        az = np.deg2rad(np.asarray(ds["azimuth"].values, dtype=np.float64))
+        self.azimuth = ray_coordinate(ds, "azimuth")
+        az = np.deg2rad(self.azimuth)
         self.ray_sin = np.ascontiguousarray(np.sin(az))
         self.ray_cos = np.ascontiguousarray(np.cos(az))
+        if load:
+            self.velocity = self._flagged(self.da.transpose(self.ray, "range").values)
+
+    def _flagged(self, values):
+        """Values beyond the Nyquist velocity are flags (e.g. range folded)."""
+        vel = np.array(values, dtype=np.float64)
+        vel[~(np.abs(vel) <= _NYQUIST_TOLERANCE * self.nyquist)] = np.nan
+        return np.ascontiguousarray(vel)
+
+    def with_velocity(self, values):
+        """A copy of the sweep with the (ray, range) ``values`` as velocity."""
+        sweep = copy.copy(self)
+        sweep.velocity = self._flagged(values)
+        return sweep
 
     def wrap(self, folds, anchor=None, method="region"):
         """Dealiased DataArray with the input's coordinates, dims and dtype."""
-        da = self.da
         out = self.velocity + 2.0 * self.nyquist * folds
-        if da.dims[0] != self.ray:
+        if self.da.dims[0] != self.ray:
             out = out.T
+        return self.decorate(out, anchor, method)
+
+    def decorate(self, values, anchor=None, method="region"):
+        """The dealiased ``values`` (on the dims of the field) as a DataArray."""
+        da = self.da
         dtype = da.dtype if np.issubdtype(da.dtype, np.floating) else np.float64
         attrs = dict(da.attrs)
         attrs.update(
@@ -574,13 +679,30 @@ class _Sweep:
         )
         if anchor is not None:
             attrs["dealias_anchor"] = anchor
-        return da.copy(data=out.astype(dtype, copy=False)).assign_attrs(attrs)
+        return da.copy(data=values.astype(dtype, copy=False)).assign_attrs(attrs)
+
+    @property
+    def dtype(self):
+        """Type of the dealiased velocity: that of the field if it is floating."""
+        dtype = self.da.dtype
+        return dtype if np.issubdtype(dtype, np.floating) else np.dtype(np.float64)
+
+
+def _sweep_elevation(ds, sweep):
+    """Elevation of every ray; the same for the sweeps of a stack."""
+    elevation = ds["elevation"]
+    if set(elevation.dims) - {sweep.ray}:
+        raise ValueError(
+            f"the elevation has the dimensions {elevation.dims}: a wind_profile "
+            "needs the same elevation for every sweep of a stack"
+        )
+    return np.broadcast_to(elevation.values, ds[sweep.ray].shape)
 
 
 def _beam_height(ds, sweep):
     """Gate heights above sea level (4/3 Earth) on (ray, range)."""
     rng = ds["range"].values.astype(np.float64)[None, :]
-    elev = np.broadcast_to(ds["elevation"].values, ds[sweep.ray].shape)
+    elev = _sweep_elevation(ds, sweep)
     alt = float(ds["altitude"]) if "altitude" in ds.variables else 0.0
     return beam_center_height(rng, elev.astype(np.float64)[:, None], radar_height=alt)
 
@@ -593,7 +715,7 @@ def _wind_reference(ds, sweep, wind_profile):
     u = np.interp(z, height[order], wind_profile["u"].values[order], np.nan, np.nan)
     v = np.interp(z, height[order], wind_profile["v"].values[order], np.nan, np.nan)
     az = np.deg2rad(ds["azimuth"].values.astype(np.float64))[:, None]
-    elev = np.broadcast_to(ds["elevation"].values, ds[sweep.ray].shape)
+    elev = _sweep_elevation(ds, sweep)
     cos_el = np.cos(np.deg2rad(elev.astype(np.float64)))[:, None]
     return (u * np.sin(az) + v * np.cos(az)) * cos_el
 
@@ -779,6 +901,28 @@ def _dealias_tree(
     datasets = {n: _sweep_dataset(dtree, n) for n in names}
     elevation = {n: float(np.nanmedian(datasets[n]["elevation"].values)) for n in names}
     names.sort(key=lambda n: elevation[n])  # stable: split cuts keep their order
+    if not all(is_plain(datasets[n][field]) for n in names):
+        if not (sweep_continuity and len(names) > 1):
+            return _dealias_lazy_tree(
+                dtree,
+                names,
+                datasets,
+                field,
+                nyquist_velocity,
+                wind_profile,
+                name,
+                products_only,
+                confidence,
+                method,
+                options,
+            )
+        for n in names:  # the chain of sweeps needs the velocities
+            if datasets[n][field].ndim != 2:
+                raise ValueError(
+                    "sweep_continuity=True needs sweeps on (azimuth, range); "
+                    "pass sweep_continuity=False for sweeps with extra dimensions"
+                )
+            datasets[n] = datasets[n].assign({field: datasets[n][field].compute()})
     sweeps = [
         _Sweep(datasets[n], field, _nyquist(datasets[n], field, nyquist_velocity, n))
         for n in names
@@ -826,6 +970,33 @@ def _dealias_tree(
     )
 
 
+def _dealias_lazy_tree(
+    dtree,
+    names,
+    datasets,
+    field,
+    nyquist_velocity,
+    wind_profile,
+    name,
+    products_only,
+    confidence,
+    method,
+    options,
+):
+    """Dealias the sweeps of a volume one by one, lazily for dask arrays."""
+    sweeps, results = [], []
+    for n in names:
+        nyquist = _nyquist(datasets[n], field, nyquist_velocity, n)
+        sweep, result = _dealias_sweep(
+            datasets[n], field, nyquist, None, wind_profile, method, options
+        )
+        sweeps.append(sweep)
+        results.append(result)
+    return _tree_products(
+        dtree, names, sweeps, results, name, products_only, confidence, options
+    )
+
+
 def _tree_products(
     dtree, names, sweeps, results, name, products_only, confidence, options
 ):
@@ -842,32 +1013,25 @@ def _tree_products(
     return out
 
 
-def _unravel_folds(datasets, sweeps, three_d, options):
-    """
-    Integer folds (NaN where a gate is dropped) of sweeps dealiased with UNRAVEL.
+def _unravel_geometry(ds, sweep):
+    """Range, ground range, ground position and circle flag of a sweep."""
+    rng = np.ascontiguousarray(ds["range"].values, dtype=np.float64)
+    elevation = (
+        float(np.nanmedian(ds["elevation"].values))
+        if "elevation" in ds.variables
+        else 0.0
+    )
+    ground = rng * np.cos(np.deg2rad(elevation))
+    az = np.deg2rad(sweep.azimuth)
+    x = np.ascontiguousarray(ground[None, :] * np.sin(az)[:, None])
+    y = np.ascontiguousarray(ground[None, :] * np.cos(az)[:, None])
+    return (rng, ground, x, y, _is_full_circle(sweep.azimuth))
 
-    ``datasets`` are the sweeps ordered by elevation. Each sweep is run with
-    the default driver of the paper (compiled kernel, or the Python
-    specification of :mod:`radarx.retrieve._unravel_numpy`), then, if
-    ``three_d`` and there are several, every sweep above the lowest is checked
-    against the corrected sweep below it.
-    """
+
+def _unravel_solve(sweeps, prepared, p, options):
+    """UNRAVEL on each sweep: the corrected velocities and the flags."""
     from . import _unravel_numpy as spec
 
-    p = dict(spec.DEFAULTS, alpha=options["alpha"])
-    prepared = []
-    for ds, s in zip(datasets, sweeps):
-        rng = np.ascontiguousarray(ds["range"].values, dtype=np.float64)
-        elevation = (
-            float(np.nanmedian(ds["elevation"].values))
-            if "elevation" in ds.variables
-            else 0.0
-        )
-        ground = rng * np.cos(np.deg2rad(elevation))
-        az = np.deg2rad(s.azimuth)
-        x = np.ascontiguousarray(ground[None, :] * np.sin(az)[:, None])
-        y = np.ascontiguousarray(ground[None, :] * np.cos(az)[:, None])
-        prepared.append((rng, ground, x, y, _is_full_circle(s.azimuth)))
     if options["compiled"]:
         solved = _unravel.unravel(
             [s.velocity for s in sweeps],
@@ -896,11 +1060,11 @@ def _unravel_folds(datasets, sweeps, three_d, options):
             )
             for s, q in zip(sweeps, prepared)
         ]
-    outs = [np.array(o) for o, _ in solved]
-    flags = [np.array(f) for _, f in solved]
-    if three_d:
-        for k in range(1, len(sweeps)):
-            _check_below(k, outs, flags, sweeps, datasets, prepared, p, options)
+    return [np.array(o) for o, _ in solved], [np.array(f) for _, f in solved]
+
+
+def _folds_of(outs, sweeps):
+    """Integer folds (NaN where a gate is dropped) of corrected velocities."""
     folds = []
     for out, s in zip(outs, sweeps):
         with np.errstate(invalid="ignore"):
@@ -912,6 +1076,36 @@ def _unravel_folds(datasets, sweeps, three_d, options):
                 )
             )
     return folds
+
+
+def _unravel_folds_of(sweeps, prepared, options):
+    """Folds of sweeps dealiased with UNRAVEL one by one (no 3-D check)."""
+    from . import _unravel_numpy as spec
+
+    p = dict(spec.DEFAULTS, alpha=options["alpha"])
+    outs, _ = _unravel_solve(sweeps, prepared, p, options)
+    return _folds_of(outs, sweeps)
+
+
+def _unravel_folds(datasets, sweeps, three_d, options):
+    """
+    Integer folds (NaN where a gate is dropped) of sweeps dealiased with UNRAVEL.
+
+    ``datasets`` are the sweeps ordered by elevation. Each sweep is run with
+    the default driver of the paper (compiled kernel, or the Python
+    specification of :mod:`radarx.retrieve._unravel_numpy`), then, if
+    ``three_d`` and there are several, every sweep above the lowest is checked
+    against the corrected sweep below it.
+    """
+    from . import _unravel_numpy as spec
+
+    p = dict(spec.DEFAULTS, alpha=options["alpha"])
+    prepared = [_unravel_geometry(ds, s) for ds, s in zip(datasets, sweeps)]
+    outs, flags = _unravel_solve(sweeps, prepared, p, options)
+    if three_d:
+        for k in range(1, len(sweeps)):
+            _check_below(k, outs, flags, sweeps, datasets, prepared, p, options)
+    return _folds_of(outs, sweeps)
 
 
 def _check_below(k, outs, flags, sweeps, datasets, prepared, p, options):
@@ -1454,20 +1648,6 @@ def _local_median(
     )
 
 
-def _plain_sweep(ds, field):
-    """``(ray_dim, values (ray, range) float64, azimuth)`` of a sweep field."""
-    if field not in ds:
-        raise KeyError(f"{field!r} is not in the sweep")
-    da = ds[field]
-    ray = _ray_dim(da)
-    values = np.array(da.transpose(ray, "range").values, dtype=np.float64)
-    return (
-        ray,
-        np.ascontiguousarray(values),
-        np.asarray(ds["azimuth"].values, dtype=np.float64),
-    )
-
-
 def _disagreement_numpy(values, wrap, half, threshold, min_neighbours):
     """
     NumPy implementation of the compiled ``neighbour_disagreement`` kernel.
@@ -1557,11 +1737,13 @@ def _confidence_options(window, min_neighbours, threshold, n_threads, compiled):
     }
 
 
+@dask_support("lazy")
+@renamed_arguments(radar="obj")
 @provenance(
     "Confidence of dealiased velocity from the neighbouring gates, a radarx definition"
 )
 def dealias_confidence(
-    radar,
+    obj,
     field=None,
     nyquist_velocity=None,
     *,
@@ -1607,7 +1789,7 @@ def dealias_confidence(
 
     Parameters
     ----------
-    radar : xarray.Dataset or xarray.DataTree
+    obj : xarray.Dataset or xarray.DataTree
         A sweep or a volume with the dealiased velocity and the ``azimuth``
         and ``range`` coordinates.
     field : str, optional
@@ -1651,19 +1833,19 @@ def dealias_confidence(
     options = _confidence_options(
         window, min_neighbours, threshold, n_threads, _use_compiled(engine)
     )
-    radar = as_sweep(radar)
-    field = find_field(radar, _DEALIASED, field)
-    if isinstance(radar, xr.Dataset):
-        return _confidence_sweep(radar, field, nyquist_velocity, None, name, options)
+    obj = as_sweep(obj)
+    field = find_field(obj, _DEALIASED, field)
+    if isinstance(obj, xr.Dataset):
+        return _confidence_sweep(obj, field, nyquist_velocity, None, name, options)
     nodes = {}
-    for sweep in _sweep_names_with(radar, field):
-        ds = _sweep_dataset_of(radar, sweep)
+    for sweep in _sweep_names_with(obj, field):
+        ds = _sweep_dataset_of(obj, sweep)
         nodes[sweep] = _confidence_sweep(
             ds, field, nyquist_velocity, sweep, name, options
         ).to_dataset()
     if not nodes:
         raise ValueError(f"No sweep contains {field!r}.")
-    return product_tree(radar, nodes)
+    return product_tree(obj, nodes)
 
 
 def _sweep_names_with(dtree, field):
@@ -1680,13 +1862,10 @@ def _sweep_dataset_of(dtree, sweep):
 
 def _confidence_sweep(ds, field, nyquist, sweep, name, options):
     vn = _nyquist(ds, field, nyquist, sweep)
-    ray, values, azimuth = _plain_sweep(ds, field)
-    conf = _confidence_values(values, azimuth, vn, options)
     da = ds[field]
-    if da.dims[0] != ray:
-        conf = conf.T
+    conf = _confidence(da, ray_coordinate(ds, "azimuth"), vn, options)
     return xr.DataArray(
-        conf,
+        conf.data,
         dims=da.dims,
         coords=da.coords,
         name=name or f"{field}_confidence",
@@ -1710,6 +1889,30 @@ def _prf_flags(ds, ray, prf, first_ray):
     return values.astype(bool)
 
 
+def _dual_prf_core(batch, vh, vl, min_points, max_window, passes, n_threads, compiled):
+    """Dual-PRF correction of sweeps given as ``((high, wrap), (velocity,))``."""
+    half_max = (max_window - 1) // 2
+    results = []
+    for (high, wrap), arrays in batch:
+        current = np.ascontiguousarray(arrays[0], dtype=np.float64)
+        vu = np.where(high, vh, vl)[:, None]
+        shift = np.zeros(current.shape, dtype=np.int32)
+        for _ in range(passes):
+            med = _local_median(
+                current, wrap, 1, half_max, min_points, True, n_threads, compiled
+            )
+            with np.errstate(invalid="ignore"):
+                outlier = np.isfinite(med) & (np.abs(current - med) > vu)
+                k = np.floor((med - current) / (2.0 * vu) + 0.5)
+            if not outlier.any():
+                break
+            k = np.where(outlier, k, 0.0)
+            current = current + 2.0 * vu * k
+            shift += k.astype(np.int32)
+        results.append((current, shift))
+    return results
+
+
 def _dual_prf_sweep(
     ds,
     field,
@@ -1724,30 +1927,28 @@ def _dual_prf_sweep(
     n_threads,
     compiled,
 ):
-    ray, values, azimuth = _plain_sweep(ds, field)
-    high = _prf_flags(ds, ray, prf, first_ray)
-    vu = np.where(high, vh, vl)[:, None]
-    wrap = _is_full_circle(azimuth)
-    half_max = (max_window - 1) // 2
-    shift = np.zeros(values.shape, dtype=np.int32)
-    current = values
-    for _ in range(passes):
-        med = _local_median(
-            current, wrap, 1, half_max, min_points, True, n_threads, compiled
-        )
-        with np.errstate(invalid="ignore"):
-            outlier = np.isfinite(med) & (np.abs(current - med) > vu)
-            k = np.floor((med - current) / (2.0 * vu) + 0.5)
-        if not outlier.any():
-            break
-        k = np.where(outlier, k, 0.0)
-        current = current + 2.0 * vu * k
-        shift += k.astype(np.int32)
+    if field not in ds:
+        raise KeyError(f"{field!r} is not in the sweep")
     da = ds[field]
-    out = current
-    if da.dims[0] != ray:
-        out, shift = out.T, shift.T
+    ray = ray_dimension(da)
+    high = _prf_flags(ds, ray, prf, first_ray)
+    wrap = _is_full_circle(ray_coordinate(ds, "azimuth"))
+    core = functools.partial(
+        _dual_prf_core,
+        vh=vh,
+        vl=vl,
+        min_points=min_points,
+        max_window=max_window,
+        passes=passes,
+        n_threads=n_threads,
+        compiled=compiled,
+    )
     dtype = da.dtype if np.issubdtype(da.dtype, np.floating) else np.float64
+    out, shift = apply_sweeps(
+        core,
+        Sweep([da], context=(high, wrap)),
+        (Output(dtype), Output(np.int32)),
+    )
     attrs = dict(da.attrs)
     attrs.update(
         {
@@ -1763,12 +1964,13 @@ def _dual_prf_sweep(
             "min_points": min_points,
             "max_window": max_window,
             "passes": passes,
-            "outliers_corrected": int((shift != 0).sum()),
         }
     )
-    corrected = da.copy(data=out.astype(dtype, copy=False)).assign_attrs(attrs)
+    if is_plain(da):
+        attrs["outliers_corrected"] = int((shift.values != 0).sum())
+    corrected = da.copy(data=out.data).assign_attrs(attrs)
     shifts = xr.DataArray(
-        shift,
+        shift.data,
         dims=da.dims,
         coords=da.coords,
         attrs={
@@ -1793,11 +1995,16 @@ def _positive(value, what, sweep):
     return value
 
 
+@dask_support(
+    "lazy",
+    "The attribute ``outliers_corrected`` is written for a sweep in memory only.",
+)
+@renamed_arguments(radar="obj")
 @provenance(
     "Dual-PRF velocity error correction by the local median (Holleman and Beekhuis 2003)"
 )
 def correct_dual_prf(
-    radar,
+    obj,
     field=None,
     *,
     nyquist_high,
@@ -1825,7 +2032,7 @@ def correct_dual_prf(
 
     Parameters
     ----------
-    radar : xarray.Dataset or xarray.DataTree
+    obj : xarray.Dataset or xarray.DataTree
         A sweep, or a volume whose sweeps holding ``field`` are processed one
         by one. The velocity is the output of the radar processor, already
         unfolded to the extended interval.
@@ -1927,8 +2134,8 @@ def correct_dual_prf(
     if int(max_window) != max_window or max_window < 3 or max_window % 2 == 0:
         raise ValueError("max_window must be an odd number of at least 3")
     compiled = _use_compiled(engine)
-    radar = as_sweep(radar)
-    field = find_field(radar, VELOCITY, field)
+    obj = as_sweep(obj)
+    field = find_field(obj, VELOCITY, field)
     name = name or f"{field}_dualprf"
     options = (min_points, max_window, int(passes), name, n_threads, compiled)
 
@@ -1939,29 +2146,19 @@ def correct_dual_prf(
             raise ValueError("nyquist_high must be larger than nyquist_low")
         return vh, vl
 
-    if isinstance(radar, xr.Dataset):
+    if isinstance(obj, xr.Dataset):
         vh, vl = limits(None)
-        return _dual_prf_sweep(radar, field, vh, vl, prf, first_ray, *options)
+        return _dual_prf_sweep(obj, field, vh, vl, prf, first_ray, *options)
     nodes = {}
-    for sweep in _sweep_names_with(radar, field):
+    for sweep in _sweep_names_with(obj, field):
         vh, vl = limits(sweep)
         nodes[sweep] = _dual_prf_sweep(
-            _sweep_dataset_of(radar, sweep), field, vh, vl, prf, first_ray, *options
+            _sweep_dataset_of(obj, sweep), field, vh, vl, prf, first_ray, *options
         )
     if not nodes:
         raise ValueError(f"No sweep contains {field!r}.")
-    return product_tree(radar, nodes)
+    return product_tree(obj, nodes)
 
 
-@accessor_method("dataset", "datatree", name="correct_dual_prf")
-def _correct_dual_prf_accessor(self, field=None, **kwargs):
-    return correct_dual_prf(self.xarray_obj, field, **kwargs)
-
-
-@accessor_method("dataset", "datatree", name="dealias_confidence")
-def _dealias_confidence_accessor(self, field=None, nyquist_velocity=None, **kwargs):
-    return dealias_confidence(self.xarray_obj, field, nyquist_velocity, **kwargs)
-
-
-_correct_dual_prf_accessor.__doc__ = correct_dual_prf.__doc__
-_dealias_confidence_accessor.__doc__ = dealias_confidence.__doc__
+accessor_for(correct_dual_prf, "dataset", "datatree")
+accessor_for(dealias_confidence, "dataset", "datatree")

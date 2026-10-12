@@ -134,7 +134,8 @@ def test_engines_agree(method, offset):
     b = estimate_kdp(ds, engine="compiled", **kw)
     for name in ("PHIDP_processed", "KDP", "PHIDP_OFFSET"):
         np.testing.assert_array_equal(np.isnan(a[name]), np.isnan(b[name]))
-        np.testing.assert_allclose(a[name], b[name], atol=1e-6, rtol=0)
+        # the fields are float32: the engines differ by one rounding step
+        np.testing.assert_allclose(a[name], b[name], atol=1e-6, rtol=2e-7)
     assert np.isnan(b.KDP[12]).all()
 
 
@@ -165,9 +166,9 @@ def test_optional_fields_and_output_layout(engine):
     assert out.PHIDP_OFFSET.dims == ("azimuth",)
     xr.testing.assert_identical(out.azimuth, ds.azimuth)
     assert "elevation" in out.coords
-    assert out.KDP.attrs["units"] == "degrees/km"
+    assert out.KDP.attrs["units"] == "degree km-1"
     assert out.KDP.attrs["standard_name"] == "radar_specific_differential_phase_hv"
-    assert out.PHIDP_processed.attrs["units"] == "degrees"
+    assert out.PHIDP_processed.attrs["units"] == "degree"
     assert out.PHIDP_processed.attrs["standard_name"] == "radar_differential_phase_hv"
     assert np.isfinite(out.KDP).mean() > 0.5
 
@@ -252,7 +253,7 @@ def test_input_checks(monkeypatch):
         estimate_kdp(ds, rhohv="RHOHV_X")
     with pytest.raises(ValueError, match="two range gates"):
         estimate_kdp(ds.isel(range=slice(0, 1)))
-    with pytest.raises(ValueError, match="2-D"):
+    with pytest.raises(ValueError, match="dimensions"):
         estimate_kdp(ds.assign(PHIDP=ds.PHIDP.isel(azimuth=0)))
     monkeypatch.setattr(kdpmod, "HAS_COMPILED_KERNEL", False)
     with pytest.raises(ImportError, match="compiled KDP kernel"):
@@ -308,7 +309,7 @@ def test_kdp_needs_enough_valid_gates_in_window(engine):
     assert np.isfinite(out.KDP[:, 150:190]).all()
     loose = estimate_kdp(ds, engine=engine, min_valid_fraction=0.0)
     assert np.isfinite(loose.KDP[:, 260:269]).all()
-    assert out.KDP.attrs["units"] == "degrees/km"
+    assert out.KDP.attrs["units"] == "degree km-1"
 
 
 @pytest.fixture(scope="module")
@@ -671,12 +672,12 @@ def test_backscatter_phase_of_the_hubbert_filter(engine):
     out = estimate_kdp(ds, engine=engine, offset=150.0)
     delta = out.PHIDP_BACKSCATTER
     assert delta.dims == out.KDP.dims
-    assert delta.attrs["units"] == "degrees"
+    assert delta.attrs["units"] == "degree"
     measured = (ds.PHIDP.values - 150.0 + 180.0) % 360.0 - 180.0
     resid = measured - out.PHIDP_processed.values
     resid -= 360.0 * np.round(resid / 360.0)
     ok = np.isfinite(delta.values)
-    np.testing.assert_allclose(delta.values[ok], resid[ok], atol=1e-9)
+    np.testing.assert_allclose(delta.values[ok], resid[ok], atol=1e-4, rtol=1e-6)
     bump = 10.0 * np.exp(-0.5 * ((r - 62.0) / 1.0) ** 2)
     centre = (r > 61.5) & (r < 62.5)
     est = np.nanmean(delta.values[:, centre])
@@ -705,7 +706,7 @@ def test_kdp_uncertainty_matches_the_spread_over_rays(method, engine):
         assert 1.0 < ratio < 1.6
     else:
         assert ratio == pytest.approx(1.0, abs=0.2)
-    assert out.KDP_UNCERTAINTY.attrs["units"] == "degrees/km"
+    assert out.KDP_UNCERTAINTY.attrs["units"] == "degree km-1"
     unc = out.KDP_UNCERTAINTY.values
     np.testing.assert_array_equal(np.isnan(unc), np.isnan(out.KDP.values))
     assert (unc[np.isfinite(unc)] > 0).all()

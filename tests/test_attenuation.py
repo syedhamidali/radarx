@@ -288,7 +288,7 @@ def test_zphi_is_exact_for_a_power_law_rain(engine):
         coords={"azimuth": [0.0], "range": ("range", r * 1000.0)},
     )
     out = correct_attenuation(
-        ds, alpha=alpha, beta=0.02, b=b, dbz_min=-50.0, engine=engine
+        ds, alpha=alpha, beta=0.02, b=b, min_dbz=-50.0, engine=engine
     )
     err = out.DBZH_corrected.values[0] - dbz_true
     assert pia[-1] > 25.0  # a strong case
@@ -320,7 +320,7 @@ def test_unconstrained_solution_is_unstable_and_zphi_is_not(engine):
         coords={"azimuth": [0.0], "range": ("range", r * 1000.0)},
     )
     out = correct_attenuation(
-        ds, alpha=alpha, beta=0.02, b=b, dbz_min=-50.0, engine=engine
+        ds, alpha=alpha, beta=0.02, b=b, min_dbz=-50.0, engine=engine
     )
     err = out.DBZH_corrected.values[0] - dbz_true
     assert np.isfinite(out.AH.values[0]).all()
@@ -447,14 +447,14 @@ def test_dataset_result_fields_and_attributes():
         xr.testing.assert_equal(out[name], ds[name])
     assert out.DBZH_corrected.attrs["units"] == "dBZ"
     assert out.ZDR_corrected.attrs["units"] == "dB"
-    assert out.AH.attrs["units"] == "dB/km" and out.PIA.attrs["units"] == "dB"
+    assert out.AH.attrs["units"] == "dB km-1" and out.PIA.attrs["units"] == "dB"
     assert out.DBZH_corrected.attrs["standard_name"] == "equivalent_reflectivity_factor"
     assert out.attrs["attenuation_alpha"] == 0.054
     assert out.attrs["attenuation_beta"] == 0.0157
     # PIDA = (beta / alpha) PIA and corrected = measured + attenuation
-    np.testing.assert_allclose(out.PIDA, out.PIA * 0.0157 / 0.054)
-    np.testing.assert_allclose(out.DBZH_corrected, ds.DBZH + out.PIA)
-    np.testing.assert_allclose(out.ZDR_corrected, ds.ZDR + out.PIDA)
+    np.testing.assert_allclose(out.PIDA, out.PIA * 0.0157 / 0.054, rtol=1e-6)
+    np.testing.assert_allclose(out.DBZH_corrected, ds.DBZH + out.PIA, rtol=1e-6)
+    np.testing.assert_allclose(out.ZDR_corrected, ds.ZDR + out.PIDA, rtol=1e-6)
     assert float(out.DELTA_PHIDP[0]) == pytest.approx(
         float(ds.PHIDP_processed[0, -1] - ds.PHIDP_processed[0, 0])
     )
@@ -625,7 +625,7 @@ def test_raw_phase_is_processed_by_estimate_kdp():
     ds = xr.concat([ds] * nray, "azimuth").assign_coords(azimuth=np.arange(nray) * 1.0)
     ds["PHIDP"] = (("azimuth", "range"), raw)
     out = correct_attenuation(ds, band="C", method="zphi")
-    ref = estimate_kdp(ds, phidp="PHIDP", rhohv="RHOHV", dbzh="DBZH")
+    ref = estimate_kdp(ds, phidp="PHIDP", rhohv="RHOHV", dbz="DBZH")
     both = correct_attenuation(ds.assign(PHIDP_processed=ref.PHIDP_processed), band="C")
     xr.testing.assert_allclose(out.PIA, both.PIA)
     # the span is the span of the true propagation phase, to the noise of the filter
@@ -706,18 +706,18 @@ def test_fields_by_name_or_by_array():
     ref = correct_attenuation(ds, band="C")
     # DataArrays for the fields of a Dataset
     by_array = correct_attenuation(
-        ds, dbzh=ds.DBZH, phidp=ds.PHIDP_processed, zdr=ds.ZDR, band="C"
+        ds, dbz=ds.DBZH, phidp=ds.PHIDP_processed, zdr=ds.ZDR, band="C"
     )
     xr.testing.assert_allclose(by_array.DBZH_corrected, ref.DBZH_corrected)
     xr.testing.assert_allclose(by_array.ZDR_corrected, ref.ZDR_corrected)
     # names of fields of the Dataset
     renamed = ds.rename(PHIDP_processed="PHI_USER", DBZH="Z_USER")
-    by_name = correct_attenuation(renamed, dbzh="Z_USER", phidp="PHI_USER", band="C")
+    by_name = correct_attenuation(renamed, dbz="Z_USER", phidp="PHI_USER", band="C")
     np.testing.assert_allclose(by_name.PIA, ref.PIA)
     with pytest.raises(KeyError, match="'PHI_NONE' is not in the dataset"):
         correct_attenuation(ds, phidp="PHI_NONE", band="C")
     with pytest.raises(KeyError, match="'REFL_NONE' is not in the dataset"):
-        correct_attenuation(ds, dbzh="REFL_NONE", band="C")
+        correct_attenuation(ds, dbz="REFL_NONE", band="C")
 
 
 def test_dataarray_inputs_must_be_dataarrays():

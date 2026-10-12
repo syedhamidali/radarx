@@ -281,6 +281,7 @@ import xarray as xr
 
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 from . import _ice_fall, _raindrop_fall
 from . import _rain_trajectories_numpy as _ref
 
@@ -1025,6 +1026,7 @@ def _check_threads(n_threads):
         raise ValueError("n_threads must be non-negative")
 
 
+@dask_support("computes", "it needs the fields of every time.")
 @provenance("Raindrop trajectories with evaporation, after Dawson et al. (2015)")
 def rain_trajectories(
     source,
@@ -1051,8 +1053,8 @@ def rain_trajectories(
     scheme="rk4",
     evaporated_diameter=0.12,
     store_path=0,
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Trajectories of raindrops from source points to the ground.
@@ -1145,10 +1147,10 @@ def rain_trajectories(
         Keep the path every ``store_path`` steps as ``path_x``, ``path_y``,
         ``path_z``, ``path_diameter`` and ``path_time`` on a ``step`` axis.
         Default 0 (no path).
-    engine : {"auto", "compiled", "numpy"}, optional
-        Implementation. The NumPy reference gives the same results.
     n_threads : int, optional
         Threads of the compiled kernel. Default: all cores.
+    engine : {"auto", "compiled", "numpy"}, optional
+        Implementation. The NumPy reference gives the same results.
 
     Returns
     -------
@@ -1404,6 +1406,7 @@ def _sample_source_dsd(field, ds, motion=(0.0, 0.0)):
     return xr.DataArray(vals.reshape(shape), dims=dims, coords=ds["source_x"].coords)
 
 
+@dask_support("eager", "it needs the fields of every time.")
 @provenance(
     "Backward raindrop trajectories, radarx's own scheme after Dawson et al. (2015)"
 )
@@ -1433,8 +1436,8 @@ def rain_source_points(
     scheme="rk4",
     evaporated_diameter=0.12,
     store_path=0,
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Source points and times aloft of drops arriving at the surface.
@@ -1702,6 +1705,7 @@ def _edges(centers):
     return np.concatenate([[c[0] - (mid[0] - c[0])], mid, [c[-1] + (c[-1] - mid[-1])]])
 
 
+@dask_support("computes", "it works on small in-memory data.")
 @provenance(
     "Surface drop size distribution from landed drops, radarx's own accumulation"
 )
@@ -1924,6 +1928,7 @@ def surface_dsd(
     )
 
 
+@dask_support("eager", "it needs the fields of every time.")
 @provenance(
     "Trajectory-matched drop arrival times, radarx's own after Dawson et al. (2015)"
 )
@@ -1949,8 +1954,8 @@ def trajectory_matched_times(
     evaporated_diameter=0.12,
     tolerance=1e-3,
     max_iterations=12,
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Times at which drops from a moving echo pattern reach a surface site.
@@ -2134,8 +2139,10 @@ def trajectory_matched_times(
     return ds.drop_vars(["landing_time"])
 
 
-@accessor_method("dataset", "datatree", name="rain_trajectories")
-def _rain_trajectories_accessor(self, diameter, **kwargs):
+@accessor_method(
+    "dataset", "datatree", name="rain_trajectories", wraps=rain_trajectories
+)
+def _rain_trajectories_accessor(self):
     """
     Trajectories of raindrops from the points of this object to the ground.
 
@@ -2149,4 +2156,3 @@ def _rain_trajectories_accessor(self, diameter, **kwargs):
         Landing positions and times, diameters, evaporated mass fractions and
         concentration ratios per source point and size.
     """
-    return rain_trajectories(self.xarray_obj, diameter, **kwargs)

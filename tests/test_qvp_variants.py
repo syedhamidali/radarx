@@ -67,7 +67,7 @@ def make_sweep(
                 rng[None, :] * np.ones_like(h),
                 el[:, None] * np.ones_like(h),
             )
-        units = {"DBZH": "dBZ", "ZDR": "dB", "RHOHV": "1", "KDP": "degrees/km"}.get(
+        units = {"DBZH": "dBZ", "ZDR": "dB", "RHOHV": "1", "KDP": "degree km-1"}.get(
             name, "1"
         )
         data[name] = (("azimuth", "range"), values.astype(np.float32), {"units": units})
@@ -845,7 +845,7 @@ def test_cap_removes_rain_products_above_the_bottom():
     )
     assert np.isfinite(higher.RAIN_RATE.values[height.values <= 2500.0]).all()
     # the lower edge of a wide beam is lower: gates just above the cap are kept
-    wide = mask_above_melting_layer(sweep, 2000.0, beam_width=2.0)
+    wide = mask_above_melting_layer(sweep, 2000.0, beamwidth=2.0)
     assert (
         np.isfinite(wide.RAIN_RATE.values).sum()
         > np.isfinite(out.RAIN_RATE.values).sum()
@@ -887,6 +887,16 @@ def test_cap_from_the_melting_layer_outputs():
     assert sweep.RAIN_RATE.attrs.get("comment") is None
 
 
+def test_cap_variables_lazy():
+    pytest.importorskip("dask")
+    sweep = rain_sweep()
+    out = mask_above_melting_layer(sweep.chunk({"azimuth": 20}), 2000.0)
+    assert out.RAIN_RATE.chunks is not None
+    xr.testing.assert_equal(
+        out.RAIN_RATE.compute(), mask_above_melting_layer(sweep, 2000.0).RAIN_RATE
+    )
+
+
 def test_cap_variables_height_dask_volume_and_accessors():
     sweep = rain_sweep()
     one = mask_above_melting_layer(sweep, 2000.0, variables="D0")
@@ -899,13 +909,6 @@ def test_cap_variables_height_dask_volume_and_accessors():
     flat = sweep.assign_coords(elevation=3.0)
     h = vp._gate_height(flat, None, None)
     assert h.dims == ("range",)
-    # lazy
-    lazy = sweep.chunk({"azimuth": 20})
-    out = mask_above_melting_layer(lazy, 2000.0)
-    assert out.RAIN_RATE.chunks is not None
-    xr.testing.assert_equal(
-        out.RAIN_RATE.compute(), mask_above_melting_layer(sweep, 2000.0).RAIN_RATE
-    )
     # a volume
     root = xr.Dataset(coords={"latitude": 45.0, "longitude": 10.0, "altitude": ALT})
     tree = xr.DataTree.from_dict(

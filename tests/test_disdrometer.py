@@ -507,7 +507,9 @@ def test_radar_at_location_geometry():
     assert out.DBZH.item() == pytest.approx(20.0 + r / 2000.0)
     assert str(out.time.values[0])[:21] == "2022-03-31T00:30:04.5"
     assert out.DBZH.attrs["units"] == "dBZ"
-    avg = radar_at_location(sweep, lat, lon, radius=600.0, fields=["DBZH", "VEL", "XX"])
+    avg = radar_at_location(
+        sweep, lat, lon, radius=600.0, data_vars=["DBZH", "VEL", "XX"]
+    )
     assert avg.DBZH.item() == pytest.approx(out.DBZH.item(), abs=0.2)
     assert 44.0 < avg.VEL.item() < 47.0 and np.isnan(avg.XX.item())
     with pytest.raises(ValueError, match="no radar"):
@@ -606,7 +608,7 @@ def test_real_nexrad_gate_above_instrument(klbb):
     h = np.sqrt(r**2 + re**2 + 2 * r * re * np.sin(np.deg2rad(el))) - re
     s = re * np.arcsin(r * np.cos(np.deg2rad(el)) / (re + h))
     lat, lon = _destination(lat0, lon0, az, s)
-    out = radar_at_location(klbb, lat, lon, fields=["DBZH", "ZDR"])
+    out = radar_at_location(klbb, lat, lon, data_vars=["DBZH", "ZDR"])
     assert out.range.item() == r and out.azimuth.item() == pytest.approx(az)
     assert out.DBZH.item() == pytest.approx(float(dbz[ia, ir]))
     assert out.gate_distance.item() < 50.0
@@ -620,7 +622,7 @@ def test_real_nexrad_gate_above_instrument(klbb):
         - np.timedelta64(150, "s")
         + np.arange(30) * np.timedelta64(10, "s"),
     )
-    pairs = match_radar(ds, klbb, fields=["DBZH"])
+    pairs = match_radar(ds, klbb, data_vars=["DBZH"])
     assert np.isfinite(pairs.DBZH_disdrometer).all()
     assert 30.0 < pairs.DBZH_disdrometer.item() < 60.0
 

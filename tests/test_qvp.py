@@ -676,7 +676,7 @@ def test_real_timeseries_melting_layer():
     assert top > float(half["melting_layer_top"].median()) + 100
     assert abs(top - 3859.0) < 400
     offset = ml["melting_layer_top_offset_freezing_level"]
-    np.testing.assert_allclose(offset, ml["melting_layer_top"] - 3859.0)
+    np.testing.assert_allclose(offset, ml["melting_layer_top"] - 3859.0, rtol=2e-6)
 
 
 def test_edge_cases():
@@ -712,7 +712,7 @@ def test_edge_cases():
         qvp(dt, sweep=7)
     with pytest.raises(ValueError, match="No sweep"):
         qvp(xr.DataTree(dt.ds))
-    with pytest.raises(ValueError, match="2-D"):
+    with pytest.raises(ValueError, match="dimensions"):
         qvp(ds.assign(bad=("range", RNG)), "bad")
     # melting layer input checks
     prof = _profiles_dataset([_melting_profile()])

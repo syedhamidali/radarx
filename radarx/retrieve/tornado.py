@@ -123,9 +123,11 @@ __all__ = ["tornado_probability", "tornet_inputs", "rotation_couplets"]
 import numpy as np
 import xarray as xr
 
+from .._compat import renamed_arguments
 from .._polar import nearest_ray
 from .._provenance import provenance
-from .._registry import accessor_method
+from .._registry import accessor_for
+from .._sweepwise import dask_support
 from . import _onnx_models
 from ._products import product_tree
 
@@ -257,43 +259,39 @@ def _first(ds, names):
     return None
 
 
-def _doppler_velocity(dop, velocity, dealias, nyquist_velocity, angle):
+def _doppler_velocity(dop, field, dealias, nyquist_velocity, angle):
     """Velocity of a Doppler sweep (flags removed, dealiased) and folded gates."""
     from .dealias import dealias_velocity
 
-    vel, folded = _clean(dop[velocity])
+    vel, folded = _clean(dop[field])
     width_name = _first(dop, ("WRADH", "WRAD", "spectrum_width"))
     width = None
     if width_name:
         width, width_folded = _clean(dop[width_name])
         folded = folded | width_folded
     if dealias:
-        nyq = _nyquist(dop, velocity, nyquist_velocity, angle)
+        nyq = _nyquist(dop, field, nyquist_velocity, angle)
         if nyq is None:
             raise ValueError(
                 f"no Nyquist velocity at {angle}°: pass nyquist_velocity=, "
                 "add a 'nyquist_velocity' coordinate, or dealias=False"
             )
-        vel = dealias_velocity(
-            dop.assign({velocity: vel}), velocity, nyquist_velocity=nyq
-        )
+        vel = dealias_velocity(dop.assign({field: vel}), field, nyquist_velocity=nyq)
     return vel, width, folded
 
 
-def _tilt_fields(sweeps, angle, velocity, dealias, nyquist_velocity, kdp, tolerance):
+def _tilt_fields(sweeps, angle, field, dealias, nyquist_velocity, kdp, tolerance):
     """The six TorNet variables of one tilt, its range-folded gates, its Doppler cut."""
     from .kdp import estimate_kdp
 
-    _, dop = _pick(sweeps, angle, tolerance, [(velocity,)])
+    _, dop = _pick(sweeps, angle, tolerance, [(field,)])
     _, surv = _pick(sweeps, angle, tolerance, [("RHOHV",), ("ZDR",)])
     if dop is None or surv is None:
         raise ValueError(
-            f"no sweeps with {velocity!r} and RHOHV/ZDR within "
+            f"no sweeps with {field!r} and RHOHV/ZDR within "
             f"{tolerance}° of {angle}°"
         )
-    vel, width, folded = _doppler_velocity(
-        dop, velocity, dealias, nyquist_velocity, angle
-    )
+    vel, width, folded = _doppler_velocity(dop, field, dealias, nyquist_velocity, angle)
     surv = surv.assign(
         {n: _clean(v)[0] for n, v in surv.data_vars.items() if v.ndim == 2}
     )
@@ -315,12 +313,14 @@ def _tilt_fields(sweeps, angle, velocity, dealias, nyquist_velocity, kdp, tolera
     return fields, folded, dop
 
 
+@dask_support("computes", "the result combines the gates of all sweeps of the volume.")
+@renamed_arguments(volume="obj", velocity="field")
 @provenance("Inputs of the TorNet CNN from a WSR-88D volume")
 def tornet_inputs(
-    volume,
+    obj,
     *,
     elevations=(0.5, 0.9),
-    velocity="VRADH",
+    field="VRADH",
     dealias=True,
     nyquist_velocity=None,
     kdp=None,
@@ -332,17 +332,17 @@ def tornet_inputs(
 
     Parameters
     ----------
-    volume : xarray.DataTree
+    obj : xarray.DataTree
         A volume with ``sweep_*`` groups (xradar), e.g. NEXRAD Level II with
         split cuts: each tilt takes the polarimetric variables from the
         first sweep at that elevation holding them and the velocity and
         spectrum width from the first sweep holding velocity.
     elevations : tuple of float, optional
         Fixed angles (degrees) of the two tilts. Default ``(0.5, 0.9)``.
-    velocity : str, optional
+    field : str, optional
         Radial velocity field. Default ``"VRADH"``.
     dealias : bool, optional
-        Dealias ``velocity`` with :func:`radarx.retrieve.dealias_velocity`
+        Dealias ``field`` with :func:`radarx.retrieve.dealias_velocity`
         (default). Pass ``False`` for velocities that are already dealiased.
     nyquist_velocity : float or dict, optional
         Nyquist velocity (m s⁻¹) for dealiasing, or a dict mapping the fixed
@@ -401,12 +401,12 @@ def tornet_inputs(
        generator. *Artif. Intell. Earth Syst.*, **2** (3),
        https://doi.org/10.1175/AIES-D-22-0084.1
     """
-    if not hasattr(volume, "children"):
+    if not hasattr(obj, "children"):
         raise TypeError("tornet_inputs needs an xarray.DataTree volume")
-    sweeps = _sweeps(volume)
+    sweeps = _sweeps(obj)
     azimuth = np.arange(_AZ_STEP / 2, 360.0, _AZ_STEP)
     tilts, rf_tilts, angles, times, ranges = [], [], [], [], []
-    options = (velocity, dealias, nyquist_velocity, kdp, tolerance)
+    options = (field, dealias, nyquist_velocity, kdp, tolerance)
     for angle in elevations:
         fields, rf, dop = _tilt_fields(sweeps, angle, *options)
         stop = max_range or float(dop["range"].values[-1])
@@ -439,11 +439,11 @@ def tornet_inputs(
         np.stack([r[:, :n] for r in rf_tilts], axis=-1),
     )
     coords = {
-        "azimuth": ("azimuth", azimuth, {"units": "degrees", "long_name": "azimuth"}),
-        "range": ("range", rng, {"units": "meters", "long_name": "range"}),
-        "elevation": ("tilt", np.asarray(angles), {"units": "degrees"}),
+        "azimuth": ("azimuth", azimuth, {"units": "degree", "long_name": "azimuth"}),
+        "range": ("range", rng, {"units": "m", "long_name": "range"}),
+        "elevation": ("tilt", np.asarray(angles), {"units": "degree"}),
     }
-    root = volume.to_dataset(inherit=False)
+    root = obj.to_dataset(inherit=False)
     for c in ("latitude", "longitude", "altitude"):
         if c in root.variables:
             coords[c] = root[c]
@@ -533,9 +533,11 @@ def _sigmoid(x):
     return 1.0 / (1.0 + np.exp(-np.asarray(x, dtype=np.float64)))
 
 
+@dask_support("computes", "the result combines the gates of all sweeps of the volume.")
+@renamed_arguments(volume="obj")
 @provenance("TorNet CNN tornado probability (ONNX network)")
 def tornado_probability(
-    volume,
+    obj,
     model=None,
     *,
     stride=(30, 60),
@@ -548,7 +550,7 @@ def tornado_probability(
 
     Parameters
     ----------
-    volume : xarray.DataTree or xarray.Dataset
+    obj : xarray.DataTree or xarray.Dataset
         A WSR-88D volume (see :func:`tornet_inputs`), or a Dataset of
         prepared inputs as returned by :func:`tornet_inputs`.
     model : str or path or radarx.ml.Model, optional
@@ -615,12 +617,12 @@ def tornado_probability(
     >>> out = radarx.retrieve.tornado_probability(dtree)  # doctest: +SKIP
     >>> out.tornado_probability.plot()  # doctest: +SKIP
     """
-    if isinstance(volume, xr.Dataset):
+    if isinstance(obj, xr.Dataset):
         if kwargs:
             raise TypeError(f"unexpected arguments for prepared inputs: {kwargs}")
-        inputs_ds = volume
+        inputs_ds = obj
     else:
-        inputs_ds = tornet_inputs(volume, **kwargs)
+        inputs_ds = tornet_inputs(obj, **kwargs)
     if min(stride) < 1:
         raise ValueError("stride must be positive")
     net = _onnx_models.load(model, DEFAULT_MODEL, providers)
@@ -663,8 +665,8 @@ def tornado_probability(
             ),
         },
         coords={
-            "chip_azimuth": ("chip", chip_az, {"units": "degrees"}),
-            "chip_range": ("chip", chip_rng, {"units": "meters"}),
+            "chip_azimuth": ("chip", chip_az, {"units": "degree"}),
+            "chip_range": ("chip", chip_rng, {"units": "m"}),
             **{
                 k: v
                 for k, v in inputs_ds.coords.items()
@@ -720,7 +722,7 @@ def _couplets_sweep(
     window,
     min_area,
     diameter,
-    min_reflectivity,
+    min_dbz,
     rotation,
     median_filter=None,
 ):
@@ -741,11 +743,11 @@ def _couplets_sweep(
     else:
         signed = shear if rotation == "cyclonic" else -shear
     candidate = np.nan_to_num(signed, nan=-np.inf) >= threshold
-    if min_reflectivity is not None:
+    if min_dbz is not None:
         dbz_name = _first(ds, ("DBZH", "DBZ", "reflectivity"))
         if dbz_name is not None:
             dbz = ds[dbz_name].transpose(ray_dim, "range").values
-            candidate &= np.nan_to_num(dbz, nan=-99.0) >= min_reflectivity
+            candidate &= np.nan_to_num(dbz, nan=-99.0) >= min_dbz
     labels = _label_regions(candidate, az)
     dr = rng[1] - rng[0] if rng.size > 1 else _GATE
     dtheta = np.radians(np.median(np.diff(np.sort(np.mod(az, 360.0)))))
@@ -814,10 +816,10 @@ def _couplets_sweep(
             ),
         },
         coords={
-            "azimuth": ("couplet", arr[0], {"units": "degrees"}),
-            "range": ("couplet", arr[1], {"units": "meters"}),
-            "x": ("couplet", arr[5], {"units": "meters"}),
-            "y": ("couplet", arr[6], {"units": "meters"}),
+            "azimuth": ("couplet", arr[0], {"units": "degree"}),
+            "range": ("couplet", arr[1], {"units": "m"}),
+            "x": ("couplet", arr[5], {"units": "m"}),
+            "y": ("couplet", arr[6], {"units": "m"}),
         },
         attrs=method,
     )
@@ -907,6 +909,8 @@ def _keep_continuous(nodes, min_tilts, link_distance, max_skip):
     return out
 
 
+@dask_support("eager", "the number of couplets depends on the data.")
+@renamed_arguments(min_reflectivity="min_dbz")
 @provenance(
     "Rotation couplets from LLSD azimuthal shear, radarx's own simple detection",
     extra_refs=("roc-mesocyclone-detection",),
@@ -919,7 +923,7 @@ def rotation_couplets(
     window=(750.0, 2500.0),
     min_area=0.5e6,
     diameter=5000.0,
-    min_reflectivity=None,
+    min_dbz=None,
     rotation="cyclonic",
     min_tilts=None,
     link_distance=5000.0,
@@ -955,7 +959,7 @@ def rotation_couplets(
         Length (m) of the arc, centred on the shear peak, along which the
         largest velocity difference ``delta_v`` is measured at the range of
         the peak. Default 5 km, a radarx choice without a published source.
-    min_reflectivity : float, optional
+    min_dbz : float, optional
         If given, only gates with at least this reflectivity (dBZ) count.
     rotation : {"cyclonic", "anticyclonic", "both"}, optional
         Sense of rotation to detect. ``"cyclonic"`` (default) is positive
@@ -1001,7 +1005,7 @@ def rotation_couplets(
     Notes
     -----
     A couplet is an 8-connected region of gates with LLSD azimuthal shear at
-    or above ``threshold`` (and optionally ``min_reflectivity``); the peak
+    or above ``threshold`` (and optionally ``min_dbz``); the peak
     shear, the velocity difference along the azimuth at the range of the peak
     (the inbound and outbound extremes within ``diameter`` of arc, as in
     the usual description of rotational velocity; not checked against a
@@ -1068,7 +1072,7 @@ def rotation_couplets(
         window,
         min_area,
         diameter,
-        min_reflectivity,
+        min_dbz,
         rotation,
         median_filter,
     )
@@ -1092,15 +1096,5 @@ def rotation_couplets(
     raise TypeError("rotation_couplets needs an xarray.Dataset or xarray.DataTree")
 
 
-@accessor_method("datatree", name="tornado_probability")
-def _tornado_probability_accessor(self, model=None, **kwargs):
-    return tornado_probability(self.xarray_obj, model, **kwargs)
-
-
-@accessor_method("dataset", "datatree", name="rotation_couplets")
-def _rotation_couplets_accessor(self, field="VRADH", **kwargs):
-    return rotation_couplets(self.xarray_obj, field, **kwargs)
-
-
-_tornado_probability_accessor.__doc__ = tornado_probability.__doc__
-_rotation_couplets_accessor.__doc__ = rotation_couplets.__doc__
+accessor_for(tornado_probability, "datatree")
+accessor_for(rotation_couplets, "dataset", "datatree")

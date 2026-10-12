@@ -124,6 +124,16 @@ conflict with each other:
   and its `__all__` re-exported by `radarx.retrieve` automatically.
 - **Accessor methods:** register them in your module with
   `radarx._registry.accessor_method` instead of editing `radarx/accessors.py`.
+  A method that passes its arguments on to a function names it with
+  `wraps=function`, so that it shows the signature of the function (the test
+  `tests/test_argument_names.py` checks this).
+- **Names, precision and units:** use the argument names of the user guide
+  (`obj`, `dbz`, `field`, `min_<quantity>`, `n_threads` before `engine`, both
+  keyword-only), return floating point fields as `float32`
+  (`radarx._dtypes.fields_as_float32`) and write `units` in the UDUNITS style
+  (`m s-1`, `degree km-1`); `tests/test_dtype_units.py` checks the units and
+  the dtype of the main functions. To rename an argument, keep the old name for
+  one release with `radarx._compat.renamed_arguments`.
 - **Notebooks:** example notebooks named `docs/notebooks/<Capitalised_Name>.md`
   are listed in the user guide automatically.
 - **Changelog:** add `docs/changes/<PR number>.md`.

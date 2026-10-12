@@ -84,7 +84,7 @@ across north in full sweeps) smaller than ``min_size`` gates are removed as
 speckle, as are gates with fewer than half of the window holding echo.
 
 Gates without signal are not classified: missing values, a signal-to-noise
-ratio below ``snr_min`` (if an SNR field is given), and the no-data codes
+ratio below ``min_snr`` (if an SNR field is given), and the no-data codes
 of NEXRAD Level II data as decoded by xradar (reflectivity
 :math:`\\leq` -32 dBZ, :math:`Z_{DR} \\leq` -12.9 dB,
 :math:`\\rho_{hv} \\leq` 0.21, :math:`\\Phi_{DP} < 0`; ``nodata``).
@@ -134,13 +134,24 @@ References
 
 from __future__ import annotations
 
+import functools
+
 __all__ = ["echo_mask", "apply_mask"]
 
 import numpy as np
 import xarray as xr
 
+from .._compat import renamed_arguments
 from .._fields import VELOCITY, align_like, as_sweep
 from .._provenance import provenance
+from .._sweepwise import (
+    Output,
+    Sweep,
+    apply_sweeps_many,
+    dask_support,
+    ray_coordinate,
+    ray_dimension,
+)
 from .dealias import _ray_links, _sweep_mapping
 from .kdp import _DBZH_NAMES, _PHIDP_NAMES, _RHOHV_NAMES, _find, _gate_spacing
 
@@ -677,8 +688,11 @@ def _options(limits, weights):
     return out, w
 
 
+_ALL_ROLES = ("dbzh", "zdr", "rhohv", "phidp", "snr", "vrad", "zh3")
+
+
 def _prepare_sweep(ds, fields, window):
-    """Field names and contiguous (ray, range) float64 arrays of one sweep."""
+    """Field names, the fields on (..., ray, range) and the ray links of a sweep."""
     dbzh, zdr, rhohv, phidp, snr = fields[:5]
     names = {
         "dbzh": _find(ds, dbzh, _DBZH_NAMES, True),
@@ -692,43 +706,34 @@ def _prepare_sweep(ds, fields, window):
         names["vrad"] = _find(ds, vrad, VELOCITY, vrad is not None)
         names["zh3"] = _find(ds, zh3, (), zh3 is not None)
     da = ds[names["dbzh"]]
-    if "range" not in da.dims or da.ndim != 2:
-        raise ValueError(f"{names['dbzh']!r} must be 2-D with a 'range' dimension")
-    ray_dim = da.dims[0] if da.dims[1] == "range" else da.dims[1]
+    ray_dim = ray_dimension(da)
     dr = _gate_spacing(ds["range"].values)
-
-    def arr(name):
-        if name is None:
-            return None
-        values = ds[name].transpose(ray_dim, "range").values
-        return np.ascontiguousarray(values, dtype=np.float64)
-
     if "azimuth" in ds.coords and ray_dim == "azimuth":
-        links = _ray_links(ds["azimuth"].values)
+        links = _ray_links(ray_coordinate(ds, ray_dim))
     else:
         links = np.ones(da.sizes[ray_dim], dtype=np.uint8)
         links[-1] = 0  # RHI or unknown geometry: no wrap
-    sweep = {role: arr(name) for role, name in names.items()}
-    sweep.setdefault("vrad", None)
-    sweep.setdefault("zh3", None)
-    sweep.update(
-        {
-            "ds": ds,
-            "names": names,
-            "ray_dim": ray_dim,
-            "links": np.ascontiguousarray(links, dtype=np.uint8),
-            "h": max(1, round(0.5 * float(window) / dr)),
-        }
-    )
-    return sweep
+    return {
+        "ds": ds,
+        "names": names,
+        "ray_dim": ray_dim,
+        "fields": [
+            None if names.get(role) is None else ds[names[role]] for role in _ALL_ROLES
+        ],
+        "links": np.ascontiguousarray(links, dtype=np.uint8),
+        "h": max(1, round(0.5 * float(window) / dr)),
+    }
+
+
+def _polarimetric(sweep):
+    return any(sweep["names"].get(r) is not None for r in ("zdr", "rhohv", "phidp"))
 
 
 def _wrap_sweep(sweep, score, cls, threshold, comment=None, method="radarx"):
     """Score, class and mask on the input sweep coordinates."""
     da = sweep["ds"][sweep["names"]["dbzh"]]
     dims = da.dims
-    if dims[0] != sweep["ray_dim"]:  # kernel output is (ray, range)
-        score, cls = score.T, cls.T
+    score, cls = score.data, cls.data
     used = ", ".join(n for n in sweep["names"].values() if n)
     flags = np.array(sorted(CLASSES), dtype=np.int8)
     out = xr.Dataset(
@@ -779,7 +784,7 @@ def _wrap_sweep(sweep, score, cls, threshold, comment=None, method="radarx"):
     return out
 
 
-def _run(sweeps, params, n_threads, use_compiled):
+def _classify_batch(sweeps, params, n_threads, use_compiled):
     if params.get("method") == "krause2016":
         if use_compiled:
             scores, classes = _krause_compiled(sweeps, params, n_threads)
@@ -791,16 +796,46 @@ def _run(sweeps, params, n_threads, use_compiled):
     return [_classify_numpy(sw, params) for sw in sweeps]
 
 
-def _polarimetric(sweep):
-    return any(sweep[r] is not None for r in ("zdr", "rhohv", "phidp"))
+def _core(batch, params, n_threads, use_compiled):
+    """Score and class of sweeps given as ``((links, h), fields)``."""
+    sweeps = []
+    for (links, h), arrays in batch:
+        sweep = {
+            role: None if a is None else np.ascontiguousarray(a, dtype=np.float64)
+            for role, a in zip(_ALL_ROLES, arrays)
+        }
+        sweeps.append({**sweep, "links": links, "h": h})
+    return _classify_batch(sweeps, params, n_threads, use_compiled)
+
+
+def _run(sweeps, params, n_threads, use_compiled):
+    """Score and class (DataArrays) of every prepared sweep."""
+    core = functools.partial(
+        _core, params=params, n_threads=n_threads, use_compiled=use_compiled
+    )
+    return apply_sweeps_many(
+        core,
+        [Sweep(sw["fields"], context=(sw["links"], sw["h"])) for sw in sweeps],
+        (Output(np.float32), Output(np.int8)),
+    )
 
 
 def _borrow_split_cuts(sweeps, results, tolerance=0.1):
-    """Class of Doppler cuts from the polarimetric cut at the same elevation."""
+    """Class of Doppler cuts from the polarimetric cut at the same elevation.
+
+    The classes of the two cuts are combined, so both are computed (dask
+    arrays become NumPy arrays); cuts with extra dimensions are left as they
+    are.
+    """
     angles = [_fixed_angle(sw["ds"]) for sw in sweeps]
     comments = [None] * len(sweeps)
     for i, sw in enumerate(sweeps):
-        if _polarimetric(sw) or angles[i] is None or sw["ray_dim"] != "azimuth":
+        if (
+            _polarimetric(sw)
+            or angles[i] is None
+            or sw["ray_dim"] != "azimuth"
+            or results[i][1].ndim != 2
+        ):
             continue
         cands = [
             j
@@ -808,14 +843,15 @@ def _borrow_split_cuts(sweeps, results, tolerance=0.1):
             if _polarimetric(other)
             and angles[j] is not None
             and other["ray_dim"] == "azimuth"
+            and results[j][1].ndim == 2
             and abs(angles[j] - angles[i]) <= tolerance
         ]
         if not cands:
             continue
         j = min(cands, key=lambda k: abs(k - i))
         iray, igate = _sweep_mapping(sweeps[j]["ds"], sw["ds"])
-        src_score, src_cls = results[j]
-        score, cls = results[i]
+        src_score, src_cls = (_ray_range(r, sweeps[j]) for r in results[j])
+        score, cls = (_ray_range(r, sw) for r in results[i])
         # nearest source gate of every gate (-1 outside the source sweep)
         ngs = src_cls.shape[1]
         flat = np.where(
@@ -832,9 +868,17 @@ def _borrow_split_cuts(sweeps, results, tolerance=0.1):
         idx = np.flatnonzero(has)[keep]
         cls.ravel()[idx] = take_cls[keep]
         score.ravel()[idx] = src_score.ravel()[src[keep]]
-        results[i] = (score, cls)
+        results[i] = tuple(
+            r.copy(data=v if r.dims[0] == sw["ray_dim"] else v.T)
+            for r, v in zip(results[i], (score, cls))
+        )
         comments[i] = sweeps[j]["name"]
     return results, comments
+
+
+def _ray_range(da, sweep):
+    """The values of a result on (ray, range) as a NumPy array."""
+    return da.transpose(sweep["ray_dim"], "range").values
 
 
 def _fixed_angle(ds):
@@ -846,20 +890,25 @@ def _fixed_angle(ds):
     return None  # pragma: no cover - xradar sweeps have one of the above
 
 
+@dask_support(
+    "lazy",
+    "With ``split_cuts=True`` a Doppler cut of a volume takes its classes from the polarimetric cut at the same elevation, so these two cuts are computed.",
+)
+@renamed_arguments(dbzh="dbz", vrad="field", snr_min="min_snr")
 @provenance(
     "Fuzzy-logic echo score in the manner of Gourley 2007 and Krause 2016, own memberships "
     "and weights (method='krause2016': the MetSignal algorithm of Krause 2016)"
 )
 def echo_mask(
     obj,
-    dbzh=None,
+    dbz=None,
     zdr=None,
     rhohv=None,
     phidp=None,
     snr=None,
     *,
     method="radarx",
-    vrad=None,
+    field=None,
     zh_3km=None,
     window=None,
     threshold=None,
@@ -867,7 +916,7 @@ def echo_mask(
     weights=None,
     spin_threshold=2.0,
     min_size=None,
-    snr_min=3.0,
+    min_snr=3.0,
     phidp_texture="circular",
     nodata="auto",
     split_cuts=True,
@@ -884,7 +933,7 @@ def echo_mask(
         sweep node (``dtree["sweep_0"]``), or a volume with ``sweep_*`` groups,
         e.g. from xradar. Range gates must be uniformly spaced; ``range`` is
         in metres.
-    dbzh, zdr, rhohv, phidp, snr : str, optional
+    dbz, zdr, rhohv, phidp, snr : str, optional
         Field names of the reflectivity (dBZ, required), differential
         reflectivity (dB), copolar correlation coefficient, differential
         phase (degrees) and signal-to-noise ratio (dB). By default the first
@@ -905,7 +954,7 @@ def echo_mask(
         ``window`` are not accepted, ``spin_threshold`` and
         ``phidp_texture`` are not used, and the score ``METEO_SCORE`` is the
         aggregation value A of the paper, not averaged over 3 x 3 gates.
-    vrad : str, optional
+    field : str, optional
         Radial velocity field (m/s) of ``method="krause2016"``. By default the
         first of ``VRADH``, ``VRAD``, ``VRADV``, ``VEL``, ``VELOCITY``,
         ``velocity``, ``radial_velocity`` that a sweep holds. Where it is
@@ -960,7 +1009,7 @@ def echo_mask(
         :func:`radarx.retrieve.estimate_kdp`. On synthetic rain with KDP 5 to
         30 degrees/km both classify all gates as meteorological. Both rules
         are radarx choices.
-    snr_min : float, optional
+    min_snr : float, optional
         Gates with an SNR below this (dB) have no echo, if an SNR field is
         used. Default 3 (radarx choice).
     nodata : {"auto", "nexrad"}, dict or None, optional
@@ -1065,7 +1114,7 @@ def echo_mask(
     The only corner shared with a paper is the full membership of SD(ZDR)
     up to 1 dB (Krause 2016 [2]). All other corners, all weights, the
     threshold, the 1.5 km window (Krause: nine range bins), the
-    3 x 3 averaging of the score, the ``min_size`` speckle filter, ``snr_min``
+    3 x 3 averaging of the score, the ``min_size`` speckle filter, ``min_snr``
     (3 dB), ``spin_threshold`` (2 dB), the NEXRAD no-data floors and the
     reflection of rhohv above 1 are radarx's own choices and are not taken
     from these papers. They have not been tuned against the published
@@ -1203,7 +1252,7 @@ def echo_mask(
                 f"nine-gate window of the paper; {given} are options of "
                 "method='radarx'"
             )
-    elif vrad is not None or zh_3km is not None:
+    elif field is not None or zh_3km is not None:
         raise ValueError("vrad and zh_3km are used by method='krause2016' only")
     if threshold is None:
         threshold = KRAUSE_THRESHOLDS["warm"] if krause else 0.6
@@ -1219,9 +1268,9 @@ def echo_mask(
         )
     lim, wts = _options(limits, weights)
     use_compiled = _use_compiled(engine)
-    fields = (dbzh, zdr, rhohv, phidp, snr)
+    fields = (dbz, zdr, rhohv, phidp, snr)
     if krause:
-        fields += (vrad, zh_3km)
+        fields += (field, zh_3km)
     obj = as_sweep(obj)
 
     def params(nexrad):
@@ -1229,14 +1278,14 @@ def echo_mask(
             return {
                 "method": method,
                 "floors": _floors(nodata, nexrad, _ROLES + ("vrad",)),
-                "snr_min": float(snr_min),
+                "snr_min": float(min_snr),
                 "threshold": float(threshold),
                 "min_size": int(min_size),
             }
         return {
             "method": method,
             "floors": _floors(nodata, nexrad),
-            "snr_min": float(snr_min),
+            "snr_min": float(min_snr),
             "limits": lim,
             "weights": wts,
             "spin_threshold": float(spin_threshold),
@@ -1256,7 +1305,7 @@ def echo_mask(
     names = [
         name
         for name in _sweep_names(obj)
-        if _find(obj[name].to_dataset(), dbzh, _DBZH_NAMES, False) is not None
+        if _find(obj[name].to_dataset(), dbz, _DBZH_NAMES, False) is not None
     ]
     if not names:
         raise KeyError("no sweep contains a reflectivity field")
@@ -1280,7 +1329,7 @@ def echo_mask(
 
 
 def _keep_array(mask, da, name):
-    """Boolean (ray, range) array of ``mask`` in the dims order of ``da``."""
+    """Boolean DataArray of ``mask`` on the dimensions of ``da`` (lazy)."""
     if isinstance(mask, xr.Dataset):
         if "METEO_MASK" not in mask:
             raise KeyError(f"no METEO_MASK for {name!r}; pass the output of echo_mask")
@@ -1288,31 +1337,31 @@ def _keep_array(mask, da, name):
     if not isinstance(mask, xr.DataArray):
         raise TypeError("mask must be an xarray DataArray, Dataset or DataTree")
     dims = [d for d in da.dims if d in mask.dims]
-    if mask.ndim != 2 or len(dims) != 2:
+    if len(dims) != mask.ndim or "range" not in dims or len(dims) < 2:
         raise ValueError(f"the mask does not match the dimensions of {name!r}")
     keep = align_like(mask, da, f"the mask of {name!r}").transpose(*dims)
     if keep.shape != tuple(da.sizes[d] for d in dims):
         raise ValueError(f"the mask does not match the shape of {name!r}")
-    return keep.values.astype(bool)
+    return keep.astype(bool)
 
 
-def _mask_fields(ds, mask, fields, floors):
-    """Masked copies of ``fields`` of a sweep, as a dict of DataArrays."""
+def _mask_fields(ds, mask, data_vars, floors):
+    """Masked copies of ``data_vars`` of a sweep, as a dict of DataArrays."""
     ray_dims = [d for d in ("azimuth", "elevation") if d in ds.dims]
-    if fields is None:
-        fields = [
+    if data_vars is None:
+        data_vars = [
             name
             for name, da in ds.data_vars.items()
-            if da.ndim == 2
+            if da.ndim >= 2
             and "range" in da.dims
             and any(d in da.dims for d in ray_dims)
             and np.issubdtype(da.dtype, np.floating)
             and name not in ("METEO_SCORE",)
         ]
-    elif isinstance(fields, str):
-        fields = [fields]
+    elif isinstance(data_vars, str):
+        data_vars = [data_vars]
     out = {}
-    for name in fields:
+    for name in data_vars:
         if name not in ds:
             raise KeyError(f"{name!r} is not in the dataset")
         da = ds[name]
@@ -1320,13 +1369,15 @@ def _mask_fields(ds, mask, fields, floors):
         floor = floors.get(name)
         if floor is not None:
             with np.errstate(invalid="ignore"):
-                keep = keep & (da.values > floor)
-        out[name] = da.where(xr.DataArray(keep, dims=da.dims)).assign_attrs(da.attrs)
+                keep = keep & (da > floor)
+        out[name] = da.where(keep).assign_attrs(da.attrs)
     return out
 
 
+@dask_support("lazy")
+@renamed_arguments(fields="data_vars")
 @provenance("Masking of non-meteorological gates with the radarx echo classification")
-def apply_mask(obj, mask=None, fields=None, *, nodata="auto", **kwargs):
+def apply_mask(obj, mask=None, data_vars=None, *, nodata="auto", **kwargs):
     """
     Set non-meteorological gates to NaN.
 
@@ -1339,7 +1390,7 @@ def apply_mask(obj, mask=None, fields=None, *, nodata="auto", **kwargs):
         The output of :func:`echo_mask` for ``obj`` (or its boolean
         ``METEO_MASK``, True for gates to keep). By default it is computed
         with :func:`echo_mask` and ``**kwargs``.
-    fields : str or list of str, optional
+    data_vars : str or list of str, optional
         Fields to mask. Default: all floating point fields on
         ``(azimuth, range)`` (or ``(elevation, range)``). In a volume,
         sweeps without a field or without a mask are left unchanged.
@@ -1368,7 +1419,7 @@ def apply_mask(obj, mask=None, fields=None, *, nodata="auto", **kwargs):
 
     Examples
     --------
-    >>> clean = radarx.retrieve.apply_mask(dtree, fields=["DBZH", "ZDR"])  # doctest: +SKIP
+    >>> clean = radarx.retrieve.apply_mask(dtree, data_vars=["DBZH", "ZDR"])  # doctest: +SKIP
     >>> clean = dtree.radarx.apply_mask()  # doctest: +SKIP
     """
     if nodata not in ("auto", "nexrad", None):
@@ -1389,7 +1440,7 @@ def apply_mask(obj, mask=None, fields=None, *, nodata="auto", **kwargs):
     if isinstance(obj, xr.Dataset):
         if isinstance(mask, xr.DataTree):
             raise TypeError("a Dataset needs a Dataset or DataArray mask")
-        return obj.assign(_mask_fields(obj, mask, fields, floors(obj)))
+        return obj.assign(_mask_fields(obj, mask, data_vars, floors(obj)))
 
     if not isinstance(mask, xr.DataTree):
         raise TypeError("a DataTree needs the DataTree output of echo_mask")
@@ -1398,9 +1449,9 @@ def apply_mask(obj, mask=None, fields=None, *, nodata="auto", **kwargs):
         if name not in obj.children:
             continue
         ds = obj[name].to_dataset(inherit=False)
-        wanted = fields
-        if fields is not None:
-            wanted = [fields] if isinstance(fields, str) else fields
+        wanted = data_vars
+        if data_vars is not None:
+            wanted = [data_vars] if isinstance(data_vars, str) else data_vars
             wanted = [f for f in wanted if f in ds]
         masked = _mask_fields(
             ds, mask[name].to_dataset(), wanted, floors(ds, obj.root.attrs)
@@ -1410,6 +1461,8 @@ def apply_mask(obj, mask=None, fields=None, *, nodata="auto", **kwargs):
     return out
 
 
-def _fields_for(ds, fields):
+def _fields_for(ds, data_vars):
     """Optional fields that a sweep of a volume lacks are left out."""
-    return (fields[0],) + tuple(f if f is None or f in ds else None for f in fields[1:])
+    return (data_vars[0],) + tuple(
+        f if f is None or f in ds else None for f in data_vars[1:]
+    )

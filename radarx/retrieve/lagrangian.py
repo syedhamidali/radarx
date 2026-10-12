@@ -186,7 +186,9 @@ import warnings
 import numpy as np
 import xarray as xr
 
+from .._compat import renamed_arguments
 from .._provenance import provenance
+from .._sweepwise import dask_support
 from . import _lagrangian_numpy as _np_kernel
 
 try:
@@ -265,13 +267,13 @@ def _axis(ds, name):
     return c
 
 
-def _reflectivity_name(ds, reflectivity):
-    if reflectivity is None:
+def _reflectivity_name(ds, dbz):
+    if dbz is None:
         return None
-    if reflectivity != "auto":
-        if reflectivity not in ds:
-            raise ValueError(f"reflectivity {reflectivity!r} not in the winds")
-        return reflectivity
+    if dbz != "auto":
+        if dbz not in ds:
+            raise ValueError(f"reflectivity {dbz!r} not in the winds")
+        return dbz
     for name in _REFLECTIVITY:
         if name in ds:
             return name
@@ -596,6 +598,8 @@ def _valid_fraction(val, npts):
         return np.where(npts > 0, nvalid / np.maximum(npts, 1), np.nan)
 
 
+@dask_support("computes", "it follows trajectories through the winds of all times.")
+@renamed_arguments(reflectivity="dbz")
 @provenance("Air trajectories through gridded winds, as used by Ziegler (2013a, b)")
 def trajectories(
     winds,
@@ -618,11 +622,11 @@ def trajectories(
     u="u",
     v="v",
     w="w",
-    reflectivity="auto",
+    dbz="auto",
     valid=None,
     environment_mask=None,
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Backward or forward air trajectories through a time series of 3-D winds.
@@ -704,7 +708,7 @@ def trajectories(
         ``dbz_floor`` (dBZ given to missing reflectivity).
     u, v, w : str, optional
         Names of the wind components. Default ``"u"``, ``"v"``, ``"w"``.
-    reflectivity : str or None, optional
+    dbz : str or None, optional
         Reflectivity (dBZ) variable, ``"auto"`` (default: the first of
         ``DBZ``, ``DBZH``, ``reflectivity``, ``corrected_reflectivity``,
         ``dbz``) or None (not used; the reflectivity test of the environment
@@ -719,10 +723,10 @@ def trajectories(
         True where a parcel may count as environmental for
         ``termination="precipitation"`` below ``cold_pool_depth`` (e.g. the
         air ahead of the gust front). Default: nowhere.
-    engine : {"auto", "compiled", "numpy"}, optional
-        Implementation. ``"auto"`` (default) prefers the compiled kernel.
     n_threads : int, optional
         Threads of the compiled kernel. Default: all cores.
+    engine : {"auto", "compiled", "numpy"}, optional
+        Implementation. ``"auto"`` (default) prefers the compiled kernel.
 
     Returns
     -------
@@ -765,7 +769,7 @@ def trajectories(
     ...      for k, val in (("u", 5.0), ("v", 0.0), ("w", 0.0))},
     ...     coords={"time": t, "z": c, "y": c, "x": c})
     >>> tr = trajectories(ds, start={"x": [8000.0], "y": [5000.0], "z": [3000.0]},
-    ...                   reflectivity=None)
+    ...                   dbz=None)
     >>> float(tr.x.isel(step=int(tr.n_points[0]) - 1)[0])
     5000.0
     """
@@ -778,7 +782,7 @@ def trajectories(
         u=u,
         v=v,
         w=w,
-        reflectivity=reflectivity,
+        reflectivity=dbz,
         storm_motion=storm_motion,
         extend=extend,
         surface_downdraft_on=surface_downdraft,
@@ -913,8 +917,8 @@ def trajectories(
 from .._registry import accessor_method  # noqa: E402
 
 
-@accessor_method("dataset", name="trajectories")
-def _trajectories_dataset_accessor(self, time=None, **kwargs):
+@accessor_method("dataset", name="trajectories", wraps=trajectories)
+def _trajectories_dataset_accessor(self):
     """
     Air trajectories through the time series of 3-D winds in this dataset.
 
@@ -925,4 +929,3 @@ def _trajectories_dataset_accessor(self, time=None, **kwargs):
     xarray.Dataset
         Trajectory positions, times, winds and termination flags.
     """
-    return trajectories(self.xarray_obj, time, **kwargs)

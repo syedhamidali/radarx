@@ -222,7 +222,7 @@ def test_missing_reflectivity():
     ds = _winds(0.0, 0.0, 1.0, dbz=np.nan, nt=6)
     tr = run(ds, _point(5000.0, 5000.0, 1000.0))
     assert int(tr.flags[0]) == 1  # NaN reflectivity is no echo
-    tr = run(ds, _point(5000.0, 5000.0, 1000.0), reflectivity=None, max_steps=200)
+    tr = run(ds, _point(5000.0, 5000.0, 1000.0), dbz=None, max_steps=200)
     assert int(tr.flags[0]) == 8
 
 
@@ -295,7 +295,7 @@ def test_errors():
     with pytest.raises(ValueError, match="increasing"):
         trajectories(ds.isel(x=slice(None, None, -1)), start=p)
     with pytest.raises(ValueError, match="reflectivity"):
-        trajectories(ds, start=p, reflectivity="ZH")
+        trajectories(ds, start=p, dbz="ZH")
     with pytest.raises(ValueError, match="same size"):
         trajectories(ds, start={"x": [1.0, 2.0], "y": [1.0], "z": [1.0]})
     with pytest.raises(ValueError, match="extend"):
@@ -315,7 +315,7 @@ def test_options_and_coordinates():
     a = trajectories(
         ds,
         start=p,
-        reflectivity="DBZ",
+        dbz="DBZ",
         storm_motion=(1.0, 0.0),
         extend=(60.0, 0.0),
         termination=False,

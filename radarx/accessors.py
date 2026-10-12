@@ -26,6 +26,7 @@ __doc__ = __doc__.format("\n   ".join(__all__))
 
 import xarray as xr
 
+from ._registry import forward
 from .grid import (
     grid_radar,  # noqa
     to_uxarray,  # noqa
@@ -43,7 +44,8 @@ from .retrieve import echo_mask as retrieve_echo_mask  # noqa
 from .retrieve import estimate_motion as retrieve_estimate_motion  # noqa
 from .retrieve import interpolate_time as retrieve_interpolate_time  # noqa
 from .retrieve import shear as _shear
-from .vis import plot_cappi, plot_ppi, plot_rhi  # noqa
+from .retrieve.multidoppler import dual_doppler_analytic, multi_doppler
+from .vis import plot_cappi, plot_maxcappi, plot_ppi, plot_rhi  # noqa
 from .vis.interactive import (
     RadarxDataArrayPlotAccessor,
     RadarxDatasetPlotAccessor,
@@ -57,6 +59,11 @@ try:  # pragma: no cover
 except (ImportError, AttributeError):  # pragma: no cover
     from datatree import DataTree as RadarxDataTreeType
     from datatree import register_datatree_accessor
+
+
+def _forwards(func):
+    """Decorator for an accessor method that calls ``func`` on the wrapped object."""
+    return lambda stub: forward(func, stub)
 
 
 def accessor_constructor(self, xarray_obj):  # pragma: no cover
@@ -98,7 +105,8 @@ class RadarxAccessor:
 class _ShearMixin:
     """Azimuthal shear and radial divergence (LLSD) for sweeps and volumes."""
 
-    def llsd(self, field=None, window=(750.0, 2500.0), **kwargs):
+    @_forwards(_shear.llsd)
+    def llsd(self):
         """
         Azimuthal shear and radial divergence by linear least-squares derivatives.
 
@@ -110,9 +118,6 @@ class _ShearMixin:
             sweep holds.
         window : tuple of float, optional
             Window ``(range_m, azimuth_m)`` in metres. Default ``(750, 2500)``.
-        **kwargs
-            ``weights``, ``min_valid_fraction``, ``mask``, ``n_threads`` and
-            ``engine``, see :func:`radarx.retrieve.llsd`.
 
         Returns
         -------
@@ -123,9 +128,9 @@ class _ShearMixin:
         --------
         radarx.retrieve.llsd
         """
-        return _shear.llsd(self.xarray_obj, field, window, **kwargs)
 
-    def azimuthal_shear(self, field=None, window=(750.0, 2500.0), **kwargs):
+    @_forwards(_shear.azimuthal_shear)
+    def azimuthal_shear(self):
         """
         Azimuthal shear (s⁻¹) of the radial velocity by LLSD.
 
@@ -140,9 +145,9 @@ class _ShearMixin:
         --------
         radarx.retrieve.azimuthal_shear
         """
-        return _shear.azimuthal_shear(self.xarray_obj, field, window, **kwargs)
 
-    def radial_divergence(self, field=None, window=(750.0, 2500.0), **kwargs):
+    @_forwards(_shear.radial_divergence)
+    def radial_divergence(self):
         """
         Radial divergence (s⁻¹) of the radial velocity by LLSD.
 
@@ -157,7 +162,6 @@ class _ShearMixin:
         --------
         radarx.retrieve.radial_divergence
         """
-        return _shear.radial_divergence(self.xarray_obj, field, window, **kwargs)
 
 
 class _AssignMixin:
@@ -224,7 +228,8 @@ class RadarxDataArrayAccessor(RadarxAccessor):
         """
         return RadarxDataArrayPlotAccessor(self.xarray_obj)
 
-    def to_uxarray(self, variables=None):
+    @_forwards(to_uxarray)
+    def to_uxarray(self):
         """
         Convert the sweep into a uxarray dataset with one face per gate.
 
@@ -243,9 +248,9 @@ class RadarxDataArrayAccessor(RadarxAccessor):
         --------
         radarx.grid.to_uxarray
         """
-        return to_uxarray(self.xarray_obj, variables=variables)
 
-    def estimate_motion(self, other, field=None, **kwargs):
+    @_forwards(retrieve_estimate_motion)
+    def estimate_motion(self):
         """
         Storm motion from this gridded volume to a later one.
 
@@ -255,8 +260,6 @@ class RadarxDataArrayAccessor(RadarxAccessor):
             The later gridded volume on the same grid.
         field : str, optional
             Field to track (Dataset only). Default: the reflectivity.
-        **kwargs
-            Passed to :func:`radarx.retrieve.estimate_motion`.
 
         Returns
         -------
@@ -267,9 +270,9 @@ class RadarxDataArrayAccessor(RadarxAccessor):
         --------
         radarx.retrieve.estimate_motion
         """
-        return retrieve_estimate_motion(self.xarray_obj, other, field, **kwargs)
 
-    def advect(self, u, v=None, dt=None, **kwargs):
+    @_forwards(retrieve_advect)
+    def advect(self):
         """
         Move the gridded fields along the storm motion.
 
@@ -281,8 +284,6 @@ class RadarxDataArrayAccessor(RadarxAccessor):
             Northward motion (m/s).
         dt : float or timedelta, optional
             Time step in seconds (or pass ``time=`` as a target time).
-        **kwargs
-            Passed to :func:`radarx.retrieve.advect`.
 
         Returns
         -------
@@ -293,9 +294,9 @@ class RadarxDataArrayAccessor(RadarxAccessor):
         --------
         radarx.retrieve.advect
         """
-        return retrieve_advect(self.xarray_obj, u, v, dt, **kwargs)
 
-    def interpolate_time(self, other, times, motion=None, **kwargs):
+    @_forwards(retrieve_interpolate_time)
+    def interpolate_time(self):
         """
         Advection-corrected time interpolation to a later gridded volume.
 
@@ -307,8 +308,6 @@ class RadarxDataArrayAccessor(RadarxAccessor):
             Target times between the two volumes.
         motion : xarray.Dataset, optional
             Storm motion; estimated from the two volumes by default.
-        **kwargs
-            Passed to :func:`radarx.retrieve.interpolate_time`.
 
         Returns
         -------
@@ -319,9 +318,6 @@ class RadarxDataArrayAccessor(RadarxAccessor):
         --------
         radarx.retrieve.interpolate_time
         """
-        return retrieve_interpolate_time(
-            self.xarray_obj, other, times, motion, **kwargs
-        )
 
 
 @xr.register_dataset_accessor("radarx")
@@ -344,7 +340,8 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         """
         return RadarxDatasetPlotAccessor(self.xarray_obj)
 
-    def to_uxarray(self, variables=None):
+    @_forwards(to_uxarray)
+    def to_uxarray(self):
         """
         Convert the sweep into a uxarray dataset with one face per gate.
 
@@ -363,9 +360,9 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         --------
         radarx.grid.to_uxarray
         """
-        return to_uxarray(self.xarray_obj, variables=variables)
 
-    def estimate_motion(self, other, field=None, **kwargs):
+    @_forwards(retrieve_estimate_motion)
+    def estimate_motion(self):
         """
         Storm motion from this gridded volume to a later one.
 
@@ -375,8 +372,6 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
             The later gridded volume on the same grid.
         field : str, optional
             Field to track (Dataset only). Default: the reflectivity.
-        **kwargs
-            Passed to :func:`radarx.retrieve.estimate_motion`.
 
         Returns
         -------
@@ -387,9 +382,9 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         --------
         radarx.retrieve.estimate_motion
         """
-        return retrieve_estimate_motion(self.xarray_obj, other, field, **kwargs)
 
-    def advect(self, u, v=None, dt=None, **kwargs):
+    @_forwards(retrieve_advect)
+    def advect(self):
         """
         Move the gridded fields along the storm motion.
 
@@ -401,8 +396,6 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
             Northward motion (m/s).
         dt : float or timedelta, optional
             Time step in seconds (or pass ``time=`` as a target time).
-        **kwargs
-            Passed to :func:`radarx.retrieve.advect`.
 
         Returns
         -------
@@ -413,9 +406,9 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         --------
         radarx.retrieve.advect
         """
-        return retrieve_advect(self.xarray_obj, u, v, dt, **kwargs)
 
-    def interpolate_time(self, other, times, motion=None, **kwargs):
+    @_forwards(retrieve_interpolate_time)
+    def interpolate_time(self):
         """
         Advection-corrected time interpolation to a later gridded volume.
 
@@ -427,8 +420,6 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
             Target times between the two volumes.
         motion : xarray.Dataset, optional
             Storm motion; estimated from the two volumes by default.
-        **kwargs
-            Passed to :func:`radarx.retrieve.interpolate_time`.
 
         Returns
         -------
@@ -439,41 +430,32 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         --------
         radarx.retrieve.interpolate_time
         """
-        return retrieve_interpolate_time(
-            self.xarray_obj, other, times, motion, **kwargs
-        )
 
-    def kdp(self, phidp=None, rhohv=None, dbzh=None, **kwargs):
+    @_forwards(estimate_kdp)
+    def kdp(self):
         """
         Process the differential phase and estimate KDP for this sweep.
 
         Parameters
         ----------
-        phidp, rhohv, dbzh : str, optional
+        phidp, rhohv, dbz : str, optional
             Field names; by default the usual xradar/CfRadial names.
-        **kwargs
-            Options of :func:`radarx.retrieve.estimate_kdp`, e.g. ``method``.
 
         Returns
         -------
         xarray.Dataset
-            ``PHIDP_processed`` (degrees), ``KDP`` (degrees/km) and
+            ``PHIDP_processed`` (degree), ``KDP`` (degree km-1) and
             ``PHIDP_OFFSET``.
 
         See Also
         --------
         radarx.retrieve.estimate_kdp
         """
-        return estimate_kdp(self.xarray_obj, phidp, rhohv, dbzh, **kwargs)
 
-    def echo_mask(self, **kwargs):
+    @_forwards(retrieve_echo_mask)
+    def echo_mask(self):
         """
         Classify the gates of this sweep as meteorological or not.
-
-        Parameters
-        ----------
-        **kwargs
-            Field names and options of :func:`radarx.retrieve.echo_mask`.
 
         Returns
         -------
@@ -484,9 +466,9 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         --------
         radarx.retrieve.echo_mask, radarx.retrieve.apply_mask
         """
-        return retrieve_echo_mask(self.xarray_obj, **kwargs)
 
-    def apply_mask(self, mask=None, fields=None, **kwargs):
+    @_forwards(retrieve_apply_mask)
+    def apply_mask(self):
         """
         Set the non-meteorological gates of this sweep to NaN.
 
@@ -497,9 +479,6 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
             given.
         fields : str or list of str, optional
             Fields to mask. Default: all floating point gate fields.
-        **kwargs
-            Options of :func:`radarx.retrieve.apply_mask` and, without
-            ``mask``, of :func:`radarx.retrieve.echo_mask`.
 
         Returns
         -------
@@ -510,9 +489,9 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         --------
         radarx.retrieve.apply_mask, radarx.retrieve.echo_mask
         """
-        return retrieve_apply_mask(self.xarray_obj, mask, fields, **kwargs)
 
-    def qvp(self, data_vars=None, **kwargs):
+    @_forwards(qvp)
+    def qvp(self):
         """
         Quasi-vertical profile of this sweep.
 
@@ -520,9 +499,6 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         ----------
         data_vars : str or list of str, optional
             Variables to profile. By default all ``(azimuth, range)`` fields.
-        **kwargs
-            Options of :func:`radarx.retrieve.qvp` (``min_rhohv``,
-            ``min_dbz``, ``min_count``, ``reduction``, ...).
 
         Returns
         -------
@@ -533,16 +509,11 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         --------
         radarx.retrieve.qvp
         """
-        return qvp(self.xarray_obj, data_vars, **kwargs)
 
-    def melting_layer(self, **kwargs):
+    @_forwards(melting_layer)
+    def melting_layer(self):
         """
         Melting-layer top and bottom from quasi-vertical profiles.
-
-        Parameters
-        ----------
-        **kwargs
-            Options of :func:`radarx.retrieve.melting_layer`.
 
         Returns
         -------
@@ -556,9 +527,9 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         --------
         radarx.retrieve.melting_layer
         """
-        return melting_layer(self.xarray_obj, **kwargs)
 
-    def dealias(self, field=None, nyquist_velocity=None, **kwargs):
+    @_forwards(dealias_velocity)
+    def dealias(self):
         """
         Dealias (unfold) the Doppler velocity of this sweep.
 
@@ -570,9 +541,6 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         nyquist_velocity : float, optional
             Nyquist velocity in m/s. By default read from the sweep's
             ``nyquist_velocity`` (xradar).
-        **kwargs
-            Further options of :func:`radarx.retrieve.dealias_velocity`, e.g.
-            ``reference`` or ``wind_profile``.
 
         Returns
         -------
@@ -585,9 +553,6 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         --------
         radarx.retrieve.dealias_velocity
         """
-        return dealias_velocity(
-            self.xarray_obj, field, nyquist_velocity=nyquist_velocity, **kwargs
-        )
 
     def interpolate_profile(
         self,
@@ -595,8 +560,8 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         variables=None,
         *,
         extrapolate=False,
-        engine="auto",
         n_threads=None,
+        engine="auto",
     ):
         """
         Add profile variables (temperature, pressure, wind, ...) at every gate or level.
@@ -612,10 +577,10 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
             Profile variables to add. Default: all.
         extrapolate : bool, optional
             Hold the end values beyond the profile. Default False (NaN).
-        engine : {"auto", "compiled", "numpy"}, optional
-            Kernel implementation.
         n_threads : int, optional
             Threads for the compiled kernel. Default: all cores.
+        engine : {"auto", "compiled", "numpy"}, optional
+            Kernel implementation.
 
         Returns
         -------
@@ -652,8 +617,8 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         source="auto",
         time=None,
         time_interpolation="linear",
-        engine="auto",
         n_threads=None,
+        engine="auto",
     ):
         """
         Thermodynamic and wind background on a radarx grid.
@@ -669,10 +634,10 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
             ERA5 valid time. Default: the grid's ``time``.
         time_interpolation : {"linear", "nearest"}, optional
             ERA5 time interpolation.
-        engine : {"auto", "compiled", "numpy"}, optional
-            Kernel implementation.
         n_threads : int, optional
             Threads for the compiled kernel. Default: all cores.
+        engine : {"auto", "compiled", "numpy"}, optional
+            Kernel implementation.
 
         Returns
         -------
@@ -697,7 +662,8 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
             n_threads=n_threads,
         )
 
-    def multi_doppler(self, background=None, **kwargs):
+    @_forwards(multi_doppler)
+    def multi_doppler(self):
         """
         Retrieve the 3D wind from the radial velocities of several radars.
 
@@ -705,8 +671,6 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         ----------
         background : xarray.Dataset, optional
             Background on the grid (``grid.radarx.background()``).
-        **kwargs
-            Options of :func:`radarx.retrieve.multi_doppler`.
 
         Returns
         -------
@@ -717,11 +681,9 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         --------
         radarx.retrieve.multi_doppler, radarx.retrieve.multi_doppler_input
         """
-        from .retrieve.multidoppler import multi_doppler
 
-        return multi_doppler(self.xarray_obj, background, **kwargs)
-
-    def dual_doppler_analytic(self, background=None, **kwargs):
+    @_forwards(dual_doppler_analytic)
+    def dual_doppler_analytic(self):
         """
         Analytic dual-Doppler winds from the radial velocities of several radars.
 
@@ -730,8 +692,6 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         background : xarray.Dataset, optional
             Background on the grid; only its air density and freezing level
             are used.
-        **kwargs
-            Options of :func:`radarx.retrieve.dual_doppler_analytic`.
 
         Returns
         -------
@@ -742,148 +702,22 @@ class RadarxDataSetAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         --------
         radarx.retrieve.dual_doppler_analytic, radarx.retrieve.multi_doppler
         """
-        from .retrieve.multidoppler import dual_doppler_analytic
 
-        return dual_doppler_analytic(self.xarray_obj, background, **kwargs)
-
-    def plot_max_cappi(
-        self,
-        data_var,
-        cmap=None,
-        vmin=None,
-        vmax=None,
-        title=None,
-        lat_lines=None,
-        lon_lines=None,
-        add_map=True,
-        projection=None,
-        colorbar=True,
-        range_rings=False,
-        dpi=100,
-        savedir=None,
-        show_figure=True,
-        add_slogan=False,
-        **kwargs,
-    ) -> xr.Dataset:
+    @_forwards(plot_maxcappi)
+    def plot_max_cappi(self):
         """Plot a maximum CAPPI product from a 3D gridded radar dataset."""
-        from .vis import plot_maxcappi
 
-        radar = self.xarray_obj
-        return radar.pipe(
-            plot_maxcappi,
-            data_var,
-            cmap,
-            vmin,
-            vmax,
-            title,
-            lat_lines,
-            lon_lines,
-            add_map,
-            projection,
-            colorbar,
-            range_rings,
-            dpi,
-            savedir,
-            show_figure,
-            add_slogan,
-            **kwargs,
-        )
-
-    def plot_ppi(
-        self,
-        data_var,
-        cmap=None,
-        vmin=None,
-        vmax=None,
-        title=None,
-        colorbar=True,
-        ax=None,
-        dpi=100,
-        savedir=None,
-        show_figure=True,
-        add_slogan=False,
-        **kwargs,
-    ) -> xr.Dataset:
+    @_forwards(plot_ppi)
+    def plot_ppi(self):
         """Plot a georeferenced plan-position view using ``x`` and ``y``."""
-        return self.xarray_obj.pipe(
-            plot_ppi,
-            data_var,
-            cmap,
-            vmin,
-            vmax,
-            title,
-            colorbar,
-            ax,
-            dpi,
-            savedir,
-            show_figure,
-            add_slogan,
-            **kwargs,
-        )
 
-    def plot_rhi(
-        self,
-        data_var,
-        cmap=None,
-        vmin=None,
-        vmax=None,
-        title=None,
-        colorbar=True,
-        ax=None,
-        dpi=100,
-        savedir=None,
-        show_figure=True,
-        add_slogan=False,
-        **kwargs,
-    ) -> xr.Dataset:
+    @_forwards(plot_rhi)
+    def plot_rhi(self):
         """Plot a vertical cross-section using ground range and height."""
-        return self.xarray_obj.pipe(
-            plot_rhi,
-            data_var,
-            cmap,
-            vmin,
-            vmax,
-            title,
-            colorbar,
-            ax,
-            dpi,
-            savedir,
-            show_figure,
-            add_slogan,
-            **kwargs,
-        )
 
-    def plot_cappi(
-        self,
-        data_var,
-        cmap=None,
-        vmin=None,
-        vmax=None,
-        title=None,
-        colorbar=True,
-        ax=None,
-        dpi=100,
-        savedir=None,
-        show_figure=True,
-        add_slogan=False,
-        **kwargs,
-    ) -> xr.Dataset:
+    @_forwards(plot_cappi)
+    def plot_cappi(self):
         """Plot a CAPPI dataset on the horizontal plane."""
-        return self.xarray_obj.pipe(
-            plot_cappi,
-            data_var,
-            cmap,
-            vmin,
-            vmax,
-            title,
-            colorbar,
-            ax,
-            dpi,
-            savedir,
-            show_figure,
-            add_slogan,
-            **kwargs,
-        )
 
 
 @register_datatree_accessor("radarx")
@@ -945,22 +779,8 @@ class RadarxDataTreeAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
             self.xarray_obj, kind=source, station=station, time=time, **kwargs
         )
 
-    def to_grid(
-        self,
-        data_vars=None,
-        pseudo_cappi=True,
-        x_lim=(-100e3, 100e3),
-        y_lim=(-100e3, 100e3),
-        z_lim=(0, 10e3),
-        x_step=1000,
-        y_step=1000,
-        z_step=250,
-        x_smth=0.2,
-        y_smth=0.2,
-        z_smth=1,
-        method="cone",
-        n_threads=None,
-    ):
+    @_forwards(grid_radar)
+    def to_grid(self):
         """
         Grid the radar volume onto a Cartesian 3D domain.
 
@@ -991,24 +811,9 @@ class RadarxDataTreeAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         --------
         radarx.grid.grid_radar, radarx.grid.grid_cones
         """
-        return grid_radar(
-            self.xarray_obj,
-            data_vars,
-            pseudo_cappi,
-            x_lim,
-            y_lim,
-            z_lim,
-            x_step,
-            y_step,
-            z_step,
-            x_smth,
-            y_smth,
-            z_smth,
-            method=method,
-            n_threads=n_threads,
-        )
 
-    def kdp(self, phidp=None, rhohv=None, dbzh=None, **kwargs):
+    @_forwards(estimate_kdp)
+    def kdp(self):
         """
         Process the differential phase and estimate KDP for every sweep.
 
@@ -1017,31 +822,24 @@ class RadarxDataTreeAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
 
         Parameters
         ----------
-        phidp, rhohv, dbzh : str, optional
+        phidp, rhohv, dbz : str, optional
             Field names; by default the usual xradar/CfRadial names.
-        **kwargs
-            Options of :func:`radarx.retrieve.estimate_kdp`, e.g. ``method``.
 
         Returns
         -------
         xarray.DataTree
             The root of the volume and one node per sweep with processed
-            ``PHIDP_processed`` (degrees), ``KDP`` (degrees/km) and ``PHIDP_OFFSET``.
+            ``PHIDP_processed`` (degree), ``KDP`` (degree km-1) and ``PHIDP_OFFSET``.
 
         See Also
         --------
         radarx.retrieve.estimate_kdp
         """
-        return estimate_kdp(self.xarray_obj, phidp, rhohv, dbzh, **kwargs)
 
-    def echo_mask(self, **kwargs):
+    @_forwards(retrieve_echo_mask)
+    def echo_mask(self):
         """
         Classify the gates of every sweep as meteorological or not.
-
-        Parameters
-        ----------
-        **kwargs
-            Field names and options of :func:`radarx.retrieve.echo_mask`.
 
         Returns
         -------
@@ -1053,9 +851,9 @@ class RadarxDataTreeAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         --------
         radarx.retrieve.echo_mask, radarx.retrieve.apply_mask
         """
-        return retrieve_echo_mask(self.xarray_obj, **kwargs)
 
-    def apply_mask(self, mask=None, fields=None, **kwargs):
+    @_forwards(retrieve_apply_mask)
+    def apply_mask(self):
         """
         Set the non-meteorological gates of every sweep to NaN.
 
@@ -1066,9 +864,6 @@ class RadarxDataTreeAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
             given.
         fields : str or list of str, optional
             Fields to mask. Default: all floating point gate fields.
-        **kwargs
-            Options of :func:`radarx.retrieve.apply_mask` and, without
-            ``mask``, of :func:`radarx.retrieve.echo_mask`.
 
         Returns
         -------
@@ -1079,9 +874,9 @@ class RadarxDataTreeAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         --------
         radarx.retrieve.apply_mask, radarx.retrieve.echo_mask
         """
-        return retrieve_apply_mask(self.xarray_obj, mask, fields, **kwargs)
 
-    def qvp(self, data_vars=None, **kwargs):
+    @_forwards(qvp)
+    def qvp(self):
         """
         Quasi-vertical profile of one sweep of the volume.
 
@@ -1089,10 +884,6 @@ class RadarxDataTreeAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         ----------
         data_vars : str or list of str, optional
             Variables to profile. By default all ``(azimuth, range)`` fields.
-        **kwargs
-            Options of :func:`radarx.retrieve.qvp`, e.g. ``sweep`` or
-            ``elevation`` (default: the highest sweep), ``min_rhohv``,
-            ``min_dbz``, ``min_count``, ``reduction``.
 
         Returns
         -------
@@ -1103,9 +894,9 @@ class RadarxDataTreeAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         --------
         radarx.retrieve.qvp, radarx.retrieve.qvp_timeseries
         """
-        return qvp(self.xarray_obj, data_vars, **kwargs)
 
-    def dealias(self, field=None, nyquist_velocity=None, **kwargs):
+    @_forwards(dealias_velocity)
+    def dealias(self):
         """
         Dealias (unfold) the Doppler velocity of every sweep.
 
@@ -1117,9 +908,6 @@ class RadarxDataTreeAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         nyquist_velocity : float or dict, optional
             Nyquist velocity in m/s, or a dict by sweep name. By default read
             from each sweep's ``nyquist_velocity`` (xradar).
-        **kwargs
-            Further options of :func:`radarx.retrieve.dealias_velocity`, e.g.
-            ``wind_profile``, ``sweep_continuity`` or ``name``.
 
         Returns
         -------
@@ -1132,25 +920,9 @@ class RadarxDataTreeAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
         --------
         radarx.retrieve.dealias_velocity
         """
-        return dealias_velocity(
-            self.xarray_obj, field, nyquist_velocity=nyquist_velocity, **kwargs
-        )
 
-    def create_cappi(
-        self,
-        height,
-        method="cartesian_idw",
-        vertical_tolerance=None,
-        apply_filter=False,
-        *,
-        fields=None,
-        sweeps=None,
-        x=None,
-        y=None,
-        x_res=1000.0,
-        y_res=1000.0,
-        padding=0.0,
-    ):
+    @_forwards(retrieve_cappi)
+    def create_cappi(self):
         """
         Create a CAPPI from a georeferenced radar volume.
 
@@ -1187,24 +959,10 @@ class RadarxDataTreeAccessor(_AssignMixin, _ShearMixin, RadarxAccessor):
             Extra padding, in meters, applied to the Cartesian output domain.
             Used only with ``method="cartesian_idw"``.
         """
-        return retrieve_cappi(
-            self.xarray_obj,
-            height=height,
-            method=method,
-            vertical_tolerance=vertical_tolerance,
-            apply_filter=apply_filter,
-            fields=fields,
-            sweeps=sweeps,
-            x=x,
-            y=y,
-            x_res=x_res,
-            y_res=y_res,
-            padding=padding,
-        )
 
-    def to_cappi(self, *args, **kwargs):
+    @_forwards(retrieve_cappi)
+    def to_cappi(self):
         """Convenience alias for :meth:`create_cappi`."""
-        return self.create_cappi(*args, **kwargs)
 
 
 def _attach_registered_methods():

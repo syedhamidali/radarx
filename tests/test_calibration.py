@@ -173,7 +173,7 @@ def test_selection_criteria():
     ds["RHOHV"] = ds.RHOHV * 0 + 0.9
     out = zdr_offset(ds, "light_rain", z_range=(10, 40), band="S")
     assert int(out.ZDR_OFFSET_COUNT) == 0 and np.isnan(float(out.ZDR_OFFSET))
-    ok = zdr_offset(ds, "light_rain", z_range=(10, 40), band="S", rhohv_min=0.85)
+    ok = zdr_offset(ds, "light_rain", z_range=(10, 40), band="S", min_rhohv=0.85)
     assert int(ok.ZDR_OFFSET_COUNT) > 0
     snr = ds.DBZH * 0 + 10.0
     snr[:, :200] = 30.0
@@ -182,12 +182,12 @@ def test_selection_criteria():
         "light_rain",
         z_range=(10, 40),
         band="S",
-        rhohv_min=0.85,
-        snr_min=20.0,
+        min_rhohv=0.85,
+        min_snr=20.0,
     )
     assert 0.4 < int(few.ZDR_OFFSET_COUNT) / int(ok.ZDR_OFFSET_COUNT) < 0.6
     tiny = zdr_offset(
-        ds, "light_rain", z_range=(10, 40), band="S", rhohv_min=0.85, min_count=10**9
+        ds, "light_rain", z_range=(10, 40), band="S", min_rhohv=0.85, min_count=10**9
     )
     assert np.isnan(float(tiny.ZDR_OFFSET)) and int(tiny.ZDR_OFFSET_COUNT) > 0
 
@@ -297,7 +297,7 @@ def test_zdr_offset_shifts_the_z_offset():
 def test_z_offset_selection():
     ds, z_true = consistent_rain()
     # light rain only: KDP too small for the classes, nothing to report
-    none = z_offset(ds, zdr_offset=DZDR, band="S", z_range=(20, 30), kdp_min=10.0)
+    none = z_offset(ds, zdr_offset=DZDR, band="S", z_range=(20, 30), min_kdp=10.0)
     assert int(none.Z_OFFSET_BINS) == 0 and np.isnan(float(none.Z_OFFSET))
     mask = (ds.azimuth < 90.0).broadcast_like(ds.DBZH)
     part = z_offset(ds, zdr_offset=DZDR, band="S", mask=mask)
@@ -368,7 +368,7 @@ def test_system_phidp_is_recovered_across_the_wrap(engine, system):
     assert int(out.SYSTEM_PHIDP_RAYS) == 120
     assert float(out.SYSTEM_PHIDP_SPREAD) < 1.5  # 2 degrees of noise over 20 gates
     assert out.SYSTEM_PHIDP_RAY.dims == ("azimuth",)
-    assert out.SYSTEM_PHIDP.attrs["units"] == "degrees"
+    assert out.SYSTEM_PHIDP.attrs["units"] == "degree"
 
 
 def test_phidp_rays_in_precipitation_do_not_move_the_median():
@@ -510,7 +510,7 @@ def test_zdr_offset_ignores_low_snr_and_masked_gates(engine):
     ds["SNR"] = (ds.ZDR.dims, snr)
     mask = xr.DataArray(keep, dims=ds.ZDR.dims)
     out = zdr_offset(
-        ds, "vertical", snr_min=20.0, mask=mask, min_count=10, engine=engine
+        ds, "vertical", min_snr=20.0, mask=mask, min_count=10, engine=engine
     )
     assert float(out.ZDR_OFFSET) == pytest.approx(0.42, abs=1e-6)
     assert int(out.ZDR_OFFSET_COUNT) == 30 * 70
@@ -519,7 +519,7 @@ def test_zdr_offset_ignores_low_snr_and_masked_gates(engine):
         ds.rename(SNR="SNR_USER"),
         "vertical",
         snr="SNR_USER",
-        snr_min=20.0,
+        min_snr=20.0,
         mask=mask,
         min_count=10,
         engine=engine,
@@ -541,7 +541,7 @@ def test_z_offset_ignores_low_snr_and_masked_gates(engine):
     kwargs = dict(
         zdr_offset=DZDR,
         band="S",
-        snr_min=20.0,
+        min_snr=20.0,
         mask=keep,
         min_bin_count=10,
         engine=engine,
@@ -569,7 +569,7 @@ def test_phidp_offset_ignores_low_snr_and_masked_gates(engine):
     phi[:, :15] = np.mod(phi[:, :15] + 100.0, 360.0)  # wrong where excluded
     ds = ds.assign(PHIDP=(ds.PHIDP.dims, phi), SNR=snr)
     out = phidp_offset(
-        ds, snr_min=20.0, mask=keep, min_range=0.0, n_gates=5, engine=engine
+        ds, min_snr=20.0, mask=keep, min_range=0.0, n_gates=5, engine=engine
     )
     assert abs(float(out.SYSTEM_PHIDP) - 37.0) < 0.5
     assert int(out.SYSTEM_PHIDP_GATES.values[0]) == 5

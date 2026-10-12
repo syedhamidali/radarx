@@ -65,6 +65,7 @@ import xarray as xr
 from .._fields import as_sweep, node_dataset
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 from ..fundamentals.constants import EARTH_RADIUS
 from ..fundamentals.refraction import k_e_from_rays, trace_rays
 from ..grid.cone import _sweep_names
@@ -240,6 +241,7 @@ def _sweep_products(ds, height, refractivity, options, radar_height):
     return out
 
 
+@dask_support("lazy_only")
 @provenance(
     "Ray tracing of the radar beam through a refractivity profile "
     "(Snell's law in a spherically stratified atmosphere), after Bean and "
@@ -346,8 +348,8 @@ def beam_path(
     return _sweep_products(ds, height, n, options, radar_height)
 
 
-@accessor_method("dataarray", "dataset", "datatree", name="beam_path")
-def _beam_path_accessor(self, profile, **kwargs):
+@accessor_method("dataarray", "dataset", "datatree", name="beam_path", wraps=beam_path)
+def _beam_path_accessor(self):
     """
     True beam height and ground range of every gate from a refractivity profile.
 
@@ -358,4 +360,3 @@ def _beam_path_accessor(self, profile, **kwargs):
     xarray.Dataset or xarray.DataTree
         ``beam_height``, ``ground_range``, ``gate_elevation`` and ``k_e``.
     """
-    return beam_path(self.xarray_obj, profile, **kwargs)

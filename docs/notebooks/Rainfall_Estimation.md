@@ -238,7 +238,7 @@ def mask_no_data(ds):
 nodes = {"/": raw.root.to_dataset(inherit=False)}
 nodes.update({n: mask_no_data(raw[n].to_dataset(inherit=False)) for n in raw.children})
 volume = xr.DataTree.from_dict(nodes).xradar.georeference()
-volume = volume.radarx.assign(volume.radarx.kdp(phidp="PHIDP", rhohv="RHOHV", dbzh="DBZH"))
+volume = volume.radarx.assign(volume.radarx.kdp(phidp="PHIDP", rhohv="RHOHV", dbz="DBZH"))
 profile = volume.radarx.sounding(era5_source="gcs")
 volume = volume.radarx.assign(volume.radarx.hid(profile, band="S", scores=False))
 rain = volume.radarx.rain_rate()
@@ -367,14 +367,14 @@ kdp = estimate_kdp(
     csapr,
     phidp="uncorrected_differential_phase",
     rhohv="uncorrected_copol_correlation_coeff",
-    dbzh="uncorrected_reflectivity_h",
+    dbz="uncorrected_reflectivity_h",
 )
 csapr = csapr.assign(KDP=kdp.KDP, met=csapr.gate_id.isin([1, 2, 4]))
 cls_c = csapr.radarx.hid(
     "sounding_temperature",
     band="C",
     mask="met",
-    dbzh="attenuation_corrected_reflectivity_h",
+    dbz="attenuation_corrected_reflectivity_h",
     zdr="attenuation_corrected_differential_reflectivity",
     kdp="KDP",
     rhohv="copol_correlation_coeff",

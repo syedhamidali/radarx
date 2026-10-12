@@ -230,7 +230,7 @@ def test_a_gate_at_the_point_and_a_gate_at_the_radius(weighting, engine):
     "options",
     [
         dict(roi=1500.0),
-        dict(roi=800.0, beam_width=1.0),
+        dict(roi=800.0, beamwidth=1.0),
         dict(roi=1000.0, roi_range_factor=0.01, roi_height_factor=0.2, min_gates=3),
         dict(roi=1500.0, motion=(10.0, -5.0), time="2026-01-01T00:03"),
     ],
@@ -264,7 +264,7 @@ def test_bigger_radius_fills_more_and_beam_width_grows_with_range(
     # the radius is s tan(1 degree) = 0.017 s: 0.9 km at 50 km, below roi near the radar
     fixed = gates.grid_gates(random_volume, "DBZH", **GRID, roi=200.0, engine=engine)
     beam = gates.grid_gates(
-        random_volume, "DBZH", **GRID, roi=200.0, beam_width=1.0, engine=engine
+        random_volume, "DBZH", **GRID, roi=200.0, beamwidth=1.0, engine=engine
     )
     far = dict(x=slice(20e3, 30e3), y=slice(20e3, 30e3))
     assert (
@@ -317,7 +317,7 @@ def test_known_fields(name, weighting, tolerance, engine):
         **GRID,
         weighting=weighting,
         roi=1500.0,
-        beam_width=1.0,
+        beamwidth=1.0,
         engine=engine,
     )["DBZH"]
     X, Y, Z = np.meshgrid(GRID["x"], GRID["y"], GRID["z"], indexing="ij")
@@ -364,7 +364,7 @@ def test_rhi_section(engine):
     distance = np.arange(2e3, 50e3, 1e3)
     z = np.arange(500.0, 8000.0, 500.0)
     out = gates.grid_rhi(
-        dtree, "DBZH", distance=distance, z=z, roi=800.0, beam_width=0.5, engine=engine
+        dtree, "DBZH", distance=distance, z=z, roi=800.0, beamwidth=0.5, engine=engine
     )
     assert out["DBZH"].dims == ("z", "distance")
     assert float(out.azimuth) == pytest.approx(90.0)
@@ -388,7 +388,7 @@ def test_rhi_section(engine):
         y=[0.0],
         z=z,
         roi=800.0,
-        beam_width=0.5,
+        beamwidth=0.5,
         engine=engine,
     )["DBZH"].isel(y=0)
     np.testing.assert_allclose(
@@ -531,8 +531,8 @@ def test_errors(random_volume, monkeypatch):
         dict(roi=np.nan),
         dict(roi_range_factor=-1.0),
         dict(roi_height_factor=-0.1),
-        dict(beam_width=0.0),
-        dict(beam_width=95.0),
+        dict(beamwidth=0.0),
+        dict(beamwidth=95.0),
         dict(min_gates=0),
     ):
         with pytest.raises(ValueError):

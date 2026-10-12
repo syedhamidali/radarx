@@ -100,14 +100,18 @@ __all__ = [
 
 __doc__ = __doc__.format("\n   ".join(__all__))
 
+import functools
 import math
 import warnings
 
 import numpy as np
 import xarray as xr
 
+from .._compat import renamed_arguments
+from .._dtypes import fields_as_float32
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import Output, Sweep, apply_sweeps, dask_support, ray_dimension
 
 try:
     from . import _qvp
@@ -272,7 +276,7 @@ _PHASE_NAMES = {
 
 
 def _is_2d_numeric(da):
-    return da.ndim == 2 and "range" in da.dims and np.issubdtype(da.dtype, np.number)
+    return da.ndim >= 2 and "range" in da.dims and np.issubdtype(da.dtype, np.number)
 
 
 def _default_vars(ds):
@@ -319,6 +323,9 @@ def _beam_height(rng, elevation, site_altitude):
 def _sweep_time(ds):
     if "time" not in ds.coords and "time" not in ds:
         return np.datetime64("NaT", "ns")
+    if ds["time"].ndim > 1:  # a stack of sweeps: the time of each
+        rays = [d for d in ds["time"].dims if d in ("azimuth", "elevation")]
+        return ds["time"].mean(rays)
     t = np.ravel(ds["time"].values).astype("datetime64[ns]")
     t = t[~np.isnat(t)]
     if t.size == 0:
@@ -420,6 +427,17 @@ def _fields_of(first, data_vars, rhohv, dbz, min_rhohv, min_dbz):
     return data_vars, quality, thresholds
 
 
+def _circular_means(val, cnt, nv, circular):
+    """Angles of the means of cos and sin that follow the ``nv`` variables."""
+    val = np.array(val, dtype=np.float64)
+    for j, v in enumerate(circular):
+        c, sn = val[nv + 2 * j], val[nv + 2 * j + 1]
+        with np.errstate(invalid="ignore"):
+            angle = np.rad2deg(np.arctan2(sn, c))
+        val[v] = np.where(np.isnan(c) | np.isnan(sn), np.nan, angle)
+    return val[:nv], cnt[:nv]
+
+
 def _profiles(
     sweeps,
     data_vars,
@@ -471,16 +489,61 @@ def _profiles(
         nv = len(data_vars)
         values, counts = list(values), list(counts)
         for i, (val, cnt) in enumerate(zip(values, counts)):
-            val = np.array(val, dtype=np.float64)
-            for j, v in enumerate(circular):
-                c, sn = val[nv + 2 * j], val[nv + 2 * j + 1]
-                with np.errstate(invalid="ignore"):
-                    angle = np.rad2deg(np.arctan2(sn, c))
-                val[v] = np.where(np.isnan(c) | np.isnan(sn), np.nan, angle)
-            values[i], counts[i] = val[:nv], cnt[:nv]
+            values[i], counts[i] = _circular_means(val, cnt, nv, circular)
     filters = {q: t for q, t in zip(quality, thresholds)}
     _check_elevation(sweeps, data_vars, values, elevation_correction, warn_low)
     return data_vars, modes, values, counts, filters
+
+
+def _reduce_core(
+    batch,
+    thresholds,
+    kernel_modes,
+    circular,
+    nv,
+    min_count,
+    min_fraction,
+    correct,
+    names,
+    want_counts,
+    use_compiled,
+    n_threads,
+):
+    """Azimuthal profiles of sweeps given as ``(elevation, fields)``."""
+    out = []
+    for elevation, arrays in batch:
+        data = [np.ascontiguousarray(a, dtype=np.float32) for a in arrays[:nv]]
+        qual = [np.ascontiguousarray(a, dtype=np.float32) for a in arrays[nv:]]
+        for v in circular:
+            rad = np.deg2rad(data[v].astype(np.float64))
+            data.extend(
+                [np.cos(rad).astype(np.float32), np.sin(rad).astype(np.float32)]
+            )
+        need = [max(int(min_count), math.ceil(min_fraction * data[0].shape[0]), 1)]
+        if use_compiled:
+            values, counts = _qvp.azimuthal_reduce(
+                [data],
+                [qual],
+                thresholds,
+                kernel_modes,
+                need,
+                n_threads=int(n_threads or 0),
+            )
+        else:
+            values, counts = _reduce_numpy(
+                [data], [qual], thresholds, kernel_modes, need
+            )
+        val, cnt = values[0], counts[0]
+        if circular:
+            val, cnt = _circular_means(val, cnt, nv, circular)
+        val = list(val)
+        if correct:
+            _correct_elevation(val, names, elevation)
+        res = tuple(np.asarray(v, dtype=np.float32) for v in val[:nv])
+        if want_counts:
+            res += tuple(cnt[:nv])
+        out.append(res)
+    return out
 
 
 _KDP_NAMES = {n.lower() for n in _ZH_ROLES[3]}
@@ -513,6 +576,29 @@ def _zdr_to_horizontal(zdr, elevation):
     return out
 
 
+def _correct_elevation(values, data_vars, el):
+    """Scale KDP by 1 / cos(elevation)**2 and refer ZDR to 0 degrees (in place)."""
+    for v, name in enumerate(data_vars):
+        if name.lower() in _KDP_NAMES:
+            values[v] = values[v] / np.cos(np.deg2rad(el)) ** 2
+        elif name.lower() in _ZDR_LOWER:
+            values[v] = _zdr_to_horizontal(values[v], el)
+
+
+def _warn_low_elevation(low, warn=True):
+    """Warn for sweeps below the elevation the method is meant for."""
+    if low and warn:
+        warnings.warn(
+            f"QVP of a sweep at {min(low):.1f} degrees elevation: the method "
+            "assumes high elevations (more than 10 to 20 degrees, Ryzhkov et al. "
+            "2016), and the azimuthal means of ZDR and KDP are lower than "
+            "their values at the horizontal (KDP by about cos(elevation)**2; "
+            "elevation_correction=True corrects KDP and ZDR)",
+            UserWarning,
+            stacklevel=4,
+        )
+
+
 def _check_elevation(sweeps, data_vars, values, correct, warn=True):
     """
     Warn for low sweeps; if asked, scale KDP by 1 / cos(elevation)**2 and
@@ -524,21 +610,8 @@ def _check_elevation(sweeps, data_vars, values, correct, warn=True):
         if el < _LOW_ELEVATION:
             low.append(el)
         if correct:
-            for v, name in enumerate(data_vars):
-                if name.lower() in _KDP_NAMES:
-                    values[i][v] = values[i][v] / np.cos(np.deg2rad(el)) ** 2
-                elif name.lower() in _ZDR_LOWER:
-                    values[i][v] = _zdr_to_horizontal(values[i][v], el)
-    if low and warn:
-        warnings.warn(
-            f"QVP of a sweep at {min(low):.1f} degrees elevation: the method "
-            "assumes high elevations (more than 10 to 20 degrees, Ryzhkov et al. "
-            "2016), and the azimuthal means of ZDR and KDP are lower than "
-            "their values at the horizontal (KDP by about cos(elevation)**2; "
-            "elevation_correction=True corrects KDP and ZDR)",
-            UserWarning,
-            stacklevel=4,
-        )
+            _correct_elevation(values[i], data_vars, el)
+    _warn_low_elevation(low, warn)
 
 
 def _var_attrs(ds, name, mode, filters, min_count, correct=False):
@@ -603,7 +676,7 @@ def _geometry(ds):
 _ELEVATION_ATTRS = {
     "standard_name": "sensor_to_target_elevation_angle",
     "long_name": "median elevation angle of the sweep",
-    "units": "degrees",
+    "units": "degree",
 }
 
 _QVP_PARAMS = """
@@ -663,6 +736,10 @@ _QVP_PARAMS = """
         kernel and falls back to NumPy."""
 
 
+@dask_support(
+    "lazy",
+    "The sweeps of a stack must have the same elevation and ranges; the heights are those of the median elevation.",
+)
 @provenance("Quasi-vertical profile of a sweep, after Ryzhkov et al. (2016)")
 def qvp(
     obj,
@@ -745,8 +822,8 @@ def qvp(
     >>> profile = dtree.radarx.qvp(sweep=9)  # doctest: +SKIP
     """
     ds = _select_sweep(obj, sweep=sweep, elevation=elevation)
-    data_vars, modes, values, cnts, filters = _profiles(
-        [ds],
+    data_vars, modes, values, cnts, filters, dims = _lazy_profile(
+        ds,
         data_vars,
         min_rhohv=min_rhohv,
         min_dbz=min_dbz,
@@ -756,6 +833,7 @@ def qvp(
         min_fraction=min_fraction,
         reduction=reduction,
         linear=linear,
+        counts=counts,
         n_threads=n_threads,
         engine=engine,
         elevation_correction=elevation_correction,
@@ -764,14 +842,14 @@ def qvp(
     out = {}
     for v, (name, mode) in enumerate(zip(data_vars, modes)):
         out[name] = (
-            "height",
-            values[0][v].astype(np.float32),
+            dims,
+            values[v],
             _var_attrs(ds, name, mode, filters, min_count, elevation_correction),
         )
         if counts:
             out[f"{name}_count"] = (
-                "height",
-                cnts[0][v],
+                dims,
+                cnts[v],
                 {"long_name": f"number of valid gates of {name}", "units": "1"},
             )
     coords = _height_coords(height, rng, ground)
@@ -785,6 +863,73 @@ def qvp(
     return result
 
 
+def _lazy_profile(
+    ds,
+    data_vars,
+    *,
+    min_rhohv,
+    min_dbz,
+    rhohv,
+    dbz,
+    min_count,
+    min_fraction,
+    reduction,
+    linear,
+    counts,
+    n_threads,
+    engine,
+    elevation_correction,
+):
+    """
+    Azimuthal reduction of a sweep, a stack of sweeps or dask arrays.
+
+    Returns the names, modes, the profile of each variable and its count of
+    valid gates (arrays on the extra dimensions and the heights), the filters
+    and the dimensions of the arrays.
+    """
+    use_compiled = _use_compiled(engine)
+    data_vars, quality, thresholds = _fields_of(
+        ds, data_vars, rhohv, dbz, min_rhohv, min_dbz
+    )
+    modes = _modes(ds, data_vars, reduction, linear)
+    circular = [
+        v
+        for v, name in enumerate(data_vars)
+        if reduction == "mean" and _is_phase(ds, name)
+    ]
+    elevation = float(np.nanmedian(ds["elevation"].values))
+    _warn_low_elevation([elevation] if elevation < _LOW_ELEVATION else [])
+    core = functools.partial(
+        _reduce_core,
+        thresholds=thresholds,
+        kernel_modes=list(modes) + [_MODES["mean"]] * (2 * len(circular)),
+        circular=circular,
+        nv=len(data_vars),
+        min_count=min_count,
+        min_fraction=min_fraction,
+        correct=elevation_correction,
+        names=data_vars,
+        want_counts=counts,
+        use_compiled=use_compiled,
+        n_threads=n_threads,
+    )
+    outputs = [Output(np.float32, "range")] * len(data_vars)
+    if counts:
+        outputs += [Output(np.int32, "range")] * len(data_vars)
+    fields = [ds[name] for name in data_vars + quality]
+    for field in fields[1:]:
+        if ray_dimension(field) != ray_dimension(fields[0]):
+            raise ValueError(
+                f"{field.name!r} is not on the same rays as {data_vars[0]!r}"
+            )
+    stack = Sweep(fields, context=elevation)
+    results = apply_sweeps(core, stack, outputs, raw=True)
+    nv = len(data_vars)
+    filters = dict(zip(quality, thresholds))
+    dims = stack.extra + ("height",)
+    return data_vars, modes, results[:nv], results[nv:], filters, dims
+
+
 def _interp_nan(x_new, x, y):
     """Linear interpolation that is NaN wherever a neighbouring sample is NaN."""
     nan = np.isnan(y)
@@ -793,6 +938,7 @@ def _interp_nan(x_new, x, y):
     return np.where(bad > 0, np.nan, v)
 
 
+@dask_support("computes", "it needs the fields of every time.")
 @provenance("Time-height quasi-vertical profiles, after Ryzhkov et al. (2016)")
 def qvp_timeseries(
     volumes,
@@ -959,11 +1105,11 @@ def _layer_edge(x, h, i0, step, depth, sign, fraction):
     return -1
 
 
-def _ml_anchor(z, r, d, h, lo, hi, hmin, hmax, rho_lo, rho_hi, zdr_min, dbz_min):
+def _ml_anchor(z, r, d, h, lo, hi, hmin, hmax, rho_lo, rho_hi, min_zdr, min_dbz):
     """Largest ZDR peak with a rhohv minimum and a Z maximum nearby."""
     best = best_rho = -1
     for j in range(h.size):
-        if not (hmin <= h[j] <= hmax) or np.isnan(d[j]) or d[j] < zdr_min:
+        if not (hmin <= h[j] <= hmax) or np.isnan(d[j]) or d[j] < min_zdr:
             continue
         if best >= 0 and d[j] <= d[best]:
             continue
@@ -972,7 +1118,7 @@ def _ml_anchor(z, r, d, h, lo, hi, hmin, hmax, rho_lo, rho_hi, zdr_min, dbz_min)
             continue
         jr = lo[j] + int(np.nanargmin(rw))
         zmax = np.nanmax(zw) if not np.isnan(zw).all() else -np.inf
-        if not (rho_lo <= r[jr] <= rho_hi) or zmax < dbz_min:
+        if not (rho_lo <= r[jr] <= rho_hi) or zmax < min_dbz:
             continue
         best, best_rho = j, jr
     return best, best_rho
@@ -1223,6 +1369,8 @@ def _apply_time_consistency(top, bottom, peak, flag, template, other, **kwargs):
     return [np.moveaxis(a, -1, axis) for a in arrays]
 
 
+@dask_support("computes", "the layer is found from the whole profile.")
+@renamed_arguments(zdr_min="min_zdr", dbz_min="min_dbz")
 @provenance(
     "Melting layer from QVPs, radarx's own, loosely after Giangrande et al. (2008)"
 )
@@ -1238,8 +1386,8 @@ def melting_layer(
     freezing_level=None,
     freezing_level_window=(-1000.0, 500.0),
     rhohv_range=(0.80, 0.97),
-    zdr_min=0.5,
-    dbz_min=20.0,
+    min_zdr=0.5,
+    min_dbz=20.0,
     window=500.0,
     depth=1000.0,
     rhohv_onset=None,
@@ -1355,11 +1503,11 @@ def melting_layer(
         melting and non-melting echo can fall below 0.90; this is a
         radarx choice, not tested against the paper. Pass
         ``(0.90, 0.97)`` for the paper's range.
-    zdr_min : float, optional
+    min_zdr : float, optional
         Minimum ZDR peak, default 0.5 dB (radarx choice; Giangrande et al.
         2008 [1] require a ZDR maximum between 0.8 and 2.5 dB, and there is no
         upper limit here).
-    dbz_min : float, optional
+    min_dbz : float, optional
         Minimum Z maximum near the ZDR peak, default 20 dBZ (radarx choice;
         Giangrande et al. 2008 [1] require a Z maximum between 30 and 47 dBZ,
         and there is no upper limit here).
@@ -1424,7 +1572,7 @@ def melting_layer(
       and looks for the ρhv minimum and the Z maximum within ``window`` metres
       on both sides of it;
     - ``rhohv_range`` is (0.80, 0.97), not (0.90, 0.97) (see that parameter);
-    - ``zdr_min=0.5`` dB and ``dbz_min=20`` dBZ replace 0.8 dB and 30 dBZ,
+    - ``min_zdr=0.5`` dB and ``min_dbz=20`` dBZ replace 0.8 dB and 30 dBZ,
       and there is no upper limit of 2.5 dB and 47 dBZ. The lower defaults
       are radarx's choice, made because azimuthal averaging in a QVP smooths
       and weakens the extremes (Z is averaged over the whole circle,
@@ -1523,7 +1671,7 @@ def melting_layer(
     )
     hmin, hmax = _search_range(search, height_range, freezing_level_window, len(zh))
     params = (
-        *(float(v) for v in (*rhohv_range, zdr_min, dbz_min, window, depth)),
+        *(float(v) for v in (*rhohv_range, min_zdr, min_dbz, window, depth)),
         float(edge_fraction),
         _BOUNDARIES[boundaries],
         np.inf if rhohv_onset is None else float(rhohv_onset),
@@ -1606,7 +1754,7 @@ def melting_layer(
                 "units": "m",
             },
         )
-    return out
+    return fields_as_float32(out)
 
 
 # ---------------------------------------------------------------------------
@@ -1810,6 +1958,7 @@ def _elevation_limits(sweeps, minimum, maximum):
     return kept
 
 
+@dask_support("computes", "the result combines the gates of all sweeps of the volume.")
 @provenance(
     "Range-defined quasi-vertical profile, after Tobin and Kumjian (2017) "
     "as described by Murphy et al. (2020); weights are radarx's own"
@@ -2042,6 +2191,7 @@ def _height_at_ground(elevation, ground, site_altitude):
     return float(np.interp(ground, dist, height))
 
 
+@dask_support("computes", "the result combines the gates of all sweeps of the volume.")
 @provenance("Columnar vertical profile, after Murphy et al. (2020)")
 def cvp(
     volumes,
@@ -2267,7 +2417,7 @@ def cvp(
         "azimuth": (
             (),
             float(azimuth),
-            {"long_name": "azimuth of the CVP centre", "units": "degrees"},
+            {"long_name": "azimuth of the CVP centre", "units": "degree"},
         ),
         "ground_range": (
             (),
@@ -2318,6 +2468,7 @@ def _intermediate_band(levels, elevation, ground, site_altitude):
     return low, high
 
 
+@dask_support("computes", "the profile is built from all rays.")
 @provenance(
     "Quasi-vertical profile of an RHI (RHI-QVP), after Allabakash et al. (2019)"
 )
@@ -2472,7 +2623,7 @@ def rhi_qvp(
         extra["azimuth"] = (
             (),
             float(np.nanmedian(first["azimuth"].values)),
-            {"long_name": "median azimuth of the RHI", "units": "degrees"},
+            {"long_name": "median azimuth of the RHI", "units": "degree"},
         )
     out = _blended_dataset(
         names,
@@ -2596,6 +2747,7 @@ def _ppi_layer_numpy(sweeps, target, sector, q_top, q_bottom, min_points, params
     return top, bottom, npts, *percentiles(everything)
 
 
+@dask_support("computes", "the result combines the gates of all sweeps of the volume.")
 @provenance("Melting layer from the PPIs of a volume, after Giangrande et al. (2008)")
 def melting_layer_ppi(
     volumes,
@@ -2780,7 +2932,7 @@ def melting_layer_ppi(
         "azimuth": (
             "azimuth",
             target,
-            {"long_name": "azimuth of the window centre", "units": "degrees"},
+            {"long_name": "azimuth of the window centre", "units": "degree"},
         )
     }
     method = (
@@ -2911,10 +3063,10 @@ RAIN_ONLY_PRODUCTS = (
 ABOVE_MELTING_LAYER_FLAG = 4
 
 
-def _gate_height(obj, height, beam_width):
+def _gate_height(obj, height, beamwidth):
     """
     Height (m above sea level) of the gates of a sweep, or the height of the
-    lower edge of the beam if ``beam_width`` (degrees) is given.
+    lower edge of the beam if ``beamwidth`` (degrees) is given.
     """
     if height is None:
         if "elevation" not in obj.coords or "range" not in obj.coords:
@@ -2934,10 +3086,10 @@ def _gate_height(obj, height, beam_width):
         else:
             raise ValueError("the elevation must be a scalar or one value per ray.")
         height = xr.DataArray(np.asarray(z), dims=dims)
-    if beam_width:
+    if beamwidth:
         rng = obj["range"].reset_coords(drop=True)
         el = np.deg2rad(obj["elevation"].reset_coords(drop=True))
-        half = 0.5 * np.deg2rad(float(beam_width)) * rng * np.cos(el)
+        half = 0.5 * np.deg2rad(float(beamwidth)) * rng * np.cos(el)
         height = height - half
     return height
 
@@ -2987,13 +3139,13 @@ def _capped_flag_attrs():
     }
 
 
-def _cap_sweep(obj, melting_layer, bottom, height, margin, beam_width, variables):
+def _cap_sweep(obj, melting_layer, bottom, height, margin, beamwidth, variables):
     cap = _align_azimuth(_cap_height(melting_layer, bottom, margin), obj)
-    edge = _gate_height(obj, height, beam_width)
+    edge = _gate_height(obj, height, beamwidth)
     above = edge > cap  # NaN where the layer or the height is unknown: kept
     text = (
         f"set to NaN where the beam is above the melting layer bottom + {margin:g} m"
-        + (f" (lower edge of a {beam_width:g} degree beam)" if beam_width else "")
+        + (f" (lower edge of a {beamwidth:g} degree beam)" if beamwidth else "")
     )
     if isinstance(obj, xr.DataArray):
         out = obj.where(~above)
@@ -3028,6 +3180,8 @@ def _cap_sweep(obj, melting_layer, bottom, height, margin, beam_width, variables
     return out
 
 
+@dask_support("computes", "the layer height is found from the data.")
+@renamed_arguments(beam_width="beamwidth")
 @provenance(
     "Rain-only products set to NaN above the melting layer bottom, radarx's own"
 )
@@ -3038,7 +3192,7 @@ def mask_above_melting_layer(
     bottom="melting_layer_bottom",
     height=None,
     margin=0.0,
-    beam_width=None,
+    beamwidth=None,
     variables=None,
 ):
     """
@@ -3059,7 +3213,7 @@ def mask_above_melting_layer(
     layer plus ``margin``. The bottom is the end of snow melting (Ryzhkov
     and Krause 2022 [1]_, p. 533), so below it there are no wet snow and no
     ice: the rain-only relations apply from there downward. The ``margin``
-    (default 0 m) moves the cap, and ``beam_width`` makes it use the lower
+    (default 0 m) moves the cap, and ``beamwidth`` makes it use the lower
     edge of the beam instead of its centre, because a beam whose lower half
     is in rain and upper half in the layer is contaminated. Both are radarx's
     definition and are not taken from a paper. Gates are kept where the
@@ -3088,7 +3242,7 @@ def mask_above_melting_layer(
         ``altitude`` coordinates.
     margin : float, optional
         Added to the bottom (m); gates above the sum are removed. Default 0.
-    beam_width : float, optional
+    beamwidth : float, optional
         Two-way half-power beam width (degrees). With it the height compared
         with the cap is the lower edge of the beam, ``height - 0.5 * width *
         range * cos(elevation)``. Default None: the centre of the beam.
@@ -3134,14 +3288,14 @@ def mask_above_melting_layer(
         return map_sweeps(
             products,
             lambda ds, name: _cap_sweep(
-                ds, melting_layer, bottom, height, margin, beam_width, variables
+                ds, melting_layer, bottom, height, margin, beamwidth, variables
             ),
             "mask_above_melting_layer",
         )
     if not isinstance(products, (xr.DataArray, xr.Dataset)):
         raise TypeError("products must be an xarray DataArray, Dataset or DataTree.")
     return _cap_sweep(
-        products, melting_layer, bottom, height, margin, beam_width, variables
+        products, melting_layer, bottom, height, margin, beamwidth, variables
     )
 
 
@@ -3150,8 +3304,8 @@ def mask_above_melting_layer(
 # ---------------------------------------------------------------------------
 
 
-@accessor_method("dataset", "datatree", name="rd_qvp")
-def _rd_qvp_accessor(self, data_vars=None, **kwargs):
+@accessor_method("dataset", "datatree", name="rd_qvp", wraps=rd_qvp)
+def _rd_qvp_accessor(self):
     """
     Range-defined quasi-vertical profile of this volume.
 
@@ -3159,9 +3313,6 @@ def _rd_qvp_accessor(self, data_vars=None, **kwargs):
     ----------
     data_vars : str or list of str, optional
         Variables to profile.
-    **kwargs
-        Options of :func:`radarx.retrieve.rd_qvp` (``rmax``, ``power``,
-        ``dz``, ...).
 
     Returns
     -------
@@ -3172,11 +3323,10 @@ def _rd_qvp_accessor(self, data_vars=None, **kwargs):
     --------
     radarx.retrieve.rd_qvp
     """
-    return rd_qvp(self.xarray_obj, data_vars, **kwargs)
 
 
-@accessor_method("dataset", "datatree", name="cvp")
-def _cvp_accessor(self, data_vars=None, **kwargs):
+@accessor_method("dataset", "datatree", name="cvp", wraps=cvp)
+def _cvp_accessor(self):
     """
     Columnar vertical profile of this volume.
 
@@ -3184,9 +3334,6 @@ def _cvp_accessor(self, data_vars=None, **kwargs):
     ----------
     data_vars : str or list of str, optional
         Variables to profile.
-    **kwargs
-        Options of :func:`radarx.retrieve.cvp`; ``azimuth`` and
-        ``ground_range`` of the centre are required.
 
     Returns
     -------
@@ -3197,11 +3344,10 @@ def _cvp_accessor(self, data_vars=None, **kwargs):
     --------
     radarx.retrieve.cvp
     """
-    return cvp(self.xarray_obj, data_vars, **kwargs)
 
 
-@accessor_method("dataset", "datatree", name="rhi_qvp")
-def _rhi_qvp_accessor(self, data_vars=None, **kwargs):
+@accessor_method("dataset", "datatree", name="rhi_qvp", wraps=rhi_qvp)
+def _rhi_qvp_accessor(self):
     """
     Vertical profile of this RHI scan.
 
@@ -3209,9 +3355,6 @@ def _rhi_qvp_accessor(self, data_vars=None, **kwargs):
     ----------
     data_vars : str or list of str, optional
         Variables to profile.
-    **kwargs
-        Options of :func:`radarx.retrieve.rhi_qvp` (``rmin``, ``rmax``,
-        ``dz``, ...).
 
     Returns
     -------
@@ -3222,19 +3365,14 @@ def _rhi_qvp_accessor(self, data_vars=None, **kwargs):
     --------
     radarx.retrieve.rhi_qvp
     """
-    return rhi_qvp(self.xarray_obj, data_vars, **kwargs)
 
 
-@accessor_method("dataset", "datatree", name="melting_layer_ppi")
-def _melting_layer_ppi_accessor(self, **kwargs):
+@accessor_method(
+    "dataset", "datatree", name="melting_layer_ppi", wraps=melting_layer_ppi
+)
+def _melting_layer_ppi_accessor(self):
     """
     Melting-layer top and bottom from the PPIs of this volume.
-
-    Parameters
-    ----------
-    **kwargs
-        Options of :func:`radarx.retrieve.melting_layer_ppi`
-        (``elevation_range``, ``sector``, ``percentiles``, ...).
 
     Returns
     -------
@@ -3246,11 +3384,16 @@ def _melting_layer_ppi_accessor(self, **kwargs):
     --------
     radarx.retrieve.melting_layer_ppi
     """
-    return melting_layer_ppi(self.xarray_obj, **kwargs)
 
 
-@accessor_method("dataarray", "dataset", "datatree", name="mask_above_melting_layer")
-def _mask_above_melting_layer_accessor(self, melting_layer, **kwargs):
+@accessor_method(
+    "dataarray",
+    "dataset",
+    "datatree",
+    name="mask_above_melting_layer",
+    wraps=mask_above_melting_layer,
+)
+def _mask_above_melting_layer_accessor(self):
     """
     Remove rain-only products above the melting layer.
 
@@ -3259,9 +3402,6 @@ def _mask_above_melting_layer_accessor(self, melting_layer, **kwargs):
     melting_layer : xarray.Dataset, xarray.DataArray or float
         The bottom of the melting layer (m above sea level), for example the
         output of ``melting_layer_ppi``.
-    **kwargs
-        Options of :func:`radarx.retrieve.mask_above_melting_layer`
-        (``margin``, ``beam_width``, ...).
 
     Returns
     -------
@@ -3272,4 +3412,3 @@ def _mask_above_melting_layer_accessor(self, melting_layer, **kwargs):
     --------
     radarx.retrieve.mask_above_melting_layer
     """
-    return mask_above_melting_layer(self.xarray_obj, melting_layer, **kwargs)

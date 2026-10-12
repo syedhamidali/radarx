@@ -182,8 +182,10 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from .._compat import renamed_arguments
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 
 try:
     from . import _lightning
@@ -725,27 +727,29 @@ def _with_flashes(ds, use_compiled, n_threads, distance=3000.0, time=0.15):
     return ds
 
 
+@dask_support("eager", "the flashes are found from all sources.")
+@renamed_arguments(ds="obj")
 @provenance(
     "Space-time clustering of LMA sources into flashes, after Fuchs et al. (2016)",
     extra_refs=("ester-1996",),
 )
 def cluster_flashes(
-    ds,
+    obj,
     *,
     distance=3000.0,
     time=0.15,
     min_points=1,
     max_duration=None,
     noise="flash",
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Group LMA VHF sources into flashes by their space-time separation.
 
     Parameters
     ----------
-    ds : xarray.Dataset
+    obj : xarray.Dataset
         LMA sources, e.g. from :func:`radarx.io.read_lma` (filter them by
         chi-square and number of stations first, e.g. ``max_chi2=1``,
         ``min_stations=6``).
@@ -776,11 +780,11 @@ def cluster_flashes(
         Sources that belong to no cluster (``min_points`` above 2): ``"flash"``
         (default) makes each a flash of one source, ``"drop"`` gives them
         ``event_parent_flash_id`` -1, no flash, as DBSCAN's noise label.
+    n_threads : int, optional
+        Threads for the compiled kernel. Default: all cores.
     engine : {"auto", "compiled", "numpy"}, optional
         Implementation to use. ``"auto"`` (default) prefers the compiled
         kernel and falls back to NumPy.
-    n_threads : int, optional
-        Threads for the compiled kernel. Default: all cores.
 
     Returns
     -------
@@ -873,7 +877,7 @@ def cluster_flashes(
        469-483, https://doi.org/10.1145/235815.235821
     """
     use_compiled = _use_compiled(engine)
-    _check_events(ds)
+    _check_events(obj)
     if not (distance > 0 and time > 0):
         raise ValueError("distance and time must be positive")
     if int(min_points) != min_points or min_points < 1:
@@ -883,13 +887,15 @@ def cluster_flashes(
     if noise not in ("flash", "drop"):
         raise ValueError(f"noise must be 'flash' or 'drop', not {noise!r}")
     min_points = int(min_points)
-    old = [v for v in ds.variables if FLASHES in ds[v].dims]
-    ds = ds.drop_vars(old + [v for v in ["event_parent_flash_id"] if v in ds.variables])
-    ds, _ = _sorted_events(ds)
-    lat = ds["event_latitude"].values.astype(float)
-    lon = ds["event_longitude"].values.astype(float)
-    alt = ds["event_altitude"].values.astype(float)
-    times = ds["event_time"].values
+    old = [v for v in obj.variables if FLASHES in obj[v].dims]
+    obj = obj.drop_vars(
+        old + [v for v in ["event_parent_flash_id"] if v in obj.variables]
+    )
+    obj, _ = _sorted_events(obj)
+    lat = obj["event_latitude"].values.astype(float)
+    lon = obj["event_longitude"].values.astype(float)
+    alt = obj["event_altitude"].values.astype(float)
+    times = obj["event_time"].values
     n = times.size
     t = _seconds(times, times[0]) if n else np.zeros(0)
     ex, ey, ez = _ecef(lon, lat, alt)
@@ -958,7 +964,7 @@ def cluster_flashes(
         "flash_center_altitude": mean(alt),
         "flash_area": np.asarray(area) * 1e-6,
     }
-    out = ds.assign({k: (FLASHES, v, dict(_FLASH_ATTRS[k])) for k, v in fl.items()})
+    out = obj.assign({k: (FLASHES, v, dict(_FLASH_ATTRS[k])) for k, v in fl.items()})
     out = out.assign_coords(
         flash_id=(FLASHES, np.arange(nflash, dtype=np.int64), _FLASH_ATTRS["flash_id"])
     )
@@ -999,9 +1005,11 @@ def _flash_ok(count, min_sources):
     )
 
 
+@dask_support("computes", "the densities are summed over all sources.")
+@renamed_arguments(ds="obj")
 @provenance("Gridded source, flash extent and flash initiation densities")
 def grid_lightning(
-    ds,
+    obj,
     grid=None,
     *,
     x=None,
@@ -1014,15 +1022,15 @@ def grid_lightning(
     min_sources=10,
     distance=3000.0,
     time=0.15,
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Source, flash extent and flash initiation densities on a radarx grid.
 
     Parameters
     ----------
-    ds : xarray.Dataset
+    obj : xarray.Dataset
         LMA sources (:func:`radarx.io.read_lma`), with or without flashes; if
         it has none, :func:`cluster_flashes` groups them first with
         ``distance`` and ``time``.
@@ -1051,13 +1059,13 @@ def grid_lightning(
         noise points; Fuchs et al. (2016) [1]_ (p. 8629) describe such a
         threshold on the number of points as customary.
     distance, time : float, optional
-        Clustering scales if ``ds`` has no flashes (see
+        Clustering scales if ``obj`` has no flashes (see
         :func:`cluster_flashes`, which also states how the flashes relate
         to Fuchs et al. 2016).
-    engine : {"auto", "compiled", "numpy"}, optional
-        Implementation to use. Default ``"auto"``.
     n_threads : int, optional
         Threads for the compiled kernel. Default: all cores.
+    engine : {"auto", "compiled", "numpy"}, optional
+        Implementation to use. Default ``"auto"``.
 
     Returns
     -------
@@ -1097,7 +1105,7 @@ def grid_lightning(
     >>> fed = grid_lightning(lma, grid, interval="2min")  # doctest: +SKIP
     """
     use_compiled = _use_compiled(engine)
-    _check_events(ds)
+    _check_events(obj)
     nt = int(n_threads or 0)
     x, y = _xy_of(grid, x, y)
     if z is True:
@@ -1105,16 +1113,16 @@ def grid_lightning(
             raise ValueError("z=True needs a grid with a z coordinate")
         z = grid["z"].values
     lat0, lon0 = _origin(grid, latitude, longitude)
-    ds = _with_flashes(ds, use_compiled, nt, distance, time)
-    labels, first, count = _flash_arrays(ds, use_compiled, nt)
+    obj = _with_flashes(obj, use_compiled, nt, distance, time)
+    labels, first, count = _flash_arrays(obj, use_compiled, nt)
     ok = _flash_ok(count, min_sources)
-    times = ds["event_time"].values
+    times = obj["event_time"].values
     tedges = _time_edges(times, interval, time_edges)
     ref = tedges[0]
     px, py = _project(
-        ds["event_longitude"].values, ds["event_latitude"].values, lat0, lon0, nt
+        obj["event_longitude"].values, obj["event_latitude"].values, lat0, lon0, nt
     )
-    pz = ds["event_altitude"].values.astype(float)
+    pz = obj["event_altitude"].values.astype(float)
     xe, ye = _edges(x, "x"), _edges(y, "y")
     ze = np.array([-np.inf, np.inf]) if z is None else _edges(z, "z")
     te = _seconds(tedges, ref)
@@ -1194,14 +1202,16 @@ def grid_lightning(
     out.attrs = {
         "source": "VHF Lightning Mapping Array",
         "min_sources_per_flash": int(min_sources or 1),
-        "flash_algorithm_name": ds.attrs.get("flash_algorithm_name", ""),
+        "flash_algorithm_name": obj.attrs.get("flash_algorithm_name", ""),
     }
     return out
 
 
+@dask_support("computes", "the distribution is built from all sources.")
+@renamed_arguments(ds="obj")
 @provenance("Height distribution of LMA sources and flash initiations")
 def vertical_source_distribution(
-    ds,
+    obj,
     z,
     *,
     interval=None,
@@ -1209,15 +1219,15 @@ def vertical_source_distribution(
     min_sources=10,
     distance=3000.0,
     time=0.15,
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Height distribution of LMA sources and flash initiations.
 
     Parameters
     ----------
-    ds : xarray.Dataset
+    obj : xarray.Dataset
         LMA sources (:func:`radarx.io.read_lma`), with or without flashes.
         Select a region first, e.g. with ``ds.where(..., drop=True)`` on
         ``event_latitude``/``event_longitude``.
@@ -1242,12 +1252,12 @@ def vertical_source_distribution(
     and :func:`cluster_flashes`, with their references.
     """
     use_compiled = _use_compiled(engine)
-    _check_events(ds)
+    _check_events(obj)
     nt = int(n_threads or 0)
-    ds = _with_flashes(ds, use_compiled, nt, distance, time)
-    labels, first, count = _flash_arrays(ds, use_compiled, nt)
+    obj = _with_flashes(obj, use_compiled, nt, distance, time)
+    labels, first, count = _flash_arrays(obj, use_compiled, nt)
     ok = _flash_ok(count, min_sources)
-    times = ds["event_time"].values
+    times = obj["event_time"].values
     if interval is None and time_edges is None:
         if times.size == 0:
             raise ValueError("no sources; give time_edges")
@@ -1261,7 +1271,7 @@ def vertical_source_distribution(
     args = [
         zero,
         zero,
-        _f64(ds["event_altitude"].values),
+        _f64(obj["event_altitude"].values),
         _f64(_seconds(times, ref)),
         _i64(labels),
         _i64(first),
@@ -1329,9 +1339,11 @@ def _mask_frames(times, mtimes, max_offset):
     return frame, max_off
 
 
+@dask_support("eager", "the cells are tracked through all times.")
+@renamed_arguments(ds="obj")
 @provenance("Flash rates and source heights of tracked storm cells")
 def cell_flash_rate(
-    ds,
+    obj,
     mask,
     *,
     interval="1min",
@@ -1345,15 +1357,15 @@ def cell_flash_rate(
     min_sources=10,
     distance=3000.0,
     time=0.15,
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Flash rates and source height distributions of tracked storm cells.
 
     Parameters
     ----------
-    ds : xarray.Dataset
+    obj : xarray.Dataset
         LMA sources (:func:`radarx.io.read_lma`), with or without flashes.
     mask : xarray.DataArray
         Integer cell labels on ``(time, y, x)`` (e.g. a tracked-storm
@@ -1402,7 +1414,7 @@ def cell_flash_rate(
     the input of :func:`lightning_jump` (Schultz et al. 2009, 2011, 2016).
     """
     use_compiled = _use_compiled(engine)
-    _check_events(ds)
+    _check_events(obj)
     if count not in ("initiation", "extent"):
         raise ValueError("count must be 'initiation' or 'extent'")
     if not isinstance(mask, xr.DataArray) or set(mask.dims) != {"time", "y", "x"}:
@@ -1412,10 +1424,10 @@ def cell_flash_rate(
     lat0, lon0 = _origin(mask, latitude, longitude)
     cells, index = _cell_index(mask.values, background)
 
-    ds = _with_flashes(ds, use_compiled, nt, distance, time)
-    labels, first, fcount = _flash_arrays(ds, use_compiled, nt)
+    obj = _with_flashes(obj, use_compiled, nt, distance, time)
+    labels, first, fcount = _flash_arrays(obj, use_compiled, nt)
     ok = _flash_ok(fcount, min_sources)
-    times = ds["event_time"].values
+    times = obj["event_time"].values
     mtimes = mask["time"].values.astype("datetime64[ns]")
     frame, max_off = _mask_frames(times, mtimes, max_offset)
     if time_edges is None:
@@ -1428,7 +1440,7 @@ def cell_flash_rate(
         tedges = _time_edges(times, interval, time_edges)
     ref = tedges[0]
     px, py = _project(
-        ds["event_longitude"].values, ds["event_latitude"].values, lat0, lon0, nt
+        obj["event_longitude"].values, obj["event_latitude"].values, lat0, lon0, nt
     )
     zc = None if z is None else np.asarray(z, dtype=float)
     ze = np.array([-np.inf, np.inf]) if zc is None else _edges(zc, "z")
@@ -1440,7 +1452,7 @@ def cell_flash_rate(
         _i64(frame),
         _f64(px),
         _f64(py),
-        _f64(ds["event_altitude"].values),
+        _f64(obj["event_altitude"].values),
         _f64(_seconds(times, ref)),
         _i64(labels),
         _i64(first),
@@ -1721,8 +1733,8 @@ def lightning_jump(
 # --------------------------------------------------------------------------
 
 
-@accessor_method("dataset", name="cluster_flashes")
-def _cluster_flashes_accessor(self, **kwargs):
+@accessor_method("dataset", name="cluster_flashes", wraps=cluster_flashes)
+def _cluster_flashes_accessor(self):
     """
     Group the LMA sources of this dataset into flashes.
 
@@ -1733,11 +1745,10 @@ def _cluster_flashes_accessor(self, **kwargs):
     xarray.Dataset
         The sources with ``event_parent_flash_id`` and the flash variables.
     """
-    return cluster_flashes(self.xarray_obj, **kwargs)
 
 
-@accessor_method("dataset", name="grid_lightning")
-def _grid_lightning_accessor(self, grid=None, **kwargs):
+@accessor_method("dataset", name="grid_lightning", wraps=grid_lightning)
+def _grid_lightning_accessor(self):
     """
     Grid the LMA sources of this dataset (source, flash extent and flash
     initiation densities).
@@ -1749,11 +1760,10 @@ def _grid_lightning_accessor(self, grid=None, **kwargs):
     xarray.Dataset
         Gridded lightning products on ``(time, [z,] y, x)``.
     """
-    return grid_lightning(self.xarray_obj, grid, **kwargs)
 
 
-@accessor_method("dataarray", name="lightning_jump")
-def _lightning_jump_accessor(self, **kwargs):
+@accessor_method("dataarray", name="lightning_jump", wraps=lightning_jump)
+def _lightning_jump_accessor(self):
     """
     Lightning jumps of this flash-rate time series (Schultz et al. 2009).
 
@@ -1764,4 +1774,3 @@ def _lightning_jump_accessor(self, **kwargs):
     xarray.Dataset
         Averaged flash rate, DFRDT, sigma level and jump flags.
     """
-    return lightning_jump(self.xarray_obj, **kwargs)

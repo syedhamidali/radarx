@@ -632,8 +632,8 @@ counterpart of the sounding of step 3:
 
 ```{code-cell} ipython3
 with timed("4b. VAD wind profile"):
-    vad = vad_profile(volumes[1], velocity="VRADH_dealiased", max_rms=4.0, max_range=80e3)
-vad_acc = volumes[1].radarx.vad_profile(velocity="VRADH_dealiased", max_rms=4.0, max_range=80e3)
+    vad = vad_profile(volumes[1], field="VRADH_dealiased", max_rms=4.0, max_range=80e3)
+vad_acc = volumes[1].radarx.vad_profile(field="VRADH_dealiased", max_rms=4.0, max_range=80e3)
 fig, axes = plt.subplots(1, 2, figsize=(8.5, 5), sharey=True, layout="constrained")
 for ax, comp in zip(axes, ("u", "v")):
     ax.plot(vad[comp], vad.height / 1e3, ".-", color="k", ms=3, label="KGWX VAD, 00:00 UTC")
@@ -656,7 +656,7 @@ processed phase is returned as `PHIDP_processed`, so the raw `PHIDP` is kept.
 ```{code-cell} ipython3
 with timed("5. PhiDP processing and KDP"):
     volumes = [
-        vol.radarx.assign(vol.radarx.kdp(phidp="PHIDP", rhohv="RHOHV", dbzh="DBZH"))
+        vol.radarx.assign(vol.radarx.kdp(phidp="PHIDP", rhohv="RHOHV", dbz="DBZH"))
         for vol in volumes
     ]
 ```
@@ -687,7 +687,7 @@ offers several methods (`method="hubbert"` is the default; see the
 
 ```{code-cell} ipython3
 sweep_in = volumes[1]["sweep_0"].to_dataset()
-kdp_fn = estimate_kdp(sweep_in, phidp="PHIDP", rhohv="RHOHV", dbzh="DBZH")
+kdp_fn = estimate_kdp(sweep_in, phidp="PHIDP", rhohv="RHOHV", dbz="DBZH")
 print("same KDP as the accessor:", bool(np.allclose(kdp_fn.KDP, sweep_in.KDP, equal_nan=True)))
 ```
 
@@ -1152,10 +1152,10 @@ value.
 ```{code-cell} ipython3
 with timed("9b. layer-maximum azimuthal shear"):
     low_layer = volumes[1].radarx.azimuthal_shear_layer_max(
-        "VRADH_dealiased", layer=(0.0, 2000.0), min_reflectivity=20.0
+        "VRADH_dealiased", layer=(0.0, 2000.0), min_dbz=20.0
     )
     mid_layer = azimuthal_shear_layer_max(
-        volumes[1], "VRADH_dealiased", layer=(3000.0, 6000.0), min_reflectivity=20.0, median_filter=3
+        volumes[1], "VRADH_dealiased", layer=(3000.0, 6000.0), min_dbz=20.0, median_filter=3
     )
 lowest = volumes[1]["sweep_1"].to_dataset()
 fig, axes = plt.subplots(1, 3, figsize=(17, 4.8), sharey=True, layout="constrained")
@@ -1273,9 +1273,9 @@ with timed("10c. functions of the gridding"):
         volumes[1], ["DBZH"], x_lim=(-100e3, 100e3), y_lim=(-100e3, 100e3), z_lim=(500, 8e3),
         x_step=2000, y_step=2000, z_step=500,
     )
-    cappi = create_cappi(volumes[1], 2000, fields=["DBZH"], x_res=2000, y_res=2000)
-    cappi_acc = volumes[1].radarx.create_cappi(2000, fields=["DBZH"], x_res=2000, y_res=2000)
-    cappi_alias = volumes[1].radarx.to_cappi(2000, fields=["DBZH"], x_res=2000, y_res=2000)  # an alias
+    cappi = create_cappi(volumes[1], 2000, data_vars=["DBZH"], x_res=2000, y_res=2000)
+    cappi_acc = volumes[1].radarx.create_cappi(2000, data_vars=["DBZH"], x_res=2000, y_res=2000)
+    cappi_alias = volumes[1].radarx.to_cappi(2000, data_vars=["DBZH"], x_res=2000, y_res=2000)  # an alias
     points = stack_data(low_volume, ["DBZH"])
 lat_axis, lon_axis, x_axis, y_axis, z_axis, crs = make_3d_grid(
     volumes[1]["sweep_0"].to_dataset(), x_lim=(-100e3, 100e3), y_lim=(-100e3, 100e3), x_step=2000,
@@ -1293,7 +1293,7 @@ print(f"cone grid {dict(cones.sizes)}; pseudo-CAPPI grid {dict(pseudo.sizes)}; C
 output point is the weighted mean of the gates within a radius of influence in
 metres, with the weights of Cressman (1959) or Barnes (1964), or the nearest
 gate. The radius can grow with the distance from the radar (`roi_range_factor`),
-or follow the beam width (`beam_width`, in degrees), as the radius functions of
+or follow the beam width (`beamwidth`, in degrees), as the radius functions of
 Py-ART do. A gate is a point in space, so the scan does not matter: the same
 call grids sector scans, RHIs and volumes that repeat a tilt. `grid_rhi` gives a
 vertical section through the radar in the same way. For repeated sweeps of one
@@ -1306,17 +1306,17 @@ zs_section = np.arange(250.0, 10e3, 250.0)
 distance = np.arange(2e3, 150e3, 1000.0)
 with timed("10d. Radius of influence gridding"):
     cressman = grid_gates(
-        volumes[1], ["DBZH"], x=xs, y=xs, z=zs, weighting="cressman", roi=1000.0, beam_width=1.0
+        volumes[1], ["DBZH"], x=xs, y=xs, z=zs, weighting="cressman", roi=1000.0, beamwidth=1.0
     )
     barnes = volumes[1].radarx.grid_gates(
-        ["DBZH"], x=xs, y=xs, z=zs, weighting="barnes", roi=1000.0, beam_width=1.0
+        ["DBZH"], x=xs, y=xs, z=zs, weighting="barnes", roi=1000.0, beamwidth=1.0
     )
     nearest = grid_gates(volumes[1], ["DBZH"], x=xs, y=xs, z=zs, weighting="nearest", roi=1000.0)
     section = grid_rhi(
-        volumes[1], ["DBZH"], azimuth=250.0, distance=distance, z=zs_section, roi=1000.0, beam_width=1.0
+        volumes[1], ["DBZH"], azimuth=250.0, distance=distance, z=zs_section, roi=1000.0, beamwidth=1.0
     )
     section_acc = volumes[1].radarx.grid_rhi(
-        ["DBZH"], azimuth=250.0, distance=distance, z=zs_section, roi=1000.0, beam_width=1.0
+        ["DBZH"], azimuth=250.0, distance=distance, z=zs_section, roi=1000.0, beamwidth=1.0
     )
     merged = grid_cones(volumes[1], ["DBZH"], x=xs, y=xs, z=zs, repeats="mean")
 both = cones.DBZH.notnull() & cressman.DBZH.notnull()
@@ -1531,13 +1531,13 @@ with timed("12b. multi-radar grid"):
     )
 with timed("12c. multi-Doppler wind"):
     md_grid = multi_doppler_input(
-        [kgwx, kbmx], x, y, z, velocity="VRADH_dealiased", time=analysis_time, motion=motion
+        [kgwx, kbmx], x, y, z, field="VRADH_dealiased", time=analysis_time, motion=motion
     )
     background = sounding.profile_to_grid(era5, md_grid)
-    wind = md_grid.radarx.multi_doppler(background, velocity="VRADH_dealiased")
+    wind = md_grid.radarx.multi_doppler(background, field="VRADH_dealiased")
     # the classical analytic solution (2 x 2 system per cell, continuity equation upward)
-    analytic = md_grid.radarx.dual_doppler_analytic(background, velocity="VRADH_dealiased")
-    analytic_fn = dual_doppler_analytic(md_grid, background, velocity="VRADH_dealiased")
+    analytic = md_grid.radarx.dual_doppler_analytic(background, field="VRADH_dealiased")
+    analytic_fn = dual_doppler_analytic(md_grid, background, field="VRADH_dealiased")
 print(f"iterations per grid level: {wind.attrs['iterations']}")
 solved = analytic.u.notnull() & (wind.n_radars >= 2)
 print(f"analytic dual-Doppler: {int(solved.sum())} cells with a horizontal wind, "
@@ -1904,8 +1904,8 @@ axis = (np.arange(300) - 149.5) * 1000.0
 lon2d, lat2d = Transformer.from_crs(lcc, "EPSG:4326", always_xy=True).transform(*np.meshgrid(axis, axis))
 
 with timed("16. super-observations, WRFDA and DART files"):
-    so = superobs(kgwx, (lat2d, lon2d), cells=3, vel="VRADH_dealiased", rho_min=0.85, max_range=150e3)
-    so_acc = kgwx.radarx.superobs((lat2d, lon2d), cells=3, vel="VRADH_dealiased", rho_min=0.85, max_range=150e3)
+    so = superobs(kgwx, (lat2d, lon2d), cells=3, field="VRADH_dealiased", min_rhohv=0.85, max_range=150e3)
+    so_acc = kgwx.radarx.superobs((lat2d, lon2d), cells=3, field="VRADH_dealiased", min_rhohv=0.85, max_range=150e3)
     stats = write_wrfda_radar(so, "ob.radar", time="2022-03-31_00:00:00")
     dart_stats = write_dart_obs_seq(so, "obs_seq.out", time="2022-03-31_00:00:00")
 print("accessor agrees:", bool(so.reflectivity.equals(so_acc.reflectivity)), bool(so.velocity.equals(so_acc.velocity)))
@@ -2233,6 +2233,11 @@ notebooks or from this index.
 | `dsd_bayesian` | `radarx.retrieve.dsd_bayes` | [core](Radar_Workflow): 7. Rain drop size distribution |
 | `dsd_prior` | `radarx.retrieve.dsd_bayes` | [core](Radar_Workflow): 7. Rain drop size distribution |
 | `forward_grid` | `radarx.retrieve.dsd_bayes` | [core](Radar_Workflow): 7. Rain drop size distribution |
+| `ensemble_retrieval` | `radarx.retrieve.ensemble` | [part 2](Radar_Workflow_Advanced): 16. Ensembles and uncertainty of the retrievals |
+| `ensemble_statistics` | `radarx.retrieve.ensemble` | [part 2](Radar_Workflow_Advanced): 16. Ensembles and uncertainty of the retrievals |
+| `measurement_error` | `radarx.retrieve.ensemble` | [part 2](Radar_Workflow_Advanced): 16. Ensembles and uncertainty of the retrievals |
+| `perturb_radar` | `radarx.retrieve.ensemble` | [part 2](Radar_Workflow_Advanced): 16. Ensembles and uncertainty of the retrievals |
+| `relation_scatter` | `radarx.retrieve.ensemble` | [part 2](Radar_Workflow_Advanced): 16. Ensembles and uncertainty of the retrievals |
 | `drop_evaporation_rate` | `radarx.retrieve.evaporation` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `evaporation` | `radarx.retrieve.evaporation` | [core](Radar_Workflow): 13. Evaporation |
 | `integrate_evaporation` | `radarx.retrieve.evaporation` | [core](Radar_Workflow): 13. Evaporation |
@@ -2359,6 +2364,8 @@ The methods of the `.radarx` accessors:
 | `.radarx.dual_doppler_analytic` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `.radarx.echo_mask` | [core](Radar_Workflow): 2. Remove non-meteorological echo |
 | `.radarx.echo_top` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
+| `.radarx.ensemble_retrieval` | [part 2](Radar_Workflow_Advanced): 16. Ensembles and uncertainty of the retrievals |
+| `.radarx.ensemble_statistics` | [part 2](Radar_Workflow_Advanced): 16. Ensembles and uncertainty of the retrievals |
 | `.radarx.estimate_motion` | [core](Radar_Workflow): 11. Storm motion, common analysis time and time interpolation |
 | `.radarx.evaporation` | [core](Radar_Workflow): 13. Evaporation |
 | `.radarx.forward_operator` | [part 2](Radar_Workflow_Advanced): 14. Forward operator for WRF and MPAS output |
@@ -2379,6 +2386,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.liquid_water_content` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.llsd` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `.radarx.mask_above_melting_layer` | [core](Radar_Workflow): 8. QVP time series and melting layer |
+| `.radarx.measurement_error` | [part 2](Radar_Workflow_Advanced): 16. Ensembles and uncertainty of the retrievals |
 | `.radarx.melting_layer` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `.radarx.melting_layer_ppi` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `.radarx.melting_snow_fall_speed` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
@@ -2388,6 +2396,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.network_bias` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `.radarx.noise_level` | [core](Radar_Workflow): 15. Noise and calibration |
 | `.radarx.parcel_diagnostics` | [core](Radar_Workflow): Parcel thermodynamics: CAPE, CIN, the lifted index and the levels |
+| `.radarx.perturb_radar` | [part 2](Radar_Workflow_Advanced): 16. Ensembles and uncertainty of the retrievals |
 | `.radarx.phidp_offset` | [core](Radar_Workflow): 15. Noise and calibration |
 | `.radarx.plot` | [core](Radar_Workflow): 10. Cone gridding, Max-CAPPI, interactive view and UGRID |
 | `.radarx.plot_cappi` | [core](Radar_Workflow): Other ways to grid, section and plot |

@@ -179,6 +179,7 @@ import xarray as xr
 
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 from . import _rain_collisions_numpy as _ref
 from . import _rain_trajectories_numpy as _traj
 from . import rain_trajectories as _rt
@@ -303,6 +304,7 @@ def _bin_widths(diameter):
     return np.diff(_ref.edges_cm(diameter)) * 10.0
 
 
+@dask_support("lazy_only")
 @provenance(
     "Raindrop collisions, coalescence and breakup in a rain shaft: coalescence "
     "efficiency and fragment distributions of Low and List (1982) with a "
@@ -532,8 +534,8 @@ def _flux_ratio(zs, ss, z_out):
     return np.interp(z_out, zs, ss)
 
 
-@accessor_method("dataarray", name="rain_shaft")
-def _rain_shaft_accessor(self, **kwargs):
+@accessor_method("dataarray", name="rain_shaft", wraps=rain_shaft)
+def _rain_shaft_accessor(self):
     """
     Drop size distribution below the top of a rain shaft, with collisions.
 
@@ -546,4 +548,3 @@ def _rain_shaft_accessor(self, **kwargs):
         ``dsd``, ``number_concentration``, ``liquid_water_content`` and
         ``rain_rate`` at the requested depths.
     """
-    return rain_shaft(self.xarray_obj, **kwargs)

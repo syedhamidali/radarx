@@ -327,7 +327,7 @@ def test_outputs_and_attrs():
         assert q.dims == ("quantile", "gate")
         assert (q.diff("quantile") >= 0).all()
         assert (q.sel(quantile=0.1) <= out[v] + 1e-9).mean() > 0.9
-    np.testing.assert_allclose(out.NW, 10**out.LOG10_NW)
+    np.testing.assert_allclose(out.NW, 10**out.LOG10_NW, rtol=1e-6)
     assert out.RAIN_RATE.attrs["standard_name"] == "rainfall_rate"
     assert "standard_name" not in out.RAIN_RATE_SD.attrs
     assert out.attrs["method"] == "bayesian" and out.attrs["prior"] == "generic"

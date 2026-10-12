@@ -37,12 +37,16 @@ __all__ = ["grid_radars", "merge_radars", "network_bias"]
 
 __doc__ = __doc__.format("\n   ".join(__all__))
 
+import inspect
+
 import numpy as np
 import xarray as xr
 
+from .._compat import renamed_arguments
 from .._gridcf import aeqd_crs, georeference
 from .._provenance import provenance
-from .._registry import accessor_method
+from .._registry import accessor_method, method_signature
+from .._sweepwise import dask_support
 from . import cone
 
 try:
@@ -359,7 +363,7 @@ def _volume_time(sweeps):
     return t0 + (t - t0).astype(np.int64).mean().astype("timedelta64[ns]")
 
 
-def _task_arrays(ds, name, rhohv, rhohv_min):
+def _task_arrays(ds, name, rhohv, min_rhohv):
     """
     Data (float32 or float64 as stored, masked where the co-polar correlation
     is low) and float64 azimuth, elevation and range of one sweep.
@@ -369,9 +373,9 @@ def _task_arrays(ds, name, rhohv, rhohv_min):
     data = da.transpose(ray_dim, "range").values
     if data.dtype not in (np.float32, np.float64):
         data = data.astype(np.float64)
-    if rhohv_min is not None and name != rhohv and rhohv in ds:
+    if min_rhohv is not None and name != rhohv and rhohv in ds:
         rho = ds[rhohv].transpose(ray_dim, "range").values
-        data = np.where(rho < rhohv_min, data.dtype.type(np.nan), data)
+        data = np.where(rho < min_rhohv, data.dtype.type(np.nan), data)
     return (
         np.ascontiguousarray(data),
         np.ascontiguousarray(ds["azimuth"].values, dtype=np.float64),
@@ -392,6 +396,8 @@ def _sweep_elevations(selected):
 # ---------------------------------------------------------------------------
 
 
+@dask_support("computes", "it grids and combines several radars.")
+@renamed_arguments(rhohv_min="min_rhohv")
 @provenance("Multi-radar gridding on a shared grid", extra_refs=("doviak-zrnic-1993",))
 def grid_radars(
     radars,
@@ -408,7 +414,7 @@ def grid_radars(
     calibrate=None,
     reference=0,
     rhohv="RHOHV",
-    rhohv_min=None,
+    min_rhohv=None,
     max_range=None,
     beamwidth=1.0,
     range_scale=50e3,
@@ -498,9 +504,9 @@ def grid_radars(
         Reference radar (index or name) of the calibration. Default: the
         first radar.
     rhohv : str, optional
-        Co-polar correlation field used for ``rhohv_min``. Default
+        Co-polar correlation field used for ``min_rhohv``. Default
         ``"RHOHV"``.
-    rhohv_min : float, optional
+    min_rhohv : float, optional
         Mask gates with a co-polar correlation below this (non-meteorological
         echoes) in every field before gridding, in sweeps that have
         ``rhohv``. Default: no masking.
@@ -657,7 +663,7 @@ def grid_radars(
             selected = cone._select_sweeps(sweeps, name)
             if not selected:
                 continue
-            arrays = [_task_arrays(ds, name, rhohv, rhohv_min) for ds in selected]
+            arrays = [_task_arrays(ds, name, rhohv, min_rhohv) for ds in selected]
             tasks.append((r, arrays))
             task_keys.append((r, name, dict(selected[0][name].attrs)))
             shifts.append(
@@ -963,7 +969,7 @@ def _assemble(
         {
             "standard_name": "sensor_to_target_azimuth_angle",
             "long_name": "direction of the beam at the cell, clockwise from grid north",
-            "units": "degrees",
+            "units": "degree",
         },
     )
     fields["elevation"] = (
@@ -971,7 +977,7 @@ def _assemble(
         elevation,
         {
             "long_name": "elevation of the beam above the local horizontal at the cell",
-            "units": "degrees",
+            "units": "degree",
         },
     )
     fields["range"] = (
@@ -1028,12 +1034,12 @@ def _assemble(
         "sweep_elevation": (
             ("radar", "sweep"),
             sweep_table,
-            {"long_name": "sweep elevation angles", "units": "degrees"},
+            {"long_name": "sweep elevation angles", "units": "degree"},
         ),
         "beamwidth": (
             "radar",
             np.asarray(beamwidths, dtype=float),
-            {"long_name": "half-power beamwidth", "units": "degrees"},
+            {"long_name": "half-power beamwidth", "units": "degree"},
         ),
     }
     out = xr.Dataset(fields, coords=coords)
@@ -1118,9 +1124,11 @@ def _no_echo_floor(no_echo, values, da):
     return np.full(values.shape[0], float(no_echo))
 
 
+@dask_support("computes", "it combines the grids of several radars.")
+@renamed_arguments(grid="obj")
 @provenance("Weighted merge of gridded radars, after Zhang et al. (2005)")
 def merge_radars(
-    grid,
+    obj,
     data_vars="DBZH",
     *,
     bias=None,
@@ -1211,7 +1219,7 @@ def merge_radars(
 
     Parameters
     ----------
-    grid : xarray.Dataset
+    obj : xarray.Dataset
         Output of :func:`grid_radars`.
     data_vars : str or list of str, optional
         Fields to merge. Default ``"DBZH"``.
@@ -1252,7 +1260,7 @@ def merge_radars(
     Raises
     ------
     ValueError
-        If a field is not in ``grid``, ``average`` or ``no_echo`` is not
+        If a field is not in ``obj``, ``average`` or ``no_echo`` is not
         valid, or a ``bias`` Dataset belongs to another field.
 
     References
@@ -1274,47 +1282,45 @@ def merge_radars(
     use_compiled = _use_compiled(engine)
     if isinstance(data_vars, str):
         data_vars = [data_vars]
-    missing = [name for name in data_vars if name not in grid]
+    missing = [name for name in data_vars if name not in obj]
     if missing:
         raise ValueError(f"grid has no {missing}")
     if time is None:
-        time = grid.attrs.get("analysis_time", grid["time"].values[0])
+        time = obj.attrs.get("analysis_time", obj["time"].values[0])
     if average not in ("dbz", "linear"):
         raise ValueError(f"average must be 'dbz' or 'linear', not {average!r}")
     if no_echo is False:
         no_echo = None
     if isinstance(no_echo, str) and no_echo != "min":
         raise ValueError(f"no_echo must be 'min', None or a number, not {no_echo!r}")
-    k_e = cone._check_k_e(grid.attrs.get("k_e", K_E) if k_e is None else k_e)
+    k_e = cone._check_k_e(obj.attrs.get("k_e", K_E) if k_e is None else k_e)
     if time_weight is None:
-        time_weight = "advection" not in grid.attrs
+        time_weight = "advection" not in obj.attrs
     time = np.datetime64(time, "ns")
-    offsets = list(
-        ((grid["time"].values - time) / np.timedelta64(1, "s")).astype(float)
-    )
+    offsets = list(((obj["time"].values - time) / np.timedelta64(1, "s")).astype(float))
     offsets = [0.0 if np.isnan(o) else o for o in offsets]
     if beamwidth is None:
-        beamwidth = grid["beamwidth"].values if "beamwidth" in grid else 1.0
-    nr = grid.sizes["radar"]
+        beamwidth = obj["beamwidth"].values if "beamwidth" in obj else 1.0
+    nr = obj.sizes["radar"]
     beamwidth = [float(b) for b in np.broadcast_to(beamwidth, (nr,))]
     elevations = [
         [float(e) for e in row if np.isfinite(e)]
-        for row in grid["sweep_elevation"].values
+        for row in obj["sweep_elevation"].values
     ]
-    altitudes = [float(a) for a in grid["radar_altitude"].values]
-    ground = _radar_columns(grid, use_compiled, n_threads)["ground"]
-    z = grid["z"].values.astype(np.float64)
+    altitudes = [float(a) for a in obj["radar_altitude"].values]
+    ground = _radar_columns(obj, use_compiled, n_threads)["ground"]
+    z = obj["z"].values.astype(np.float64)
     L = float(range_scale or 0.0)
     tau = float(time_scale or 0.0) if time_weight else 0.0
     covered = (
-        grid["coverage"].transpose("radar", "z", "y", "x").values > 0
-        if "coverage" in grid
+        obj["coverage"].transpose("radar", "z", "y", "x").values > 0
+        if "coverage" in obj
         else None
     )
 
     out = {}
     for name in data_vars:
-        da = grid[name].transpose("radar", "z", "y", "x")
+        da = obj[name].transpose("radar", "z", "y", "x")
         if bias is not None:
             if isinstance(bias, xr.Dataset):
                 target = bias.attrs.get("field")
@@ -1329,7 +1335,7 @@ def merge_radars(
             da = da - b.fillna(0.0).astype(np.float32)
         values = np.ascontiguousarray(da.values, dtype=np.float32)
         floor = (
-            _no_echo_floor(no_echo, values, grid[name]) if covered is not None else None
+            _no_echo_floor(no_echo, values, obj[name]) if covered is not None else None
         )
         if floor is not None:
             fill = covered & np.isnan(values)
@@ -1353,7 +1359,7 @@ def merge_radars(
             with np.errstate(invalid="ignore", divide="ignore"):
                 merged = np.where(merged > 0, 10.0 * np.log10(merged), np.nan)
             merged = merged.astype(np.float32)
-        attrs = dict(grid[name].attrs)
+        attrs = dict(obj[name].attrs)
         attrs["comment"] = "weighted merge of all radars"
         attrs["merge_average"] = average
         out[name] = (("z", "y", "x"), merged, attrs)
@@ -1363,11 +1369,11 @@ def merge_radars(
             {"long_name": f"sum of merge weights of {name}", "units": "1"},
         )
     coords = {
-        k: c for k, c in grid.coords.items() if "radar" not in c.dims and k != "time"
+        k: c for k, c in obj.coords.items() if "radar" not in c.dims and k != "time"
     }
     ds = xr.Dataset(out, coords=coords)
     ds["time"] = xr.DataArray(time, attrs={"long_name": "analysis time"})
-    ds.attrs = dict(grid.attrs)
+    ds.attrs = dict(obj.attrs)
     return ds
 
 
@@ -1437,14 +1443,16 @@ def _network_solution(pairs, d, w, nr, ref):
     return bias, error, residual
 
 
+@dask_support("computes", "it compares the overlap of several radars.")
+@renamed_arguments(grid="obj", reflectivity="dbz")
 @provenance("Relative radar biases from overlaps, radarx's own after Seo et al. (2014)")
 def network_bias(
-    grid,
+    obj,
     field="DBZH",
     reference=0,
     *,
     valid_range=None,
-    reflectivity="DBZH",
+    dbz="DBZH",
     reflectivity_range=None,
     z_range=None,
     max_range=None,
@@ -1504,7 +1512,7 @@ def network_bias(
 
     Parameters
     ----------
-    grid : xarray.Dataset
+    obj : xarray.Dataset
         Output of :func:`grid_radars`.
     field : str, optional
         Field to compare, e.g. ``"DBZH"`` or ``"ZDR"``. Default ``"DBZH"``.
@@ -1514,12 +1522,12 @@ def network_bias(
         Use only values inside this range on both radars. Default (15, 50)
         dBZ for reflectivity (above the noise, below hail), no limit for
         other fields.
-    reflectivity : str, optional
+    dbz : str, optional
         Reflectivity field used by ``reflectivity_range``. Default ``"DBZH"``.
     reflectivity_range : tuple of float, optional
         For fields other than reflectivity: use only cells where both radars
         measure a reflectivity in this range. Default (20, 40) dBZ, rain
-        without hail, if ``reflectivity`` is in ``grid``.
+        without hail, if ``dbz`` is in ``obj``.
     z_range : tuple of float, optional
         Height range (m above sea level) to use, e.g. below the melting
         layer. Default: all levels.
@@ -1551,7 +1559,7 @@ def network_bias(
     Raises
     ------
     ValueError
-        If ``field`` is not in ``grid``, ``reference`` is unknown or
+        If ``field`` is not in ``obj``, ``reference`` is unknown or
         ``select_on`` is not valid.
 
     References
@@ -1568,9 +1576,9 @@ def network_bias(
     >>> corrected = grid.DBZH - bias.bias  # doctest: +SKIP
     """
     use_compiled = _use_compiled(engine)
-    if field not in grid:
+    if field not in obj:
         raise ValueError(f"grid has no {field!r}")
-    names = [str(n) for n in grid["radar"].values]
+    names = [str(n) for n in obj["radar"].values]
     nr = len(names)
     if isinstance(reference, str):
         if reference not in names:
@@ -1583,9 +1591,9 @@ def network_bias(
 
     if select_on not in ("mean", "both"):
         raise ValueError(f"select_on must be 'mean' or 'both', not {select_on!r}")
-    da = grid[field].transpose("radar", "z", "y", "x")
+    da = obj[field].transpose("radar", "z", "y", "x")
     keep = xr.ones_like(da, dtype=bool)
-    is_refl = _is_reflectivity(grid[field])
+    is_refl = _is_reflectivity(obj[field])
     if valid_range is None and is_refl:
         valid_range = (15.0, 50.0)
     # quantity and window of the selection on a third quantity
@@ -1598,17 +1606,17 @@ def network_bias(
             select, window = da, valid_range
         elif valid_range is not None:
             keep &= (da >= valid_range[0]) & (da <= valid_range[1])
-    if not is_refl and reflectivity in grid:
+    if not is_refl and dbz in obj:
         if reflectivity_range is None:
             reflectivity_range = (20.0, 40.0)
-        zh = grid[reflectivity].transpose(*da.dims)
+        zh = obj[dbz].transpose(*da.dims)
         if select_on == "both":
             keep &= (zh >= reflectivity_range[0]) & (zh <= reflectivity_range[1])
         else:
             select, window = zh, reflectivity_range
     if z_range is not None:
-        keep &= (grid["z"] >= z_range[0]) & (grid["z"] <= z_range[1])
-    rng = grid["range"].transpose(*da.dims)
+        keep &= (obj["z"] >= z_range[0]) & (obj["z"] <= z_range[1])
+    rng = obj["range"].transpose(*da.dims)
     if max_range is not None:
         keep &= rng <= max_range
     values = np.ascontiguousarray(
@@ -1671,7 +1679,7 @@ def network_bias(
         return m
 
     valid = n >= min_count
-    units = grid[field].attrs.get("units", "")
+    units = obj[field].attrs.get("units", "")
     other = ("other", names)
     out = xr.Dataset(
         {
@@ -1712,7 +1720,7 @@ def network_bias(
                 {"long_name": "pair bias minus network solution", "units": units},
             ),
         },
-        coords={"radar": grid["radar"].values, "other": other},
+        coords={"radar": obj["radar"].values, "other": other},
     )
     out.attrs = {
         "field": field,
@@ -1729,8 +1737,8 @@ def network_bias(
     return out
 
 
-@accessor_method("dataset", name="network_bias")
-def _network_bias_dataset_accessor(self, field="DBZH", reference=0, **kwargs):
+@accessor_method("dataset", name="network_bias", wraps=network_bias)
+def _network_bias_dataset_accessor(self):
     """
     Relative calibration biases of the radars of a multi-radar grid.
 
@@ -1740,8 +1748,6 @@ def _network_bias_dataset_accessor(self, field="DBZH", reference=0, **kwargs):
         Field to compare. Default ``"DBZH"``.
     reference : int or str, optional
         Reference radar. Default: the first.
-    **kwargs
-        See :func:`radarx.grid.network_bias`.
 
     Returns
     -------
@@ -1752,11 +1758,10 @@ def _network_bias_dataset_accessor(self, field="DBZH", reference=0, **kwargs):
     --------
     radarx.grid.network_bias
     """
-    return network_bias(self.xarray_obj, field, reference, **kwargs)
 
 
-@accessor_method("dataset", name="merge_radars")
-def _merge_radars_dataset_accessor(self, data_vars="DBZH", **kwargs):
+@accessor_method("dataset", name="merge_radars", wraps=merge_radars)
+def _merge_radars_dataset_accessor(self):
     """
     Weighted merge of the radars of a multi-radar grid.
 
@@ -1764,8 +1769,6 @@ def _merge_radars_dataset_accessor(self, data_vars="DBZH", **kwargs):
     ----------
     data_vars : str or list of str, optional
         Fields to merge. Default ``"DBZH"``.
-    **kwargs
-        See :func:`radarx.grid.merge_radars`.
 
     Returns
     -------
@@ -1776,11 +1779,10 @@ def _merge_radars_dataset_accessor(self, data_vars="DBZH", **kwargs):
     --------
     radarx.grid.merge_radars
     """
-    return merge_radars(self.xarray_obj, data_vars, **kwargs)
 
 
 @accessor_method("datatree", name="grid_radars")
-def _grid_radars_datatree_accessor(self, others=(), x=None, y=None, z=None, **kwargs):
+def _grid_radars_datatree_accessor(self, others=(), *args, **kwargs):
     """
     Grid this radar together with ``others`` onto one shared grid.
 
@@ -1805,4 +1807,12 @@ def _grid_radars_datatree_accessor(self, others=(), x=None, y=None, z=None, **kw
     """
     if isinstance(others, xr.DataTree):
         others = [others]
-    return grid_radars([self.xarray_obj, *others], x, y, z, **kwargs)
+    return grid_radars([self.xarray_obj, *others], *args, **kwargs)
+
+
+_grid_radars_datatree_accessor.__signature__ = method_signature(
+    grid_radars,
+    lead=[
+        inspect.Parameter("others", inspect.Parameter.POSITIONAL_OR_KEYWORD, default=())
+    ],
+)

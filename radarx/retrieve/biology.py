@@ -90,9 +90,11 @@ __all__ = ["biological_echo"]
 import numpy as np
 import xarray as xr
 
+from .._compat import renamed_arguments
 from .._polar import nearest_ray
 from .._provenance import provenance
-from .._registry import accessor_method
+from .._registry import accessor_for
+from .._sweepwise import dask_support
 from . import _onnx_models
 from ._products import product_tree
 from .tornado import _clean, _first, _fixed_angle, _sweeps
@@ -200,9 +202,11 @@ def _select(sweeps, elevations, fields):
     return chosen
 
 
+@dask_support("computes", "the network classifies the whole volume at once.")
+@renamed_arguments(volume="obj")
 @provenance("MistNet biological echo segmentation (ONNX network)")
 def biological_echo(
-    volume,
+    obj,
     model=None,
     *,
     fields=("DBZH", "VRADH", "WRADH"),
@@ -217,7 +221,7 @@ def biological_echo(
 
     Parameters
     ----------
-    volume : xarray.DataTree
+    obj : xarray.DataTree
         A WSR-88D volume with ``sweep_*`` groups (xradar). For each of
         ``elevations`` the sweep nearest in fixed angle that holds all
         ``fields`` is used (the Doppler cut of NEXRAD split cuts).
@@ -279,11 +283,11 @@ def biological_echo(
     >>> bio = radarx.retrieve.biological_echo(dtree)  # doctest: +SKIP
     >>> dtree = dtree.radarx.assign(bio)  # doctest: +SKIP
     """
-    if not hasattr(volume, "children"):
+    if not hasattr(obj, "children"):
         raise TypeError("biological_echo needs an xarray.DataTree volume")
     if len(elevations) != 5:
         raise ValueError("MistNet needs exactly five elevations")
-    chosen = _select(_sweeps(volume), elevations, fields)
+    chosen = _select(_sweeps(obj), elevations, fields)
     x = np.concatenate(
         [_render(ds, fields, size, resolution)[None] for _, ds in chosen]
     )  # [scan, product, H, W]
@@ -332,12 +336,7 @@ def biological_echo(
             coords=coords,
         )
         nodes[name] = out.transpose(*ds[fields[0]].dims)
-    return product_tree(volume, nodes)
+    return product_tree(obj, nodes)
 
 
-@accessor_method("datatree", name="biological_echo")
-def _biological_echo_accessor(self, model=None, **kwargs):
-    return biological_echo(self.xarray_obj, model, **kwargs)
-
-
-_biological_echo_accessor.__doc__ = biological_echo.__doc__
+accessor_for(biological_echo, "datatree")

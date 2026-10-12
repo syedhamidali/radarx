@@ -58,8 +58,10 @@ import warnings
 import numpy as np
 import xarray as xr
 
+from .._compat import renamed_arguments
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 
 # -- input features of the network (shared with the training code) --------
 
@@ -204,7 +206,7 @@ def _model_spacing(info):
 # -- input handling --------------------------------------------------------
 
 
-def _single_radar(grid_or_volume, x, y, z, radar, velocity, reflectivity, **kw):
+def _single_radar(grid_or_volume, x, y, z, radar, field, dbz, **kw):
     """One-radar Dataset on ``(radar, z, y, x)`` with beam geometry."""
     from .multidoppler import multi_doppler_input, radar_geometry
 
@@ -212,14 +214,12 @@ def _single_radar(grid_or_volume, x, y, z, radar, velocity, reflectivity, **kw):
     if isinstance(obj, xr.DataTree):
         if x is None or y is None or z is None:
             raise ValueError("a radar volume needs the grid coordinates x, y and z")
-        return multi_doppler_input(
-            [obj], x, y, z, velocity=velocity, reflectivity=reflectivity, **kw
-        )
+        return multi_doppler_input([obj], x, y, z, field=field, dbz=dbz, **kw)
     if not isinstance(obj, xr.Dataset):
         raise TypeError("expected an xarray.Dataset grid or an xarray.DataTree volume")
     ds = obj
-    if velocity not in ds:
-        raise ValueError(f"no {velocity!r} in the grid")
+    if field not in ds:
+        raise ValueError(f"no {field!r} in the grid")
     if "radar" in ds.dims:
         if ds.sizes["radar"] > 1:
             if radar is None:
@@ -240,7 +240,7 @@ def _single_radar(grid_or_volume, x, y, z, radar, velocity, reflectivity, **kw):
     return ds
 
 
-def _on_spacing(ds, background, spacing, velocity, reflectivity):
+def _on_spacing(ds, background, spacing, field, dbz):
     """``ds`` and ``background`` interpolated to the network's grid spacing."""
     from .multidoppler import _spacing, radar_geometry
 
@@ -256,7 +256,7 @@ def _on_spacing(ds, background, spacing, velocity, reflectivity):
         c = ds[name].values
         n = int(np.floor(abs(c[-1] - c[0]) / d_net)) + 1
         new[name] = c[0] + np.sign(d) * d_net * np.arange(n)
-    keep = [v for v in (velocity, reflectivity) if v in ds]
+    keep = [v for v in (field, dbz) if v in ds]
     fine = ds[keep].interp(new)
     for name in ("radar_x", "radar_y", "radar_altitude"):
         fine[name] = ds[name]
@@ -293,11 +293,11 @@ def _beam_coefficients(ds):
     return np.stack([np.cos(el) * np.sin(az), np.cos(el) * np.cos(az), np.sin(el)])
 
 
-def _grid_features(ds, background, velocity, reflectivity):
+def _grid_features(ds, background, field, reflectivity):
     """Network input features of a one-radar Dataset."""
     dims = ("z", "y", "x")
     shape = tuple(ds.sizes[d] for d in dims)
-    vr = ds[velocity].isel(radar=0).transpose(*dims).values.astype(np.float64)
+    vr = ds[field].isel(radar=0).transpose(*dims).values.astype(np.float64)
     if reflectivity in ds:
         dbz = ds[reflectivity]
         if "radar" in dbz.dims:
@@ -471,12 +471,12 @@ def _background_error(ds, background, sigma, corr, rng):
     return du * scale, dv * scale
 
 
-def _perturbed(ds, background, velocity, vr_error, background_error, corr, rng):
+def _perturbed(ds, background, field, vr_error, background_error, corr, rng):
     """Copies of the observations and the background with random errors."""
     pert = ds.copy()
-    vr = ds[velocity].values
+    vr = ds[field].values
     noise = vr_error * rng.standard_normal(vr.shape)
-    pert[velocity] = ds[velocity].copy(data=(vr + noise).astype(vr.dtype))
+    pert[field] = ds[field].copy(data=(vr + noise).astype(vr.dtype))
     bg = None
     if background is not None:
         bg = background.copy()
@@ -488,7 +488,7 @@ def _perturbed(ds, background, velocity, vr_error, background_error, corr, rng):
     return pert, bg
 
 
-def _with_uncertainty(out, ds, background, net, run, checked, seed, velocity):
+def _with_uncertainty(out, ds, background, net, run, checked, seed, field):
     """Add the standard deviation over perturbed retrievals to ``out``."""
     members, vr_error, background_error, corr = checked
     rng = np.random.default_rng(seed)
@@ -499,7 +499,7 @@ def _with_uncertainty(out, ds, background, net, run, checked, seed, velocity):
         warnings.simplefilter("ignore")
         for n in range(1, members + 1):
             pert, bg = _perturbed(
-                ds, background, velocity, vr_error, background_error, corr, rng
+                ds, background, field, vr_error, background_error, corr, rng
             )
             member = _retrieve(pert, bg, net=net, **run)
             for c in "uvw":
@@ -531,6 +531,8 @@ def _with_uncertainty(out, ds, background, net, run, checked, seed, velocity):
 # -- public API ------------------------------------------------------------
 
 
+@dask_support("computes", "the wind is fitted to the whole grid or volume.")
+@renamed_arguments(velocity="field", reflectivity="dbz")
 @provenance(
     "Single-Doppler winds, cost structure of Gao et al. (1999) applied to one radar"
 )
@@ -544,8 +546,8 @@ def single_doppler_winds(
     y=None,
     z=None,
     radar=None,
-    velocity="VRADH",
-    reflectivity="DBZH",
+    field="VRADH",
+    dbz="DBZH",
     weights=None,
     fall_speed_correction=True,
     w_boundary="bottom",
@@ -556,8 +558,8 @@ def single_doppler_winds(
     background_error=3.0,
     correlation=(25000.0, 1000.0),
     seed=0,
-    engine="auto",
     n_threads=None,
+    engine="auto",
     **input_kwargs,
 ):
     """
@@ -589,7 +591,7 @@ def single_doppler_winds(
     Parameters
     ----------
     grid_or_volume : xarray.Dataset or xarray.DataTree
-        A gridded radar (``velocity``, optionally ``reflectivity``, on
+        A gridded radar (``field``, optionally ``dbz``, on
         ``(z, y, x)`` or ``(radar, z, y, x)``, with ``radar_x``, ``radar_y``
         and ``radar_altitude``, e.g. from
         :func:`radarx.retrieve.multi_doppler_input`), or a radar volume,
@@ -615,7 +617,7 @@ def single_doppler_winds(
         Grid coordinates (m) when ``grid_or_volume`` is a volume.
     radar : int, optional
         Index of the radar to use when the grid holds several.
-    velocity, reflectivity : str, optional
+    field, dbz : str, optional
         Field names. Default ``"VRADH"`` and ``"DBZH"``.
     weights : dict, optional
         Overrides of the weights of :func:`radarx.retrieve.multi_doppler`.
@@ -649,10 +651,10 @@ def single_doppler_winds(
         random field. Default ``(25000.0, 1000.0)`` (a radarx choice).
     seed : int, optional
         Seed of the random number generator of the ensemble. Default 0.
-    engine : {"auto", "compiled", "numpy"}, optional
-        Implementation of the variational cost (and of the gridding).
     n_threads : int, optional
         Threads for the compiled kernels. Default: all cores.
+    engine : {"auto", "compiled", "numpy"}, optional
+        Implementation of the variational cost (and of the gridding).
     **input_kwargs
         Further options of :func:`radarx.retrieve.multi_doppler_input` when
         gridding a volume (``origin``, ``time``, ``motion``, ...).
@@ -736,7 +738,7 @@ def single_doppler_winds(
     ...     grid, bg, model="single_doppler.onnx")  # doctest: +SKIP
     """
     kw = dict(n_threads=n_threads, engine=engine, **input_kwargs)
-    ds = _single_radar(grid_or_volume, x, y, z, radar, velocity, reflectivity, **kw)
+    ds = _single_radar(grid_or_volume, x, y, z, radar, field, dbz, **kw)
     if background is None:
         warnings.warn(
             "no background: the cross-beam wind is constrained by mass "
@@ -748,8 +750,8 @@ def single_doppler_winds(
     else:
         background = _full_background(background, ds)
     variational = dict(
-        velocity=velocity,
-        reflectivity=reflectivity,
+        field=field,
+        dbz=dbz,
         fall_speed_correction=fall_speed_correction,
         w_boundary=w_boundary,
         engine=engine,
@@ -769,7 +771,7 @@ def single_doppler_winds(
         net = _load_network(model, providers)
         out = _retrieve(ds, background, net=net, **run)
         return _with_uncertainty(
-            out, ds, background, net, run, run_checked, seed, velocity
+            out, ds, background, net, run, run_checked, seed, field
         )
     return _retrieve(ds, background, net=_load_network(model, providers), **run)
 
@@ -783,8 +785,8 @@ def _retrieve(ds, background, *, net, model, refine, weights, providers, variati
     """One retrieval on the single-radar Dataset ``ds`` (see single_doppler_winds)."""
     from .multidoppler import DEFAULT_WEIGHTS, multi_doppler
 
-    velocity = variational["velocity"]
-    reflectivity = variational["reflectivity"]
+    velocity = variational["field"]
+    reflectivity = variational["dbz"]
     if model is None:
         out = multi_doppler(ds, background, weights=weights, **variational)
         out.attrs["method"] = (
@@ -866,8 +868,10 @@ def _retrieve(ds, background, *, net, model, refine, weights, providers, variati
     return out
 
 
-@accessor_method("dataset", "datatree", name="single_doppler_winds")
-def _single_doppler_winds_accessor(self, background=None, **kwargs):
+@accessor_method(
+    "dataset", "datatree", name="single_doppler_winds", wraps=single_doppler_winds
+)
+def _single_doppler_winds_accessor(self):
     """
     Retrieve the 3D wind from one Doppler radar.
 
@@ -875,9 +879,6 @@ def _single_doppler_winds_accessor(self, background=None, **kwargs):
     ----------
     background : xarray.Dataset, optional
         Background on the grid (``grid.radarx.background()``).
-    **kwargs
-        Options of :func:`radarx.retrieve.single_doppler_winds` (``model``,
-        ``refine``, ``uncertainty``, and ``x``, ``y``, ``z`` for a volume).
 
     Returns
     -------
@@ -888,4 +889,3 @@ def _single_doppler_winds_accessor(self, background=None, **kwargs):
     --------
     radarx.retrieve.single_doppler_winds
     """
-    return single_doppler_winds(self.xarray_obj, background, **kwargs)

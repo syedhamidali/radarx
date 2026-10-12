@@ -43,6 +43,7 @@ import numpy as np
 import xarray as xr
 
 from .._provenance import provenance
+from .._sweepwise import dask_support
 
 
 def _edges(centers, full_circle=False):
@@ -176,6 +177,7 @@ def _face_node_connectivity(n_ray_edges, n_range, full_circle):
     return faces.reshape(-1, 4)
 
 
+@dask_support("computes", "uxarray builds its grid and variables in memory.")
 @provenance("Radar sweep as an unstructured grid with one face per gate")
 def to_uxarray(obj, variables=None):
     """

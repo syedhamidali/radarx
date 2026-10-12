@@ -180,14 +180,18 @@ References
 
 from __future__ import annotations
 
+import functools
+
 __all__ = ["hid", "hid_classes"]
 
 import numpy as np
 import xarray as xr
 
+from .._compat import renamed_arguments
 from .._fields import align_like
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import Gates, Output, apply_gates_many, dask_support
 
 try:
     from . import _hid
@@ -957,7 +961,7 @@ def _c2d(values, dtype=np.float64):
 
 
 def _temperature_values(ds, da, temperature, height, opts):
-    """Temperature (degC) on the gates of ``da``."""
+    """Temperature (degC) on the gates of ``da`` (a DataArray)."""
     if _is_profile(temperature):
         from ..io.sounding import interpolate_profile
 
@@ -965,9 +969,15 @@ def _temperature_values(ds, da, temperature, height, opts):
         env = interpolate_profile(
             prof, height, ["temperature"], n_threads=opts["n_threads"]
         )["temperature"]
-        return _to_celsius(env.values, prof["temperature"].attrs.get("units"))
+        celsius = _to_celsius(env.values, prof["temperature"].attrs.get("units"))
+        return xr.DataArray(celsius, dims=height.dims, coords=height.coords)
     tda = _field_values(ds, temperature, da, "temperature")
-    return _to_celsius(tda.values, tda.attrs.get("units"))
+    units = tda.attrs.get("units")
+    if units in _KELVIN:
+        return tda - 273.15
+    if units is None:  # the unit is guessed from the values
+        return tda.copy(data=_to_celsius(tda.values, None))
+    return tda
 
 
 def _infer_obj_band(obj):
@@ -994,12 +1004,25 @@ def _nodata_floors(ds, opts):
 
 def _drop_nodata(values, floor):
     """The values with the flag codes at or below ``floor`` set to NaN."""
-    with np.errstate(invalid="ignore"):
-        return np.where(values <= floor, np.nan, values)
+    return values.where(~(values <= floor))
+
+
+# gate fields of a block, in the order of the Gates of a sweep
+_GATE_KEYS = (
+    "zh",
+    "zdr",
+    "kdp",
+    "rhohv",
+    "phidp",
+    "height",
+    "temperature",
+    "valid",
+    "blockage",
+)
 
 
 def _prepare(ds, fields, opts):
-    """Arrays of one sweep or grid for the kernel, and wrapping info."""
+    """Gate fields (lazy) of one sweep or grid for the kernel, and wrapping info."""
     dbzh, zdr, kdp, rhohv, phidp = fields
     zname = _find(ds, dbzh, "dbzh", True)
     da = ds[zname]
@@ -1011,9 +1034,9 @@ def _prepare(ds, fields, opts):
         "rhohv": _find(ds, rhohv, "rhohv"),
         "phidp": _find(ds, phidp, "phidp"),
     }
-    block = {"zh": _c2d(da.values)}
+    block = {"zh": da}
     for key, name in names.items():
-        block[key] = None if name is None else _c2d(_on(ds[name], da).values)
+        block[key] = None if name is None else _on(ds[name], da)
     floors = _nodata_floors(ds, opts)
     if floors is not None:
         block["zh"] = _drop_nodata(block["zh"], floors["dbzh"])
@@ -1030,25 +1053,19 @@ def _prepare(ds, fields, opts):
                 "gate heights are needed: the dataset has no 'z', 'height' or "
                 "'elevation' and 'range'"
             )
-        block["height"] = _c2d(height.values)
+        block["height"] = height
     if temperature is not None:
-        block["temperature"] = _c2d(
-            _temperature_values(ds, da, temperature, height, opts)
-        )
+        block["temperature"] = _temperature_values(ds, da, temperature, height, opts)
     mask = _field_values(ds, opts["mask"], da, "mask")
     if mask is not None:
-        block["valid"] = _c2d(np.asarray(mask.values).astype(bool), np.uint8)
-    blk = _field_values(ds, opts["blockage"], da, "blockage")
-    if blk is not None:
-        block["blockage"] = _c2d(blk.values)
-    if "range" in da.dims:
-        block["range"] = np.ascontiguousarray(ds["range"].values, dtype=np.float64)
-    if opts["ml"] is not None:
-        nrow = block["zh"].shape[0]
-        block["ml_bottom"] = np.full(nrow, opts["ml"][0])
-        block["ml_top"] = np.full(nrow, opts["ml"][1])
+        block["valid"] = mask.astype(bool)
+    block["blockage"] = _field_values(ds, opts["blockage"], da, "blockage")
+    if opts["load"]:  # the melting layer is found from all gates
+        block = {k: None if v is None else v.compute() for k, v in block.items()}
+    rng = ds["range"].values if "range" in da.dims else None
     used = [zname] + [n for n in names.values() if n]
-    return block, {"da": da, "fields": used}
+    gates = Gates([block.get(k) for k in _GATE_KEYS], context=(rng, opts["ml"]))
+    return gates, {"da": da, "fields": used}
 
 
 def _zero_height_profile(temperature, opts):
@@ -1108,7 +1125,6 @@ def _melting_layer_heights(melting_layer, temperature, ml_thickness, datasets, o
 
 def _wrap(prep, cls, conf, scores, classes, table, info):
     da = prep["da"]
-    shape = da.shape
     coords = {k: v for k, v in da.coords.items()}
     abbr = [c[0] for c in classes]
     meanings = " ".join(c[1] for c in classes)
@@ -1135,10 +1151,10 @@ def _wrap(prep, cls, conf, scores, classes, table, info):
     }
     out = xr.Dataset(
         {
-            "HID": (da.dims, cls.reshape(shape), hid_attrs),
+            "HID": (cls.dims, cls.data, hid_attrs),
             "HID_confidence": (
-                da.dims,
-                conf.reshape(shape),
+                conf.dims,
+                conf.data,
                 {
                     "long_name": "Score of the assigned hydrometeor class",
                     "units": "1",
@@ -1149,9 +1165,10 @@ def _wrap(prep, cls, conf, scores, classes, table, info):
         coords=coords,
     )
     if scores is not None:
+        scores = scores.transpose("hid_class", ...)
         out["HID_scores"] = xr.DataArray(
-            scores.reshape((len(classes),) + shape),
-            dims=("hid_class",) + da.dims,
+            scores.data,
+            dims=scores.dims,
             attrs={
                 "long_name": "Aggregated membership score of each hydrometeor class",
                 "units": "1",
@@ -1171,18 +1188,74 @@ def _wrap(prep, cls, conf, scores, classes, table, info):
     return out
 
 
-def _run(datasets, fields, classes, table, opts, n_threads, use_compiled):
-    if table["mode"] == _HYBRID or table["mode"] == _ADDITIVE:
-        opts["need_height"] = opts["ml"] is not None
-    preps = [_prepare(ds, fields, opts) for ds in datasets]
-    blocks = [p[0] for p in preps]
+def _block_of(arrays, context):
+    """The kernel block of a sweep: flat (row, column) arrays by name."""
+    rng, ml = context
+    block = {}
+    for key, values in zip(_GATE_KEYS, arrays):
+        if values is None:
+            block[key] = None
+        elif key == "valid":
+            block[key] = _c2d(np.asarray(values).astype(bool), np.uint8)
+        else:
+            block[key] = _c2d(values)
+    if rng is not None:
+        block["range"] = np.ascontiguousarray(rng, dtype=np.float64)
+    if ml is not None:
+        nrow = block["zh"].shape[0]
+        block["ml_bottom"] = np.full(nrow, ml[0])
+        block["ml_top"] = np.full(nrow, ml[1])
+    return block
+
+
+def _core(batch, table, opts, n_threads, use_compiled, found):
+    """Classes, scores and confidence of sweeps given as ``(context, fields)``."""
+    blocks = [_block_of(arrays, context) for context, arrays in batch]
     if use_compiled:
         results, info = _classify_compiled(blocks, table, opts, n_threads)
     else:
         results, info = _classify_numpy(blocks, table, opts)
+    found.update(info)
+    out = []
+    for (cls, conf, scores), (_, arrays) in zip(results, batch):
+        shape = arrays[0].shape
+        item = (cls.reshape(shape), conf.reshape(shape))
+        if opts["want_scores"]:
+            item += (np.moveaxis(scores.reshape((-1,) + shape), 0, -1),)
+        out.append(item)
+    return out
+
+
+def _run(datasets, fields, classes, table, opts, n_threads, use_compiled):
+    if table["mode"] == _HYBRID or table["mode"] == _ADDITIVE:
+        opts["need_height"] = opts["ml"] is not None
+    opts["load"] = table["mode"] == _WINTER
+    preps = [_prepare(ds, fields, opts) for ds in datasets]
+    found = {"n_wet_snow": 0, "melting_layer_height": np.nan, "melting": 0}
+    core = functools.partial(
+        _core,
+        table=table,
+        opts=opts,
+        n_threads=n_threads,
+        use_compiled=use_compiled,
+        found=found,
+    )
+    outputs = [Output(np.int8, "gate"), Output(np.float32, "gate")]
+    if opts["want_scores"]:
+        nc = table["kind"].shape[0]
+        outputs.append(Output(np.float32, "gate", new_dims={"hid_class": nc}))
+    results = apply_gates_many(core, [p[0] for p in preps], outputs)
     return [
-        _wrap(p[1], c, f, s, classes, table, info)
-        for p, (c, f, s) in zip(preps, results)
+        _wrap(
+            p[1],
+            res[0],
+            res[1],
+            res[2] if len(res) > 2 else None,
+            classes,
+            table,
+            found,
+        )
+        for p, res in zip(preps, results)
     ]
 
 
@@ -1207,6 +1280,11 @@ def _check_inputs(obj, temperature, mask, blockage, ml_gates):
     return lo, hi
 
 
+@dask_support(
+    "lazy",
+    "The winter scheme (``method='thompson'``) and a melting layer found from the gates need all gates, so they compute the dask arrays.",
+)
+@renamed_arguments(dbzh="dbz")
 @provenance(
     "Fuzzy-logic hydrometeor classification after Park et al. (2009), Dolan et al. (2013)"
 )
@@ -1216,7 +1294,7 @@ def hid(
     *,
     band=None,
     method="auto",
-    dbzh=None,
+    dbz=None,
     zdr=None,
     kdp=None,
     rhohv=None,
@@ -1264,7 +1342,7 @@ def hid(
         Dolan et al. (2013)** and not the additive weighted sum of the 2009
         paper (see :mod:`radarx.retrieve.hid`). ``"thompson"`` is the winter
         classification of Thompson et al. (2014) [4].
-    dbzh, zdr, kdp, rhohv, phidp : str, optional
+    dbz, zdr, kdp, rhohv, phidp : str, optional
         Field names of the reflectivity (dBZ), differential reflectivity
         (dB), specific differential phase (°/km), copolar correlation
         coefficient and the processed (unfolded, offset-free) differential
@@ -1402,7 +1480,7 @@ def hid(
         "temperature": temperature,
         "mask": mask,
         "blockage": blockage,
-        "dbzh": dbzh,
+        "dbzh": dbz,
         "n_threads": n_threads,
         "need_height": table["mode"] == _WINTER,
         "sin_half_beam": float(np.sin(np.deg2rad(0.5 * float(beamwidth)))),
@@ -1416,7 +1494,7 @@ def hid(
         "want_scores": bool(scores),
     }
     table = dict(table, quality=table["quality"] and bool(quality))
-    fields = (dbzh, zdr, kdp, rhohv, phidp)
+    fields = (dbz, zdr, kdp, rhohv, phidp)
 
     if isinstance(obj, xr.Dataset):
         datasets = [_with_kdp(obj, fields, use_compiled, n_threads)]
@@ -1426,7 +1504,7 @@ def hid(
             name
             for name in obj.children
             if name.startswith("sweep")
-            and _find(obj[name].to_dataset(), dbzh, "dbzh") is not None
+            and _find(obj[name].to_dataset(), dbz, "dbzh") is not None
             and _find(obj[name].to_dataset(), zdr, "zdr") is not None
         ]
         if not names:
@@ -1455,7 +1533,7 @@ def _has_phase(ds):
 
 def _kdp_options(fields):
     dbzh, _, _, rhohv, _ = fields
-    return {"dbzh": dbzh, "rhohv": rhohv}
+    return {"dbz": dbzh, "rhohv": rhohv}
 
 
 def _with_kdp(ds, fields, use_compiled, n_threads):
@@ -1509,8 +1587,8 @@ def _with_kdp_tree(dtree, names, fields, use_compiled, n_threads):
     return datasets
 
 
-@accessor_method("dataset", name="hid")
-def _hid_dataset_accessor(self, temperature=None, *, band=None, **kwargs):
+@accessor_method("dataset", name="hid", wraps=hid)
+def _hid_dataset_accessor(self):
     """
     Classify hydrometeors with fuzzy logic for this sweep or grid.
 
@@ -1521,9 +1599,6 @@ def _hid_dataset_accessor(self, temperature=None, *, band=None, **kwargs):
         a temperature field or its name. Default: none.
     band : {"S", "C", "X"}, optional
         Radar band. Default None: from the radar frequency in the data.
-    **kwargs
-        Options of :func:`radarx.retrieve.hid`, e.g. ``method``, ``mask``
-        or the field names.
 
     Returns
     -------
@@ -1534,11 +1609,10 @@ def _hid_dataset_accessor(self, temperature=None, *, band=None, **kwargs):
     --------
     radarx.retrieve.hid
     """
-    return hid(self.xarray_obj, temperature, band=band, **kwargs)
 
 
-@accessor_method("datatree", name="hid")
-def _hid_datatree_accessor(self, temperature=None, *, band=None, **kwargs):
+@accessor_method("datatree", name="hid", wraps=hid)
+def _hid_datatree_accessor(self):
     """
     Classify hydrometeors with fuzzy logic for every sweep.
 
@@ -1553,9 +1627,6 @@ def _hid_datatree_accessor(self, temperature=None, *, band=None, **kwargs):
         or the name of a temperature field in each sweep. Default: none.
     band : {"S", "C", "X"}, optional
         Radar band. Default None: from the radar frequency in the data.
-    **kwargs
-        Options of :func:`radarx.retrieve.hid`, e.g. ``method``, ``mask``
-        or the field names.
 
     Returns
     -------
@@ -1567,4 +1638,3 @@ def _hid_datatree_accessor(self, temperature=None, *, band=None, **kwargs):
     --------
     radarx.retrieve.hid
     """
-    return hid(self.xarray_obj, temperature, band=band, **kwargs)

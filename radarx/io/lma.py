@@ -299,8 +299,8 @@ def read_lma(
     max_chi2=None,
     min_stations=None,
     altitude=None,
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Read Lightning Mapping Array VHF source files into an xarray Dataset.
@@ -325,10 +325,10 @@ def read_lma(
     altitude : (float, float), optional
         Keep only sources with ``altitude[0] <= alt <= altitude[1]`` (m above
         mean sea level), e.g. ``(0, 20e3)``. Default: keep all.
-    engine : {"auto", "compiled", "numpy"}, optional
-        Parser to use. ``"auto"`` (default) prefers the compiled kernel.
     n_threads : int, optional
         Threads of the compiled parser. Default: all cores.
+    engine : {"auto", "compiled", "numpy"}, optional
+        Parser to use. ``"auto"`` (default) prefers the compiled kernel.
 
     Returns
     -------

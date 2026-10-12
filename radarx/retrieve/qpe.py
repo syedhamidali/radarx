@@ -148,8 +148,10 @@ __doc__ = __doc__.replace("{}", "\n   ".join(__all__))
 import numpy as np
 import xarray as xr
 
+from .._compat import renamed_arguments
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 from ._fieldtools import detach
 
 try:
@@ -255,13 +257,13 @@ _KELVIN = ("K", "kelvin", "Kelvin", "degK")
 class _Setup:
     """Coefficients and options of one call, in the form the kernel takes."""
 
-    def __init__(self, coef, a_nodes, z_cap, zdr_min, negative):
+    def __init__(self, coef, a_nodes, z_cap, min_zdr, negative):
         self.coef = [float(c) for c in coef]
         self.a_t, self.a_p0, self.a_p1 = (
             np.asarray(v, dtype=np.float64) for v in a_nodes
         )
         self.z_cap = float("nan") if z_cap is None else float(z_cap)
-        self.zdr_min = float("nan") if zdr_min is None else float(zdr_min)
+        self.zdr_min = float("nan") if min_zdr is None else float(min_zdr)
         self.negative = 1 if negative == "zero" else 0
         self.fixed_a = self.a_t.size == 1
 
@@ -646,7 +648,7 @@ def _single(
     coefficients,
     polarization,
     z_cap,
-    zdr_min,
+    min_zdr,
     negative,
     temperature,
     engine,
@@ -657,7 +659,7 @@ def _single(
     _use_compiled(engine)
     name = RELATIONS[rel]
     coef, nodes = _coefficients([name], band, coefficients, polarization)
-    setup = _Setup(coef, nodes, z_cap, zdr_min, negative)
+    setup = _Setup(coef, nodes, z_cap, min_zdr, negative)
     text = _describe(name, band, setup, polarization, temperature)
     needs = _NEEDS[name]
 
@@ -717,6 +719,7 @@ def _fill(func, coefficients_doc, z_cap=True):
     func.__doc__ = func.__doc__.replace("    {common}", text)
 
 
+@dask_support("lazy")
 @provenance("Rain rate from reflectivity, R(Z) power law")
 def rain_rate_z(
     obj,
@@ -803,6 +806,7 @@ def rain_rate_z(
     )
 
 
+@dask_support("lazy")
 @provenance("Rain rate from specific differential phase, R(KDP) power law")
 def rain_rate_kdp(
     obj,
@@ -902,6 +906,8 @@ _fill(
 )
 
 
+@dask_support("lazy")
+@renamed_arguments(zdr_min="min_zdr")
 @provenance("Rain rate from reflectivity and differential reflectivity, R(Z, ZDR)")
 def rain_rate_z_zdr(
     obj,
@@ -911,7 +917,7 @@ def rain_rate_z_zdr(
     band="S",
     coefficients=None,
     z_cap=Z_CAP,
-    zdr_min=None,
+    min_zdr=None,
     n_threads=None,
     engine="auto",
 ):
@@ -942,7 +948,7 @@ def rain_rate_z_zdr(
         Name of the differential reflectivity (dB), by default the first found
         of ``ZDR``, ``differential_reflectivity`` and
         ``corrected_differential_reflectivity``, or the field itself.
-    zdr_min : float or None, optional
+    min_zdr : float or None, optional
         Differential reflectivity (dB) below which the value is replaced by
         this one, because the relation grows quickly for negative values (a
         radarx option). Default None: no limit.
@@ -981,7 +987,7 @@ def rain_rate_z_zdr(
     Examples
     --------
     >>> rr = radarx.retrieve.rain_rate_z_zdr(sweep)  # doctest: +SKIP
-    >>> rr = dtree.radarx.rain_rate_z_zdr(zdr_min=0.0)  # doctest: +SKIP
+    >>> rr = dtree.radarx.rain_rate_z_zdr(min_zdr=0.0)  # doctest: +SKIP
     """
     return _single(
         obj,
@@ -991,7 +997,7 @@ def rain_rate_z_zdr(
         {"z_zdr": coefficients} if coefficients is not None else None,
         "h",
         z_cap,
-        zdr_min,
+        min_zdr,
         "keep",
         None,
         engine,
@@ -999,6 +1005,7 @@ def rain_rate_z_zdr(
     )
 
 
+@dask_support("lazy")
 @provenance("Rain rate from specific attenuation, R(A) power law")
 def rain_rate_a(
     obj,
@@ -1310,6 +1317,8 @@ def _blend_text(
     )
 
 
+@dask_support("lazy")
+@renamed_arguments(zdr_min="min_zdr")
 @provenance("Rain rate with the relation chosen from the hydrometeor class")
 def rain_rate(
     obj,
@@ -1325,7 +1334,7 @@ def rain_rate(
     temperature=None,
     polarization="h",
     z_cap=Z_CAP,
-    zdr_min=None,
+    min_zdr=None,
     negative="keep",
     hid_kwargs=None,
     n_threads=None,
@@ -1377,7 +1386,7 @@ def rain_rate(
         :func:`rain_rate_a`.
     temperature, polarization : optional
         For ``R(A)`` only, see :func:`rain_rate_a`.
-    z_cap, zdr_min, negative : optional
+    z_cap, min_zdr, negative : optional
         See :func:`rain_rate_z`, :func:`rain_rate_z_zdr` and
         :func:`rain_rate_kdp`.
     hid_kwargs : dict, optional
@@ -1449,7 +1458,7 @@ def rain_rate(
     def build(hid_da):
         lut_rel, lut_fac, relations = _class_tables(hid_da, class_relations)
         coef, nodes = _coefficients(sorted(relations), band, coefficients, polarization)
-        setup = _Setup(coef, nodes, z_cap, zdr_min, negative)
+        setup = _Setup(coef, nodes, z_cap, min_zdr, negative)
         text = _blend_text(
             relations, lut_rel, lut_fac, hid_da, band, setup, polarization, temperature
         )
@@ -1531,8 +1540,10 @@ def rain_rate(
 # --------------------------------------------------------------------------
 
 
-@accessor_method("dataarray", "dataset", "datatree", name="rain_rate_z")
-def _rain_rate_z_accessor(self, **kwargs):
+@accessor_method(
+    "dataarray", "dataset", "datatree", name="rain_rate_z", wraps=rain_rate_z
+)
+def _rain_rate_z_accessor(self):
     """
     Rain rate from the reflectivity, R(Z).
 
@@ -1543,11 +1554,12 @@ def _rain_rate_z_accessor(self, **kwargs):
     xarray.DataArray or xarray.DataTree
         ``RAIN_RATE_Z`` (mm h-1).
     """
-    return rain_rate_z(self.xarray_obj, **kwargs)
 
 
-@accessor_method("dataarray", "dataset", "datatree", name="rain_rate_kdp")
-def _rain_rate_kdp_accessor(self, **kwargs):
+@accessor_method(
+    "dataarray", "dataset", "datatree", name="rain_rate_kdp", wraps=rain_rate_kdp
+)
+def _rain_rate_kdp_accessor(self):
     """
     Rain rate from the specific differential phase, R(KDP).
 
@@ -1558,11 +1570,10 @@ def _rain_rate_kdp_accessor(self, **kwargs):
     xarray.DataArray or xarray.DataTree
         ``RAIN_RATE_KDP`` (mm h-1).
     """
-    return rain_rate_kdp(self.xarray_obj, **kwargs)
 
 
-@accessor_method("dataset", "datatree", name="rain_rate_z_zdr")
-def _rain_rate_z_zdr_accessor(self, **kwargs):
+@accessor_method("dataset", "datatree", name="rain_rate_z_zdr", wraps=rain_rate_z_zdr)
+def _rain_rate_z_zdr_accessor(self):
     """
     Rain rate from the reflectivity and the differential reflectivity, R(Z, ZDR).
 
@@ -1573,11 +1584,12 @@ def _rain_rate_z_zdr_accessor(self, **kwargs):
     xarray.DataArray or xarray.DataTree
         ``RAIN_RATE_Z_ZDR`` (mm h-1).
     """
-    return rain_rate_z_zdr(self.xarray_obj, **kwargs)
 
 
-@accessor_method("dataarray", "dataset", "datatree", name="rain_rate_a")
-def _rain_rate_a_accessor(self, **kwargs):
+@accessor_method(
+    "dataarray", "dataset", "datatree", name="rain_rate_a", wraps=rain_rate_a
+)
+def _rain_rate_a_accessor(self):
     """
     Rain rate from the specific attenuation, R(A).
 
@@ -1588,11 +1600,10 @@ def _rain_rate_a_accessor(self, **kwargs):
     xarray.DataArray or xarray.DataTree
         ``RAIN_RATE_A`` (mm h-1).
     """
-    return rain_rate_a(self.xarray_obj, **kwargs)
 
 
-@accessor_method("dataset", "datatree", name="rain_rate")
-def _rain_rate_accessor(self, hid=None, **kwargs):
+@accessor_method("dataset", "datatree", name="rain_rate", wraps=rain_rate)
+def _rain_rate_accessor(self):
     """
     Rain rate with the relation chosen from the hydrometeor class.
 
@@ -1603,4 +1614,3 @@ def _rain_rate_accessor(self, hid=None, **kwargs):
     xarray.Dataset or xarray.DataTree
         ``RAIN_RATE`` (mm h-1), ``RAIN_RATE_FLAG`` and ``RAIN_RATE_RELATION``.
     """
-    return rain_rate(self.xarray_obj, hid, **kwargs)

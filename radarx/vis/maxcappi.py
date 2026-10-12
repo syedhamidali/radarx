@@ -23,6 +23,7 @@ import os
 
 import numpy as np
 
+from .._compat import renamed_arguments
 from ._lazy import LazyModule, register_radar_cmaps
 
 # matplotlib is imported on first use, which keeps ``import radarx`` fast
@@ -42,8 +43,9 @@ _CARTOPY_AVAILABLE = _cartopy_installed()
 # warnings.filterwarnings("ignore")
 
 
+@renamed_arguments(ds="obj")
 def plot_maxcappi(
-    ds,
+    obj,
     data_var,
     cmap=None,
     vmin=None,
@@ -67,7 +69,7 @@ def plot_maxcappi(
 
     Parameters
     ----------
-    ds : xarray.Dataset
+    obj : xarray.Dataset
         Xarray Dataset containing the gridded radar data to be plotted.
     data_var : str
         The radar data_var to be plotted (e.g., "REF", "VEL", "WIDTH").
@@ -139,9 +141,9 @@ def plot_maxcappi(
 
     # Define default latitude and longitude lines if not provided
     if lon_lines is None:
-        lon_lines = np.arange(int(ds.lon.min().values), int(ds.lon.max().values) + 1)
+        lon_lines = np.arange(int(obj.lon.min().values), int(obj.lon.max().values) + 1)
     if lat_lines is None:
-        lat_lines = np.arange(int(ds.lat.min().values), int(ds.lat.max().values) + 1)
+        lat_lines = np.arange(int(obj.lat.min().values), int(obj.lat.max().values) + 1)
 
     # Configure plotting parameters
     plt.rcParams.update(
@@ -162,22 +164,22 @@ def plot_maxcappi(
     )
 
     # Extract maximum values across dimensions
-    max_c = ds[data_var].max(dim="z")
-    max_x = ds[data_var].max(dim="y")
-    max_y = ds[data_var].max(dim="x").T
+    max_c = obj[data_var].max(dim="z")
+    max_x = obj[data_var].max(dim="y")
+    max_y = obj[data_var].max(dim="x").T
 
     # Extract coordinate and dimension information
-    trgx, trgy, trgz = ds["x"].values, ds["y"].values, ds["z"].values
+    trgx, trgy, trgz = obj["x"].values, obj["y"].values, obj["z"].values
     max_height = int(np.floor(trgz.max()) / 1e3)
     sideticks = np.arange(max_height / 4, max_height + 1, max_height / 4).astype(int)
 
     # Set colormap and value ranges
     cmap = cmap or "ChaseSpectral"
-    vmin = vmin if vmin is not None else ds[data_var].min().values
-    vmax = vmax if vmax is not None else ds[data_var].max().values
+    vmin = vmin if vmin is not None else obj[data_var].min().values
+    vmax = vmax if vmax is not None else obj[data_var].max().values
     title = title or f"Max-{data_var.upper()[:3]}"
 
-    projection = _get_projection(ds)
+    projection = _get_projection(obj)
     # FIG
     fig = plt.figure(figsize=[10.3, 10])
     left, bottom, width, height = 0.1, 0.1, 0.6, 0.2
@@ -215,7 +217,7 @@ def plot_maxcappi(
     # Draw colorbar
     if colorbar:  # pragma: no cover
         cb = plt.colorbar(xy, cax=ax_cb)
-        units = ds[data_var].attrs.get("units", "")  # Provide a default
+        units = obj[data_var].attrs.get("units", "")  # Provide a default
         cb.set_label(units, size=15)
 
     background_color = ax_xy.get_facecolor()
@@ -247,7 +249,7 @@ def plot_maxcappi(
     )
 
     # Title and metadata
-    _add_plot_metadata(ax_cnr, ds, title, trgx, trgz)  # pragma: no cover
+    _add_plot_metadata(ax_cnr, obj, title, trgx, trgz)  # pragma: no cover
 
     ax_xy.set_aspect("auto")
 
@@ -255,7 +257,7 @@ def plot_maxcappi(
         _add_slogan(fig)
 
     _save_and_display_plot(
-        fig, ds, title, savedir, dpi, show_figure
+        fig, obj, title, savedir, dpi, show_figure
     )  # pragma: no cover
     # plt.rcParams.update(original_rc_params)
     plt.rcdefaults()

@@ -171,7 +171,7 @@ def test_errors(case):
     with pytest.raises(TypeError, match="background"):
         single_doppler_winds(ds, bg.u)
     with pytest.raises(ValueError, match="no 'VEL'"):
-        single_doppler_winds(ds, bg, velocity="VEL")
+        single_doppler_winds(ds, bg, field="VEL")
     with pytest.raises(ValueError, match="at least 3"):
         single_doppler_winds(ds.isel(z=[0, 1]), bg.isel(z=[0, 1]))
     with pytest.raises(ValueError, match="x, y and z"):

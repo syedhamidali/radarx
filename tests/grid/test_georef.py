@@ -201,7 +201,9 @@ def test_create_cappi_has_a_crs_and_two_dimensional_lat_lon():
             for k, el in enumerate((1.0, 3.0, 5.0))
         }
     )
-    out = R.create_cappi(vol, height=150.0, fields=["DBZH"], x_res=2000.0, y_res=2000.0)
+    out = R.create_cappi(
+        vol, height=150.0, data_vars=["DBZH"], x_res=2000.0, y_res=2000.0
+    )
     assert out["DBZH"].attrs["grid_mapping"] == "crs_wkt"
     assert out["lat"].dims == ("y", "x")
     lat0, lon0 = float(out["latitude"]), float(out["longitude"])
@@ -220,7 +222,7 @@ def test_create_cappi_has_a_crs_and_two_dimensional_lat_lon():
         }
     )
     plain = R.create_cappi(
-        stripped, height=150.0, fields=["DBZH"], x_res=2000.0, y_res=2000.0
+        stripped, height=150.0, data_vars=["DBZH"], x_res=2000.0, y_res=2000.0
     )
     assert "crs_wkt" not in plain.coords and "lat" not in plain.coords
     assert "grid_mapping" not in plain["DBZH"].attrs

@@ -90,7 +90,7 @@ sweep = dtree["sweep_0"].to_dataset()
 fields = {
     "phidp": "uncorrected_differential_phase",
     "rhohv": "uncorrected_copol_correlation_coeff",
-    "dbzh": "uncorrected_reflectivity_h",
+    "dbz": "uncorrected_reflectivity_h",
 }
 dr = float(np.diff(sweep.range.values).mean()) / 1000.0  # km
 print(f"gate spacing {dr * 1000:.0f} m, {sweep.sizes['azimuth']} rays x {sweep.sizes['range']} gates")
@@ -284,7 +284,7 @@ rays can follow the processor's $K_{DP}$.
 ```{code-cell} ipython3
 x, y = sweep.x / 1e3, sweep.y / 1e3
 panels = [
-    (sweep[fields["dbzh"]], "$Z_H$ (dBZ)", "ChaseSpectral", -10, 65),
+    (sweep[fields["dbz"]], "$Z_H$ (dBZ)", "ChaseSpectral", -10, 65),
     (sweep.specific_differential_phase, "radar processor $K_{DP}$ (reference, °/km)", "turbo", -1, 6),
     (results["hubbert"].KDP, "$K_{DP}$, Hubbert and Bringi (°/km)", "turbo", -1, 6),
     (results["network"].KDP, "$K_{DP}$, linear network (°/km)", "turbo", -1, 6),
@@ -329,7 +329,7 @@ score = np.where(np.isfinite(target[rays_test]), target[rays_test], 0).sum(axis=
 iray = int(rays_test[np.argmax(score)])
 r_km = sweep.range.values / 1e3
 fig, axes = plt.subplots(3, 1, figsize=(9, 8), sharex=True, layout="constrained")
-axes[0].plot(r_km, sweep[fields["dbzh"]].isel(azimuth=iray), color="k", lw=0.8)
+axes[0].plot(r_km, sweep[fields["dbz"]].isel(azimuth=iray), color="k", lw=0.8)
 axes[0].set(ylabel="$Z_H$ (dBZ)", title=f"azimuth {float(sweep.azimuth[iray]):.1f}° (held out)")
 axes[1].plot(r_km, sweep[fields["phidp"]].isel(azimuth=iray), ".", ms=2, color="0.6", label="raw $\\Psi_{DP}$")
 axes[1].plot(r_km, results["hubbert"].PHIDP_processed.isel(azimuth=iray), color="C0", label="Hubbert")

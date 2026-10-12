@@ -272,7 +272,7 @@ station = pars.assign_coords(
     altitude=float(klbb["altitude"]),
     time=pars.time.values - pars.time.values[70] + t_radar,  # rain core under the radar
 )
-pairs = match_radar(station, klbb, fields=["DBZH", "ZDR"], window="60s", delay="fall")
+pairs = match_radar(station, klbb, data_vars=["DBZH", "ZDR"], window="60s", delay="fall")
 pairs[["DBZH", "DBZH_disdrometer", "ZDR", "ZDR_disdrometer", "beam_height",
        "height_above_ground", "gate_distance", "delay", "n_records"]]
 ```

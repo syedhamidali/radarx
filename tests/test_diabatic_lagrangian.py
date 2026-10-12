@@ -584,7 +584,7 @@ def test_polarimetric_closure():
     np.testing.assert_allclose(
         below.qr.isel(time=0).sel(z=1000.0),
         d.LWC * 1e-3 / float(base.rho.sel(z=1000.0)),
-        rtol=1e-10,
+        rtol=1e-6,
     )
     # an HID graupel class below the melting level adds graupel; scaling N_g
     hid = xr.full_like(ds.DBZ, 4, dtype=np.int8)
@@ -813,10 +813,10 @@ def test_errors():
         diabatic_lagrangian(
             ds, snd, precipitation="none", mesoscale=xr.Dataset({"theta": ("q", [1.0])})
         )
-    with pytest.raises(ValueError, match="dbzh"):
+    with pytest.raises(ValueError, match="dbz="):
         polarimetric_precipitation(ds.drop_vars("DBZ"), _base(ds))
     with pytest.raises(ValueError, match="not found"):
-        polarimetric_precipitation(ds, _base(ds), dbzh="ZH")
+        polarimetric_precipitation(ds, _base(ds), dbz="ZH")
     cold = snd.assign(temperature=snd.temperature - 60.0)
     with pytest.raises(ValueError, match="melting level"):
         ziegler2013_precipitation(
@@ -863,7 +863,7 @@ def test_numpy_branches_and_inputs():
     e = diabatic_lagrangian(ds, snd, processes=NONE, precipitation="none", levels=[2])
     np.testing.assert_allclose(d.theta, e.theta, atol=5e-3)
     # explicit closure names and constants
-    q = polarimetric_precipitation(ds, base, dbzh="DBZ", zdr="ZDR")
+    q = polarimetric_precipitation(ds, base, dbz="DBZ", zdr="ZDR")
     assert float(q.qr.max()) > 0
     z = ziegler2013_precipitation(
         ds, base, profiles=_profiles(), constants={"n0r": 4e5}

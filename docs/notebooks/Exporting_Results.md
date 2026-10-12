@@ -243,7 +243,7 @@ projection centred on the scalar `latitude` and `longitude` of the Dataset. Pass
 `crs=` to say otherwise, or `crs=False` for none.
 
 ```{code-cell} ipython3
-cappi = create_cappi(vol, height=1500.0, fields=["DBZH"], x_res=2000.0, y_res=2000.0)
+cappi = create_cappi(vol, height=1500.0, data_vars=["DBZH"], x_res=2000.0, y_res=2000.0)
 path = write_netcdf_cf(cappi, work / "cappi.nc")
 with xr.open_dataset(path) as back:
     print(back["crs"].attrs["latitude_of_projection_origin"], back["lat"].dims)

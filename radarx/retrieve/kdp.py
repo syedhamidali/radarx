@@ -13,7 +13,7 @@ differential phase :math:`K_{DP} = \\frac{1}{2}\\, d\\Phi_{DP}/dr`.
 Every ray is processed independently along range:
 
 1. **Masking.** Gates count as meteorological where :math:`\\Psi_{DP}` is
-   finite, :math:`\\rho_{hv}` reaches ``rhohv_min`` (default 0.85, the level
+   finite, :math:`\\rho_{hv}` reaches ``min_rhohv`` (default 0.85, the level
    below which Park et al. 2009 [3] consider the data contaminated by
    non-meteorological scatterers, p. 736) and the texture of
    :math:`\\Psi_{DP}` (its circular standard deviation over
@@ -195,11 +195,22 @@ from __future__ import annotations
 
 __all__ = ["estimate_kdp"]
 
+import functools
+
 import numpy as np
 import xarray as xr
 
+from .._compat import renamed_arguments
+from .._dtypes import fields_as_float32
 from .._fields import as_sweep
 from .._provenance import provenance
+from .._sweepwise import (
+    Output,
+    Sweep,
+    apply_sweeps_many,
+    dask_support,
+    ray_dimension,
+)
 from ._products import product_tree
 
 try:
@@ -255,12 +266,12 @@ def _wrap180(d):
     return d - 360.0 * np.floor(d / 360.0 + 0.5)
 
 
-def _valid_mask(phi, rho, rhohv_min, htex, tex_limit, mode=0, tex_max=20.0):
+def _valid_mask(phi, rho, min_rhohv, htex, tex_limit, mode=0, tex_max=20.0):
     """Meteorological gates: finite phase, rhohv and phase texture tests."""
     base = np.isfinite(phi)
     if rho is not None:
         with np.errstate(invalid="ignore"):
-            base &= rho >= rhohv_min
+            base &= rho >= min_rhohv
     rad = np.where(base, np.deg2rad(np.where(base, phi, 0.0)), 0.0)
     c = np.where(base, np.cos(rad), 0.0)
     s = np.where(base, np.sin(rad), 0.0)
@@ -481,7 +492,7 @@ def _adaptive_hf(sigma, kdp_ref, cap, hk_short, dr, fraction):
 
 def _kdp_noise_factor(hpre, hk, dr, n_pass=0):
     """
-    Standard deviation of KDP (degrees/km) per degree of white phase noise:
+    Standard deviation of KDP (degree km-1) per degree of white phase noise:
     half the least-squares slope over 2*hk+1 gates of a phase filtered with
     ``_smooth(., hpre)`` (hpre 0: not filtered). ``n_pass``: the slope of the
     phase rebuilt by integrating KDP (Vulpiani) applied that many more times;
@@ -688,7 +699,7 @@ def _ml_features(phi, rho, z, dr, params, sign, mask=None):
     filled = np.where(good[:, None], _fill(psi, valid), 0.0)
     nr, ng = phi.shape
     feats = np.zeros((nr, len(ML_FEATURES), ng), dtype=np.float32)
-    # half the range derivative (degrees/km), scaled by 0.1
+    # half the range derivative (degree km-1), scaled by 0.1
     feats[:, 0] = 0.05 * np.gradient(filled, dr, axis=1)
     feats[:, 1] = valid
     if rho is not None:
@@ -766,19 +777,13 @@ def _ml_run(model, feats):
     ]
 
 
-def _run_ml(datasets, fields, params, model):
-    """``method="ml"`` for a list of sweep datasets."""
-    model, info, name = _ml_model(model)
-    sweeps = [_prepare_sweep(ds, fields, params) for ds in datasets]
+def _ml_core(batch, params, model):
+    """``method="ml"`` for sweeps given as ``(geometry, (phidp, rhohv, dbzh))``."""
+    sweeps = _sweeps_of(batch)
     masks = [
         _mask_numpy(sw["phi"], sw["rho"], sw["z"], {**params, **sw}) for sw in sweeps
     ]
     sign = _decide_sign([m[3] for m in masks], params["phidp_sign"])
-    ml_attrs = {
-        "ml_model": str(info.get("name", name or type(model).__name__)),
-        "ml_model_version": str(info.get("version", "unknown")),
-        "ml_model_licence": str(info.get("licence", "unknown")),
-    }
     results = []
     for sw, mask in zip(sweeps, masks):
         p = {**params, **sw}
@@ -788,47 +793,62 @@ def _run_ml(datasets, fields, params, model):
         kdp, delta, std = _ml_run(model, feats)
         phi = _ml_phase(kdp, delta, psi, valid, good, sw["dr"])
         keep = valid & good[:, None]
-        out = _wrap_sweep(
-            sw,
-            phi,
-            np.where(keep, kdp, np.nan),
-            offset,
-            "ml",
-            sign,
+        results.append(
+            (
+                phi,
+                np.where(keep, kdp, np.nan),
+                offset,
+                np.where(keep, delta, np.nan),
+                np.where(keep, std, np.nan),
+                sign,
+                np.nan,
+                0,
+                np.nan,
+            )
         )
-        dims = out.KDP.dims
-        out["PHIDP_BACKSCATTER"] = (
-            dims,
-            _transpose_like(np.where(keep, delta, np.nan), sw, dims),
-            {
-                "long_name": "Backscatter differential phase",
-                "units": "degrees",
-                "comment": "backscatter phase delta estimated by the network",
-            },
-        )
-        out["KDP_UNCERTAINTY"] = (
-            dims,
-            _transpose_like(np.where(keep, std, np.nan), sw, dims),
-            {
-                "long_name": "Standard deviation of the specific differential phase",
-                "units": "degrees/km",
-                "comment": "predicted by the network",
-            },
-        )
-        for var in ("PHIDP_processed", "KDP", "PHIDP_BACKSCATTER", "KDP_UNCERTAINTY"):
-            out[var].attrs.update(ml_attrs)
-        out["PHIDP_processed"].attrs["comment"] = (
-            f"{sw['name']}{' multiplied by -1,' if sign < 0 else ''} twice the "
-            "range integral of the network KDP, fitted to the measured phase "
-            "minus the backscatter phase (method='ml')"
-        )
-        results.append(out)
     return results
 
 
-def _transpose_like(values, sweep, dims):
-    """(ray, range) values in the dimension order ``dims`` of the output."""
-    return values if dims[0] == sweep["ray_dim"] else values.T
+def _ml_attrs(model):
+    """The model object and the attributes that name it."""
+    model, info, name = _ml_model(model)
+    attrs = {
+        "ml_model": str(info.get("name", name or type(model).__name__)),
+        "ml_model_version": str(info.get("version", "unknown")),
+        "ml_model_licence": str(info.get("licence", "unknown")),
+    }
+    return model, attrs
+
+
+def _add_ml_variables(out, sweep, ml_attrs, sign, res):
+    """Backscatter phase and uncertainty of the network on the sweep Dataset."""
+    out["PHIDP_BACKSCATTER"] = (
+        res[3].dims,
+        res[3].data,
+        {
+            "long_name": "Backscatter differential phase",
+            "units": "degree",
+            "comment": "backscatter phase delta estimated by the network",
+        },
+    )
+    out["KDP_UNCERTAINTY"] = (
+        res[4].dims,
+        res[4].data,
+        {
+            "long_name": "Standard deviation of the specific differential phase",
+            "units": "degree km-1",
+            "comment": "predicted by the network",
+        },
+    )
+    for var in ("PHIDP_processed", "KDP", "PHIDP_BACKSCATTER", "KDP_UNCERTAINTY"):
+        out[var].attrs.update(ml_attrs)
+    flipped = " multiplied by -1," if sign is not None and sign < 0 else ""
+    out["PHIDP_processed"].attrs["comment"] = (
+        f"{sweep['name']}{flipped} twice the range integral of the network "
+        "KDP, fitted to the measured phase minus the backscatter phase "
+        "(method='ml')"
+    )
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -892,32 +912,16 @@ _DBZH_NAMES = ("DBZH", "DBZ", "reflectivity", "corrected_reflectivity")
 
 
 def _prepare_sweep(ds, fields, params):
-    """Field names, contiguous (ray, range) arrays and windows of one sweep."""
+    """Field names, fields and the windows (in gates) of one sweep."""
     phidp, rhohv, dbzh = fields
     phidp = _find(ds, phidp, _PHIDP_NAMES, True)
     rhohv = _find(ds, rhohv, _RHOHV_NAMES, rhohv is not None)
     dbzh = _find(ds, dbzh, _DBZH_NAMES, dbzh is not None)
     da = ds[phidp]
-    if "range" not in da.dims or da.ndim != 2:
-        raise ValueError(f"{phidp!r} must be 2-D with a 'range' dimension")
-    ray_dim = da.dims[0] if da.dims[1] == "range" else da.dims[1]
+    ray_dim = ray_dimension(da)
     dr = _gate_spacing(ds["range"].values)
-
-    def arr(name):
-        if name is None:
-            return None
-        values = ds[name].transpose(ray_dim, "range").values
-        return np.ascontiguousarray(values, dtype=np.float64)
-
     short, long_ = params["kdp_window"]
-    sweep = {
-        "ds": ds,
-        "name": phidp,
-        "fields": (phidp, rhohv, dbzh),
-        "ray_dim": ray_dim,
-        "phi": arr(phidp),
-        "rho": arr(rhohv),
-        "z": arr(dbzh),
+    geometry = {
         "dr": dr,
         "htex": _half_gates(params["texture_window"], dr),
         # 0: adapt to the phase noise, at most hf_cap
@@ -937,99 +941,130 @@ def _prepare_sweep(ds, fields, params):
         "hk_short": _half_gates(short, dr),
         "hk_long": _half_gates(long_, dr),
     }
-    if sweep["z"] is None:
-        sweep["hk_short"] = sweep["hk_long"]
-    return sweep
+    if dbzh is None:
+        geometry["hk_short"] = geometry["hk_long"]
+    return {
+        "ds": ds,
+        "name": phidp,
+        "fields": (phidp, rhohv, dbzh),
+        "ray_dim": ray_dim,
+        "arrays": [da] + [None if f is None else ds[f] for f in (rhohv, dbzh)],
+        "geometry": geometry,
+    }
 
 
-def _wrap_sweep(sweep, out, kdp, offset, method, sign, extra=None):
-    """
-    Processed PHIDP, KDP and the offset on the input sweep coordinates; with
-    ``extra = (delta, uncertainty, (noise, hf, largest KDP))`` also the backscatter
-    phase and the standard deviation of KDP.
-    """
-    da = sweep["ds"][sweep["name"]]
-    ray_dim = sweep["ray_dim"]
-    dims = (ray_dim, "range")
+def _sweeps_of(batch):
+    """Sweep dicts (float64 arrays and windows) of the entries of a batch."""
+
+    def arr(a):
+        return None if a is None else np.ascontiguousarray(a, dtype=np.float64)
+
+    return [
+        {**geometry, "phi": arr(a[0]), "rho": arr(a[1]), "z": arr(a[2])}
+        for geometry, a in batch
+    ]
+
+
+def _attributes(sweep, method, sign, info):
+    """Attributes of the processed phase, KDP and the offset."""
     phidp, rhohv, dbzh = sweep["fields"]
-    flipped = " multiplied by -1 (phase decreasing in range)," if sign < 0 else ""
+    if sign is None:
+        flipped = " multiplied by -1 where the phase decreases in range,"
+    elif sign < 0:
+        flipped = " multiplied by -1 (phase decreasing in range),"
+    else:
+        flipped = ""
     phi_attrs = {
         "standard_name": "radar_differential_phase_hv",
         "long_name": "Processed differential phase HV",
-        "units": "degrees",
+        "units": "degree",
         "comment": (
             f"{phidp}{flipped} with the system offset removed, unfolded and "
             f"range filtered (method={method!r})"
         ),
         "source_fields": ", ".join(f for f in (phidp, rhohv, dbzh) if f),
-        "phidp_sign": int(sign),
     }
+    if sign is not None:
+        phi_attrs["phidp_sign"] = int(sign)
+    if info is not None:
+        sigma, hf, kdp_ref = info
+        phi_attrs.update(
+            {
+                "phase_noise": float(sigma),
+                "filter_window": float(2 * hf * sweep["geometry"]["dr"]),
+                "kdp_reference": float(kdp_ref),
+            }
+        )
     kdp_attrs = {
         "standard_name": "radar_specific_differential_phase_hv",
         "long_name": "Specific differential phase HV",
-        "units": "degrees/km",
+        "units": "degree km-1",
         "comment": "half the range derivative of the processed PHIDP",
     }
     off_attrs = {
         "long_name": "System differential phase offset",
-        "units": "degrees",
+        "units": "degree",
         "comment": f"in the convention of {phidp}",
     }
+    return phi_attrs, kdp_attrs, off_attrs
+
+
+def _wrap_sweep(sweep, res, method, sign=None, info=None):
+    """
+    Processed PHIDP, KDP and the offset on the input sweep coordinates, the
+    backscatter phase of the Hubbert method and the standard deviation of KDP.
+
+    ``res`` holds the DataArrays of phase, KDP, offset, backscatter phase and
+    uncertainty (in this order). ``sign`` and ``info`` (the noise, filter
+    half-width and largest KDP of the sweep) are known for a sweep in memory.
+    """
+    ref = sweep["ds"][sweep["name"]]
+    phi_attrs, kdp_attrs, off_attrs = _attributes(sweep, method, sign, info)
+    phi, kdp, offset, delta, unc = res[:5]
     out_ds = xr.Dataset(
         {
-            "PHIDP_processed": (dims, out, phi_attrs),
-            "KDP": (dims, kdp, kdp_attrs),
-            "PHIDP_OFFSET": ((ray_dim,), offset, off_attrs),
+            "PHIDP_processed": (phi.dims, phi.data, phi_attrs),
+            "KDP": (kdp.dims, kdp.data, kdp_attrs),
+            "PHIDP_OFFSET": (offset.dims, offset.data, off_attrs),
         },
-        coords=dict(da.coords),
+        coords=dict(ref.coords),
     )
-    if extra is not None:
-        delta, unc, (sigma, hf, kdp_ref) = extra
-        if method == "hubbert":
-            out_ds["PHIDP_BACKSCATTER"] = (
-                dims,
-                delta,
-                {
-                    "long_name": "Backscatter differential phase",
-                    "units": "degrees",
-                    "comment": (
-                        "measured phase (unfolded, offset removed) minus the "
-                        "processed phase at the valid gates: the part of the "
-                        "backscatter phase that the filter removed (a bump wider "
-                        "than the filter stays in PHIDP_processed) plus the phase "
-                        "noise, so average it over gates or rays"
-                    ),
-                },
-            )
-        out_ds["KDP_UNCERTAINTY"] = (
-            dims,
-            unc,
+    if method == "ml":
+        return out_ds
+    if method == "hubbert":
+        out_ds["PHIDP_BACKSCATTER"] = (
+            delta.dims,
+            delta.data,
             {
-                "long_name": "Standard deviation of the specific differential phase",
-                "units": "degrees/km",
+                "long_name": "Backscatter differential phase",
+                "units": "degree",
                 "comment": (
-                    "phase noise of the ray (median absolute second difference) "
-                    "propagated as white noise through the filter and the "
-                    "least-squares slope; the bias of the resolution is not included"
+                    "measured phase (unfolded, offset removed) minus the "
+                    "processed phase at the valid gates: the part of the "
+                    "backscatter phase that the filter removed (a bump wider "
+                    "than the filter stays in PHIDP_processed) plus the phase "
+                    "noise, so average it over gates or rays"
                 ),
             },
         )
-        out_ds["PHIDP_processed"].attrs.update(
-            {
-                "phase_noise": float(sigma),
-                "filter_window": float(2 * hf * sweep["dr"]),
-                "kdp_reference": float(kdp_ref),
-            }
-        )
-    for name in ("PHIDP_processed", "KDP", "PHIDP_BACKSCATTER", "KDP_UNCERTAINTY"):
-        if name in out_ds:
-            out_ds[name] = out_ds[name].transpose(*da.dims)
+    out_ds["KDP_UNCERTAINTY"] = (
+        unc.dims,
+        unc.data,
+        {
+            "long_name": "Standard deviation of the specific differential phase",
+            "units": "degree km-1",
+            "comment": (
+                "phase noise of the ray (median absolute second difference) "
+                "propagated as white noise through the filter and the "
+                "least-squares slope; the bias of the resolution is not included"
+            ),
+        },
+    )
     return out_ds
 
 
-def _run(datasets, fields, params, n_threads, use_compiled):
-    """Process a list of sweep datasets; all rays in one kernel call."""
-    sweeps = [_prepare_sweep(ds, fields, params) for ds in datasets]
+def _process(sweeps, params, n_threads, use_compiled):
+    """Process sweep dicts; all rays in one kernel call."""
     if use_compiled:
         outs, kdps, offsets, sign, deltas, uncs, infos = _process_compiled(
             sweeps, params, n_threads
@@ -1050,13 +1085,66 @@ def _run(datasets, fields, params, n_threads, use_compiled):
             )
             results.append((out, kdp, offset, delta, unc, (sigma, hf, kdp_ref)))
     return [
-        _wrap_sweep(
-            sw, out, kdp, offset, params["method_name"], sign, (delta, unc, info)
-        )
-        for sw, (out, kdp, offset, delta, unc, info) in zip(sweeps, results)
+        (out, kdp, offset, delta, unc, sign, sigma, hf, kdp_ref)
+        for out, kdp, offset, delta, unc, (sigma, hf, kdp_ref) in results
     ]
 
 
+def _core(batch, params, n_threads, use_compiled):
+    return _process(_sweeps_of(batch), params, n_threads, use_compiled)
+
+
+# results of a core: phase, KDP, offset, backscatter phase, uncertainty, and
+# the sign, noise, filter half-width and largest KDP of the sweep
+_OUTPUTS = (
+    Output(np.float32),
+    Output(np.float32),
+    Output(np.float32, "ray"),
+    Output(np.float32),
+    Output(np.float32),
+    Output(np.int8, "scalar"),
+    Output(np.float64, "scalar"),
+    Output(np.float64, "scalar"),
+    Output(np.float64, "scalar"),
+)
+
+
+def _sign_and_info(stack, res, params):
+    """Sign of the phase and filter diagnostics: known for a sweep in memory."""
+    if stack.plain:
+        info = tuple(float(r.values) for r in res[6:9])
+        return int(res[5].values), info
+    return (params["phidp_sign"] or None), None
+
+
+def _run(datasets, fields, params, n_threads, use_compiled, model=None):
+    """Process a list of sweep datasets; all plain sweeps in one kernel call."""
+    sweeps = [_prepare_sweep(ds, fields, params) for ds in datasets]
+    method = params["method_name"]
+    if method == "ml":
+        model, ml_attrs = _ml_attrs(model)
+        core = functools.partial(_ml_core, params=params, model=model)
+    else:
+        core = functools.partial(
+            _core, params=params, n_threads=n_threads, use_compiled=use_compiled
+        )
+    stacks = [Sweep(sw["arrays"], context=sw["geometry"]) for sw in sweeps]
+    outs = apply_sweeps_many(core, stacks, _OUTPUTS, one_by_one=True)
+    results = []
+    for sw, stack, res in zip(sweeps, stacks, outs):
+        sign, info = _sign_and_info(stack, res, params)
+        result = _wrap_sweep(sw, res, method, sign, info)
+        if method == "ml":
+            result = _add_ml_variables(result, sw, ml_attrs, sign, res)
+        results.append(fields_as_float32(result))
+    return results
+
+
+@dask_support(
+    "lazy",
+    "For dask or stacked input ``phidp_sign='auto'`` is decided for each sweep, and the attributes of the filter (``phase_noise``, ``filter_window``, ``kdp_reference``) are not written.",
+)
+@renamed_arguments(dbzh="dbz", rhohv_min="min_rhohv")
 @provenance(
     "Differential phase and KDP processing, radarx's own after published concepts",
     extra_refs=("maesaka-2012",),
@@ -1065,10 +1153,10 @@ def estimate_kdp(
     obj,
     phidp=None,
     rhohv=None,
-    dbzh=None,
+    dbz=None,
     *,
     method="hubbert",
-    rhohv_min=0.85,
+    min_rhohv=0.85,
     texture_window=2.0,
     texture_max=None,
     texture_method="circular",
@@ -1099,7 +1187,7 @@ def estimate_kdp(
         sweep node (``dtree["sweep_0"]``), or a volume with ``sweep_*`` groups,
         e.g. from xradar. Range gates must be uniformly spaced; ``range`` is
         in metres.
-    phidp, rhohv, dbzh : str, optional
+    phidp, rhohv, dbz : str, optional
         Names of the measured (raw) differential phase (degrees), the
         copolar correlation coefficient and the reflectivity (dBZ). By
         default the first name found is used: ``UPHIDP``, ``PHIDP``,
@@ -1115,7 +1203,7 @@ def estimate_kdp(
         Range filtering method, see :mod:`radarx.retrieve.kdp`.
         Default ``"hubbert"``. ``"ml"`` runs a neural network and needs
         ``pip install radarx[ml]`` and a registered model (see ``model``).
-    rhohv_min : float, optional
+    min_rhohv : float, optional
         Minimum :math:`\\rho_{hv}` of meteorological gates. Default 0.85, the
         level below which Park et al. (2009) [3] consider the data
         contaminated by non-meteorological scatterers (p. 736).
@@ -1189,7 +1277,7 @@ def estimate_kdp(
         as in Park et al. (2009) [3], p. 732 (they use ``Z > 40``, radarx
         ``Z >= 40``).
     kdp_bounds : (float, float), optional
-        ``"vulpiani"``: KDP values (degrees/km) outside these bounds are set
+        ``"vulpiani"``: KDP values (degree km-1) outside these bounds are set
         to zero in each iteration. Default ``(-2, 20)`` at S band (radarx
         choice); see ``band``.
     min_valid_fraction : float, optional
@@ -1222,7 +1310,7 @@ def estimate_kdp(
         For a sweep, a Dataset with the processed differential phase
         ``PHIDP_processed`` (degrees, increasing with range in rain; masked gates are
         bridged and gates beyond the first and last valid gate hold the end
-        values), ``KDP`` (degrees/km; NaN at non-meteorological gates), the
+        values), ``KDP`` (degree km-1; NaN at non-meteorological gates), the
         system offset ``PHIDP_OFFSET`` per ray (in the convention of the
         input phase) and the standard deviation ``KDP_UNCERTAINTY`` of KDP,
         on the input coordinates. ``method="hubbert"`` adds the backscatter
@@ -1349,7 +1437,7 @@ def estimate_kdp(
     params = {
         "method": METHODS.get(method, -1),
         "method_name": method,
-        "rhohv_min": float(rhohv_min),
+        "rhohv_min": float(min_rhohv),
         "texture_window": texture_window,
         "texture_max": float(texture_max),
         "texture_method": texture_method,
@@ -1367,16 +1455,10 @@ def estimate_kdp(
         "min_valid_fraction": float(min_valid_fraction),
         "phidp_sign": sign_value,
     }
-    fields = (phidp, rhohv, dbzh)
-    if method == "ml":
+    fields = (phidp, rhohv, dbz)
 
-        def run(datasets):
-            return _run_ml(datasets, fields, params, model)
-
-    else:
-
-        def run(datasets):
-            return _run(datasets, fields, params, n_threads, use_compiled)
+    def run(datasets):
+        return _run(datasets, fields, params, n_threads, use_compiled, model)
 
     obj = as_sweep(obj)
     if isinstance(obj, xr.Dataset):

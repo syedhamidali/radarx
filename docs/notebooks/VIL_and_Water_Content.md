@@ -487,7 +487,7 @@ kdp = estimate_kdp(
     sweep,
     phidp="uncorrected_differential_phase",
     rhohv="uncorrected_copol_correlation_coeff",
-    dbzh="attenuation_corrected_reflectivity_h",
+    dbz="attenuation_corrected_reflectivity_h",
 )
 sweep = sweep.assign(KDP=kdp.KDP)
 fields = dict(

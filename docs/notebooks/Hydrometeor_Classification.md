@@ -251,14 +251,14 @@ kdp = estimate_kdp(
     sw,
     phidp="uncorrected_differential_phase",
     rhohv="uncorrected_copol_correlation_coeff",
-    dbzh="uncorrected_reflectivity_h",
+    dbz="uncorrected_reflectivity_h",
 )
 sw = sw.assign(KDP=kdp.KDP, met=sw.gate_id.isin([1, 2, 4]))
 res_c = sw.radarx.hid(
     "sounding_temperature",
     band="C",
     mask="met",
-    dbzh="attenuation_corrected_reflectivity_h",
+    dbz="attenuation_corrected_reflectivity_h",
     zdr="attenuation_corrected_differential_reflectivity",
     kdp="KDP",
     rhohv="copol_correlation_coeff",

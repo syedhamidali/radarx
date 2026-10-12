@@ -257,8 +257,10 @@ import pandas as pd
 import xarray as xr
 from scipy.special import gammainc, gammaincc, gammaincinv, gammaln
 
+from .._compat import renamed_arguments
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 from ..fundamentals.geometry import beam_center_height, ground_range
 from . import _raindrop_fall
 from . import dsd as _dsdmod
@@ -551,9 +553,10 @@ def _finish_qc(ds, keep, valid, vt, counts, attrs, extra=None):
     return out
 
 
+@renamed_arguments(ds="obj")
 @provenance("Disdrometer particle quality control against the terminal fall speed")
 def disdrometer_qc(
-    ds,
+    obj,
     *,
     method="relative",
     tolerance=0.6,
@@ -568,7 +571,7 @@ def disdrometer_qc(
 
     Parameters
     ----------
-    ds : xarray.Dataset
+    obj : xarray.Dataset
         Disdrometer data with ``counts`` on ``(time, velocity, diameter)``,
         e.g. from :func:`radarx.io.read_parsivel`.
     method : {"relative", "raupach2015"}, optional
@@ -600,7 +603,7 @@ def disdrometer_qc(
     Returns
     -------
     xarray.Dataset
-        ``ds`` with ``counts_qc`` (counts of the kept classes, NaN in
+        ``obj`` with ``counts_qc`` (counts of the kept classes, NaN in
         discarded records), ``qc_mask`` (kept classes), ``valid`` (kept
         records) and ``terminal_fall_speed`` (m s-1, on ``diameter``, and
         on ``time`` with the air density).
@@ -622,14 +625,14 @@ def disdrometer_qc(
     0.25 mm are radarx choices, not from these papers; the fall speed is that
     of :func:`terminal_fall_speed`.
     """
-    counts = _check_counts(ds)
+    counts = _check_counts(obj)
     if method not in ("relative", "raupach2015"):
         raise ValueError(f"method must be 'relative' or 'raupach2015', not {method!r}")
     if not tolerance > 0:
         raise ValueError("tolerance must be positive")
-    vt = _fall_speed(ds, density_correction, fall_speed)
-    v = ds["velocity"]
-    d = ds["diameter"]
+    vt = _fall_speed(obj, density_correction, fall_speed)
+    v = obj["velocity"]
+    d = obj["diameter"]
     if method == "relative":
         keep = abs(v - vt) <= float(tolerance) * vt
     else:
@@ -638,12 +641,12 @@ def disdrometer_qc(
         keep = keep & (d <= float(max_diameter))
     if drop_unmeasured:
         keep = keep & (d > 0.25)
-    valid = _wind_valid(ds, max_wind)
+    valid = _wind_valid(obj, max_wind)
     attrs = (
         f"method={method}, tolerance={tolerance}, max_diameter={max_diameter}, "
         f"drop_unmeasured={drop_unmeasured}, max_wind={max_wind}"
     )
-    return _finish_qc(ds, keep, valid, vt, counts, attrs)
+    return _finish_qc(obj, keep, valid, vt, counts, attrs)
 
 
 def _velocity_shift_numpy(counts, lo, up, vt, step):
@@ -668,17 +671,19 @@ def _velocity_shift_numpy(counts, lo, up, vt, step):
     return out
 
 
+@dask_support("computes", "it works on small in-memory data.")
+@renamed_arguments(ds="obj")
 @provenance("Parsivel spectra correction of Raupach and Berne (2015)")
 def raupach_berne_correction(
-    ds,
+    obj,
     *,
     instrument="parsivel2",
     counts="counts",
     max_wind=None,
     density_correction=True,
     fall_speed="drag_balance",
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Correct Parsivel spectra with the method of Raupach and Berne (2015).
@@ -691,7 +696,7 @@ def raupach_berne_correction(
 
     Parameters
     ----------
-    ds : xarray.Dataset
+    obj : xarray.Dataset
         Disdrometer data with ``counts`` on ``(time, velocity, diameter)``
         and the instrument rain intensity ``rain_rate_instrument``
         (mm h-1), which selects the correction factors.
@@ -706,15 +711,15 @@ def raupach_berne_correction(
         class.
     max_wind, density_correction, fall_speed : optional
         See :func:`disdrometer_qc`.
-    engine : {"auto", "compiled", "numpy"}, optional
-        Compiled kernel or NumPy implementation of the velocity shift.
     n_threads : int, optional
         Threads of the compiled kernel; default all cores.
+    engine : {"auto", "compiled", "numpy"}, optional
+        Compiled kernel or NumPy implementation of the velocity shift.
 
     Returns
     -------
     xarray.Dataset
-        ``ds`` with ``counts_qc`` (shifted and filtered counts), ``qc_mask``,
+        ``obj`` with ``counts_qc`` (shifted and filtered counts), ``qc_mask``,
         ``valid``, ``terminal_fall_speed`` and ``concentration_factor`` (on
         ``time`` and ``diameter``; NaN where the intensity is missing).
 
@@ -726,17 +731,17 @@ def raupach_berne_correction(
     Tech.*, **8** (1), 343-365, https://doi.org/10.5194/amt-8-343-2015
     """
     name = counts
-    counts = _check_counts(ds, name).fillna(0.0)
+    counts = _check_counts(obj, name).fillna(0.0)
     if instrument not in _RB_FACTORS:
         raise ValueError(
             f"instrument must be one of {tuple(_RB_FACTORS)}, not {instrument!r}"
         )
-    if "rain_rate_instrument" not in ds:
+    if "rain_rate_instrument" not in obj:
         raise ValueError("the correction needs 'rain_rate_instrument'")
-    if ds.sizes["diameter"] != 32 or ds.sizes["velocity"] != 32:
+    if obj.sizes["diameter"] != 32 or obj.sizes["velocity"] != 32:
         raise ValueError("the correction needs the 32 x 32 Parsivel classes")
-    vt = _fall_speed(ds, density_correction, fall_speed)
-    _, _, vlo, vup = _edges(ds, "velocity")
+    vt = _fall_speed(obj, density_correction, fall_speed)
+    _, _, vlo, vup = _edges(obj, "velocity")
     c = np.asarray(counts.values, float)
     vtv = _fall_speed_values(vt, counts.shape[0])
     if _use_compiled(engine):
@@ -746,16 +751,16 @@ def raupach_berne_correction(
     else:
         shifted = _velocity_shift_numpy(c, vlo, vup, vtv, 0.1)
     shifted = counts.copy(data=shifted)
-    v = ds["velocity"]
-    d = ds["diameter"]
+    v = obj["velocity"]
+    d = obj["diameter"]
     keep = (v <= vt + 4.0) & (v >= vt - 3.0) & (d <= 7.5)
-    valid = _wind_valid(ds, max_wind)
+    valid = _wind_valid(obj, max_wind)
     # concentration factors by intensity class
     table = np.array(
         [[np.nan if x is None else x for x in row] for row in _RB_FACTORS[instrument]]
     )
     edges = np.array(_RB_INTENSITY[instrument])
-    rate = ds["rain_rate_instrument"].values
+    rate = obj["rain_rate_instrument"].values
     cls = np.searchsorted(edges, rate, side="right") - 1
     ok = np.isfinite(rate) & (cls >= 0) & (cls < len(edges) - 1)
     factor = np.ones((rate.size, 32))
@@ -765,7 +770,7 @@ def raupach_berne_correction(
     cf = xr.DataArray(
         factor,
         dims=("time", "diameter"),
-        coords={"time": ds["time"], "diameter": ds["diameter"]},
+        coords={"time": obj["time"], "diameter": obj["diameter"]},
         attrs={
             "long_name": "Drop concentration correction factor (Raupach and Berne 2015)",
             "units": "1",
@@ -775,11 +780,11 @@ def raupach_berne_correction(
         f"method=raupach_berne_2015, instrument={instrument}, counts={name}, "
         f"max_wind={max_wind}"
     )
-    if name == "counts_qc" and "qc" in ds.attrs:
-        attrs = f"{ds.attrs['qc']}; {attrs}"
-        valid = valid & ds["valid"] if "valid" in ds else valid
+    if name == "counts_qc" and "qc" in obj.attrs:
+        attrs = f"{obj.attrs['qc']}; {attrs}"
+        valid = valid & obj["valid"] if "valid" in obj else valid
     return _finish_qc(
-        ds, keep, valid, vt, shifted, attrs, extra={"concentration_factor": cf}
+        obj, keep, valid, vt, shifted, attrs, extra={"concentration_factor": cf}
     )
 
 
@@ -788,23 +793,25 @@ def raupach_berne_correction(
 # --------------------------------------------------------------------------
 
 
+@dask_support("computes", "it works on small in-memory data.")
+@renamed_arguments(ds="obj")
 @provenance("Drop number concentration N(D) after Raupach and Berne (2015)")
 def number_concentration(
-    ds,
+    obj,
     *,
     counts=None,
     velocity="measured",
     sample_interval=None,
     fall_speed="drag_balance",
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Drop number concentration N(D) from particle counts.
 
     Parameters
     ----------
-    ds : xarray.Dataset
+    obj : xarray.Dataset
         Disdrometer data with counts on ``(time, velocity, diameter)``.
     counts : str, optional
         Counts variable. Default ``"counts_qc"`` if present (output of
@@ -820,10 +827,10 @@ def number_concentration(
     fall_speed : {"drag_balance", "atlas1973"}, optional
         Sea-level law of :func:`terminal_fall_speed` for ``velocity="terminal"``
         when the dataset has no ``terminal_fall_speed``.
-    engine : {"auto", "compiled", "numpy"}, optional
-        Compiled kernel or NumPy implementation.
     n_threads : int, optional
         Threads of the compiled kernel; default all cores.
+    engine : {"auto", "compiled", "numpy"}, optional
+        Compiled kernel or NumPy implementation.
 
     Returns
     -------
@@ -857,35 +864,35 @@ def number_concentration(
     Technol.*, **27** (2), 333-344, https://doi.org/10.1175/2009JTECHA1332.1
     """
     if counts is None:
-        counts = "counts_qc" if "counts_qc" in ds else "counts"
-    c = _check_counts(ds, counts)
+        counts = "counts_qc" if "counts_qc" in obj else "counts"
+    c = _check_counts(obj, counts)
     if velocity not in ("measured", "terminal"):
         raise ValueError(f"velocity must be 'measured' or 'terminal', not {velocity!r}")
-    d, dd, _, _ = _edges(ds, "diameter")
+    d, dd, _, _ = _edges(obj, "diameter")
     n, nv, nd = c.shape
     if sample_interval is not None:
         dt = np.full(n, float(sample_interval))
-    elif "sample_interval" in ds:
-        dt = ds["sample_interval"].values.astype(float)
+    elif "sample_interval" in obj:
+        dt = obj["sample_interval"].values.astype(float)
     else:
-        t = ds["time"].values.astype("datetime64[ns]").astype(np.int64) / 1e9
+        t = obj["time"].values.astype("datetime64[ns]").astype(np.int64) / 1e9
         dt = np.full(n, float(np.median(np.diff(t))) if n > 1 else np.nan)
     area = 1e-6 * BEAM_LENGTH * (BEAM_WIDTH - d / 2.0)  # m2
     with np.errstate(divide="ignore", invalid="ignore"):
         scale = 1.0 / (area[None, :] * dd[None, :] * dt[:, None])
-        if "concentration_factor" in ds:
+        if "concentration_factor" in obj:
             scale = (
-                scale * ds["concentration_factor"].transpose("time", "diameter").values
+                scale * obj["concentration_factor"].transpose("time", "diameter").values
             )
         if velocity == "measured":
-            v = np.asarray(ds["velocity"].values, float)
+            v = np.asarray(obj["velocity"].values, float)
             weight = np.broadcast_to((1.0 / v)[None, :, None], (1, nv, nd))
         else:
             vt = _fall_speed_values(
                 (
-                    ds["terminal_fall_speed"]
-                    if "terminal_fall_speed" in ds
-                    else _fall_speed(ds, False, fall_speed)
+                    obj["terminal_fall_speed"]
+                    if "terminal_fall_speed" in obj
+                    else _fall_speed(obj, False, fall_speed)
                 ),
                 n,
             )
@@ -909,14 +916,14 @@ def number_concentration(
         out,
         dims=("time", "diameter"),
         coords={
-            "time": ds["time"],
-            "diameter": ds["diameter"],
+            "time": obj["time"],
+            "diameter": obj["diameter"],
             "bin_width": ("diameter", dd, {"units": "mm"}),
         },
         name="ND",
         attrs=dict(_ND_ATTRS),
     )
-    for k, val in ds.coords.items():
+    for k, val in obj.coords.items():
         if val.ndim == 0:
             nd_da = nd_da.assign_coords({k: val})
     return nd_da
@@ -935,6 +942,7 @@ def _diameter_dim(nd, dim):
     return d, w
 
 
+@dask_support("computes", "it works on small in-memory data.")
 @provenance("Integral quantities of measured drop size distributions")
 def dsd_moments(nd, dim="diameter", fall_speed="drag_balance"):
     """
@@ -1251,6 +1259,7 @@ def _truncated_quantities(logn0, mu, lam, dmin, dmax):
     return np.stack([n0, nw, d0, dm, mu, lam, rain, np.pi / 6.0 * 1.0e-3 * m3])
 
 
+@dask_support("computes", "it works on small in-memory data.")
 @provenance(
     "Gamma drop size distribution fit by moments, after Ulbrich and Atlas (1998)"
 )
@@ -1264,8 +1273,8 @@ def fit_gamma(
     mu_range=None,
     max_iter=50,
     tol=1e-10,
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Fit gamma drop size distributions to measured spectra.
@@ -1295,10 +1304,10 @@ def fit_gamma(
     max_iter, tol : optional
         Newton iterations of the truncated fit (default 50) and tolerance
         on the log moment ratios (default 1e-10).
-    engine : {"auto", "compiled", "numpy"}, optional
-        Compiled kernel or NumPy implementation.
     n_threads : int, optional
         Threads of the compiled kernel; default all cores.
+    engine : {"auto", "compiled", "numpy"}, optional
+        Compiled kernel or NumPy implementation.
 
     Returns
     -------
@@ -1447,19 +1456,21 @@ def fit_gamma(
 _RADAR_VARS = ("DBZH", "ZDR", "KDP", "RHOHV", "AH", "ADP")
 
 
+@dask_support("computes", "it works on small in-memory data.")
+@renamed_arguments(ds="obj")
 @provenance(
     "Disdrometer processing: quality control, N(D), moments, gamma fit, radar variables"
 )
 def process_disdrometer(
-    ds,
+    obj,
     *,
     qc="relative",
     fits=("MM246", "TMM246"),
     band="S",
     temperature=20.0,
     velocity="measured",
-    engine="auto",
     n_threads=None,
+    engine="auto",
     **qc_kwargs,
 ):
     """
@@ -1467,7 +1478,7 @@ def process_disdrometer(
 
     Parameters
     ----------
-    ds : xarray.Dataset
+    obj : xarray.Dataset
         Disdrometer data with ``counts`` (e.g. from
         :func:`radarx.io.read_parsivel`), or the output of
         :func:`disdrometer_qc` / :func:`raupach_berne_correction` (then
@@ -1499,7 +1510,7 @@ def process_disdrometer(
         ``KDP``, ``RHOHV``, ``AH`` and ``ADP`` of
         :func:`radarx.retrieve.radar_from_dsd`, and per fit ``N0_<fit>``,
         ``MU_<fit>``, ``LAMBDA_<fit>``, ``DM_<fit>``, ``D0_<fit>`` and
-        ``NW_<fit>``; with the station coordinates of ``ds``.
+        ``NW_<fit>``; with the station coordinates of ``obj``.
 
     Notes
     -----
@@ -1536,10 +1547,10 @@ def process_disdrometer(
         if f not in _FITS:
             raise ValueError(f"unknown fit {f!r}; choose from {tuple(_FITS)}")
     if qc in ("relative", "raupach2015"):
-        ds = disdrometer_qc(ds, method=qc, **qc_kwargs)
+        obj = disdrometer_qc(obj, method=qc, **qc_kwargs)
     elif qc == "raupach_berne":
-        ds = raupach_berne_correction(
-            ds, engine=engine, n_threads=n_threads, **qc_kwargs
+        obj = raupach_berne_correction(
+            obj, engine=engine, n_threads=n_threads, **qc_kwargs
         )
     elif qc is not None:
         raise ValueError(
@@ -1548,7 +1559,7 @@ def process_disdrometer(
         )
     law = qc_kwargs.get("fall_speed", "drag_balance")
     nd = number_concentration(
-        ds, velocity=velocity, fall_speed=law, engine=engine, n_threads=n_threads
+        obj, velocity=velocity, fall_speed=law, engine=engine, n_threads=n_threads
     )
     out = dsd_moments(nd, fall_speed=law)
     valid = np.isfinite(out["NT"])
@@ -1568,29 +1579,22 @@ def process_disdrometer(
     out.attrs = {
         "band": radar.attrs["band"],
         "temperature": float(temperature),
-        "qc": ds.attrs.get("qc", "none"),
+        "qc": obj.attrs.get("qc", "none"),
         "velocity": velocity,
     }
     return out
 
 
-@accessor_method("dataset", name="disdrometer")
-def _disdrometer_accessor(self, **kwargs):
+@accessor_method("dataset", name="disdrometer", wraps=process_disdrometer)
+def _disdrometer_accessor(self):
     """
     Disdrometer products: quality control, N(D), moments, fits, radar variables.
-
-    Parameters
-    ----------
-    **kwargs
-        Options of :func:`radarx.retrieve.process_disdrometer`, e.g. ``qc``,
-        ``fits``, ``band``.
 
     Returns
     -------
     xarray.Dataset
         See :func:`radarx.retrieve.process_disdrometer`.
     """
-    return process_disdrometer(self.xarray_obj, **kwargs)
 
 
 # --------------------------------------------------------------------------
@@ -1641,17 +1645,19 @@ def _pick_sweep(tree, sweep):
     return ds
 
 
+@dask_support("computes", "it reads the gates above one location.")
+@renamed_arguments(radar="obj", fields="data_vars")
 @provenance(
     "Radar variables in the gate above a ground location, radarx's own sampling"
 )
 def radar_at_location(
-    radar,
+    obj,
     latitude,
     longitude,
     altitude=None,
     *,
     sweep=0,
-    fields=None,
+    data_vars=None,
     radius=None,
 ):
     """
@@ -1659,7 +1665,7 @@ def radar_at_location(
 
     Parameters
     ----------
-    radar : xarray.DataTree, xarray.Dataset or sequence of them
+    obj : xarray.DataTree, xarray.Dataset or sequence of them
         Radar volumes (xradar DataTrees) or sweeps, e.g. one volume per
         time; each gives one sample.
     latitude, longitude : float
@@ -1670,7 +1676,7 @@ def radar_at_location(
     sweep : int or float, optional
         Sweep index (``sweep_<n>``, default 0) or the fixed angle (degrees)
         of the sweep to take from DataTrees.
-    fields : sequence of str, optional
+    data_vars : sequence of str, optional
         Variables to sample. Default: all variables on ``(azimuth, range)``.
     radius : float, optional
         Average the gates whose centres are within this horizontal distance
@@ -1697,7 +1703,7 @@ def radar_at_location(
     6371 km, used earlier, is off by -0.2 to +0.56 %, up to 280 m at 50 km).
     """
     rows = []
-    for ds in _sweeps(radar, sweep):
+    for ds in _sweeps(obj, sweep):
         for c in ("latitude", "longitude", "altitude"):
             if c not in ds.coords and c not in ds:
                 raise ValueError(f"the sweep has no radar {c!r}")
@@ -1719,7 +1725,7 @@ def radar_at_location(
         y = s * np.cos(np.deg2rad(az[:, None]))
         dist = np.hypot(x - xl, y - yl)
         ia, ir = np.unravel_index(np.nanargmin(dist), dist.shape)
-        names = fields or [
+        names = data_vars or [
             v for v in ds.data_vars if set(ds[v].dims) == {"azimuth", "range"}
         ]
         row = {}
@@ -1769,8 +1775,8 @@ def radar_at_location(
         "height_above_ground": ("Height of the beam centre above the location", "m"),
         "gate_distance": ("Horizontal distance from the gate to the location", "m"),
         "range": ("Range of the gate", "m"),
-        "azimuth": ("Azimuth of the gate", "degrees"),
-        "elevation": ("Elevation of the gate", "degrees"),
+        "azimuth": ("Azimuth of the gate", "degree"),
+        "elevation": ("Elevation of the gate", "degree"),
     }
     for k, (ln, u) in geo.items():
         out[k].attrs = {"long_name": ln, "units": u}
@@ -1800,30 +1806,32 @@ def _window_mean(t_src, values, weights, t_lo, t_hi):
     return out, sw
 
 
+@dask_support("computes", "it pairs the spectra with the gates above one location.")
+@renamed_arguments(ds="obj", fields="data_vars")
 @provenance(
     "Pairing of disdrometer spectra with radar gates, radarx's own construction"
 )
 def match_radar(
-    ds,
+    obj,
     radar,
     *,
     sweep=0,
-    fields=None,
+    data_vars=None,
     window="60s",
     delay=None,
     radius=None,
     band="S",
     temperature=20.0,
     qc="relative",
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Pair disdrometer spectra with the radar gate above the instrument.
 
     Parameters
     ----------
-    ds : xarray.Dataset
+    obj : xarray.Dataset
         Disdrometer data of one station (``counts`` and the scalar
         coordinates ``latitude``, ``longitude``, ``altitude``), e.g. from
         :func:`radarx.io.read_parsivel`; or the output of
@@ -1831,7 +1839,7 @@ def match_radar(
         ``ND`` variable and the station coordinates.
     radar : xarray.DataTree, xarray.Dataset or sequence of them
         Radar volumes or sweeps, see :func:`radar_at_location`.
-    sweep, fields, radius : optional
+    sweep, data_vars, radius : optional
         See :func:`radar_at_location`.
     window : str or numpy.timedelta64, optional
         Length of the disdrometer averaging window centred on each radar
@@ -1876,32 +1884,32 @@ def match_radar(
     >>> (pairs.DBZH - pairs.DBZH_disdrometer).mean()  # doctest: +SKIP
     """
     for c in ("latitude", "longitude"):
-        if c not in ds.coords:
+        if c not in obj.coords:
             raise ValueError(f"the disdrometer dataset has no {c!r} coordinate")
-    if "station" in ds.dims:
+    if "station" in obj.dims:
         raise ValueError("select one station (ds.isel(station=i)) or loop over them")
-    lat, lon = float(ds["latitude"]), float(ds["longitude"])
-    alt = float(ds["altitude"]) if "altitude" in ds.coords else None
+    lat, lon = float(obj["latitude"]), float(obj["longitude"])
+    alt = float(obj["altitude"]) if "altitude" in obj.coords else None
     if alt is not None and not np.isfinite(alt):
         alt = None
     pts = radar_at_location(
-        radar, lat, lon, alt, sweep=sweep, fields=fields, radius=radius
+        radar, lat, lon, alt, sweep=sweep, data_vars=data_vars, radius=radius
     )
-    if "ND" in ds:
-        nd = ds["ND"].transpose("time", "diameter")
+    if "ND" in obj:
+        nd = obj["ND"].transpose("time", "diameter")
     else:
         if qc in ("relative", "raupach2015"):
-            ds = disdrometer_qc(ds, method=qc)
+            obj = disdrometer_qc(obj, method=qc)
         elif qc == "raupach_berne":
-            ds = raupach_berne_correction(ds, engine=engine, n_threads=n_threads)
+            obj = raupach_berne_correction(obj, engine=engine, n_threads=n_threads)
         elif qc is not None:
             raise ValueError(f"unknown qc {qc!r}")
-        nd = number_concentration(ds, engine=engine, n_threads=n_threads)
+        nd = number_concentration(obj, engine=engine, n_threads=n_threads)
     win = pd.to_timedelta(window).to_timedelta64().astype("timedelta64[ns]")
     t_src = nd["time"].values.astype("datetime64[ns]")
     weights = (
-        ds["sample_interval"].values.astype(float)
-        if "sample_interval" in ds
+        obj["sample_interval"].values.astype(float)
+        if "sample_interval" in obj
         else np.ones(t_src.size)
     )
     t_rad = pts["time"].values
@@ -1964,6 +1972,6 @@ def match_radar(
     out.attrs = {
         "window": str(window),
         "band": rad.attrs["band"],
-        "station": str(ds["station"].values) if "station" in ds.coords else "",
+        "station": str(obj["station"].values) if "station" in obj.coords else "",
     }
     return out

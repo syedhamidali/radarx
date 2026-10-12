@@ -103,8 +103,10 @@ import importlib
 import numpy as np
 import xarray as xr
 
+from .._compat import renamed_arguments
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 from . import _fieldtools as ft
 
 try:
@@ -176,7 +178,7 @@ def _median(v):
 
 
 def _offset_stats_numpy(
-    zdr, dbz, rhohv, snr, mask, elev, ref_z, ref_v, z_min, z_max, rhohv_min, snr_min
+    zdr, dbz, rhohv, snr, mask, elev, ref_z, ref_v, z_min, z_max, min_rhohv, min_snr
 ):
     rows, n = zdr.shape
     out = np.full((rows, 5), np.nan)
@@ -186,9 +188,9 @@ def _offset_stats_numpy(
         with np.errstate(invalid="ignore"):
             ok = np.isfinite(zdr[r])
             if rhohv.size:
-                ok &= rhohv[r] >= rhohv_min
+                ok &= rhohv[r] >= min_rhohv
             if snr.size:
-                ok &= snr[r] >= snr_min
+                ok &= snr[r] >= min_snr
             if mask.size:
                 ok &= mask[r] != 0.0
             ref = np.full(n, ref_v[0])
@@ -226,9 +228,9 @@ def _consistency_stats_numpy(
     z_min,
     z_max,
     bin_width,
-    rhohv_min,
-    snr_min,
-    kdp_min,
+    min_rhohv,
+    min_snr,
+    min_kdp,
     min_bin_count,
 ):
     rows, n = z.shape
@@ -241,9 +243,9 @@ def _consistency_stats_numpy(
             ok = np.isfinite(z[r]) & np.isfinite(zdr[r]) & np.isfinite(kdp[r])
             ok &= (z[r] >= z_min) & (z[r] < z_max)
             if rhohv.size:
-                ok &= rhohv[r] >= rhohv_min
+                ok &= rhohv[r] >= min_rhohv
             if snr.size:
-                ok &= snr[r] >= snr_min
+                ok &= snr[r] >= min_snr
             if mask.size:
                 ok &= mask[r] != 0.0
         b = np.minimum(nb - 1, np.floor((z[r][ok] - z_min) / bin_width).astype(int))
@@ -253,7 +255,7 @@ def _consistency_stats_numpy(
         sk = np.bincount(b, weights=kdp[r][ok], minlength=nb)
         with np.errstate(invalid="ignore", divide="ignore"):
             mz, md, mk = sz / cnt, sd / cnt - zdr_offset, sk / cnt
-            use = (cnt >= max(min_bin_count, 1)) & (mk >= kdp_min) & (mk > 0.0)
+            use = (cnt >= max(min_bin_count, 1)) & (mk >= min_kdp) & (mk > 0.0)
             use &= (md >= gz[0]) & (md <= gz[-1])
             lg = np.interp(md, gz, glg)
             dev = mz - 10.0 * (np.log10(mk) - lg)
@@ -268,16 +270,16 @@ def _consistency_stats_numpy(
 
 
 def _phidp_rays_numpy(
-    phidp, rhohv, snr, mask, first_gate, n_use, rhohv_min, snr_min, min_count
+    phidp, rhohv, snr, mask, first_gate, n_use, min_rhohv, min_snr, min_count
 ):
     rows, n = phidp.shape
     with np.errstate(invalid="ignore"):
         ok = np.isfinite(phidp)
         ok &= (np.arange(n) >= max(first_gate, 0))[None, :]
         if rhohv.size:
-            ok &= rhohv >= rhohv_min
+            ok &= rhohv >= min_rhohv
         if snr.size:
-            ok &= snr >= snr_min
+            ok &= snr >= min_snr
         if mask.size:
             ok &= mask != 0.0
     ok &= np.cumsum(ok, axis=1) <= n_use
@@ -415,6 +417,8 @@ def _check_statistic(statistic):
         raise ValueError(f"statistic must be 'median' or 'mean', not {statistic!r}")
 
 
+@dask_support("lazy")
+@renamed_arguments(rhohv_min="min_rhohv", snr_min="min_snr")
 @provenance("Differential reflectivity offset from natural targets")
 def zdr_offset(
     obj,
@@ -428,8 +432,8 @@ def zdr_offset(
     elevation=None,
     reference=None,
     z_range=None,
-    rhohv_min=0.98,
-    snr_min=None,
+    min_rhohv=0.98,
+    min_snr=None,
     statistic="median",
     min_count=100,
     dim=None,
@@ -442,8 +446,8 @@ def zdr_offset(
     Offset of the differential reflectivity from vertical pointing, light rain or dry snow.
 
     The offset is the median (or mean) of ``ZDR - reference`` over the gates
-    that pass the selection (``rhohv`` at least ``rhohv_min``, reflectivity
-    within ``z_range``, SNR at least ``snr_min``, ``mask`` true). The offset
+    that pass the selection (``rhohv`` at least ``min_rhohv``, reflectivity
+    within ``z_range``, SNR at least ``min_snr``, ``mask`` true). The offset
     is the measured value minus the true one, so ``ZDR - offset`` is the
     corrected differential reflectivity. See :mod:`radarx.retrieve.calibration`
     for the three methods, the reference values, the elevation dependence and
@@ -477,9 +481,9 @@ def zdr_offset(
         Reflectivity limits (dBZ) of the target. Default: no limits for
         ``"vertical"``, (20, 25) for ``"light_rain"`` and (0, 30) for
         ``"dry_snow"`` (radarx choices).
-    rhohv_min : float, optional
+    min_rhohv : float, optional
         Smallest correlation coefficient. Default 0.98.
-    snr_min : float, optional
+    min_snr : float, optional
         Smallest SNR in dB; the SNR field is only used with this.
     statistic : {"median", "mean"}, optional
         The statistic that is reported as the offset. Default ``"median"``,
@@ -534,7 +538,7 @@ def zdr_offset(
     Examples
     --------
     >>> off = radarx.retrieve.zdr_offset(sweep)  # doctest: +SKIP
-    >>> off = dtree.radarx.zdr_offset("light_rain", snr_min=15)  # doctest: +SKIP
+    >>> off = dtree.radarx.zdr_offset("light_rain", min_snr=15)  # doctest: +SKIP
     >>> corrected = sweep.ZDR - float(off.ZDR_OFFSET)  # doctest: +SKIP
     """
     ft.check_object(obj)
@@ -565,7 +569,7 @@ def zdr_offset(
         rho = _rho_field(ds, rhohv)
         s = (
             _optional_field(ds, True if snr is None else snr, ft.SNR_NAMES, "SNR")
-            if snr_min is not None
+            if min_snr is not None
             else None
         )
         fields = {
@@ -598,15 +602,15 @@ def zdr_offset(
                 ref_z,
                 ref_v,
                 limits,
-                rhohv_min,
-                snr_min,
+                min_rhohv,
+                min_snr,
                 use_compiled,
                 n_threads,
             )
 
         res = _row_apply(fields, [lead], dims, 5, func)
         return _offset_dataset(
-            res, statistic, min_count, method, ref_text, z, limits, rhohv_min
+            res, statistic, min_count, method, ref_text, z, limits, min_rhohv
         )
 
     if isinstance(obj, xr.DataTree):
@@ -627,7 +631,7 @@ def _rho_field(ds, rhohv):
 
 
 def _run_offset(
-    flat, elev, ref_z, ref_v, limits, rhohv_min, snr_min, use_compiled, n_threads
+    flat, elev, ref_z, ref_v, limits, min_rhohv, min_snr, use_compiled, n_threads
 ):
     args = (
         flat["zdr"],
@@ -640,8 +644,8 @@ def _run_offset(
         ref_v,
         float(limits[0]),
         float(limits[1]),
-        float(rhohv_min),
-        float(snr_min) if snr_min is not None else -np.inf,
+        float(min_rhohv),
+        float(min_snr) if min_snr is not None else -np.inf,
     )
     if use_compiled:
         return _calibration.offset_stats(*args, n_threads=int(n_threads or 0))
@@ -649,7 +653,7 @@ def _run_offset(
 
 
 def _offset_dataset(
-    res, statistic, min_count, method, ref_text, like, limits, rhohv_min
+    res, statistic, min_count, method, ref_text, like, limits, min_rhohv
 ):
     def part(i):
         return res.isel({_STAT: i}, drop=True)
@@ -659,7 +663,7 @@ def _offset_dataset(
     enough = count >= max(min_count, 1)
     comment = (
         f"{statistic} of ZDR minus the reference over {method} gates "
-        f"(reference: {ref_text}; RHOHV >= {rhohv_min:g}); subtract it from ZDR"
+        f"(reference: {ref_text}; RHOHV >= {min_rhohv:g}); subtract it from ZDR"
     )
     se = std / np.sqrt(count.where(count > 0))
     attrs = {"units": "dB"}
@@ -724,6 +728,8 @@ def _run_consistency(flat, curve, params, use_compiled, n_threads):
     return _consistency_stats_numpy(*args)
 
 
+@dask_support("lazy")
+@renamed_arguments(rhohv_min="min_rhohv", snr_min="min_snr", kdp_min="min_kdp")
 @provenance("Reflectivity offset from the self-consistency of Z, ZDR and KDP")
 def z_offset(
     obj,
@@ -737,9 +743,9 @@ def z_offset(
     zdr_offset=0.0,
     z_range=(20.0, 45.0),
     bin_width=1.0,
-    rhohv_min=0.98,
-    snr_min=None,
-    kdp_min=0.05,
+    min_rhohv=0.98,
+    min_snr=None,
+    min_kdp=0.05,
     min_bin_count=100,
     statistic="median",
     dim=None,
@@ -772,7 +778,7 @@ def z_offset(
         The reflectivity (DataArray; then ``zdr`` and ``kdp`` must be arrays),
         a sweep, a profile or a volume.
     dbz, zdr, kdp, rhohv, snr : str or xarray.DataArray, optional
-        Fields. Defaults ``DBZH``, ``ZDR``, ``KDP`` (degrees/km, for example
+        Fields. Defaults ``DBZH``, ``ZDR``, ``KDP`` (degree km-1, for example
         from :func:`radarx.retrieve.estimate_kdp`) and ``RHOHV``.
     mask : xarray.DataArray, optional
         Boolean array of the rain gates (below the melting layer).
@@ -785,12 +791,12 @@ def z_offset(
     bin_width : float, optional
         Width of a reflectivity class in dB. Default 1, as in Ryzhkov et al.
         (2005).
-    rhohv_min : float, optional
+    min_rhohv : float, optional
         Smallest correlation coefficient. Default 0.98.
-    snr_min : float, optional
+    min_snr : float, optional
         Smallest SNR in dB; the SNR field is only used with this.
-    kdp_min : float, optional
-        Smallest class mean of KDP (degrees/km) to be used. Default 0.05
+    min_kdp : float, optional
+        Smallest class mean of KDP (degree km-1) to be used. Default 0.05
         (S band); take about twice as much at C band and four times at X
         band.
     min_bin_count : int, optional
@@ -872,7 +878,7 @@ def z_offset(
         rho = _rho_field(ds, rhohv)
         s = (
             _optional_field(ds, True if snr is None else snr, ft.SNR_NAMES, "SNR")
-            if snr_min is not None
+            if min_snr is not None
             else None
         )
         fields = {
@@ -892,9 +898,9 @@ def z_offset(
             "z_min": z_range[0],
             "z_max": z_range[1],
             "bin_width": bin_width,
-            "rhohv_min": rhohv_min,
-            "snr_min": -np.inf if snr_min is None else snr_min,
-            "kdp_min": kdp_min,
+            "rhohv_min": min_rhohv,
+            "snr_min": -np.inf if min_snr is None else min_snr,
+            "kdp_min": min_kdp,
             "min_bin_count": min_bin_count,
         }
 
@@ -980,6 +986,8 @@ def _wrap(angle):
     return 180.0 - np.mod(180.0 - np.asarray(angle), 360.0)
 
 
+@dask_support("lazy")
+@renamed_arguments(rhohv_min="min_rhohv", snr_min="min_snr")
 @provenance("System differential phase offset from the first gates of each ray")
 def phidp_offset(
     obj,
@@ -991,8 +999,8 @@ def phidp_offset(
     min_range=1.0,
     n_gates=20,
     min_gates=5,
-    rhohv_min=0.9,
-    snr_min=None,
+    min_rhohv=0.9,
+    min_snr=None,
     n_threads=None,
     engine="auto",
 ):
@@ -1015,7 +1023,7 @@ def phidp_offset(
         ``PHIDP`` (DataArray), a sweep or a volume.
     phidp, rhohv, snr : str or xarray.DataArray, optional
         Fields. Defaults ``PHIDP`` (also ``UPHIDP``) and ``RHOHV``; the SNR
-        only with ``snr_min``.
+        only with ``min_snr``.
     mask : xarray.DataArray, optional
         Boolean array of the gates that may be used.
     min_range : float, optional
@@ -1025,9 +1033,9 @@ def phidp_offset(
         Number of valid gates averaged in a ray. Default 20.
     min_gates : int, optional
         Fewest valid gates in a ray; the ray is NaN otherwise. Default 5.
-    rhohv_min : float, optional
+    min_rhohv : float, optional
         Smallest correlation coefficient. Default 0.9.
-    snr_min : float, optional
+    min_snr : float, optional
         Smallest SNR in dB.
     n_threads : int, optional
         Threads for the compiled kernel. Default: all cores.
@@ -1078,7 +1086,7 @@ def phidp_offset(
         rho = _rho_field(ds, rhohv)
         s = (
             _optional_field(ds, True if snr is None else snr, ft.SNR_NAMES, "SNR")
-            if snr_min is not None
+            if min_snr is not None
             else None
         )
         fields = {
@@ -1106,8 +1114,8 @@ def phidp_offset(
                 _empty2d(flat["mask"]),
                 first,
                 int(n_gates),
-                float(rhohv_min),
-                -np.inf if snr_min is None else float(snr_min),
+                float(min_rhohv),
+                -np.inf if min_snr is None else float(min_snr),
                 int(min_gates),
             )
             if use_compiled:
@@ -1135,7 +1143,7 @@ def _phidp_dataset(res, ray, first, n_gates):
         output_dtypes=[np.float64],
         dask_gufunc_kwargs={"output_sizes": {"summary": 3}, "allow_rechunk": True},
     )
-    deg = {"units": "degrees"}
+    deg = {"units": "degree"}
     out = xr.Dataset(
         {
             "SYSTEM_PHIDP": summary.isel(summary=0, drop=True)
@@ -1180,8 +1188,10 @@ def _phidp_dataset(res, ray, first, n_gates):
 # --------------------------------------------------------------------------
 
 
-@accessor_method("dataarray", "dataset", "datatree", name="zdr_offset")
-def _zdr_offset_accessor(self, method="light_rain", **kwargs):
+@accessor_method(
+    "dataarray", "dataset", "datatree", name="zdr_offset", wraps=zdr_offset
+)
+def _zdr_offset_accessor(self):
     """
     Offset of ZDR from vertical pointing, light rain or dry snow.
 
@@ -1192,11 +1202,10 @@ def _zdr_offset_accessor(self, method="light_rain", **kwargs):
     xarray.Dataset or xarray.DataTree
         ``ZDR_OFFSET`` (dB) with its statistics.
     """
-    return zdr_offset(self.xarray_obj, method, **kwargs)
 
 
-@accessor_method("dataarray", "dataset", "datatree", name="z_offset")
-def _z_offset_accessor(self, **kwargs):
+@accessor_method("dataarray", "dataset", "datatree", name="z_offset", wraps=z_offset)
+def _z_offset_accessor(self):
     """
     Offset of the reflectivity from the self-consistency of Z, ZDR and KDP.
 
@@ -1207,11 +1216,12 @@ def _z_offset_accessor(self, **kwargs):
     xarray.Dataset or xarray.DataTree
         ``Z_OFFSET`` (dB) with its statistics.
     """
-    return z_offset(self.xarray_obj, **kwargs)
 
 
-@accessor_method("dataarray", "dataset", "datatree", name="phidp_offset")
-def _phidp_offset_accessor(self, **kwargs):
+@accessor_method(
+    "dataarray", "dataset", "datatree", name="phidp_offset", wraps=phidp_offset
+)
+def _phidp_offset_accessor(self):
     """
     System differential phase of a sweep.
 
@@ -1222,4 +1232,3 @@ def _phidp_offset_accessor(self, **kwargs):
     xarray.Dataset or xarray.DataTree
         ``SYSTEM_PHIDP`` (degrees) and the offset of every ray.
     """
-    return phidp_offset(self.xarray_obj, **kwargs)

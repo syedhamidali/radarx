@@ -59,9 +59,11 @@ import warnings
 import numpy as np
 import xarray as xr
 
+from .._compat import renamed_arguments
 from .._fields import node_dataset
 from .._gridcf import aeqd_crs, crs_variable, georeference
 from .._provenance import provenance
+from .._sweepwise import dask_support
 
 try:
     from . import _cone
@@ -497,12 +499,14 @@ def _lonlat_axes(x, y, latitude, longitude):
     return np.asarray(lon), np.asarray(lat)
 
 
+@dask_support("computes", "the result is interpolated from the gates of all sweeps.")
+@renamed_arguments(dtree="obj")
 @provenance(
     "Cone gridding of radar volumes, radarx's own method",
     extra_refs=("doviak-zrnic-1993",),
 )
 def grid_cones(
-    dtree,
+    obj,
     data_vars=None,
     x=None,
     y=None,
@@ -525,7 +529,7 @@ def grid_cones(
 
     Parameters
     ----------
-    dtree : xarray.DataTree
+    obj : xarray.DataTree
         Radar volume with ``sweep_*`` groups and the radar site
         ``latitude``, ``longitude`` and ``altitude``, e.g. from xradar.
     data_vars : str or list of str, optional
@@ -675,7 +679,7 @@ def grid_cones(
     if x is None or y is None or z is None:
         raise ValueError("x, y and z target coordinates are required.")
     x, y, z = (np.asarray(a, dtype=np.float64) for a in (x, y, z))
-    sweeps, site, site_coords = _load_volume(dtree)
+    sweeps, site, site_coords = _load_volume(obj)
     if data_vars is None:
         data_vars = [
             name for name, da in sweeps[0].data_vars.items() if {"range"} < set(da.dims)
@@ -722,7 +726,7 @@ def grid_cones(
         else:
             field = _grid_numpy(x, y, z, arrays, site_altitude, **options)
         gridded[variable] = (("z", "y", "x"), field, attrs)
-    out = _to_dataset(gridded, x, y, z, sweeps, site, dtree.attrs)
+    out = _to_dataset(gridded, x, y, z, sweeps, site, obj.attrs)
     out.attrs["k_e"] = k_e
     if motion is not None:
         u, v = _motion_pair(motion)

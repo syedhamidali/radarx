@@ -31,20 +31,23 @@ import xarray as xr
 import xradar as xd
 from pyproj import CRS, Transformer
 
+from ._compat import renamed_arguments
+
 try:
     from xarray import DataTree
 except ImportError:  # pragma: no cover
     from datatree import DataTree
 
 
-def get_geocoords(ds):
+@renamed_arguments(ds="obj")
+def get_geocoords(obj):
     """
     Converts Cartesian coordinates (x, y, z) in a radar dataset to geographic
     coordinates (longitude, latitude, altitude) using CRS transformation.
 
     Parameters
     ----------
-    ds : xarray.Dataset
+    obj : xarray.Dataset
         Radar dataset with Cartesian coordinates.
 
     Returns
@@ -53,23 +56,23 @@ def get_geocoords(ds):
         Dataset with added 'lon', 'lat', and 'alt' coordinates and their attributes.
     """
     # Convert the dataset to georeferenced coordinates
-    ds = ds.xradar.georeference()
+    obj = obj.xradar.georeference()
     # Define source and target coordinate reference systems (CRS)
-    src_crs = ds.xradar.get_crs()
+    src_crs = obj.xradar.get_crs()
     trg_crs = CRS.from_user_input(4326)  # EPSG:4326 (WGS 84)
     # Create a transformer for coordinate conversion
     transformer = Transformer.from_crs(src_crs, trg_crs)
     # Transform x, y, z coordinates to latitude, longitude, and altitude
-    trg_y, trg_x, trg_z = transformer.transform(ds.x, ds.y, ds.z)
+    trg_y, trg_x, trg_z = transformer.transform(obj.x, obj.y, obj.z)
     # Assign new coordinates with appropriate attributes
-    ds = ds.assign_coords(
+    obj = obj.assign_coords(
         {
-            "lon": (ds.x.dims, trg_x, xd.model.get_longitude_attrs()),
-            "lat": (ds.y.dims, trg_y, xd.model.get_latitude_attrs()),
-            "alt": (ds.z.dims, trg_z, xd.model.get_altitude_attrs()),
+            "lon": (obj.x.dims, trg_x, xd.model.get_longitude_attrs()),
+            "lat": (obj.y.dims, trg_y, xd.model.get_latitude_attrs()),
+            "alt": (obj.z.dims, trg_z, xd.model.get_altitude_attrs()),
         }
     )
-    return ds
+    return obj
 
 
 def cartesian_to_geographic_aeqd(x, y, lon_0, lat_0, earth_radius):
@@ -132,13 +135,14 @@ def cartesian_to_geographic_aeqd(x, y, lon_0, lat_0, earth_radius):
     return lon_deg, lat_deg
 
 
-def find_multidim_vars(ds, ndim=2):
+@renamed_arguments(ds="obj")
+def find_multidim_vars(obj, ndim=2):
     """
     Find variables in an xarray Dataset that have more than one dimension.
 
     Parameters
     ----------
-    ds : xarray.Dataset
+    obj : xarray.Dataset
         The input dataset.
 
     Returns
@@ -146,7 +150,7 @@ def find_multidim_vars(ds, ndim=2):
     list
         A list of variable names with more than one dimension.
     """
-    return [var for var in ds.data_vars if ds[var].ndim == ndim]
+    return [var for var in obj.data_vars if obj[var].ndim == ndim]
 
 
 def _index_range(ds):
@@ -172,14 +176,15 @@ def _index_range(ds):
     return ds
 
 
-def combine_nexrad_sweeps(dtree):
+@renamed_arguments(dtree="obj")
+def combine_nexrad_sweeps(obj):
     """
     Combine radar sweeps with identical fixed angles into a new `DataTree`,
     aligning and merging datasets where necessary.
 
     Parameters
     ----------
-    dtree : xarray.DataTree
+    obj : xarray.DataTree
         Input DataTree containing radar sweeps as child nodes. Each sweep
         is expected to be a dataset with a `sweep_fixed_angle` coordinate.
 
@@ -207,12 +212,12 @@ def combine_nexrad_sweeps(dtree):
     >>> combined_dtree = combine_sweeps(radar_dtree)
 
     """
-    dtree_copy = dtree.copy(deep=True)
+    dtree_copy = obj.copy(deep=True)
     sweep_groups = {}
 
     # Group sweeps by their fixed angle
-    for swp in dtree.match("sweep_*"):
-        ds = dtree[swp].to_dataset()
+    for swp in obj.match("sweep_*"):
+        ds = obj[swp].to_dataset()
         angle = ds.sweep_fixed_angle.values.item()
         if angle not in sweep_groups:
             sweep_groups[angle] = []
@@ -271,8 +276,8 @@ def combine_nexrad_sweeps(dtree):
         ordered_dtree[f"/sweep_{new_index}"] = DataTree(ds)
 
     # Copy other nodes (non-sweeps) back to the new DataTree
-    for key in dtree.groups:
+    for key in obj.groups:
         if not key.startswith("/sweep_") and key != "/":  # pragma: no cover
             ordered_dtree[key] = dtree_copy[key]
-    ordered_dtree.attrs = dtree.attrs
+    ordered_dtree.attrs = obj.attrs
     return ordered_dtree

@@ -132,7 +132,7 @@ along `obs`, one entry per box with data.
 ```{code-cell} ipython3
 start = time.perf_counter()
 so = superobs(volume, model, cells=3, layers=500.0, top=12000.0,
-              vel="VRADH_dealiased", rho_min=0.85, max_range=150e3)
+              field="VRADH_dealiased", min_rhohv=0.85, max_range=150e3)
 t_compiled = time.perf_counter() - start
 so
 ```
@@ -142,8 +142,8 @@ The two implementations agree to rounding.
 
 ```{code-cell} ipython3
 start = time.perf_counter()
-so_numpy = volume.radarx.superobs(model, cells=3, vel="VRADH_dealiased",
-                                  rho_min=0.85, max_range=150e3, engine="numpy")
+so_numpy = volume.radarx.superobs(model, cells=3, field="VRADH_dealiased",
+                                  min_rhohv=0.85, max_range=150e3, engine="numpy")
 t_numpy = time.perf_counter() - start
 for name in ("reflectivity", "velocity", "velocity_error", "radial_east", "height"):
     assert np.allclose(so[name], so_numpy[name], rtol=1e-10, equal_nan=True)
@@ -263,7 +263,7 @@ profile) stands for the model: it is projected on the super-observations up to
 system would see.
 
 ```{code-cell} ipython3
-vad = vad_profile(volume, velocity="VRADH_dealiased", max_rms=4.0, max_range=80e3)
+vad = vad_profile(volume, field="VRADH_dealiased", max_rms=4.0, max_range=80e3)
 near = so.where(so.velocity.notnull() & (so.range < 100e3) & (so.height < 6000), drop=True)
 u = np.interp(near.height, vad.height, vad.u)
 v = np.interp(near.height, vad.height, vad.v)

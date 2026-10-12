@@ -1222,6 +1222,6 @@ class RadarxDataTreePlotAccessor:
         if "x" not in first.coords and "x" not in first.data_vars:
             dtree = dtree.xradar.georeference()
         ds = create_cappi(
-            dtree, height=height, method=method, fields=[variable], **retrieve_kwargs
+            dtree, height=height, method=method, data_vars=[variable], **retrieve_kwargs
         )
         return hvplot_cappi(ds[variable], backend=backend, **kwargs)

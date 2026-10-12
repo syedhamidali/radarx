@@ -106,7 +106,7 @@ def test_hitschfeld_bordan_kernel_agrees_with_numpy():
     kwargs = dict(a=3e-4, b=0.75, max_correction_db=12.0, return_pia=True)
     compiled = reflectivity.hitschfeld_bordan_correction(dbz, rng, **kwargs)
     reference = reflectivity.hitschfeld_bordan_correction(
-        dbz, rng, use_compiled=False, **kwargs
+        dbz, rng, engine="numpy", **kwargs
     )
     threaded = reflectivity.hitschfeld_bordan_correction(
         dbz, rng, n_threads=3, **kwargs

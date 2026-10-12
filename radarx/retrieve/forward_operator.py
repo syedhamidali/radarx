@@ -282,8 +282,10 @@ import xarray as xr
 from scipy.spatial import cKDTree
 from scipy.special import gamma as _gamma
 
+from .._compat import renamed_arguments
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 from ..fundamentals.constants import EARTH_RADIUS
 from ..fundamentals.geometry import beam_center_height, ground_range
 from ._fieldtools import broadcast_block, choose_engine
@@ -667,14 +669,15 @@ def _need(ds, names, what):
         raise KeyError(f"{what} needs the variables {missing}")
 
 
+@renamed_arguments(ds="obj")
 @provenance("WRF output as the state of the polarimetric forward operator")
-def wrf_state(ds, *, use_theta_m=None):
+def wrf_state(obj, *, use_theta_m=None):
     """
     The state of a WRF run for the forward operator.
 
     Parameters
     ----------
-    ds : xarray.Dataset
+    obj : xarray.Dataset
         The variables of a ``wrfout`` file (read with ``xr.open_dataset``):
         ``T``, ``P``, ``PB``, ``PH``, ``PHB``, ``U``, ``V``, ``W``, ``XLAT``,
         ``XLONG`` and the hydrometeors ``QRAIN``, ``QSNOW``, ``QGRAUP``,
@@ -692,7 +695,7 @@ def wrf_state(ds, *, use_theta_m=None):
         ``south_north``, ``west_east``): ``TEMPERATURE`` (K), ``PRESSURE``
         (Pa), ``AIR_DENSITY`` (dry air, kg m-3), ``HEIGHT`` (m above sea
         level at the mass levels), ``U``, ``V``, ``W`` (m s-1 at the mass
-        points) and the hydrometeor fields that ``ds`` has, with the
+        points) and the hydrometeor fields that ``obj`` has, with the
         coordinates ``latitude`` and ``longitude`` (degrees). The input is
         not changed.
 
@@ -718,19 +721,19 @@ def wrf_state(ds, *, use_theta_m=None):
     variables. *Mon. Wea. Rev.*, **136** (6), 2228-2245,
     https://doi.org/10.1175/2007MWR2083.1
     """
-    if not isinstance(ds, xr.Dataset):
+    if not isinstance(obj, xr.Dataset):
         raise TypeError("ds must be an xarray Dataset")
-    _need(ds, ("T", "P", "PB", "PH", "PHB", "XLAT", "XLONG"), "wrf_state")
+    _need(obj, ("T", "P", "PB", "PH", "PHB", "XLAT", "XLONG"), "wrf_state")
     if use_theta_m is None:
-        use_theta_m = bool(int(ds.attrs.get("USE_THETA_M", 0)))
-    qv = ds["QVAPOR"] if "QVAPOR" in ds else xr.zeros_like(ds["T"])
-    theta = ds["T"] + _T0
+        use_theta_m = bool(int(obj.attrs.get("USE_THETA_M", 0)))
+    qv = obj["QVAPOR"] if "QVAPOR" in obj else xr.zeros_like(obj["T"])
+    theta = obj["T"] + _T0
     if use_theta_m:
         theta = theta / (1.0 + _RV_RD * qv)
-    pressure = ds["P"] + ds["PB"]
+    pressure = obj["P"] + obj["PB"]
     temperature = theta * (pressure / _P0) ** (_R_D / _CP)
     density = pressure / (_R_D * temperature * (1.0 + _RV_RD * qv))
-    geopotential = _destagger(ds["PH"] + ds["PHB"], "bottom_top_stag", "bottom_top")
+    geopotential = _destagger(obj["PH"] + obj["PHB"], "bottom_top_stag", "bottom_top")
     variables = {
         "TEMPERATURE": temperature,
         "PRESSURE": pressure,
@@ -742,13 +745,13 @@ def wrf_state(ds, *, use_theta_m=None):
         ("V", "south_north_stag", "south_north"),
         ("W", "bottom_top_stag", "bottom_top"),
     ):
-        if name in ds:
-            variables[name] = _destagger(ds[name], dim, new)
-    if "QVAPOR" in ds:
-        variables["QVAPOR"] = ds["QVAPOR"]
+        if name in obj:
+            variables[name] = _destagger(obj[name], dim, new)
+    if "QVAPOR" in obj:
+        variables["QVAPOR"] = obj["QVAPOR"]
     for name in ("QRAIN", "QSNOW", "QGRAUP", "QHAIL", "QNRAIN"):
-        if name in ds:
-            variables[name] = ds[name]
+        if name in obj:
+            variables[name] = obj[name]
 
     def horizontal(da):
         da = da.isel(Time=0, drop=True) if "Time" in da.dims else da
@@ -756,31 +759,32 @@ def wrf_state(ds, *, use_theta_m=None):
 
     out = _finish_state(
         {k: v.reset_coords(drop=True) for k, v in variables.items()},
-        horizontal(ds["XLAT"]),
-        horizontal(ds["XLONG"]),
+        horizontal(obj["XLAT"]),
+        horizontal(obj["XLONG"]),
     )
     out.attrs = {"source": "WRF", "use_theta_m": int(use_theta_m)}
     return out
 
 
+@renamed_arguments(ds="obj")
 @provenance("MPAS output as the state of the polarimetric forward operator")
-def mpas_state(ds, grid=None):
+def mpas_state(obj, grid=None):
     """
     The state of an MPAS-Atmosphere run for the forward operator.
 
     Parameters
     ----------
-    ds : xarray.Dataset
+    obj : xarray.Dataset
         An MPAS history or diagnostics Dataset on the unstructured mesh, with
         ``qr``, ``qs``, ``qg``, ``nr``, ``rho``, ``pressure`` (or
         ``pressure_p`` and ``pressure_base``), ``theta``,
         ``uReconstructZonal``, ``uReconstructMeridional``, ``w`` (``exner``
         gives the temperature if present) and the hydrometeors that the run
         has. The variables ``lonCell``, ``latCell`` and ``zgrid`` are taken
-        from ``ds`` if it has them.
+        from ``obj`` if it has them.
     grid : xarray.Dataset, optional
         The static grid file, for ``lonCell``, ``latCell`` (radians) and
-        ``zgrid`` (m, ``nCells`` by ``nVertLevelsP1``) when ``ds`` has none.
+        ``zgrid`` (m, ``nCells`` by ``nVertLevelsP1``) when ``obj`` has none.
 
     Returns
     -------
@@ -813,13 +817,13 @@ def mpas_state(ds, grid=None):
     variables. *Mon. Wea. Rev.*, **136** (6), 2228-2245,
     https://doi.org/10.1175/2007MWR2083.1
     """
-    if not isinstance(ds, xr.Dataset):
+    if not isinstance(obj, xr.Dataset):
         raise TypeError("ds must be an xarray Dataset")
     if grid is not None and not isinstance(grid, xr.Dataset):
         raise TypeError("grid must be an xarray Dataset")
 
     def pick(name):
-        for holder in (ds, grid):
+        for holder in (obj, grid):
             if holder is not None and name in holder.variables:
                 return holder[name]
         raise KeyError(
@@ -828,29 +832,29 @@ def mpas_state(ds, grid=None):
 
     for name in ("lonCell", "latCell", "zgrid"):
         pick(name)
-    _need(ds, ("rho", "theta"), "mpas_state")
-    if "pressure" in ds:
-        pressure = ds["pressure"]
+    _need(obj, ("rho", "theta"), "mpas_state")
+    if "pressure" in obj:
+        pressure = obj["pressure"]
     else:
-        _need(ds, ("pressure_p", "pressure_base"), "mpas_state")
-        pressure = ds["pressure_p"] + ds["pressure_base"]
-    if "exner" in ds:
-        temperature = ds["theta"] * ds["exner"]
+        _need(obj, ("pressure_p", "pressure_base"), "mpas_state")
+        pressure = obj["pressure_p"] + obj["pressure_base"]
+    if "exner" in obj:
+        temperature = obj["theta"] * obj["exner"]
     else:
-        temperature = ds["theta"] * (pressure / _P0) ** (_R_D / _CP)
+        temperature = obj["theta"] * (pressure / _P0) ** (_R_D / _CP)
     zgrid = pick("zgrid").reset_coords(drop=True)
     zgrid = zgrid.transpose(..., "nVertLevelsP1")
     variables = {
         "TEMPERATURE": temperature,
         "PRESSURE": pressure,
-        "AIR_DENSITY": ds["rho"],
+        "AIR_DENSITY": obj["rho"],
         "HEIGHT": _destagger(zgrid, "nVertLevelsP1", "nVertLevels"),
     }
     for name, new in (("uReconstructZonal", "U"), ("uReconstructMeridional", "V")):
-        if name in ds:
-            variables[new] = ds[name]
-    if "w" in ds:
-        variables["W"] = _destagger(ds["w"], "nVertLevelsP1", "nVertLevels")
+        if name in obj:
+            variables[new] = obj[name]
+    if "w" in obj:
+        variables["W"] = _destagger(obj["w"], "nVertLevelsP1", "nVertLevels")
     for name, new in (
         ("qv", "QVAPOR"),
         ("qr", "QRAIN"),
@@ -858,8 +862,8 @@ def mpas_state(ds, grid=None):
         ("qg", "QGRAUP"),
         ("nr", "QNRAIN"),
     ):
-        if name in ds:
-            variables[new] = ds[name]
+        if name in obj:
+            variables[new] = obj[name]
 
     def degrees(name):
         da = pick(name).reset_coords(drop=True)
@@ -892,12 +896,12 @@ _ATTRS = {
     "KDP": {
         "standard_name": "radar_specific_differential_phase_hv",
         "long_name": "Specific differential phase HV",
-        "units": "degrees/km",
+        "units": "degree km-1",
     },
     "RHOHV": {
         "standard_name": "radar_correlation_coefficient_hv",
         "long_name": "Correlation coefficient HV",
-        "units": "unitless",
+        "units": "1",
     },
     "FALL_SPEED": {
         "long_name": "Reflectivity-weighted terminal fall speed",
@@ -921,7 +925,7 @@ _ATTRS = {
     "VRADH": {
         "standard_name": "radial_velocity_of_scatterers_away_from_instrument",
         "long_name": "Radial velocity of scatterers away from instrument",
-        "units": "meters per second",
+        "units": "m s-1",
     },
 }
 
@@ -997,6 +1001,7 @@ def _kernel_call(compiled, n_threads, spec):
     return block
 
 
+@dask_support("lazy_only")
 @provenance(
     "Polarimetric radar forward operator: T-matrix rain and Rayleigh dry snow, "
     "hail and graupel from the mixing ratios of a numerical model, after Jung "
@@ -1091,7 +1096,7 @@ def forward_operator(
     -------
     xarray.Dataset
         On the grid of the mixing ratios: ``DBZH`` (dBZ), ``ZDR`` (dB),
-        ``KDP`` (degrees/km), ``RHOHV`` and ``FALL_SPEED`` (m s-1, positive
+        ``KDP`` (degree km-1), ``RHOHV`` and ``FALL_SPEED`` (m s-1, positive
         downward), the linear moments ``Z_H``, ``Z_V``, ``Z_HV_REAL``,
         ``Z_HV_IMAG`` (mm6 m-3) and ``ZH_VT`` that :func:`to_radar_grid`
         interpolates, and the ``HEIGHT``, ``U``, ``V``, ``W`` of the state if
@@ -1427,20 +1432,22 @@ def _sweep_products(sampled, azimuth_da, range_da, elevation, site, thr, velocit
             "altitude": site[2],
         }
     )
-    ds["elevation"].attrs = {"units": "degrees"}
+    ds["elevation"].attrs = {"units": "degree"}
     ds["latitude"].attrs = {"units": "degrees_north"}
     ds["longitude"].attrs = {"units": "degrees_east"}
-    ds["altitude"].attrs = {"units": "meters"}
+    ds["altitude"].attrs = {"units": "m"}
     return ds.transpose(..., _AZIMUTH, _RANGE)
 
 
+@dask_support("lazy_only")
+@renamed_arguments(fields="obj")
 @provenance(
     "Sampling of the model radar variables along the beam of a radar (4/3 "
     "effective Earth radius, inverse-distance neighbour columns, linear in height)",
     extra_refs=("doviak-zrnic-1993",),
 )
 def to_radar_grid(
-    fields,
+    obj,
     site,
     elevation,
     *,
@@ -1459,7 +1466,7 @@ def to_radar_grid(
 
     Parameters
     ----------
-    fields : xarray.Dataset
+    obj : xarray.Dataset
         The result of :func:`forward_operator` of a state with ``HEIGHT`` and
         the coordinates ``latitude`` and ``longitude`` (also ``XLAT`` and
         ``XLONG``), and ``U``, ``V`` (and ``W``, taken as 0 if absent) for the
@@ -1498,7 +1505,7 @@ def to_radar_grid(
     xarray.Dataset or xarray.DataTree
         For one elevation a sweep with ``DBZH``, ``ZDR``, ``KDP``,
         ``RHOHV`` and ``VRADH`` (m s-1, positive away from the radar) on
-        (``azimuth``, ``range``) and the dimensions of ``fields`` that are
+        (``azimuth``, ``range``) and the dimensions of ``obj`` that are
         not spatial (``Time``), the coordinates ``elevation`` (per ray),
         ``latitude``, ``longitude`` and ``altitude`` of the site. For several
         elevations a DataTree with the site in the root and one such
@@ -1514,7 +1521,7 @@ def to_radar_grid(
     ValueError
         For an invalid site, elevation, ranges or options.
     TypeError
-        If ``fields`` is not a Dataset.
+        If ``obj`` is not a Dataset.
     ImportError
         If ``engine="compiled"`` and the kernel is not available.
 
@@ -1545,7 +1552,7 @@ def to_radar_grid(
     >>> sweep = to_radar_grid(fields, (35.33, -97.28, 390.0), 0.5)  # doctest: +SKIP
     >>> volume = fields.radarx.to_radar_grid((35.33, -97.28, 390.0), [0.5, 1.5])  # doctest: +SKIP
     """
-    if not isinstance(fields, xr.Dataset):
+    if not isinstance(obj, xr.Dataset):
         raise TypeError("fields must be an xarray Dataset")
     compiled = choose_engine(engine, HAS_COMPILED_KERNEL, "forward operator")
     site = tuple(float(v) for v in site)
@@ -1578,21 +1585,21 @@ def to_radar_grid(
         raise ValueError(f"neighbors must be a positive integer, not {neighbors!r}")
     if max_distance is not None and not max_distance > 0:
         raise ValueError("max_distance must be positive")
-    missing = [n for n in _SAMPLED + ("HEIGHT",) if n not in fields]
+    missing = [n for n in _SAMPLED + ("HEIGHT",) if n not in obj]
     if missing:
         raise KeyError(
             f"the fields lack {missing}: pass the result of forward_operator of a "
             "state with HEIGHT"
         )
-    lat = _first(fields, _LAT_NAMES, "latitude")
-    lon = _first(fields, _LON_NAMES, "longitude")
+    lat = _first(obj, _LAT_NAMES, "latitude")
+    lon = _first(obj, _LON_NAMES, "longitude")
     horizontal = tuple(lat.dims)
     if lon.dims != lat.dims:
         raise ValueError("latitude and longitude must have the same dimensions")
-    vertical = _vertical_dim(fields["HEIGHT"], horizontal, vertical_dim)
-    velocity = "U" in fields and "V" in fields
+    vertical = _vertical_dim(obj["HEIGHT"], horizontal, vertical_dim)
+    velocity = "U" in obj and "V" in obj
     wanted = list(_SAMPLED) + (["U", "V"] if velocity else [])
-    if velocity and "W" in fields:
+    if velocity and "W" in obj:
         wanted.append("W")
     tree, spacing = _columns(lat, lon)
     thr = 10.0 ** (0.1 * min_dbz)
@@ -1605,10 +1612,10 @@ def to_radar_grid(
         "lon_center": site[1],
     }
     azimuth_da = xr.DataArray(
-        az, dims=_AZIMUTH, coords={_AZIMUTH: az}, attrs={"units": "degrees"}
+        az, dims=_AZIMUTH, coords={_AZIMUTH: az}, attrs={"units": "degree"}
     )
     range_da = xr.DataArray(
-        rng, dims=_RANGE, coords={_RANGE: rng}, attrs={"units": "meters"}
+        rng, dims=_RANGE, coords={_RANGE: rng}, attrs={"units": "m"}
     )
     sweeps = []
     for el in elevations:
@@ -1622,7 +1629,7 @@ def to_radar_grid(
             np.broadcast_to(gate_h[None, :], (az.size, rng.size)).ravel()
         )
         args = (idx, weight, height, az.size, rng.size, compiled, n_threads)
-        sampled = _sweep_fields(fields, args, vertical, horizontal, wanted)
+        sampled = _sweep_fields(obj, args, vertical, horizontal, wanted)
         sweeps.append(
             _sweep_products(sampled, azimuth_da, range_da, el, site, thr, velocity)
         )
@@ -1643,8 +1650,8 @@ def to_radar_grid(
 # --------------------------------------------------------------------------
 
 
-@accessor_method("dataset", name="forward_operator")
-def _forward_operator_accessor(self, **kwargs):
+@accessor_method("dataset", name="forward_operator", wraps=forward_operator)
+def _forward_operator_accessor(self):
     """
     Polarimetric radar variables of a model state on the model grid.
 
@@ -1656,11 +1663,10 @@ def _forward_operator_accessor(self, **kwargs):
         ``DBZH``, ``ZDR``, ``KDP``, ``RHOHV``, ``FALL_SPEED`` and the linear
         moments.
     """
-    return forward_operator(self.xarray_obj, **kwargs)
 
 
-@accessor_method("dataset", name="to_radar_grid")
-def _to_radar_grid_accessor(self, site, elevation, **kwargs):
+@accessor_method("dataset", name="to_radar_grid", wraps=to_radar_grid)
+def _to_radar_grid_accessor(self):
     """
     Sample the model radar variables on the polar grid of a radar.
 
@@ -1672,4 +1678,3 @@ def _to_radar_grid_accessor(self, site, elevation, **kwargs):
         ``DBZH``, ``ZDR``, ``KDP``, ``RHOHV`` and ``VRADH`` on the gates of
         the sweep (a DataTree of sweeps for several elevations).
     """
-    return to_radar_grid(self.xarray_obj, site, elevation, **kwargs)

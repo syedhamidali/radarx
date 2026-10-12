@@ -161,7 +161,7 @@ def test_create_cappi_function(synthetic_volume):
     ds = create_cappi(
         synthetic_volume,
         height=150.0,
-        fields=["DBZH"],
+        data_vars=["DBZH"],
         x_res=1000.0,
         y_res=1000.0,
     )
@@ -176,7 +176,7 @@ def test_create_cappi_function(synthetic_volume):
 def test_create_cappi_accessor(synthetic_volume):
     ds = synthetic_volume.radarx.create_cappi(
         height=150.0,
-        fields=["DBZH"],
+        data_vars=["DBZH"],
         x_res=1000.0,
         y_res=1000.0,
     )
@@ -189,7 +189,7 @@ def test_create_cappi_custom_cartesian_grid(synthetic_volume):
     ds = create_cappi(
         synthetic_volume,
         height=150.0,
-        fields=["DBZH"],
+        data_vars=["DBZH"],
         x=np.array([-1500.0, 0.0, 1500.0]),
         y=np.array([-1000.0, 1000.0]),
     )
@@ -203,7 +203,7 @@ def test_create_cappi_polar_method(synthetic_volume):
     ds = create_cappi(
         synthetic_volume,
         height=150.0,
-        fields=["DBZH"],
+        data_vars=["DBZH"],
         method="polar_vertical_interpolation",
     )
 
@@ -224,7 +224,7 @@ def test_create_cappi_polar_method(synthetic_volume):
 def test_create_cappi_polar_accessor(synthetic_volume):
     ds = synthetic_volume.radarx.create_cappi(
         height=150.0,
-        fields=["DBZH"],
+        data_vars=["DBZH"],
         method="polar_vertical_interpolation",
     )
 
@@ -236,7 +236,7 @@ def test_create_cappi_legacy_method_aliases(synthetic_volume):
     ds = create_cappi(
         synthetic_volume,
         height=150.0,
-        fields=["DBZH"],
+        data_vars=["DBZH"],
         method="polar",
     )
 
@@ -248,7 +248,7 @@ def test_create_cappi_height_window_legacy_alias(synthetic_volume):
     ds = create_cappi(
         synthetic_volume,
         height=150.0,
-        fields=["DBZH"],
+        data_vars=["DBZH"],
         method="pseudo_cappi",
     )
 
@@ -260,7 +260,7 @@ def test_create_cappi_height_window_composite(synthetic_volume):
     ds = create_cappi(
         synthetic_volume,
         height=150.0,
-        fields=["DBZH"],
+        data_vars=["DBZH"],
         method="height_window_composite",
         apply_filter=True,
     )
@@ -291,7 +291,7 @@ def test_create_cappi_height_window_composite_sparse_velocity(synthetic_volume):
         ds = create_cappi(
             sparse_volume,
             height=150.0,
-            fields=["DBZH"],
+            data_vars=["DBZH"],
             method="height_window_composite",
             apply_filter=True,
         )
@@ -311,7 +311,7 @@ def test_create_cappi_missing_georeference_raises(synthetic_volume):
     )
 
     with pytest.raises(ValueError, match="Run radar.xradar.georeference"):
-        create_cappi(ungeoreferenced, height=150.0, fields=["DBZH"])
+        create_cappi(ungeoreferenced, height=150.0, data_vars=["DBZH"])
 
 
 def test_create_cappi_no_sweeps_raises():
@@ -322,7 +322,7 @@ def test_create_cappi_no_sweeps_raises():
             empty_tree,
             height=150.0,
             method="polar_vertical_interpolation",
-            fields=["DBZH"],
+            data_vars=["DBZH"],
         )
 
 
@@ -331,7 +331,7 @@ def test_create_cappi_polar_out_of_range_raises(synthetic_volume):
         create_cappi(
             synthetic_volume,
             height=10000.0,
-            fields=["DBZH"],
+            data_vars=["DBZH"],
             method="polar_vertical_interpolation",
         )
 
@@ -340,7 +340,7 @@ def test_create_cappi_polar_georeference_and_cf2(synthetic_volume):
     ds = create_cappi(
         synthetic_volume,
         height=150.0,
-        fields=["DBZH"],
+        data_vars=["DBZH"],
         method="polar_vertical_interpolation",
     )
 
@@ -446,7 +446,7 @@ def test_plot_without_axis_closes_or_shows_own_figure(mocker):
 def test_plot_cappi_function(synthetic_volume, tmp_path):
     ds = synthetic_volume.radarx.to_cappi(
         height=150.0,
-        fields=["DBZH"],
+        data_vars=["DBZH"],
         x_res=1000.0,
         y_res=1000.0,
     )
@@ -459,7 +459,7 @@ def test_plot_cappi_function(synthetic_volume, tmp_path):
 
 
 def test_plot_cappi_accessor_returns_axis(synthetic_volume, tmp_path):
-    ds = synthetic_volume.radarx.to_cappi(height=150.0, fields=["DBZH"])
+    ds = synthetic_volume.radarx.to_cappi(height=150.0, data_vars=["DBZH"])
     ax = ds.radarx.plot_cappi("DBZH", savedir=str(tmp_path), show_figure=False)
 
     assert hasattr(ax, "figure")
@@ -470,7 +470,7 @@ def test_plot_cappi_without_z_uses_generic_title(synthetic_volume, tmp_path):
     ds = create_cappi(
         synthetic_volume,
         height=150.0,
-        fields=["DBZH"],
+        data_vars=["DBZH"],
         x_res=1000.0,
         y_res=1000.0,
     ).drop_vars("z")
@@ -510,7 +510,7 @@ def test_create_cappi_explicit_sweeps(synthetic_volume):
     ds = create_cappi(
         synthetic_volume,
         height=150.0,
-        fields=["DBZH"],
+        data_vars=["DBZH"],
         sweeps=["sweep_0", "sweep_1"],
     )
     assert "DBZH" in ds.data_vars
@@ -521,7 +521,7 @@ def test_create_cappi_with_vertical_tolerance(synthetic_volume):
     ds = create_cappi(
         synthetic_volume,
         height=150.0,
-        fields=["DBZH"],
+        data_vars=["DBZH"],
         vertical_tolerance=500.0,
     )
     assert ds.attrs["product"] == "CAPPI"
@@ -794,7 +794,7 @@ def test_polar_cappi_applies_the_vertical_tolerance():
     """No value where no gate is near the height, however wide the gap (#165)."""
     volume = _tall_volume("z")
     ds = create_cappi(
-        volume, 18000.0, method="polar", fields=["DBZH"], vertical_tolerance=100.0
+        volume, 18000.0, method="polar", data_vars=["DBZH"], vertical_tolerance=100.0
     )
     dbz = ds["DBZH"]
     assert dbz.dims == ("time", "range")
@@ -811,7 +811,7 @@ def test_polar_cappi_applies_the_vertical_tolerance():
     # interpolation across any gap
     counts = [
         create_cappi(
-            volume, 18000.0, method="polar", fields=["DBZH"], vertical_tolerance=tol
+            volume, 18000.0, method="polar", data_vars=["DBZH"], vertical_tolerance=tol
         )["DBZH"]
         .to_masked_array()
         .count()
@@ -819,7 +819,7 @@ def test_polar_cappi_applies_the_vertical_tolerance():
     ]
     assert counts[0] < counts[1] < counts[2]
     # the default is a limit as well
-    default = create_cappi(volume, 18000.0, method="polar", fields=["DBZH"])
+    default = create_cappi(volume, 18000.0, method="polar", data_vars=["DBZH"])
     assert 0 < default["DBZH"].to_masked_array().count() < counts[2]
 
 
@@ -827,7 +827,7 @@ def test_polar_cappi_applies_the_vertical_tolerance():
 def test_polar_and_window_cappi_are_labelled_with_ground_range(method):
     """The value at a pixel comes from the ground distance it is labelled with (#166)."""
     volume = _tall_volume("ground")
-    ds = create_cappi(volume, 3000.0, method=method, fields=["DBZH"])
+    ds = create_cappi(volume, 3000.0, method=method, data_vars=["DBZH"])
     ground = ds["range"].values / 1000.0
     value = ds["DBZH"].isel(time=0).to_masked_array()
     ok = ~np.ma.getmaskarray(value)
@@ -883,7 +883,7 @@ def test_velocity_texture_filter_removes_garbage():
 def test_create_cappi_texture_threshold_is_passed_on(synthetic_volume):
     kw = dict(
         height=150.0,
-        fields=["DBZH"],
+        data_vars=["DBZH"],
         method="height_window_composite",
         apply_filter=True,
     )
@@ -896,7 +896,7 @@ def test_create_cappi_texture_threshold_is_passed_on(synthetic_volume):
 @pytest.mark.parametrize("method", ["cartesian_idw", "polar_vertical_interpolation"])
 def test_create_cappi_linear_units(synthetic_volume, method):
     """Averaging in linear units gives a higher dBZ than averaging the dB."""
-    kw = dict(height=200.0, method=method, fields=["DBZH"])
+    kw = dict(height=200.0, method=method, data_vars=["DBZH"])
     in_db = create_cappi(synthetic_volume, **kw)
     lin = create_cappi(synthetic_volume, linear_units=True, **kw)
     a, b = in_db["DBZH"].values, lin["DBZH"].values

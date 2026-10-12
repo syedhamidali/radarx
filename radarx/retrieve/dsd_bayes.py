@@ -228,8 +228,11 @@ import numpy as np
 import xarray as xr
 from scipy.special import erfc, ndtri
 
+from .._compat import renamed_arguments
+from .._dtypes import fields_as_float32
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 from .dsd import (
     _DBZH_NAMES,
     _OUT_ATTRS,
@@ -259,7 +262,7 @@ MU_AXIS = (-0.5, 0.5, 26)  # -0.5-12
 
 #: Default measurement error model: standard deviations of the random noise
 #: and of the calibration bias of Z_H (dB) and Z_DR (dB), and the absolute
-#: (degrees/km, dB/km) and relative parts of the K_DP and A_H errors. All
+#: (degree km-1, dB km-1) and relative parts of the K_DP and A_H errors. All
 #: values are radarx choices, not taken from a paper (Cao et al. 2010 use a
 #: total sigma of 2 dB for Z_H and 0.3 dB for Z_DR inside the region of rain
 #: data; here the totals are sqrt(1 + 1) = 1.41 dB and sqrt(0.2^2 + 0.1^2) =
@@ -356,7 +359,7 @@ def forward_grid(band="S", temperature=20.0):
     -------
     xarray.Dataset
         On ``dm`` (mm) and ``mu``, for :math:`N_w = 1` m-3 mm-1: ``DBZH``
-        (dBZ), ``ZDR`` (dB), ``KDP`` (degrees/km), ``AH`` (dB/km),
+        (dBZ), ``ZDR`` (dB), ``KDP`` (degree km-1), ``AH`` (dB km-1),
         ``RAIN_RATE`` (mm/h) and ``LWC`` (g/m3). :math:`Z_H` adds
         :math:`10 \\log_{10} N_w`; the others scale with :math:`N_w`, except
         :math:`Z_{DR}`.
@@ -393,8 +396,8 @@ def forward_grid(band="S", temperature=20.0):
         {
             "DBZH": (dims, f["L"], {"units": "dBZ"}),
             "ZDR": (dims, f["ZDR"], {"units": "dB"}),
-            "KDP": (dims, f["KDP"], {"units": "degrees/km"}),
-            "AH": (dims, f["AH"], {"units": "dB/km"}),
+            "KDP": (dims, f["KDP"], {"units": "degree km-1"}),
+            "AH": (dims, f["AH"], {"units": "dB km-1"}),
             "RAIN_RATE": (dims, 10.0 ** f["LOGR"], {"units": "mm h-1"}),
             "LWC": (dims, 10.0 ** f["LOGW"], {"units": "g m-3"}),
         },
@@ -579,6 +582,7 @@ def _packaged(name):
     return out
 
 
+@dask_support("computes", "it works on small in-memory data.")
 @provenance("Prior of the Bayesian drop size distribution retrieval")
 def dsd_prior(source="generic", *, weights=None, defensive=0.01, bandwidth=None):
     """
@@ -1201,13 +1205,15 @@ def _mask_for(mask, name):
     return node[next(iter(node.data_vars))]
 
 
+@dask_support("computes", "the posterior is evaluated for all gates on a grid.")
+@renamed_arguments(dbzh="dbz")
 @provenance(
     "Bayesian DSD retrieval after Cao et al. (2010) with own state, error model and prior"
 )
 def dsd_bayesian(
     obj,
     *,
-    dbzh=None,
+    dbz=None,
     zdr=None,
     kdp=None,
     ah=None,
@@ -1236,16 +1242,16 @@ def dsd_bayesian(
         A sweep, a grid, a QVP or any dataset holding reflectivity and
         differential reflectivity on the same coordinates, or a volume with
         ``sweep_*`` groups (sweeps without both fields are skipped).
-    dbzh, zdr : str, optional
+    dbz, zdr : str, optional
         Names of the reflectivity (dBZ) and differential reflectivity (dB),
         calibrated and corrected for attenuation. By default the first found
         of the names :func:`radarx.retrieve.dsd` looks for.
     kdp : str, xarray.DataArray, xarray.DataTree or "estimate", optional
-        Specific differential phase (degrees/km) as for
+        Specific differential phase (degree km-1) as for
         :func:`radarx.retrieve.dsd`; used at every gate where it is finite,
         with its error model (no threshold is needed). Default: not used.
     ah : str or xarray.DataArray, optional
-        Specific attenuation at horizontal polarization (dB/km), e.g. from
+        Specific attenuation at horizontal polarization (dB km-1), e.g. from
         an attenuation correction. Default: not used.
     mask : str, xarray.DataArray or xarray.DataTree, optional
         Rain gates (``True``); the others are left empty. As for
@@ -1261,7 +1267,7 @@ def dsd_bayesian(
     errors : dict, optional
         Standard deviations overriding :data:`ERRORS`: ``zh`` and
         ``zh_bias`` (dB), ``zdr`` and ``zdr_bias`` (dB), ``kdp``
-        (degrees/km) and ``kdp_rel``, ``ah`` (dB/km) and ``ah_rel``.
+        (degree km-1) and ``kdp_rel``, ``ah`` (dB km-1) and ``ah_rel``.
     quantiles : sequence of float, optional
         Posterior quantiles to return, in (0, 1). Default: the medians and
         the bounds of the central 68 % and 95 % credible intervals.
@@ -1365,7 +1371,7 @@ def dsd_bayesian(
             "radarx.retrieve.dsd_bayesian"
         ),
     }
-    fields = (dbzh, zdr)
+    fields = (dbz, zdr)
 
     def run(items):
         if use_compiled:
@@ -1374,7 +1380,10 @@ def dsd_bayesian(
             )
         else:
             res = [_retrieve_numpy(*it["arrays"], grid, ev, quantiles) for it in items]
-        return [_wrap(it, r, attrs, quantiles) for it, r in zip(items, res)]
+        return [
+            fields_as_float32(_wrap(it, r, attrs, quantiles))
+            for it, r in zip(items, res)
+        ]
 
     if not is_tree:
         est = None
@@ -1394,7 +1403,7 @@ def dsd_bayesian(
         name
         for name in obj.children
         if name.startswith("sweep")
-        and _find(obj[name].ds, dbzh, _DBZH_NAMES, False) is not None
+        and _find(obj[name].ds, dbz, _DBZH_NAMES, False) is not None
         and _find(obj[name].ds, zdr, _ZDR_NAMES, False) is not None
     ]
     if not names:
@@ -1427,20 +1436,14 @@ def dsd_bayesian(
     return xr.DataTree.from_dict(nodes)
 
 
-@accessor_method("dataset", "datatree", name="dsd_bayesian")
-def _dsd_bayesian_accessor(self, **kwargs):
+@accessor_method("dataset", "datatree", name="dsd_bayesian", wraps=dsd_bayesian)
+def _dsd_bayesian_accessor(self):
     """
     Bayesian retrieval of the raindrop size distribution with uncertainty.
 
     Posterior mean, standard deviation, quantiles and maximum of
     :math:`\\log_{10} N_w`, :math:`D_m`, :math:`\\mu`, rain rate and liquid
     water content at every gate (of every sweep of a volume).
-
-    Parameters
-    ----------
-    **kwargs
-        Options of :func:`radarx.retrieve.dsd_bayesian`, e.g. ``kdp``,
-        ``mask``, ``prior``, ``errors``, ``band``.
 
     Returns
     -------
@@ -1450,4 +1453,3 @@ def _dsd_bayesian_accessor(self, **kwargs):
     --------
     radarx.retrieve.dsd_bayesian
     """
-    return dsd_bayesian(self.xarray_obj, **kwargs)

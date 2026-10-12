@@ -94,8 +94,10 @@ __doc__ = __doc__.replace("{}", "\n   ".join(__all__))
 import numpy as np
 import xarray as xr
 
+from .._compat import renamed_arguments
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 from ..fundamentals.constants import EARTH_RADIUS, EFFECTIVE_RADIUS_4_3
 from ..grid.cone import _sweep_dataset, _sweep_names
 
@@ -243,7 +245,7 @@ def _bin_sweep_numpy(
     edges,
     clear,
     vmax,
-    rho_min,
+    min_rhohv,
     mode,
     box,
     half,
@@ -262,7 +264,7 @@ def _bin_sweep_numpy(
             else np.zeros((nray, ngate), bool)
         )
         if rho.size:
-            bad = np.isfinite(rho) & (rho < rho_min)
+            bad = np.isfinite(rho) & (rho < min_rhohv)
             zok = zok & ~bad
             vok = vok & ~bad
     in_range = (rng > 0.0) & (rng <= max_range)
@@ -564,14 +566,25 @@ def _merge(parts):
 
 
 def _radar_sums(
-    radar, dbz, vel, rho, rho_min, geometry, edges, clear, vmax, target, use, n_threads
+    radar,
+    dbz,
+    vel,
+    rho,
+    min_rhohv,
+    geometry,
+    edges,
+    clear,
+    vmax,
+    target,
+    use,
+    n_threads,
 ):
-    for given in (dbz, vel, rho if rho_min is not None else None):
+    for given in (dbz, vel, rho if min_rhohv is not None else None):
         if given is not None and not any(given in ds for ds in radar.sweeps):
             raise KeyError(f"{given!r} is not in any sweep of {radar.name!r}")
     parts, used = [], 0
     for ds in radar.sweeps:
-        arrays = _sweep_arrays(ds, dbz, vel, rho, rho_min is not None)
+        arrays = _sweep_arrays(ds, dbz, vel, rho, min_rhohv is not None)
         if arrays is None:
             continue
         used += 1
@@ -593,7 +606,7 @@ def _radar_sums(
             edges,
             clear,
             vmax,
-            -np.inf if rho_min is None else float(rho_min),
+            -np.inf if min_rhohv is None else float(min_rhohv),
             target["mode"],
             target["box"],
             target["half"],
@@ -630,6 +643,8 @@ def _lonwrap(lon):
     return (lon + 180.0) % 360.0 - 180.0
 
 
+@dask_support("eager", "the number of observations depends on the data.")
+@renamed_arguments(vel="field", rho="rhohv", rho_min="min_rhohv")
 @provenance(
     "Super-observations of radar gates in model columns and layers, after Alpert and Kumar (2007)",
     extra_refs=("doviak-zrnic-1993",),
@@ -642,9 +657,9 @@ def superobs(
     layers=500.0,
     top=12000.0,
     dbz=None,
-    vel=None,
-    rho=None,
-    rho_min=None,
+    field=None,
+    rhohv=None,
+    min_rhohv=None,
     max_range=160e3,
     min_range=3000.0,
     min_gates=6,
@@ -691,13 +706,13 @@ def superobs(
     top : float, optional
         Top of the layers (m above sea level) when ``layers`` is a thickness.
         Default 12000.
-    dbz, vel, rho : str, optional
+    dbz, field, rhohv : str, optional
         Names of the reflectivity (dBZ), the radial velocity (m s-1) and the
         correlation coefficient. By default the first found of ``DBZH``, ``DBZ``,
         ``reflectivity``, ``corrected_reflectivity``; of ``VRADH``, ``VRAD``,
         ``VEL``, ``velocity``, ``corrected_velocity``; and of ``RHOHV``. A sweep
         without a field contributes no gates of that field.
-    rho_min : float, optional
+    min_rhohv : float, optional
         Gates with a correlation coefficient below this are removed from both
         fields (non-meteorological echo). Default None (no test). The
         prototype of this function used 0.85.
@@ -825,9 +840,9 @@ def superobs(
             _radar_sums(
                 radar,
                 dbz,
-                vel,
-                rho,
-                rho_min,
+                field,
+                rhohv,
+                min_rhohv,
                 geometry,
                 edges,
                 missing == "clear",
@@ -1059,8 +1074,8 @@ def _finalize(k, radar, bins, s, nlev, target, opt):
     return out
 
 
-@accessor_method("dataset", "datatree", name="superobs")
-def _superobs_accessor(self, grid, **kwargs):
+@accessor_method("dataset", "datatree", name="superobs", wraps=superobs)
+def _superobs_accessor(self):
     """
     Super-observations of a volume or sweep on a model grid.
 
@@ -1071,4 +1086,3 @@ def _superobs_accessor(self, grid, **kwargs):
     xarray.Dataset
         The super-observations along ``obs``.
     """
-    return superobs(self.xarray_obj, grid, **kwargs)

@@ -168,8 +168,10 @@ __all__ = [
 import numpy as np
 import xarray as xr
 
+from .._compat import renamed_arguments
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 from . import _coldpool_numpy
 
 try:
@@ -345,18 +347,20 @@ def _check_si(t, p):
         raise ValueError("pressure must be in Pa")
 
 
+@dask_support("computes", "it works on small in-memory data.")
+@renamed_arguments(ds="obj")
 @provenance(
     "Potential temperatures, equivalent potential temperature after Bolton (1980)"
 )
 def potential_temperatures(
-    ds,
+    obj,
     *,
     temperature="temperature",
     pressure="pressure",
     dewpoint="dewpoint",
     relative_humidity="relative_humidity",
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Mixing ratio and potential, virtual potential and equivalent potential
@@ -372,7 +376,7 @@ def potential_temperatures(
 
     Parameters
     ----------
-    ds : xarray.Dataset
+    obj : xarray.Dataset
         Temperature (K) and pressure (Pa), with the dew point (K) or, failing
         that, the relative humidity (fraction), e.g. a station network from
         :func:`radarx.io.read_sticknet`, a sounding from
@@ -380,17 +384,17 @@ def potential_temperatures(
         potential temperature is finite.
     temperature, pressure, dewpoint, relative_humidity : str, optional
         Variable names.
-    engine : {"auto", "compiled", "numpy"}, optional
-        Kernel implementation.
     n_threads : int, optional
         Threads for the compiled kernel. Default: all cores.
+    engine : {"auto", "compiled", "numpy"}, optional
+        Kernel implementation.
 
     Returns
     -------
     xarray.Dataset
         ``mixing_ratio``, ``potential_temperature``,
         ``virtual_potential_temperature`` and
-        ``equivalent_potential_temperature`` on the coordinates of ``ds``.
+        ``equivalent_potential_temperature`` on the coordinates of ``obj``.
 
     References
     ----------
@@ -398,8 +402,8 @@ def potential_temperatures(
            temperature. *Mon. Wea. Rev.*, **108** (7), 1046-1053,
            https://doi.org/10.1175/1520-0493(1980)108<1046:TCOEPT>2.0.CO;2
     """
-    t, p = xr.broadcast(ds[temperature], ds[pressure])
-    td = _dewpoint(ds, temperature, dewpoint, relative_humidity)
+    t, p = xr.broadcast(obj[temperature], obj[pressure])
+    td = _dewpoint(obj, temperature, dewpoint, relative_humidity)
     t, p, td = xr.broadcast(t, p, td)
     _check_si(t.values, p.values)
     k = _kernel(engine)
@@ -469,15 +473,17 @@ def buoyancy(theta_v, reference, *, condensate=None):
     return b
 
 
+@dask_support("computes", "it works on small in-memory data.")
+@renamed_arguments(ds="obj")
 @provenance("Perturbations from a reference state and buoyancy")
 def cold_pool_perturbation(
-    ds,
+    obj,
     reference,
     *,
     dim="time",
     variables=None,
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
     Perturbations from a reference state and the buoyancy.
@@ -488,7 +494,7 @@ def cold_pool_perturbation(
 
     Parameters
     ----------
-    ds : xarray.Dataset
+    obj : xarray.Dataset
         Observations with ``temperature`` and ``pressure`` (and humidity),
         e.g. stations on ``(station, time)`` or a post-storm sounding on
         ``height``. Missing potential temperatures are computed with
@@ -498,7 +504,7 @@ def cold_pool_perturbation(
         window) averaged over that window for every other coordinate (every
         station), or a Dataset (e.g. a pre-storm sounding) with the same
         variables. A reference sounding on other heights is interpolated to
-        the heights of ``ds`` (:func:`radarx.io.sounding.interpolate_profile`).
+        the heights of ``obj`` (:func:`radarx.io.sounding.interpolate_profile`).
     dim : str, optional
         Dimension that ``reference`` slices. Default ``"time"``.
     variables : list of str, optional
@@ -521,20 +527,20 @@ def cold_pool_perturbation(
            Midlatitudes*. Wiley-Blackwell, 407 pp.,
            https://doi.org/10.1002/9780470682104
     """
-    ds = _with_thermo(ds, engine, n_threads)
+    obj = _with_thermo(obj, engine, n_threads)
     if isinstance(reference, slice):
-        ref = ds.sel({dim: reference}).mean(dim, keep_attrs=True)
+        ref = obj.sel({dim: reference}).mean(dim, keep_attrs=True)
     elif isinstance(reference, xr.Dataset):
         ref = _with_thermo(reference, engine, n_threads)
-        if "height" in ds.dims and "height" in ref.dims:
-            if ref.sizes["height"] != ds.sizes["height"] or not np.allclose(
-                ref["height"].values, ds["height"].values
+        if "height" in obj.dims and "height" in ref.dims:
+            if ref.sizes["height"] != obj.sizes["height"] or not np.allclose(
+                ref["height"].values, obj["height"].values
             ):
                 from ..io.sounding import interpolate_profile
 
                 ref = interpolate_profile(
                     ref,
-                    ds["height"],
+                    obj["height"],
                     [v for v in ref.data_vars if "height" in ref[v].dims],
                 )
     else:
@@ -551,21 +557,21 @@ def cold_pool_perturbation(
                 "mixing_ratio",
                 "pressure",
             )
-            if v in ds and v in ref
+            if v in obj and v in ref
         ]
     out = xr.Dataset()
     for v in variables:
-        d = (ds[v] - ref[v]).rename(f"{v}_perturbation")
+        d = (obj[v] - ref[v]).rename(f"{v}_perturbation")
         d.attrs = {
-            "long_name": f"{ds[v].attrs.get('long_name', v)} minus reference",
-            "units": ds[v].attrs.get("units", ""),
+            "long_name": f"{obj[v].attrs.get('long_name', v)} minus reference",
+            "units": obj[v].attrs.get("units", ""),
         }
         out[d.name] = d
     thv0 = ref["virtual_potential_temperature"]
     out["virtual_potential_temperature_reference"] = thv0.assign_attrs(
         long_name="Reference virtual potential temperature", units="K"
     )
-    out["buoyancy"] = buoyancy(ds["virtual_potential_temperature"], thv0)
+    out["buoyancy"] = buoyancy(obj["virtual_potential_temperature"], thv0)
     return out
 
 
@@ -581,6 +587,7 @@ def _with_thermo(ds, engine, n_threads):
 # --------------------------------------------------------------------------
 
 
+@dask_support("computes", "it integrates over the height of the cold pool.")
 @provenance("Cold-pool intensity C = sqrt(2 int -B dz) of Rotunno et al. (1988)")
 def cold_pool_intensity(
     buoyancy,
@@ -590,8 +597,8 @@ def cold_pool_intensity(
     threshold=0.0,
     depth=None,
     bottom=None,
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
         Cold-pool intensity :math:`C = \\sqrt{2 \\int_0^H (-B)\\, dz}` and depth.
@@ -628,10 +635,10 @@ def cold_pool_intensity(
         bottom : float or xarray.DataArray, optional
             Ignore levels below this height (m), e.g. the ground. Default: start
             at the lowest valid level.
-        engine : {"auto", "compiled", "numpy"}, optional
-            Kernel implementation.
         n_threads : int, optional
             Threads for the compiled kernel. Default: all cores.
+        engine : {"auto", "compiled", "numpy"}, optional
+            Kernel implementation.
 
         Returns
         -------
@@ -811,6 +818,7 @@ def rkw_ratio(intensity, shear):
 # --------------------------------------------------------------------------
 
 
+@dask_support("computes", "it works on small in-memory data.")
 @provenance("Baroclinic generation of horizontal vorticity")
 def baroclinic_generation(
     buoyancy,
@@ -820,8 +828,8 @@ def baroclinic_generation(
     u=None,
     v=None,
     storm_motion=(0.0, 0.0),
-    engine="auto",
     n_threads=None,
+    engine="auto",
 ):
     """
         Baroclinic generation of horizontal vorticity, :math:`\\partial B /
@@ -854,10 +862,10 @@ def baroclinic_generation(
             Storm motion ``(cx, cy)`` (m s-1) subtracted from ``u`` and ``v``, or
             a Dataset with ``u`` and ``v`` (e.g.
             :func:`radarx.retrieve.bunkers_storm_motion`). Default (0, 0).
-        engine : {"auto", "compiled", "numpy"}, optional
-            Kernel implementation.
         n_threads : int, optional
             Threads for the compiled kernel. Default: all cores.
+        engine : {"auto", "compiled", "numpy"}, optional
+            Kernel implementation.
 
         Returns
         -------
@@ -955,8 +963,8 @@ def baroclinic_generation(
 # --------------------------------------------------------------------------
 
 
-@accessor_method("dataset", name="potential_temperatures")
-def _potential_temperatures_accessor(self, **kwargs):
+@accessor_method("dataset", name="potential_temperatures", wraps=potential_temperatures)
+def _potential_temperatures_accessor(self):
     """
     Mixing ratio and potential, virtual potential and equivalent potential
     temperature of the dataset.
@@ -968,11 +976,10 @@ def _potential_temperatures_accessor(self, **kwargs):
     xarray.Dataset
         The four variables on the coordinates of the dataset.
     """
-    return potential_temperatures(self.xarray_obj, **kwargs)
 
 
-@accessor_method("dataarray", name="cold_pool_intensity")
-def _cold_pool_intensity_accessor(self, **kwargs):
+@accessor_method("dataarray", name="cold_pool_intensity", wraps=cold_pool_intensity)
+def _cold_pool_intensity_accessor(self):
     """
     Cold-pool intensity and depth of a buoyancy field.
 
@@ -984,11 +991,10 @@ def _cold_pool_intensity_accessor(self, **kwargs):
         ``cold_pool_intensity``, ``cold_pool_depth`` and
         ``cold_pool_top_found`` per column.
     """
-    return cold_pool_intensity(self.xarray_obj, **kwargs)
 
 
-@accessor_method("dataarray", name="baroclinic_generation")
-def _baroclinic_generation_accessor(self, **kwargs):
+@accessor_method("dataarray", name="baroclinic_generation", wraps=baroclinic_generation)
+def _baroclinic_generation_accessor(self):
     """
     Baroclinic generation of horizontal vorticity from a gridded buoyancy.
 
@@ -999,4 +1005,3 @@ def _baroclinic_generation_accessor(self, **kwargs):
     xarray.Dataset
         Buoyancy gradients and vorticity generation rates.
     """
-    return baroclinic_generation(self.xarray_obj, **kwargs)

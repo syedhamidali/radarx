@@ -265,8 +265,8 @@ def melting_snow_fall_speed(diameter, liquid_fraction, *, snow, rain="drag_balan
     return out
 
 
-@accessor_method("dataarray", name="hail_fall_speed")
-def _hail_fall_speed_accessor(self, **kwargs):
+@accessor_method("dataarray", name="hail_fall_speed", wraps=hail_fall_speed)
+def _hail_fall_speed_accessor(self):
     """
     Terminal fall speed of hail from the maximum dimension (mm) in the array.
 
@@ -277,11 +277,12 @@ def _hail_fall_speed_accessor(self, **kwargs):
     xarray.DataArray
         Terminal fall speed in m s-1.
     """
-    return hail_fall_speed(self.xarray_obj, **kwargs)
 
 
-@accessor_method("dataarray", name="melting_snow_fall_speed")
-def _melting_snow_fall_speed_accessor(self, liquid_fraction, **kwargs):
+@accessor_method(
+    "dataarray", name="melting_snow_fall_speed", wraps=melting_snow_fall_speed
+)
+def _melting_snow_fall_speed_accessor(self):
     """
     Terminal fall speed of melting snow; the array holds the diameters (mm).
 
@@ -292,4 +293,3 @@ def _melting_snow_fall_speed_accessor(self, liquid_fraction, **kwargs):
     xarray.DataArray
         Terminal fall speed in m s-1.
     """
-    return melting_snow_fall_speed(self.xarray_obj, liquid_fraction, **kwargs)

@@ -739,7 +739,7 @@ def test_odim_without_optional_how_loses_ray_angles(volume, tmp_path):
 
 def test_odim_fields_subset_and_accessor(volume, tmp_path):
     out = volume.radarx.to_odim(
-        tmp_path / "s.h5", source=SOURCE, fields=["KDP", "DBZH"]
+        tmp_path / "s.h5", source=SOURCE, data_vars=["KDP", "DBZH"]
     )
     with h5py.File(out) as f:
         quantities = sorted(
@@ -749,7 +749,9 @@ def test_odim_fields_subset_and_accessor(volume, tmp_path):
         )
     assert quantities == ["DBZH", "KDP"]
     with pytest.raises(ValueError, match="not fields"):
-        radarx.io.write_odim(volume, tmp_path / "x.h5", source=SOURCE, fields=["HID"])
+        radarx.io.write_odim(
+            volume, tmp_path / "x.h5", source=SOURCE, data_vars=["HID"]
+        )
 
 
 def test_odim_packing_keeps_integer_gain_and_offset(tmp_path):
@@ -873,7 +875,7 @@ def cappi():
         }
     )
     return R.create_cappi(
-        vol, height=150.0, fields=["DBZH"], x_res=1000.0, y_res=1000.0
+        vol, height=150.0, data_vars=["DBZH"], x_res=1000.0, y_res=1000.0
     )
 
 

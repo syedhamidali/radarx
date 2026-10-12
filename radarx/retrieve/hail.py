@@ -131,6 +131,7 @@ import xarray as xr
 
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 from ._fieldtools import choose_engine
 from .vil import (
     _find_dbz,
@@ -724,6 +725,7 @@ def _compute(
 # --------------------------------------------------------------------------
 
 
+@dask_support("computes", "the result combines the gates of all sweeps of the volume.")
 @provenance(
     "Hail detection algorithm of Witt et al. (1998): SHI, MESH, POSH, HKE",
     extra_refs=("holleman-2001", "graham-nelson-1998"),
@@ -838,6 +840,7 @@ def hail_products(
 _document(hail_products)
 
 
+@dask_support("computes", "the result combines the gates of all sweeps of the volume.")
 @provenance(
     "Severe hail index of Witt et al. (1998)",
     extra_refs=("holleman-2001", "graham-nelson-1998"),
@@ -910,6 +913,7 @@ def shi(
 _document(shi, warning=False)
 
 
+@dask_support("computes", "the result combines the gates of all sweeps of the volume.")
 @provenance(
     "Maximum expected size of hail of Witt et al. (1998)",
     extra_refs=("holleman-2001", "graham-nelson-1998"),
@@ -980,6 +984,7 @@ def mesh(
 _document(mesh, warning=False)
 
 
+@dask_support("computes", "the result combines the gates of all sweeps of the volume.")
 @provenance(
     "Probability of severe hail of Witt et al. (1998)",
     extra_refs=("holleman-2001", "graham-nelson-1998"),
@@ -1055,6 +1060,7 @@ def posh(
 _document(posh)
 
 
+@dask_support("computes", "the result combines the gates of all sweeps of the volume.")
 @provenance(
     "Hail kinetic energy flux of Waldvogel et al. (1978) as used by Witt et al. (1998)",
     extra_refs=("holleman-2001", "graham-nelson-1998"),
@@ -1133,8 +1139,8 @@ _document(hail_kinetic_energy, warning=False, levels=False)
 # --------------------------------------------------------------------------
 
 
-@accessor_method("dataset", "datatree", name="hail_products")
-def _hail_products_accessor(self, **kwargs):
+@accessor_method("dataset", "datatree", name="hail_products", wraps=hail_products)
+def _hail_products_accessor(self):
     """
     SHI, MESH, POSH and hail kinetic energy flux of a volume, grid or profile.
 
@@ -1146,11 +1152,10 @@ def _hail_products_accessor(self, **kwargs):
         ``SHI``, ``MESH``, ``POSH``, ``SHI_WARNING_THRESHOLD``, ``HKE`` and
         ``SHI_TOP_TRUNCATED``.
     """
-    return hail_products(self.xarray_obj, **kwargs)
 
 
-@accessor_method("dataset", "datatree", name="shi")
-def _shi_accessor(self, **kwargs):
+@accessor_method("dataset", "datatree", name="shi", wraps=shi)
+def _shi_accessor(self):
     """
     Severe hail index of a volume, grid or profile.
 
@@ -1161,11 +1166,10 @@ def _shi_accessor(self, **kwargs):
     xarray.DataArray
         ``SHI`` (J m-1 s-1).
     """
-    return shi(self.xarray_obj, **kwargs)
 
 
-@accessor_method("dataset", "datatree", name="mesh")
-def _mesh_accessor(self, **kwargs):
+@accessor_method("dataset", "datatree", name="mesh", wraps=mesh)
+def _mesh_accessor(self):
     """
     Maximum expected size of hail of a volume, grid or profile.
 
@@ -1176,11 +1180,10 @@ def _mesh_accessor(self, **kwargs):
     xarray.DataArray
         ``MESH`` (mm).
     """
-    return mesh(self.xarray_obj, **kwargs)
 
 
-@accessor_method("dataset", "datatree", name="posh")
-def _posh_accessor(self, **kwargs):
+@accessor_method("dataset", "datatree", name="posh", wraps=posh)
+def _posh_accessor(self):
     """
     Probability of severe hail of a volume, grid or profile.
 
@@ -1191,11 +1194,12 @@ def _posh_accessor(self, **kwargs):
     xarray.DataArray
         ``POSH`` (%).
     """
-    return posh(self.xarray_obj, **kwargs)
 
 
-@accessor_method("dataset", "datatree", name="hail_kinetic_energy")
-def _hail_kinetic_energy_accessor(self, **kwargs):
+@accessor_method(
+    "dataset", "datatree", name="hail_kinetic_energy", wraps=hail_kinetic_energy
+)
+def _hail_kinetic_energy_accessor(self):
     """
     Hail kinetic energy flux of a volume, grid or profile.
 
@@ -1206,4 +1210,3 @@ def _hail_kinetic_energy_accessor(self, **kwargs):
     xarray.DataArray
         ``HKE`` (J m-2 s-1).
     """
-    return hail_kinetic_energy(self.xarray_obj, **kwargs)

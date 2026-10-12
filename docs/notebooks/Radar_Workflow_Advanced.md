@@ -41,6 +41,7 @@ written on the fly).
 | 13 | tropical-cyclone winds from one radar: centre, GBVTD, decomposition | `tc_center`, `gbvtd`, `tc_decompose`, `synthetic_vortex`, `vortex_profile` |
 | 14 | polarimetric forward operator for WRF and MPAS model output | `wrf_state`, `mpas_state`, `forward_operator`, `to_radar_grid` |
 | 15 | dual-PRF velocity correction | `correct_dual_prf` |
+| 16 | ensembles and uncertainty of the retrievals: errors of the measurements, calibration and DSD prior propagated by Monte Carlo | `perturb_radar`, `measurement_error`, `ensemble_retrieval`, `ensemble_statistics`, `relation_scatter` |
 
 ```{code-cell} ipython3
 import math
@@ -117,6 +118,8 @@ from radarx.retrieve import (
     dsd_prior,
     dsd_spectrum,
     echo_mask,
+    ensemble_retrieval,
+    ensemble_statistics,
     fall_speed,
     fit_gamma,
     fit_gamma_moments,
@@ -127,11 +130,13 @@ from radarx.retrieve import (
     hail_fall_speed,
     lightning_jump,
     match_radar,
+    measurement_error,
     melting_snow_fall_speed,
     microphysical_rates,
     mpas_state,
     number_concentration,
     parsivel_bins,
+    perturb_radar,
     polarimetric_precipitation,
     potential_temperatures,
     process_disdrometer,
@@ -142,11 +147,13 @@ from radarx.retrieve import (
     rain_source_points,
     rain_trajectories,
     raupach_berne_correction,
+    relation_scatter,
     rkw_ratio,
     rotation_couplets,
     scattering_table,
     single_doppler_winds,
     size_sorting,
+    snr,
     surface_dsd,
     synthetic_vortex,
     tc_center,
@@ -619,8 +626,8 @@ station = pars.assign_coords(
     latitude=lat, longitude=lon, altitude=float(klbb["altitude"]),
     time=pars.time.values - pars.time.values[70] + t_radar,
 )
-pairs = match_radar(station, klbb, fields=["DBZH", "ZDR"], window="60s", delay="fall")
-above = radar_at_location(klbb, lat, lon, float(klbb["altitude"]), fields=["DBZH", "ZDR"])
+pairs = match_radar(station, klbb, data_vars=["DBZH", "ZDR"], window="60s", delay="fall")
+above = radar_at_location(klbb, lat, lon, float(klbb["altitude"]), data_vars=["DBZH", "ZDR"])
 print(f"radar gate above the station: Z_H {above.DBZH.item():.1f} dBZ, "
       f"Z_DR {above.ZDR.item():.2f} dB at {above.beam_height.item():.0f} m")
 pairs[["DBZH", "DBZH_disdrometer", "ZDR", "ZDR_disdrometer", "n_records"]].to_dataframe()
@@ -1286,9 +1293,9 @@ sweep = kgwx["sweep_1"].to_dataset(inherit="all_coords")
 sweep["VRADH"] = dealias_velocity(sweep.assign(VRADH=sweep.VRADH.where(sweep.VRADH > -63.9)))
 sweep = sweep.xradar.georeference()
 shear = azimuthal_shear(sweep)
-couplets = rotation_couplets(sweep, min_reflectivity=20.0)
+couplets = rotation_couplets(sweep, min_dbz=20.0)
 tor_acc = kgwx.radarx.tornado_probability(max_range=150e3)  # the accessor of the volume runs the same network
-couplets_acc = sweep.radarx.rotation_couplets(min_reflectivity=20.0)
+couplets_acc = sweep.radarx.rotation_couplets(min_dbz=20.0)
 print("accessors agree:", bool(np.allclose(tor_acc.tornado_probability, tor.tornado_probability, equal_nan=True)),
       couplets_acc.sizes["couplet"] == couplets.sizes["couplet"])
 print(f"{tor.sizes['chip']} chips; highest tornado probability {float(tor.tornado_probability.max()):.2f}; "
@@ -1752,7 +1759,7 @@ vol_exp = raw_exp.radarx.assign(raw_exp.radarx.kdp()).radarx.assign(raw_exp.rada
 write_zarr(vol_exp, work / "volume.zarr")
 write_cfradial2(vol_exp, work / "volume_cfradial2.nc")
 write_cfradial1(vol_exp, work / "volume_cfradial1.nc")
-write_odim(vol_exp, work / "volume.h5", source="NOD:uskbb", fields=["DBZH", "ZDR", "KDP"])
+write_odim(vol_exp, work / "volume.h5", source="NOD:uskbb", data_vars=["DBZH", "ZDR", "KDP"])
 vol_exp.radarx.to_zarr(work / "volume_accessor.zarr")
 vol_exp.radarx.to_cfradial1(work / "volume_accessor_cf1.nc")
 vol_exp.radarx.to_cfradial2(work / "volume_accessor_cf2.nc")
@@ -1969,6 +1976,69 @@ filter of the paper), and it does not unfold velocities beyond the extended
 interval; run `dealias_velocity` with `nyquist_velocity` equal to the extended
 interval (48 m/s here) for that.
 
+## 16. Ensembles and uncertainty of the retrievals
+
+Every retrieval above is one number per gate. `ensemble_retrieval` gives the
+uncertainty that comes from the random error of the measurements, the calibration and the
+prior knowledge of the DSD: it perturbs the radar fields (`perturb_radar`, with the
+standard deviations of Melnikov and Zrnic 2004 from `measurement_error`), runs
+the retrieval on each member and returns the mean, median, standard deviation and
+percentiles (`ensemble_statistics` does the last step for any array with a `member`
+dimension). `relation_scatter` is the scatter of the rain rate relations caused by the
+DSD that sets the default width of the prior part. The
+[ensemble notebook](Ensemble_Uncertainty) tests the spread against a known truth and
+shows maps for the S-band KLBB sweep and the C-band CSAPR2 sweep. Here is the
+Lubbock sweep again, with the signal-to-noise ratio from the noise level of the sweep:
+
+```{code-cell} ipython3
+from open_radar_data import DATASETS
+
+lubbock = xd.io.open_nexradlevel2_datatree(DATASETS.fetch("KLBB20160601_150025_V06"), sweep=[0])
+ens_sweep = lubbock["sweep_0"].to_dataset(inherit=False).isel(range=slice(0, 600))
+for var, limit in (("DBZH", -32.0), ("ZDR", -12.9), ("RHOHV", 0.21)):
+    ens_sweep[var] = ens_sweep[var].where(ens_sweep[var] > limit)
+ens_sweep = ens_sweep.assign(SNR=snr(ens_sweep))
+
+error = measurement_error(ens_sweep, snr="SNR")  # standard deviation of the error of each field
+rain_gates = (ens_sweep.RHOHV > 0.95) & (ens_sweep.DBZH > 30)
+print({v: round(float(error[v].where(rain_gates).median()), 3) for v in error.data_vars})
+
+members = perturb_radar(ens_sweep, members=8, seed=1, snr="SNR")  # the fields with random errors
+print(dict(members.DBZH.sizes), "| offset of the reflectivity of each member (dB):",
+      np.round((members.DBZH - ens_sweep.DBZH).where(rain_gates).median(["azimuth", "range"]).values, 2))
+stats = ensemble_statistics(members)  # mean, median, std and percentiles over the members
+print(sorted(v for v in stats.data_vars if v.startswith("ZDR")))
+
+scatter = relation_scatter("S")  # the scatter of ln R about each power law, from the DSD prior
+print(scatter.ln_sd.to_series().round(2).to_dict())
+ens = ensemble_retrieval(ens_sweep, "rain_rate_z_zdr", members=24, seed=1, noise={"snr": "SNR"}, band="S")
+```
+
+The same functions are methods of the accessors, and a volume goes through sweep by
+sweep. The retrievals the ensemble can run are listed in the documentation of
+`ensemble_retrieval`:
+
+```{code-cell} ipython3
+via_accessor = ens_sweep.radarx.ensemble_retrieval("kdp", members=16, seed=1, noise={"snr": "SNR"})
+print(float(via_accessor.KDP_median.where(rain_gates).median()), float(via_accessor.KDP_std.where(rain_gates).median()))
+print(float(ens_sweep.radarx.measurement_error(snr="SNR").ZDR_error.where(rain_gates).median()))
+print(sorted(v for v in ens_sweep.radarx.perturb_radar(members=4, snr="SNR").data_vars))
+print(sorted(v for v in members.radarx.ensemble_statistics().data_vars if v.startswith("PHIDP")))
+
+fig, axes = plt.subplots(1, 3, figsize=(15, 4.4), layout="constrained")
+azi, rng = np.deg2rad(ens_sweep.azimuth.values)[:, None], ens_sweep.range.values[None, :]
+x, y = rng * np.sin(azi) / 1e3, rng * np.cos(azi) / 1e3
+for ax, (da, title, style) in zip(axes, [
+    (ens.RAIN_RATE_Z_ZDR_median, "R($Z_H$, $Z_{DR}$) median (mm/h)", dict(cmap="turbo", vmin=0, vmax=50)),
+    (ens.RAIN_RATE_Z_ZDR_std, "standard deviation (mm/h)", dict(cmap="magma_r", vmin=0, vmax=15)),
+    (via_accessor.KDP_std, "$K_{DP}$ standard deviation (deg/km)", dict(cmap="magma_r", vmin=0, vmax=0.6)),
+]):
+    pm = ax.pcolormesh(x, y, da.where(rain_gates), shading="auto", **style)
+    plt.colorbar(pm, ax=ax, shrink=0.8)
+    ax.set(title=title, aspect="equal", xlim=(-120, 20), ylim=(-30, 110))
+plt.show()
+```
+
 ## References
 
 - Dawson, D., M. Biggerstaff, and S. Waugh, 2025: PERiLS_2022: Portable In Situ Precipitation Stations (PIPS) Data. Version 1.0. NSF NCAR Earth Observing Laboratory, https://doi.org/10.26023/HFBG-7W5M-WA00.
@@ -1978,6 +2048,7 @@ interval (48 m/s here) for that.
 - Fuchs, B. R., E. C. Bruning, S. A. Rutledge, L. D. Carey, P. R. Krehbiel, and W. Rison, 2016: Climatological analyses of LMA data with an open-source lightning flash-clustering algorithm. *Journal of Geophysical Research: Atmospheres*, **121**, 8625-8648, <https://doi.org/10.1002/2015JD024663>
 - Holleman, I., and H. Beekhuis, 2003: Analysis and Correction of Dual PRF Velocity Data. *Journal of Atmospheric and Oceanic Technology*, **20**, 443-453, <https://doi.org/10.1175/1520-0426(2003)20<443:AACODP>2.0.CO;2>
 - Gao, J., M. Xue, A. Shapiro, and K. K. Droegemeier, 1999: A Variational Method for the Analysis of Three-Dimensional Wind Fields from Two Doppler Radars. *Monthly Weather Review*, **127**, 2128-2142, <https://doi.org/10.1175/1520-0493(1999)127<2128:AVMFTA>2.0.CO;2>
+- Giangrande, S. E., A. V. Ryzhkov, V. M. Melnikov, and J. Krause, 2004: Calibration of the polarimetric NEXRAD radar using meteorological signals. *Preprints, 11th Conference on Aviation, Range, and Aerospace Meteorology*, P5.15, <https://ams.confex.com/ams/11aram22sls/techprogram/paper_81811.htm>
 - Heymsfield, A., M. Szakáll, A. Jost, I. Giammanco, R. Wright, and J. Brimelow, 2020: Corrigendum (to: A comprehensive observational study of graupel and hail terminal velocity, mass flux, and kinetic energy). *Journal of the Atmospheric Sciences*, **77**, 405-412, <https://doi.org/10.1175/JAS-D-19-0185.1>
 - Jung, Y., G. Zhang, and M. Xue, 2008: Assimilation of Simulated Polarimetric Radar Data for a Convective Storm Using the Ensemble Kalman Filter. Part I: Observation Operators for Reflectivity and Polarimetric Variables. *Monthly Weather Review*, **136**, 2228-2245, <https://doi.org/10.1175/2007MWR2083.1>
 - Kumjian, M. R., and A. V. Ryzhkov, 2012: The Impact of Size Sorting on the Polarimetric Radar Variables. *Journal of the Atmospheric Sciences*, **69**, 2042-2060, <https://doi.org/10.1175/JAS-D-11-0125.1>
@@ -1985,6 +2056,7 @@ interval (48 m/s here) for that.
 - Lin, Y.-L., R. D. Farley, and H. D. Orville, 1983: Bulk Parameterization of the Snow Field in a Cloud Model. *Journal of Climate and Applied Meteorology*, **22**, 1065-1092, <https://doi.org/10.1175/1520-0450(1983)022<1065:BPOTSF>2.0.CO;2>
 - Low, T. B., and R. List, 1982: Collision, coalescence and breakup of raindrops. Part I: Experimentally established coalescence efficiencies and fragment size distributions in breakup. *Journal of the Atmospheric Sciences*, **39**, 1591-1606, <https://doi.org/10.1175/1520-0469(1982)039<1591:CCABOR>2.0.CO;2>
 - Low, T. B., and R. List, 1982: Collision, coalescence and breakup of raindrops. Part II: Parameterization of fragment size distributions. *Journal of the Atmospheric Sciences*, **39**, 1607-1619, <https://doi.org/10.1175/1520-0469(1982)039<1607:CCABOR>2.0.CO;2>
+- Melnikov, V. M., and D. S. Zrnic, 2004: Simultaneous transmission mode for the polarimetric WSR-88D: statistical biases and standard deviations of polarimetric variables. NOAA/NSSL report, 84 pp., <https://www.nssl.noaa.gov/publications/wsr88d_reports/SHV_statistics.pdf>
 - Mahalik, M. C., B. R. Smith, K. L. Elmore, D. M. Kingfield, K. L. Ortega, and T. M. Smith, 2019: Estimates of Gradients in Radar Moments Using a Linear Least Squares Derivative Technique. *Weather and Forecasting*, **34**, 415-434, <https://doi.org/10.1175/WAF-D-18-0095.1>
 - Rahman, H., 2019: Fundamental Principles of Radar. CRC Press, <https://doi.org/10.1201/9780429279478>
 - Raupach, T. H., and A. Berne, 2015: Correction of raindrop size distributions measured by Parsivel disdrometers, using a two-dimensional video disdrometer as a reference. *Atmospheric Measurement Techniques*, **8**, 343-365, <https://doi.org/10.5194/amt-8-343-2015>
@@ -1992,6 +2064,8 @@ interval (48 m/s here) for that.
 - Rotunno, R., J. B. Klemp, and M. L. Weisman, 1988: A Theory for Strong, Long-Lived Squall Lines. *Journal of the Atmospheric Sciences*, **45**, 463-485, <https://doi.org/10.1175/1520-0469(1988)045<0463:ATFSLL>2.0.CO;2>
 - Sandmæl, T. N., B. R. Smith, A. E. Reinhart, I. M. Schick, M. C. Ake, J. G. Madden, R. B. Steeves, S. S. Williams, K. L. Elmore, and T. C. Meyer, 2023: The Tornado Probability Algorithm: A Probabilistic Machine Learning Tornadic Circulation Detection Algorithm. *Weather and Forecasting*, **38**, 445-466, <https://doi.org/10.1175/WAF-D-22-0123.1>
 - Ryzhkov, A. V., J. Snyder, J. T. Carlin, A. Khain, and M. Pinsky, 2020: What Polarimetric Weather Radars Offer to Cloud Modelers: Forward Radar Operators and Microphysical/Thermodynamic Retrievals. *Atmosphere*, **11**, 362, <https://doi.org/10.3390/atmos11040362>
+- Ryzhkov, A., M. Diederich, P. Zhang, and C. Simmer, 2014: Potential Utilization of Specific Attenuation for Rainfall Estimation, Mitigation of Partial Beam Blockage, and Radar Networking. *Journal of Atmospheric and Oceanic Technology*, **31**, 599-619, <https://doi.org/10.1175/JTECH-D-13-00038.1>
+- Salmon, J. K., M. A. Moraes, R. O. Dror, and D. E. Shaw, 2011: Parallel random numbers: as easy as 1, 2, 3. *Proceedings of the 2011 International Conference for High Performance Computing, Networking, Storage and Analysis*, 1-12, <https://doi.org/10.1145/2063384.2063405>
 - Schultz, C. J., W. A. Petersen, and L. D. Carey, 2009: Preliminary Development and Evaluation of Lightning Jump Algorithms for the Real-Time Detection of Severe Weather. *Journal of Applied Meteorology and Climatology*, **48**, 2543-2563, <https://doi.org/10.1175/2009JAMC2237.1>
 - Shapiro, A., 1993: The Use of an Exact Solution of the Navier-Stokes Equations in a Validation Test of a Three-Dimensional Nonhydrostatic Numerical Model. *Monthly Weather Review*, **121**, 2420-2425, <https://doi.org/10.1175/1520-0493(1993)121<2420:TUOAES>2.0.CO;2>
 - Veillette, M. S., J. M. Kurdzo, P. M. Stepanian, J. Y. N. Cho, T. Reis, S. Samsi, J. McDonald, and N. Chisler, 2025: A Benchmark Dataset for Tornado Detection and Prediction Using Full-Resolution Polarimetric Weather Radar Data. *Artificial Intelligence for the Earth Systems*, **4**, <https://doi.org/10.1175/AIES-D-24-0006.1>

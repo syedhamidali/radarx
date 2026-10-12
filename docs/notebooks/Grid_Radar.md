@@ -129,7 +129,7 @@ print(ds2["lat"].dims, ds2["x"].attrs["standard_name"], ds2["z"].attrs["positive
 family: every output point is the weighted mean of the gates within a radius of
 influence in metres, with the weights of Cressman (1959),
 $(R^2-d^2)/(R^2+d^2)$, or Barnes (1964), $\exp(-4d^2/R^2)$, or the nearest gate.
-With `beam_width` the radius grows with the distance from the radar like the
+With `beamwidth` the radius grows with the distance from the radar like the
 beam, so that the weights reach the gates of the neighbouring beams at any range;
 `roi_range_factor` and `roi_height_factor` give other growth rates, the
 parameters of the radius functions of Py-ART. Points without a gate in reach
@@ -141,8 +141,8 @@ a volume with repeated tilts.
 xg = yg = np.arange(-150e3, 150e3 + 1, 1000.0)
 zg = np.arange(500.0, 10e3 + 1, 500.0)
 cone_grid = rx.grid.grid_cones(dtree, "DBZH", xg, yg, zg)
-cressman = dtree.radarx.grid_gates(["DBZH"], xg, yg, zg, weighting="cressman", roi=1000.0, beam_width=1.0)
-barnes = dtree.radarx.grid_gates(["DBZH"], xg, yg, zg, weighting="barnes", roi=1000.0, beam_width=1.0)
+cressman = dtree.radarx.grid_gates(["DBZH"], xg, yg, zg, weighting="cressman", roi=1000.0, beamwidth=1.0)
+barnes = dtree.radarx.grid_gates(["DBZH"], xg, yg, zg, weighting="barnes", roi=1000.0, beamwidth=1.0)
 ```
 
 ```{code-cell} ipython3
@@ -177,7 +177,7 @@ section = dtree.radarx.grid_rhi(
     distance=np.arange(2e3, 200e3, 1000.0),
     z=np.arange(250.0, 12e3, 250.0),
     roi=1000.0,
-    beam_width=1.0,
+    beamwidth=1.0,
 )
 fig, ax = plt.subplots(figsize=(9, 3.5))
 (section["DBZH"] ).plot(ax=ax, x="distance", y="z", cmap="ChaseSpectral", vmin=-10, vmax=70)

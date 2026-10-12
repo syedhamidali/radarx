@@ -64,8 +64,11 @@ import numpy as np
 import xarray as xr
 from scipy.spatial import cKDTree
 
+from .._compat import renamed_arguments
+from .._dtypes import fields_as_float32
 from .._gridcf import aeqd_crs, georeference
 from .._provenance import provenance
+from .._sweepwise import dask_support
 
 _CARTESIAN_IDW_METHOD = "cartesian_idw"
 _POLAR_VERTICAL_INTERPOLATION_METHOD = "polar_vertical_interpolation"
@@ -1115,17 +1118,19 @@ def _create_cappi_height_window_composite(
     return ds_cappi
 
 
+@dask_support("computes", "it interpolates between the sweeps of the volume.")
+@renamed_arguments(radar="obj", fields="data_vars")
 @provenance(
     "CAPPI, radarx's own methods; inverse-distance weighting after Shepard (1968)"
 )
 def create_cappi(
-    radar,
+    obj,
     height,
     method=_CARTESIAN_IDW_METHOD,
     vertical_tolerance=None,
     apply_filter=False,
     *,
-    fields=None,
+    data_vars=None,
     sweeps=None,
     x=None,
     y=None,
@@ -1140,7 +1145,7 @@ def create_cappi(
 
     Parameters
     ----------
-    radar : xarray.DataTree
+    obj : xarray.DataTree
         Georeferenced radar volume containing one or more sweep groups.
     height : float
         Target CAPPI altitude in meters.
@@ -1168,7 +1173,7 @@ def create_cappi(
     apply_filter : bool, optional
         Apply built-in gate filtering when supported by the selected method.
         Currently this is used by ``method="height_window_composite"``.
-    fields : list[str] or None, optional
+    data_vars : list[str] or None, optional
         Radar variables to retrieve. If omitted, likely 2D radar fields are
         selected automatically.
     sweeps : list[str] or None, optional
@@ -1196,7 +1201,7 @@ def create_cappi(
         Radial velocity and differential phase are interpolated as they
         are, with a warning: velocity from different look directions and a
         cumulative phase are not meaningful when averaged, so leave them out
-        with ``fields``. Gates without echo (NaN) never enter the weights.
+        with ``data_vars``. Gates without echo (NaN) never enter the weights.
 
     Returns
     -------
@@ -1230,43 +1235,51 @@ def create_cappi(
     vertical_tolerance = _resolve_vertical_tolerance(method, vertical_tolerance)
 
     if method == _CARTESIAN_IDW_METHOD:
-        return _create_cappi_cartesian_idw(
-            radar=radar,
-            height=height,
-            fields=fields,
-            sweeps=sweeps,
-            x=x,
-            y=y,
-            x_res=x_res,
-            y_res=y_res,
-            padding=padding,
-            vertical_window=vertical_tolerance,
-            linear_units=linear_units,
+        return fields_as_float32(
+            _create_cappi_cartesian_idw(
+                radar=obj,
+                height=height,
+                fields=data_vars,
+                sweeps=sweeps,
+                x=x,
+                y=y,
+                x_res=x_res,
+                y_res=y_res,
+                padding=padding,
+                vertical_window=vertical_tolerance,
+                linear_units=linear_units,
+            )
         )
 
     if method == _POLAR_VERTICAL_INTERPOLATION_METHOD:
-        return _create_cappi_polar_vertical_interpolation(
-            radar=radar,
-            height=height,
-            fields=fields,
-            sweeps=sweeps,
-            max_vertical_distance=vertical_tolerance,
-            linear_units=linear_units,
+        return fields_as_float32(
+            _create_cappi_polar_vertical_interpolation(
+                radar=obj,
+                height=height,
+                fields=data_vars,
+                sweeps=sweeps,
+                max_vertical_distance=vertical_tolerance,
+                linear_units=linear_units,
+            )
         )
 
     if method == _HEIGHT_WINDOW_COMPOSITE_METHOD:
-        ref_sweeps = _iter_sweeps(radar, sweeps=sweeps)
-        ref_ds = _node_to_dataset(radar[ref_sweeps[0]])
-        return _create_cappi_height_window_composite(
-            radar=radar,
-            height=height,
-            fields=fields,
-            sweeps=sweeps,
-            height_window=vertical_tolerance,
-            apply_quality_control=apply_filter,
-            velocity_field=_infer_field_name(ref_ds, _COMMON_VELOCITY_FIELDS),
-            reflectivity_field=_infer_field_name(ref_ds, _COMMON_REFLECTIVITY_FIELDS),
-            texture_threshold=texture_threshold,
+        ref_sweeps = _iter_sweeps(obj, sweeps=sweeps)
+        ref_ds = _node_to_dataset(obj[ref_sweeps[0]])
+        return fields_as_float32(
+            _create_cappi_height_window_composite(
+                radar=obj,
+                height=height,
+                fields=data_vars,
+                sweeps=sweeps,
+                height_window=vertical_tolerance,
+                apply_quality_control=apply_filter,
+                velocity_field=_infer_field_name(ref_ds, _COMMON_VELOCITY_FIELDS),
+                reflectivity_field=_infer_field_name(
+                    ref_ds, _COMMON_REFLECTIVITY_FIELDS
+                ),
+                texture_threshold=texture_threshold,
+            )
         )
 
     raise ValueError(f"Unsupported CAPPI method '{method}'.")

@@ -120,7 +120,7 @@ def test_extension_reaches_air_older_than_the_winds(engine):
         extend_after=600.0,
         storm_motion=(0.0, 0.0),
         engine=engine,
-        reflectivity=None,
+        dbz=None,
     )
     nf = int(f.n_points[0])
     np.testing.assert_allclose(float(f.x[0, nf - 1]), 1000.0 + 12000.0, atol=1e-6)
@@ -157,7 +157,7 @@ def test_extension_options_and_warnings():
     ds = _winds(10.0)
     p = _point(30000.0, 20000.0)
     with pytest.warns(UserWarning, match="without storm_motion"):
-        a = trajectories(ds, start=p, extend_before=200.0, reflectivity=None)
+        a = trajectories(ds, start=p, extend_before=200.0, dbz=None)
     # extend_before overrides extend
     b = trajectories(
         ds,
@@ -165,7 +165,7 @@ def test_extension_options_and_warnings():
         extend=600.0,
         extend_before=0.0,
         storm_motion=(0.0, 0.0),
-        reflectivity=None,
+        dbz=None,
     )
     assert b.attrs["extend"] == (0.0, 600.0)
     assert int(a.n_points[0]) == int(b.n_points[0]) + 10
@@ -224,7 +224,7 @@ def test_storm_motion_errors():
     with pytest.raises(ValueError, match="two or more"):
         trajectories(ds.isel(time=[0]), start=p, storm_motion="estimate", extend=60.0)
     with pytest.raises(ValueError, match="two or more"):
-        trajectories(ds, start=p, storm_motion="estimate", reflectivity=None)
+        trajectories(ds, start=p, storm_motion="estimate", dbz=None)
     with pytest.raises(ValueError, match="'estimate'"):
         trajectories(ds, start=p, storm_motion="guess")
     with pytest.raises(ValueError, match="'u' and 'v'"):
