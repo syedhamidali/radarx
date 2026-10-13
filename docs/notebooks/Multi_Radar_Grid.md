@@ -200,7 +200,7 @@ cells close to a beam axis and the radar observed closest to the analysis time.
 merged = rx.grid.merge_radars(grid, "DBZH", bias=bias)
 fig, ax = plt.subplots(figsize=(8, 6), layout="constrained")
 cappi = merged.DBZH.sel(z=2000.0).assign_coords(x=merged.x / 1e3, y=merged.y / 1e3)
-cappi.plot(ax=ax, cmap="ChaseSpectral", vmin=-10, vmax=70, cbar_kwargs={"label": "DBZH (dBZ)"})
+cappi.where(cappi >= 0).plot(ax=ax, cmap="ChaseSpectral", vmin=0, vmax=70, cbar_kwargs={"label": "DBZH (dBZ)"})
 for name, rx_, ry_ in zip(grid.radar.values, grid.radar_x.values / 1e3, grid.radar_y.values / 1e3):
     ax.plot(rx_, ry_, "k^")
     ax.annotate(name, (rx_, ry_), xytext=(4, 4), textcoords="offset points", bbox=dict(fc="white", ec="none", alpha=0.7, pad=1))
