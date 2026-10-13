@@ -1,0 +1,33 @@
+# Unit-test environment for the uv jobs of the CI. Keep in step with
+# ci/unittests.yml (the conda environment) and requirements.txt.
+boto3
+cartopy
+cmweather
+lat_lon_parser
+matplotlib
+netCDF4
+numpy
+pooch
+pyproj
+scipy
+xarray>=2024.10.0
+xmltodict
+xradar>=0.11
+# optional radarx[plot] extra without datashader (tested in the notebook job)
+bokeh
+holoviews>=1.20
+hvplot>=0.11
+panel
+# optional radarx[ml] extra; onnx builds the tiny test models
+onnx
+onnxruntime
+h5py
+# testing
+zarr
+coverage
+open-radar-data>=0.3.0
+pytest
+pytest-cov
+pytest-mock
+pytest-xdist
+setuptools

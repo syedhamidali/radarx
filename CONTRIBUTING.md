@@ -73,6 +73,16 @@ local development.
     $ pre-commit install
     ```
 
+    Without conda, [uv](https://docs.astral.sh/uv/) sets up the same
+    development environment from the PyPI wheels:
+
+    ```bash
+    $ cd radarx/
+    $ uv venv && source .venv/bin/activate
+    $ uv pip install -r ci/unittests-requirements.txt
+    $ uv pip install -e ".[dev]"
+    ```
+
     To rebuild the compiled kernels in place, for example after you change
     a `.cpp` file, the environment itself needs `pybind11` and `setuptools`
     (`setup.py` imports both; `pip install -e` only installs them in its

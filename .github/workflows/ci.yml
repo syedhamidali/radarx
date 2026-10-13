@@ -178,6 +178,67 @@ jobs:
       run: |
         pytest -n auto --dist loadfile --verbose --durations=15 --pyargs tests
 
+  # The same unit tests in a plain pip environment installed with uv, on all
+  # three systems. ci/unittests-requirements.txt mirrors ci/unittests.yml; the
+  # job shows how much faster uv installs than conda (compare the install steps).
+  build_uv:
+    name: radarx unit tests - uv ${{ matrix.os-name }}
+    runs-on: ${{ matrix.os }}
+    needs: [lint]
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            os-name: linux
+          - os: macos-14
+            os-name: macos
+          - os: windows-latest
+            os-name: windows
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        enable-cache: true
+        cache-dependency-glob: ci/unittests-requirements.txt
+    - name: Install the dependencies
+      run: |
+        uv pip install --system -r ci/unittests-requirements.txt
+    - name: Cache the test data
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/open-radar-data
+          ~/.cache/radarx_data
+          ~/Library/Caches/open-radar-data
+          ~/Library/Caches/radarx_data
+          ~\AppData\Local\open-radar-data
+          ~\AppData\Local\radarx_data
+        key: test-data-${{ runner.os }}-v1
+        restore-keys: test-data-${{ runner.os }}-
+    - name: Install radarx
+      run: |
+        uv pip install --system . --no-deps
+    - name: Fetch the test data
+      run: |
+        python ci/fetch_test_data.py
+    - name: Check the compiled kernels
+      run: |
+        python ci/check_compiled_kernel.py
+    - name: Test with pytest
+      run: |
+        pytest -n auto --dist loadfile --verbose --durations=15 --pyargs tests
+
   build_min:
     name: radarx unit tests - minimum supported versions
     runs-on: ubuntu-latest
