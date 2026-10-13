@@ -149,13 +149,13 @@ needs. A radial velocity relates to the wind `(u, v, w)` on the grid axes by
 `u sin(az) cos(el) + v cos(az) cos(el) + w sin(el)`.
 
 ```{code-cell} ipython3
-fig, axes = plt.subplots(1, 3, figsize=(16, 4.5), layout="constrained")
-grid.azimuth.sel(radar="KNQA").plot(ax=axes[0], cmap="twilight", vmin=0, vmax=360)
-grid.elevation.sel(radar="KNQA", z=3000.0).plot(ax=axes[1], vmax=10)
-(grid.range.sel(radar="KNQA", z=3000.0) / 1e3).plot(ax=axes[2])
-for ax, title in zip(axes, ["beam azimuth", "beam elevation, z = 3 km", "slant range (km), z = 3 km"]):
-    ax.set_title(f"KNQA {title}")
-    ax.set_aspect("equal")
+beam = grid[["azimuth", "elevation", "range"]].sel(radar="KNQA").assign_coords(x=grid.x / 1e3, y=grid.y / 1e3)
+fig, axes = plt.subplots(1, 3, figsize=(15, 4.4), layout="constrained")
+beam.azimuth.plot(ax=axes[0], cmap="twilight", vmin=0, vmax=360, cbar_kwargs={"label": "degrees"})
+beam.elevation.sel(z=3000.0).plot(ax=axes[1], vmax=10, cbar_kwargs={"label": "degrees"})
+(beam.range.sel(z=3000.0) / 1e3).plot(ax=axes[2], cbar_kwargs={"label": "km"})
+for ax, title in zip(axes, ["beam azimuth", "beam elevation, z = 3 km", "slant range, z = 3 km"]):
+    ax.set(title=f"KNQA {title}", xlabel="east of the origin (km)", ylabel="north of the origin (km)", aspect="equal")
 ```
 
 ## Relative calibration
@@ -198,11 +198,16 @@ cells close to a beam axis and the radar observed closest to the analysis time.
 
 ```{code-cell} ipython3
 merged = rx.grid.merge_radars(grid, "DBZH", bias=bias)
-fig, ax = plt.subplots(figsize=(7, 6))
-merged.DBZH.sel(z=2000.0).plot(ax=ax, cmap="ChaseSpectral", vmin=-10, vmax=70)
-ax.plot(grid.radar_x, grid.radar_y, "k^")
-for name, rx_, ry_ in zip(grid.radar.values, grid.radar_x.values, grid.radar_y.values):
-    ax.annotate(name, (rx_, ry_), xytext=(3, 3), textcoords="offset points")
-ax.set_aspect("equal")
-ax.set_title("merged DBZH at 2 km MSL, calibrated to KGWX");
+fig, ax = plt.subplots(figsize=(8, 6), layout="constrained")
+cappi = merged.DBZH.sel(z=2000.0).assign_coords(x=merged.x / 1e3, y=merged.y / 1e3)
+cappi.where(cappi >= 0).plot(ax=ax, cmap="ChaseSpectral", vmin=0, vmax=70, cbar_kwargs={"label": "DBZH (dBZ)"})
+for name, rx_, ry_ in zip(grid.radar.values, grid.radar_x.values / 1e3, grid.radar_y.values / 1e3):
+    ax.plot(rx_, ry_, "k^")
+    ax.annotate(name, (rx_, ry_), xytext=(4, 4), textcoords="offset points", bbox=dict(fc="white", ec="none", alpha=0.7, pad=1))
+ax.set(
+    title="merged DBZH at 2 km MSL, calibrated to KGWX",
+    xlabel="east of the origin (km)",
+    ylabel="north of the origin (km)",
+    aspect="equal",
+)
 ```

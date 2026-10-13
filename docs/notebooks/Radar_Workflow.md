@@ -1331,7 +1331,7 @@ fig, axes = plt.subplots(1, 3, figsize=(15, 4.4), layout="constrained")
 for ax, grid, label in zip(axes, (cones, cressman, barnes), ("grid_cones", "Cressman", "Barnes")):
     grid.DBZH.sel(z=2000.0).plot(ax=ax, x="x", y="y", cmap="ChaseSpectral", vmin=-10, vmax=70)
     ax.set(title=f"{label}, 2 km", aspect="equal")
-fig
+plt.show()
 ```
 
 The vertical section of a volume along one azimuth is a pseudo range-height
