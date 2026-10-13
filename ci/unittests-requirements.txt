@@ -1,5 +1,5 @@
-# Unit-test environment for the uv jobs of the CI. Keep in step with
-# ci/unittests.yml (the conda environment) and requirements.txt.
+# Unit-test environment for pip or uv (see CONTRIBUTING.md). Keep in step with
+# ci/unittests.yml (the conda environment the CI uses) and requirements.txt.
 boto3
 cartopy
 cmweather
