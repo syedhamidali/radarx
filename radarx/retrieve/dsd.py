@@ -26,9 +26,9 @@ Methods
     al. (2008, Eq. 7: :math:`\\mu = -0.0201 \\Lambda^2 + 0.902 \\Lambda -
     1.718`, fitted to Oklahoma 2D video disdrometer data and stated there to
     apply for :math:`\\Lambda` between 0 and 20 mm\\ :sup:`-1`, the default) or
-    that of Zhang et al. (2001, Florida, :math:`-0.016, 1.213, -1.957`;
-    coefficients and equation number not checked against the paper), or one
-    given by the user. Because
+    that of Zhang et al. (2001, Eq. 18, fitted to Florida video disdrometer
+    data with a correlation of 0.97: :math:`-0.016, 1.213, -1.957`, checked
+    against the paper), or one given by the user. Because
     :math:`Z_{DR}` does not depend on :math:`N_0`, it fixes :math:`\\Lambda`
     (and :math:`\\mu`); :math:`N_0` then follows from :math:`Z_H`
     (Zhang et al. 2001; Vivekanandan et al. 2004). The lookup table is radarx's
@@ -319,8 +319,9 @@ MU_LAMBDA = {
     # mu = c2 Lambda^2 + c1 Lambda + c0 (Lambda in mm-1)
     # Cao et al. (2008), Eq. 7, valid for Lambda in 0-20 mm-1
     "cao2008": (-0.0201, 0.902, -1.718),
-    # Zhang et al. (2001), Florida relation; coefficients and equation number
-    # not checked against the paper
+    # Zhang et al. (2001), Eq. 18 (Florida video disdrometer, correlation 0.97);
+    # a regression of mu on Lambda, so it differs from the regression of Lambda
+    # on mu in the conference preprint of Zhang et al. (2003)
     "zhang2001": (-0.016, 1.213, -1.957),
 }
 # mm-1, upper end of the constrained-gamma table: the validity limit of Eq. 7 of
@@ -1004,7 +1005,7 @@ def dsd(
         \\Lambda + c_0`; ``"cao2008"`` (default) is
         :math:`-0.0201 \\Lambda^2 + 0.902 \\Lambda - 1.718` (Cao et al.
         2008), ``"zhang2001"`` is :math:`-0.016 \\Lambda^2 + 1.213 \\Lambda -
-        1.957` (Zhang et al. 2001), or give ``(c2, c1, c0)``. The table
+        1.957` (Zhang et al. 2001, Eq. 18), or give ``(c2, c1, c0)``. The table
         covers :math:`\\Lambda` up to 20 mm-1 where :math:`\\mu > -0.99`.
     mu : float, optional
         ``"normalized"``: shape parameter (> -1). Default 3.
