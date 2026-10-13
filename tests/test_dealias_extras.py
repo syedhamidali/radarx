@@ -602,3 +602,56 @@ def test_confidence_errors(solved):
     tree = xr.DataTree.from_dict({"/": xr.Dataset(), "sweep_0": ds})
     with pytest.raises(ValueError, match="No sweep contains"):
         dealias_confidence(tree, "VRADH_dealiased")
+
+
+# ------------------------------------------------ disagreement between tilts
+
+
+def _tilt_pair(n_rays=200, n_gates=300):
+    rng = np.random.default_rng(3)
+    lower = rng.normal(0.0, 3.0, (n_rays, n_gates))
+    return lower, lower.copy(), np.arange(n_rays), np.arange(n_gates)
+
+
+def test_tilt_disagreement_finds_a_block_a_fold_apart():
+    lower, upper, iray, igate = _tilt_pair()
+    nyquist = 30.0
+    upper[50:90, 100:160] += 2 * nyquist  # 2400 gates one fold higher
+    assert dealias._tilt_disagreement(lower, upper, iray, igate, nyquist) == [2400]
+
+
+def test_tilt_disagreement_ignores_small_blocks_and_noise():
+    lower, upper, iray, igate = _tilt_pair()
+    nyquist = 30.0
+    assert dealias._tilt_disagreement(lower, upper, iray, igate, nyquist) == []
+    upper[10:20, 10:20] += 2 * nyquist  # 100 gates, below the reporting size
+    upper += np.random.default_rng(4).normal(0.0, 2.0, upper.shape)
+    assert dealias._tilt_disagreement(lower, upper, iray, igate, nyquist) == []
+
+
+def test_tilt_disagreement_skips_gates_without_a_neighbour():
+    lower, upper, iray, igate = _tilt_pair()
+    nyquist = 30.0
+    upper[:, :] += 2 * nyquist
+    iray = iray.copy()
+    iray[:] = -1  # the sweeps do not overlap
+    assert dealias._tilt_disagreement(lower, upper, iray, igate, nyquist) == []
+
+
+def test_a_consistent_volume_raises_no_disagreement_warning(recwarn):
+    tree, _ = volume()
+    out = dealias_velocity(tree, "VRADH")
+    assert not [w for w in recwarn if "differ by about one fold" in str(w.message)]
+    assert all(
+        "dealias_disagreement_gates" not in out[n].ds["VRADH_dealiased"].attrs
+        for n in out.children
+    )
+
+
+def test_the_disagreement_is_reported_and_stored(monkeypatch):
+    tree, _ = volume()
+    monkeypatch.setattr(dealias, "_tilt_disagreement", lambda *a: [1500, 700])
+    with pytest.warns(UserWarning, match="differ by about one fold"):
+        out = dealias_velocity(tree, "VRADH")
+    attrs = [out[n].ds["VRADH_dealiased"].attrs for n in out.children]
+    assert [a["dealias_disagreement_gates"] for a in attrs] == [2200, 2200, 2200]

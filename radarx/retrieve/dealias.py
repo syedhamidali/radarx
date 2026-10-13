@@ -229,6 +229,11 @@ _VAD_MIN_GATES = 50
 _VAD_MIN_SPREAD = 0.02  # azimuth coverage (determinant; full circle 0.25)
 _MIN_NEIGHBOURS = 3
 _MIN_COVERAGE = 180.0  # degrees of azimuth below which zero mean is doubtful
+_DISAGREE_GATE = (
+    1.25  # |difference between tilts| / Nyquist velocity of a gate in a block
+)
+_DISAGREE_BLOCK = 1.5  # median of that ratio in a block that is a fold apart
+_DISAGREE_MIN_GATES = 1000  # connected gates of a block that is reported
 _MAX_RAY_GAP = 10  # empty rays bridged between regions
 _GATE_PASSES = 2
 _GUARD_PASSES = 100  # passes of the speed guard (it peels a core from its edge)
@@ -408,6 +413,17 @@ def dealias_velocity(
     largest group: ``"wind_profile"``, ``"reference"``, ``"sweep_below"`` or
     ``"zero_mean"``; the other groups follow the same reference, else the
     azimuth wind (VAD) fitted to the largest group, else a zero mean.
+
+    For a volume (a ``DataTree``) the dealiased neighbouring tilts are
+    compared. Where two of them differ by more than 1.25 Nyquist velocities
+    over a connected block of at least 1000 gates, with a median difference of
+    at least 1.5 Nyquist velocities, one of the two has the wrong fold there:
+    a ``UserWarning`` is raised and the number of gates is stored in the
+    ``dealias_disagreement_gates`` attribute of both sweeps. The tilts are
+    not corrected and the thresholds are radarx choices. On the lowest tilt of
+    the Tuscaloosa-Birmingham tornado volume of KBMX (27 April 2011, 22:19 UTC)
+    the region method puts a block of 29 500 gates one fold away from the
+    tilts above; compare ``method="unravel"`` where this warning appears.
 
     Missing gates of ``method="unravel"``. The region method gives a value to
     every gate that has data. UNRAVEL makes a gate missing when its first step
@@ -961,6 +977,67 @@ def _chained_reference(source, folds, iray, igate):
     return ref
 
 
+def _tilt_disagreement(lower, upper, iray, igate, nyquist):
+    """
+    Sizes of the connected blocks where two tilts are about a fold apart.
+
+    ``lower`` and ``upper`` are the dealiased velocities of two sweeps on the
+    grid of ``upper`` (``iray`` and ``igate`` map the rays and gates of
+    ``upper`` onto ``lower``). A block is a connected set of at least
+    ``_DISAGREE_MIN_GATES`` gates where the velocities differ by more than
+    ``_DISAGREE_GATE`` Nyquist velocities and the median difference is at
+    least ``_DISAGREE_BLOCK``: one of the two tilts has the wrong fold there.
+    """
+    from scipy import ndimage
+
+    ref = lower[np.clip(iray, 0, None)][:, np.clip(igate, 0, None)]
+    ref[iray < 0] = np.nan
+    ref[:, igate < 0] = np.nan
+    with np.errstate(invalid="ignore"):
+        ratio = np.abs(upper - ref) / nyquist
+    labels, count = ndimage.label(np.nan_to_num(ratio, nan=0.0) > _DISAGREE_GATE)
+    sizes = []
+    for k in range(1, count + 1):
+        block = labels == k
+        n = int(block.sum())
+        if n >= _DISAGREE_MIN_GATES and np.median(ratio[block]) >= _DISAGREE_BLOCK:
+            sizes.append(n)
+    return sizes
+
+
+def _warn_tilt_disagreement(names, sweeps, results, datasets):
+    """Warn where neighbouring tilts of a volume are a fold apart over a block."""
+    for i, (a, b) in enumerate(pairwise(names)):
+        values = []
+        for k in (i, i + 1):
+            v = np.asarray(results[k].values, dtype=np.float64)
+            values.append(v if results[k].dims[0] == sweeps[k].ray else v.T)
+        iray, igate = _sweep_mapping(datasets[a], datasets[b])
+        sizes = _tilt_disagreement(
+            values[0],
+            values[1],
+            iray,
+            igate,
+            min(sweeps[i].nyquist, sweeps[i + 1].nyquist),
+        )
+        if not sizes:
+            continue
+        total = int(sum(sizes))
+        for k in (i, i + 1):
+            results[k].attrs["dealias_disagreement_gates"] = max(
+                total, int(results[k].attrs.get("dealias_disagreement_gates", 0))
+            )
+        warnings.warn(
+            f"dealias_velocity: {a} and {b} differ by about one fold (2 Vn) over "
+            f"{len(sizes)} connected block(s) of {total} gates; one of the two "
+            "tilts has the wrong fold there. Compare method='unravel', or pass "
+            "wind_profile or reference. The number of gates is stored in the "
+            "dealias_disagreement_gates attribute.",
+            UserWarning,
+            stacklevel=4,
+        )
+
+
 def _dealias_tree(
     dtree,
     field,
@@ -1013,6 +1090,7 @@ def _dealias_tree(
             [datasets[n] for n in names], sweeps, sweep_continuity, options
         )
         results = [s.wrap(f, "unravel", "unravel") for s, f in zip(sweeps, folds)]
+        _warn_tilt_disagreement(names, sweeps, results, datasets)
         return _tree_products(
             dtree, names, sweeps, results, name, products_only, confidence, options
         )
@@ -1046,6 +1124,7 @@ def _dealias_tree(
             source = "sweep_below"
         anchor = _anchor_of(s, solved[i][1], ref, source, f"{n}: ")
         results.append(s.wrap(f, anchor))
+    _warn_tilt_disagreement(names, sweeps, results, datasets)
     return _tree_products(
         dtree, names, sweeps, results, name, products_only, confidence, options
     )
