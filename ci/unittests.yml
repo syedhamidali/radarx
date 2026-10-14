@@ -3,7 +3,7 @@ channels:
   - conda-forge
 dependencies:
   # radarx runtime dependencies (requirements.txt)
-  - python>=3.11
+  - python>=3.12
   - boto3
   - cartopy
   - cmweather

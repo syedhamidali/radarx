@@ -46,7 +46,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.12", "3.13", "3.14"]
         numpy-version: ["1", "2"]
         # NumPy 1 has no builds for Python >= 3.13
         exclude:
@@ -203,7 +203,7 @@ jobs:
           cache-environment: true
           cache-environment-key: "${{runner.os}}-${{runner.arch}}-min-${{steps.date.outputs.today}}-${{hashFiles(env.CONDA_ENV_FILE)}}"
           create-args: >-
-              python=3.11
+              python=3.12
               numpy=2
               xarray=2024.10.0
               xradar=0.11
