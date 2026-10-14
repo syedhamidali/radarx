@@ -1,0 +1,49 @@
+name: Kernel benchmark
+
+# Times the compiled C++ kernels against their NumPy twins (ci/benchmark_kernels.py) and
+# fails when a kernel is slower than NumPy or has lost most of its recorded speedup.
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+    paths:
+      - "radarx/**/*.cpp"
+      - "radarx/**/*.h"
+      - "setup.py"
+      - "ci/benchmark_kernels.py"
+      - "ci/benchmark_baseline.json"
+      - ".github/workflows/benchmark.yml"
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: kernel benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install radarx with its compiled kernels
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .
+      - name: Check the compiled kernels
+        run: |
+          python ci/check_compiled_kernel.py
+      - name: Time the kernels
+        run: |
+          python ci/benchmark_kernels.py --repeats 5 --json benchmark.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kernel-benchmark
+          path: benchmark.json

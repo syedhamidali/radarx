@@ -1,0 +1,10 @@
+{
+ "dealias_velocity (region)": 5.1,
+ "estimate_kdp (hubbert)": 3.0,
+ "echo_mask": 6.7,
+ "llsd (azimuthal shear)": 13.3,
+ "correct_attenuation (zphi)": 1.3,
+ "dsd (constrained gamma)": 1.3,
+ "grid_cones": 4.7,
+ "grid_gates (cressman)": 14.0
+}
