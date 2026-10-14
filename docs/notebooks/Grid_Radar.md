@@ -148,7 +148,8 @@ barnes = dtree.radarx.grid_gates(["DBZH"], xg, yg, zg, weighting="barnes", roi=1
 ```{code-cell} ipython3
 fig, axes = plt.subplots(1, 3, figsize=(16, 4.6), layout="constrained")
 for ax, grid, title in zip(axes, (cone_grid, cressman, barnes), ("cone", "Cressman", "Barnes")):
-    grid["DBZH"].sel(z=2000.0).plot(ax=ax, x="x", y="y", cmap="ChaseSpectral", vmin=-10, vmax=70)
+    dbz2km = grid["DBZH"].sel(z=2000.0)
+    dbz2km.where(dbz2km >= 0).plot(ax=ax, x="x", y="y", cmap="ChaseSpectral", vmin=0, vmax=70)
     ax.set(title=f"{title}, z = 2 km", aspect="equal")
 ```
 
