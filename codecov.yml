@@ -1,11 +1,12 @@
 # Codecov waits for all coverage uploads of a CI run before it reports:
-# 6 unit-test jobs + 2 notebook-test jobs. Update when the CI matrix changes.
+# 4 unit-test jobs (Python 3.12 with NumPy 1 and 2, 3.13 and 3.14 with NumPy 2) + 2
+# notebook-test jobs. Update when the CI matrix changes.
 codecov:
   notify:
-    after_n_builds: 8
+    after_n_builds: 6
 
 comment:
-  after_n_builds: 8
+  after_n_builds: 6
 
 coverage:
   status:
