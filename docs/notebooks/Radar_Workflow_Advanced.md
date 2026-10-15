@@ -1918,6 +1918,37 @@ print(f"MPAS-like mesh: DBZH up to {float(mp_fields.DBZH.max()):.1f} dBZ on the 
       f"{int(mp_sweep.DBZH.notnull().sum())} radar gates with echo")
 ```
 
+### T-matrix scattering of single drops
+
+The scattering tables of the DSD retrievals come from a threaded C++ T-matrix
+code. `raindrop_scattering` gives the table quantities of oblate raindrops for any
+wavelength, temperature and canting width; `spheroid_scattering` is the
+low-level call (the amplitude and phase matrices of spheroids in given
+directions, averaged over the orientation quadrature of `orientation_quadrature`);
+`water_refractive_index` and `axis_ratio_brandes` are its inputs.
+
+```{code-cell} ipython3
+from radarx.fundamentals import (
+    axis_ratio_brandes,
+    orientation_quadrature,
+    raindrop_scattering,
+    spheroid_scattering,
+    water_refractive_index,
+)
+
+wl = 299.792458 / 5.6  # C band, mm
+m = water_refractive_index(wl, 20.0)
+drops = raindrop_scattering([2.0, 4.0, 6.0], wl, temperature=20.0, canting_std=10.0)
+orient = orientation_quadrature(std=10.0, n_alpha=5, n_beta=10)
+S, Z, nmax = spheroid_scattering(
+    [1.0, 2.0], 1.0 / axis_ratio_brandes([2.0, 4.0]), wl, m,
+    [[90, 90, 0, 180], [90, 90, 0, 0]], orient,
+)
+print(f"m = {m:.3f}; ZDR of 2, 4, 6 mm drops: "
+      f"{(10 * np.log10(drops.sigma_h / drops.sigma_v)).values.round(2)} dB; "
+      f"S shape {S.shape}, orders {nmax}")
+```
+
 ## 15. Dual-PRF velocity correction
 
 A dual-PRF radar alternates two pulse repetition frequencies from ray to ray

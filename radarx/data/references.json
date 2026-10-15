@@ -2734,5 +2734,91 @@
   "publisher": "American Meteorological Society",
   "pages": "P5.15",
   "url": "https://ams.confex.com/ams/11aram22sls/techprogram/paper_81811.htm"
+ },
+ "10.1364/AO.39.001026": {
+  "authors": [
+   "Mishchenko, M. I."
+  ],
+  "year": 2000,
+  "title": "Calculation of the amplitude matrix for a nonspherical particle in a fixed orientation",
+  "type": "article",
+  "journal": "Applied Optics",
+  "volume": "39",
+  "issue": "6",
+  "pages": "1026",
+  "doi": "10.1364/AO.39.001026"
+ },
+ "10.1016/0030-4018(94)90731-5": {
+  "authors": [
+   "Mishchenko, M. I.",
+   "Travis, L. D."
+  ],
+  "year": 1994,
+  "title": "T-matrix computations of light scattering by large spheroidal particles",
+  "type": "article",
+  "journal": "Optics Communications",
+  "volume": "109",
+  "issue": "1-2",
+  "pages": "16-21",
+  "doi": "10.1016/0030-4018(94)90731-5"
+ },
+ "10.1364/AO.35.004927": {
+  "authors": [
+   "Mishchenko, M. I.",
+   "Travis, L. D.",
+   "Macke, A."
+  ],
+  "year": 1996,
+  "title": "Scattering of light by polydisperse, randomly oriented, finite circular cylinders",
+  "type": "article",
+  "journal": "Applied Optics",
+  "volume": "35",
+  "issue": "24",
+  "pages": "4927",
+  "doi": "10.1364/AO.35.004927"
+ },
+ "10.1103/PhysRevD.3.825": {
+  "authors": [
+   "Waterman, P. C."
+  ],
+  "year": 1971,
+  "title": "Symmetry, Unitarity, and Geometry in Electromagnetic Scattering",
+  "type": "article",
+  "journal": "Physical Review D",
+  "volume": "3",
+  "issue": "4",
+  "pages": "825-839",
+  "doi": "10.1103/PhysRevD.3.825"
+ },
+ "10.1364/AO.36.004305": {
+  "authors": [
+   "Wielaard, D. J.",
+   "Mishchenko, M. I.",
+   "Macke, A.",
+   "Carlson, B. E."
+  ],
+  "year": 1997,
+  "title": "Improved T-matrix computations for large, nonabsorbing and weakly absorbing nonspherical particles and comparison with geometrical-optics approximation",
+  "type": "article",
+  "journal": "Applied Optics",
+  "volume": "36",
+  "issue": "18",
+  "pages": "4305",
+  "doi": "10.1364/AO.36.004305"
+ },
+ "10.1016/0022-4073(96)00002-7": {
+  "authors": [
+   "Mishchenko, M. I.",
+   "Travis, L. D.",
+   "Mackowski, D. W."
+  ],
+  "year": 1996,
+  "title": "T-matrix computations of light scattering by nonspherical particles: A review",
+  "type": "article",
+  "journal": "Journal of Quantitative Spectroscopy and Radiative Transfer",
+  "volume": "55",
+  "issue": "5",
+  "pages": "535-575",
+  "doi": "10.1016/0022-4073(96)00002-7"
  }
 }
