@@ -125,3 +125,4 @@ docs/utils.rst
 docs/vis.rst
 docs/generated/
 docs/changes/unreleased.md
+.download_cache/
