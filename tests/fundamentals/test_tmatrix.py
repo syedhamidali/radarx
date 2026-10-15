@@ -218,6 +218,15 @@ def test_water_refractive_index_and_axis_ratio():
     assert r[0] == pytest.approx(0.9976, abs=1e-3) and (r <= 1.0).all() and r[1] > r[2]
 
 
+def test_there_is_no_numpy_engine():
+    with pytest.raises(ValueError, match="no NumPy version"):
+        tm.raindrop_scattering([1.0], 107.0, engine="numpy")
+    with pytest.raises(ValueError, match="engine must be"):
+        tm.spheroid_scattering(
+            1.0, 1.2, 100.0, 8 + 2j, (90, 90, 0, 180), [[0, 0, 1.0]], engine="fortran"
+        )
+
+
 def test_without_the_kernel_the_functions_say_so(monkeypatch):
     monkeypatch.setattr(tm, "HAS_COMPILED_KERNEL", False)
     with pytest.raises(ImportError, match="compiled kernel"):

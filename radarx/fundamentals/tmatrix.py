@@ -132,7 +132,13 @@ BACKSCATTER = (90.0, 90.0, 0.0, 180.0)  # thet0, thet, phi0, phi: horizontal inc
 FORWARD = (90.0, 90.0, 0.0, 0.0)
 
 
-def _require_kernel():
+def _require_kernel(engine="auto"):
+    if engine == "numpy":
+        raise ValueError(
+            "the T-matrix method has no NumPy version: use engine='auto' or 'compiled'"
+        )
+    if engine not in ("auto", "compiled"):
+        raise ValueError(f"engine must be 'auto' or 'compiled', not {engine!r}")
     if not HAS_COMPILED_KERNEL:
         raise ImportError(
             "radarx.fundamentals.tmatrix needs the compiled kernel "
@@ -306,7 +312,9 @@ def spheroid_scattering(
     ddelt=1e-3,
     ndgs=2,
     rat=1.0,
+    *,
     n_threads=None,
+    engine="auto",
 ):
     """
     Amplitude and phase matrices of spheroids in given directions and orientations.
@@ -343,6 +351,8 @@ def spheroid_scattering(
         equal-surface-area radius.
     n_threads : int, optional
         Threads (one particle per thread). Default: all cores.
+    engine : {"auto", "compiled"}, optional
+        There is only the compiled kernel; ``"numpy"`` raises a ``ValueError``.
 
     Returns
     -------
@@ -370,7 +380,7 @@ def spheroid_scattering(
            scattering by large spheroidal particles. *Opt. Commun.*, **109**, 16-21,
            https://doi.org/10.1016/0030-4018(94)90731-5
     """
-    _require_kernel()
+    _require_kernel(engine)
     radius = np.atleast_1d(np.asarray(radius, dtype=float))
     axis_ratio = np.broadcast_to(np.asarray(axis_ratio, dtype=float), radius.shape)
     geometry = np.atleast_2d(np.asarray(geometry, dtype=float))
@@ -405,7 +415,9 @@ def raindrop_scattering(
     n_beta=10,
     ndgs=4,
     ddelt=1e-3,
+    *,
     n_threads=None,
+    engine="auto",
 ):
     """
     Scattering by raindrops of given equal-volume diameters, as the radarx tables.
@@ -443,6 +455,8 @@ def raindrop_scattering(
         Accuracy of the T-matrix expansion. Default 1e-3.
     n_threads : int, optional
         Threads. Default: all cores.
+    engine : {"auto", "compiled"}, optional
+        There is only the compiled kernel; ``"numpy"`` raises a ``ValueError``.
 
     Returns
     -------
@@ -481,7 +495,7 @@ def raindrop_scattering(
     >>> d = raindrop_scattering(np.arange(0.5, 6.1, 0.5), 299.792458 / 2.8)  # doctest: +SKIP
     >>> zdr = 10 * np.log10(d.sigma_h / d.sigma_v)  # doctest: +SKIP
     """
-    _require_kernel()
+    _require_kernel(engine)
     diameter = np.atleast_1d(np.asarray(diameter, dtype=float))
     if m is None:
         m = water_refractive_index(wavelength, temperature)
@@ -504,6 +518,7 @@ def raindrop_scattering(
         ddelt=ddelt,
         ndgs=ndgs,
         n_threads=n_threads,
+        engine=engine,
     )
     zb, sf = z[:, 0], s[:, 1]
     two_pi = 2.0 * np.pi
