@@ -290,10 +290,14 @@ def test_the_default_accuracy_converges_the_raindrop_quantities(band):
     default = tm.raindrop_scattering(diameter, wavelength)
     reference = tm.raindrop_scattering(diameter, wavelength, ddelt=1e-7, ndgs=8)
     for name in ("sigma_h", "sigma_v", "ah", "av"):
-        np.testing.assert_allclose(default[name], reference[name], rtol=2e-3)
+        np.testing.assert_allclose(
+            default[name].values, reference[name].values, rtol=2e-3
+        )
     # K_DP crosses zero at short wavelengths: compare to the largest value
-    scale = np.abs(reference.kdp).max()
-    np.testing.assert_allclose(default.kdp, reference.kdp, rtol=0, atol=2e-3 * scale)
+    scale = float(np.abs(reference.kdp).max())
+    np.testing.assert_allclose(
+        default.kdp.values, reference.kdp.values, rtol=0, atol=2e-3 * scale
+    )
 
 
 def test_the_accuracy_of_the_fortran_code_is_not_enough_at_w_band():
