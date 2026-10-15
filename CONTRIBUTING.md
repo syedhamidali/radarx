@@ -166,6 +166,9 @@ To run a subset of tests:
 $ pytest tests/test_radarx.py
 ```
 
+The 16 slowest tests (listed in `tests/conftest.py`) are skipped when the
+environment variable `RADARX_SKIP_SLOW=1` is set; the CI runs them in one job.
+
 ## Deploying
 
 A reminder for the maintainers on how to release:

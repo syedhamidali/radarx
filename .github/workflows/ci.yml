@@ -44,6 +44,8 @@ jobs:
       CONDA_ENV_FILE: ci/unittests.yml
       PYTHON_VERSION: ${{ matrix.python-version }}
       RADARX_DOWNLOAD_CACHE: ${{ github.workspace }}/.download_cache
+      # the slow tests (tests/conftest.py) run once, in the Python 3.12 NumPy 2 job
+      RADARX_SKIP_SLOW: ${{ (matrix.python-version == '3.12' && matrix.numpy-version == '2') && '0' || '1' }}
     strategy:
       fail-fast: false
       matrix:
@@ -130,6 +132,7 @@ jobs:
     env:
       CONDA_ENV_FILE: ci/unittests.yml
       RADARX_DOWNLOAD_CACHE: ${{ github.workspace }}/.download_cache
+      RADARX_SKIP_SLOW: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -202,6 +205,7 @@ jobs:
     env:
       CONDA_ENV_FILE: ci/unittests.yml
       RADARX_DOWNLOAD_CACHE: ${{ github.workspace }}/.download_cache
+      RADARX_SKIP_SLOW: "1"
     steps:
     - uses: actions/checkout@v4
       with:
@@ -266,6 +270,7 @@ jobs:
     env:
       CONDA_ENV_FILE: ci/unittests.yml
       RADARX_DOWNLOAD_CACHE: ${{ github.workspace }}/.download_cache
+      RADARX_SKIP_SLOW: "1"
     steps:
     - uses: actions/checkout@v4
       with:
