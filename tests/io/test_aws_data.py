@@ -86,3 +86,45 @@ def test_download_file_invalid_key(temp_download_dir):
     assert (
         downloaded_file is None
     ), "Download should return None for an invalid file key."
+
+
+class _FakeS3:
+    """An S3 client that writes a small file and counts the downloads."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def download_file(self, bucket, key, filename):
+        self.calls += 1
+        with open(filename, "wb") as fh:
+            fh.write(f"{bucket}/{key}".encode())
+
+
+def test_download_cache_serves_a_second_request_without_downloading(
+    tmp_path, monkeypatch
+):
+    from radarx.io import aws_data
+
+    fake = _FakeS3()
+    monkeypatch.setattr(aws_data, "get_s3_client", lambda anonymous=True: fake)
+    monkeypatch.setenv("RADARX_DOWNLOAD_CACHE", str(tmp_path / "cache"))
+    first = download_file("bucket", "2022/03/30/KGWX/file_V06", str(tmp_path / "a"))
+    second = download_file("bucket", "2022/03/30/KGWX/file_V06", str(tmp_path / "b"))
+    assert fake.calls == 1
+    assert open(first, "rb").read() == open(second, "rb").read()
+    assert second == str(tmp_path / "b" / "file_V06")
+    assert (
+        tmp_path / "cache" / "bucket" / "2022" / "03" / "30" / "KGWX" / "file_V06"
+    ).exists()
+    assert not list((tmp_path / "cache").rglob("*.part"))
+
+
+def test_download_without_a_cache_downloads_every_time(tmp_path, monkeypatch):
+    from radarx.io import aws_data
+
+    fake = _FakeS3()
+    monkeypatch.setattr(aws_data, "get_s3_client", lambda anonymous=True: fake)
+    monkeypatch.delenv("RADARX_DOWNLOAD_CACHE", raising=False)
+    download_file("bucket", "a/file", str(tmp_path / "a"))
+    download_file("bucket", "a/file", str(tmp_path / "b"))
+    assert fake.calls == 2

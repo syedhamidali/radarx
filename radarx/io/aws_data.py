@@ -74,6 +74,7 @@ __all__ = [
 __doc__ = __doc__.format("\n   ".join(__all__))
 
 import os
+import shutil
 
 # AWS Buckets for different radar data
 AWS_BUCKETS = {
@@ -186,6 +187,13 @@ def download_file(bucket, file_key, save_dir, anonymous=True):
     str
         Path to the downloaded file.
 
+    Notes
+    -----
+    When the environment variable ``RADARX_DOWNLOAD_CACHE`` names a directory, every
+    downloaded file is also stored there (as ``<bucket>/<key>``) and later calls for the
+    same key copy it instead of downloading it again. The test suite and the notebooks
+    use this in CI, where many of them fetch the same volumes.
+
     Examples
     --------
     Download a NEXRAD Level II file:
@@ -209,12 +217,22 @@ def download_file(bucket, file_key, save_dir, anonymous=True):
     """
     import botocore
 
-    s3 = get_s3_client(anonymous=anonymous)
     os.makedirs(save_dir, exist_ok=True)
     local_file = os.path.join(save_dir, os.path.basename(file_key))
+    cache = os.environ.get("RADARX_DOWNLOAD_CACHE")
+    cached = os.path.join(cache, bucket, *file_key.split("/")) if cache else None
+    if cached and os.path.exists(cached):
+        shutil.copyfile(cached, local_file)
+        return local_file
+    s3 = get_s3_client(anonymous=anonymous)
     try:
         s3.download_file(bucket, file_key, local_file)
         print(f"Downloaded: {local_file}")  # pragma: no cover
+        if cached:
+            os.makedirs(os.path.dirname(cached), exist_ok=True)
+            tmp = f"{cached}.{os.getpid()}.part"
+            shutil.copyfile(local_file, tmp)
+            os.replace(tmp, cached)  # a reader never sees a half-written file
         return local_file  # pragma: no cover
     except botocore.exceptions.ClientError as e:
         print(f"Failed to download {file_key}: {e}")

@@ -43,6 +43,9 @@ jobs:
     env:
       CONDA_ENV_FILE: ci/unittests.yml
       PYTHON_VERSION: ${{ matrix.python-version }}
+      RADARX_DOWNLOAD_CACHE: ${{ github.workspace }}/.download_cache
+      # the slow tests (tests/conftest.py) run once, in the Python 3.12 NumPy 2 job
+      RADARX_SKIP_SLOW: ${{ (matrix.python-version == '3.12' && matrix.numpy-version == '2') && '0' || '1' }}
     strategy:
       fail-fast: false
       matrix:
@@ -88,6 +91,12 @@ jobs:
           ~\AppData\Local\radarx_data
         key: test-data-${{ runner.os }}-v1
         restore-keys: test-data-${{ runner.os }}-
+    - name: Cache the NEXRAD volumes the tests and notebooks download
+      uses: actions/cache@v4
+      with:
+        path: .download_cache
+        key: nexrad-downloads-${{ runner.os }}-${{ hashFiles('tests/**/*.py', 'docs/notebooks/*.md') }}
+        restore-keys: nexrad-downloads-${{ runner.os }}-
     - name: Install radarx
       run: |
         python -m pip install . --no-deps
@@ -122,6 +131,8 @@ jobs:
         shell: bash -el {0}
     env:
       CONDA_ENV_FILE: ci/unittests.yml
+      RADARX_DOWNLOAD_CACHE: ${{ github.workspace }}/.download_cache
+      RADARX_SKIP_SLOW: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -162,6 +173,12 @@ jobs:
           ~\AppData\Local\radarx_data
         key: test-data-${{ runner.os }}-v1
         restore-keys: test-data-${{ runner.os }}-
+    - name: Cache the NEXRAD volumes the tests and notebooks download
+      uses: actions/cache@v4
+      with:
+        path: .download_cache
+        key: nexrad-downloads-${{ runner.os }}-${{ hashFiles('tests/**/*.py', 'docs/notebooks/*.md') }}
+        restore-keys: nexrad-downloads-${{ runner.os }}-
     - name: Install radarx
       run: |
         python -m pip install . --no-deps
@@ -187,6 +204,8 @@ jobs:
         shell: bash -l {0}
     env:
       CONDA_ENV_FILE: ci/unittests.yml
+      RADARX_DOWNLOAD_CACHE: ${{ github.workspace }}/.download_cache
+      RADARX_SKIP_SLOW: "1"
     steps:
     - uses: actions/checkout@v4
       with:
@@ -219,6 +238,12 @@ jobs:
           ~/.cache/radarx_data
         key: test-data-${{ runner.os }}-v1
         restore-keys: test-data-${{ runner.os }}-
+    - name: Cache the NEXRAD volumes the tests and notebooks download
+      uses: actions/cache@v4
+      with:
+        path: .download_cache
+        key: nexrad-downloads-${{ runner.os }}-${{ hashFiles('tests/**/*.py', 'docs/notebooks/*.md') }}
+        restore-keys: nexrad-downloads-${{ runner.os }}-
     - name: Install radarx
       run: |
         python -m pip install . --no-deps
@@ -244,6 +269,8 @@ jobs:
         shell: bash -l {0}
     env:
       CONDA_ENV_FILE: ci/unittests.yml
+      RADARX_DOWNLOAD_CACHE: ${{ github.workspace }}/.download_cache
+      RADARX_SKIP_SLOW: "1"
     steps:
     - uses: actions/checkout@v4
       with:
@@ -273,6 +300,12 @@ jobs:
           ~/.cache/radarx_data
         key: test-data-${{ runner.os }}-v1
         restore-keys: test-data-${{ runner.os }}-
+    - name: Cache the NEXRAD volumes the tests and notebooks download
+      uses: actions/cache@v4
+      with:
+        path: .download_cache
+        key: nexrad-downloads-${{ runner.os }}-${{ hashFiles('tests/**/*.py', 'docs/notebooks/*.md') }}
+        restore-keys: nexrad-downloads-${{ runner.os }}-
     - name: Install radarx
       run: |
         python -m pip install . --no-deps
@@ -299,6 +332,7 @@ jobs:
     env:
       CONDA_ENV_FILE: ci/notebooktests.yml
       PYTHON_VERSION: ${{ matrix.python-version }}
+      RADARX_DOWNLOAD_CACHE: ${{ github.workspace }}/.download_cache
     strategy:
       fail-fast: false
       matrix:
@@ -325,6 +359,12 @@ jobs:
     - name: Install coverage and pytest via pip
       run: |
         python -m pip install coverage pytest-cov pytest-xdist pytest-mock
+    - name: Cache the NEXRAD volumes the tests and notebooks download
+      uses: actions/cache@v4
+      with:
+        path: .download_cache
+        key: nexrad-downloads-${{ runner.os }}-${{ hashFiles('tests/**/*.py', 'docs/notebooks/*.md') }}
+        restore-keys: nexrad-downloads-${{ runner.os }}-
     - name: Install radarx
       run: |
         python -m pip install . --no-deps
@@ -336,7 +376,7 @@ jobs:
         python -c "import radarx; print(radarx.version.version)"
     - name: Test with pytest
       run: |
-        pytest --verbose --durations=15 --cov=radarx --cov-report=xml:coverage_notebook.xml --cov-report=term-missing --cov-fail-under=0 docs/notebooks
+        pytest -n auto --verbose --durations=15 --cov=radarx --cov-report=xml:coverage_notebook.xml --cov-report=term-missing --cov-fail-under=0 docs/notebooks
     # unit tests for optional packages that the unit-test environment leaves
     # out (fast-barnes-py, uxarray, datashader); "python -m" puts the source
     # tree on sys.path, so coverage is measured on it as in the unit-test job

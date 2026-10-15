@@ -274,9 +274,22 @@ def _cost_gradient_numpy(
     return terms, grad
 
 
+# Cells of the grid below which the cost gradient runs on one thread: starting the
+# threads costs about 0.15 ms per call, more than the work of a grid this small
+# (measured: threads are 2 times slower at 1700 cells and 2 times faster at 8700).
+_SERIAL_CELLS = 4000
+
+
+def _gradient_threads(cells, n_threads):
+    """Threads of the cost gradient: all of them (0) only for grids that need them."""
+    threads = int(n_threads or 0)
+    return 1 if threads == 0 and cells < _SERIAL_CELLS else threads
+
+
 def _cost_gradient(problem, state, use_compiled, n_threads):
     """Cost terms and gradient of a prepared problem at ``state``."""
     p = problem
+    n_threads = _gradient_threads(state[0].size, n_threads)
     args = (
         state,
         p["coef"],

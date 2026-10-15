@@ -479,6 +479,63 @@ def test_convert_on_first_use(tmp_path, monkeypatch):
         _onnx_models.onnx_path("nope")
 
 
+def test_onnx_path_survives_a_parallel_process_removing_the_upstream_file(
+    tmp_path, monkeypatch
+):
+    # a parallel test or notebook converts the same model and removes the upstream
+    # file between our download and our read
+    monkeypatch.setenv("RADARX_CACHE_DIR", str(tmp_path / "cache"))
+    upstream = tmp_path / "upstream.h5"
+    upstream.write_bytes(b"x")
+    calls = []
+
+    def retrieve(url, known_hash, path, progressbar):
+        calls.append(url)
+        return str(upstream)
+
+    class Graph:
+        @staticmethod
+        def SerializeToString():
+            return b"onnx"
+
+    state = {"reads": 0}
+
+    def read(source):
+        state["reads"] += 1
+        if state["reads"] == 1:
+            raise FileNotFoundError(source)
+        return {}
+
+    import pooch
+
+    monkeypatch.setattr(pooch, "retrieve", retrieve)
+    monkeypatch.setitem(
+        _onnx_models._READERS, "tornet-baseline-v1", (read, lambda params: Graph)
+    )
+    out = _onnx_models.onnx_path("tornet-baseline-v1")
+    assert out.read_bytes() == b"onnx" and len(calls) == 2  # downloaded again
+    out.unlink()
+    # the other process already wrote the converted file: it is used, not rebuilt
+    state["reads"] = 0
+    calls.clear()
+
+    def read_once_converted(source):
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"converted elsewhere")
+        raise FileNotFoundError(source)
+
+    monkeypatch.setitem(
+        _onnx_models._READERS,
+        "tornet-baseline-v1",
+        (read_once_converted, lambda params: Graph),
+    )
+    assert (
+        _onnx_models.onnx_path("tornet-baseline-v1").read_bytes()
+        == b"converted elsewhere"
+    )
+    assert len(calls) == 1
+
+
 def test_load_model_objects(tmp_path, monkeypatch):
     params = tiny_tornet_params(np.random.default_rng(6))
     model = Session(_onnx_models.tornet_graph(params))

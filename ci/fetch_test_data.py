@@ -53,6 +53,15 @@ def main():
         failed.append(f"IMD test data: {err}")
     finally:
         test_data_imd.pooch.create = original
+    # the upstream weights of the ML models, converted once so that parallel tests
+    # and notebooks do not convert them at the same time
+    try:
+        from radarx.retrieve import _onnx_models
+
+        for model in ("tornet-baseline-v1", "mistnet-nexrad"):
+            _onnx_models.onnx_path(model)
+    except Exception as err:
+        failed.append(f"ONNX models: {err}")
     n = len(failed)
     print(f"test data fetched, {n} failure{'s' * (n != 1)}")
     for line in failed:

@@ -541,14 +541,26 @@ def onnx_path(name):
     import pooch
 
     info = MODELS[name]
-    source = pooch.retrieve(
-        info["url"],
-        known_hash=f"sha256:{info['sha256']}",
-        path=cache_dir() / "upstream",
-        progressbar=False,
-    )
     read, build = _READERS[name]
-    model = build(read(source))
+    # Another process (a parallel test or notebook) may convert the same model:
+    # it removes the upstream file when it is done, so a read can fail between the
+    # download and the conversion. The converted file then exists, or the download
+    # is repeated.
+    for attempt in range(3):
+        source = pooch.retrieve(
+            info["url"],
+            known_hash=f"sha256:{info['sha256']}",
+            path=cache_dir() / "upstream",
+            progressbar=False,
+        )
+        try:
+            model = build(read(source))
+            break
+        except (OSError, zipfile.BadZipFile):
+            if out.exists():
+                return out
+            if attempt == 2:
+                raise
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_suffix(".onnx.part")
     tmp.write_bytes(model.SerializeToString())
