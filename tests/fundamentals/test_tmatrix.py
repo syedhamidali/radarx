@@ -107,7 +107,12 @@ def test_reproduces_the_dsd_table_built_with_pytmatrix():
     for (band, temperature), group in groups.items():
         diameters = np.array([float(r[3]) for r in group])
         got = tm.raindrop_scattering(
-            diameters, BANDS[band], temperature=temperature, canting_std=7.0, ndgs=4
+            diameters,
+            BANDS[band],
+            temperature=temperature,
+            canting_std=7.0,
+            ndgs=4,
+            ddelt=1e-3,
         )
         for j, name in enumerate(names):
             want = np.array([float(r[4 + j]) for r in group])

@@ -91,7 +91,12 @@ def main(path=OUTPUT):
             m = tmatrix.water_refractive_index(wl, t)
             print(f"{band} band ({wl:.2f} mm), {t:.0f} C, m = {m:.4f}", flush=True)
             d = tmatrix.raindrop_scattering(
-                DIAMETERS, wl, temperature=t, canting_std=CANTING_STD, ndgs=4
+                DIAMETERS,
+                wl,
+                temperature=t,
+                canting_std=CANTING_STD,
+                ndgs=4,
+                ddelt=1e-3,  # the value of pytmatrix, with which the table was first built
             )
             for i, diameter in enumerate(DIAMETERS):
                 rows.append(

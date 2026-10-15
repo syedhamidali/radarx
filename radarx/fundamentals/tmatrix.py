@@ -26,6 +26,17 @@ single precision). Against ``pytmatrix`` (the FORTRAN code) it agrees to
 version of the method: without the compiled kernel the functions raise an
 :class:`ImportError`.
 
+Validation
+----------
+Spheres agree with an independent Mie code to 1e-8 at S, C, X, Ku, Ka and W band, spheroids
+obey the optical theorem, reciprocity and the Rayleigh limit, and the simulations of
+Bringi and Chandrasekar [10]_ (rain rate and water content estimators, attenuation against
+differential phase) are reproduced; see the notebooks ``TMatrix_Validation``,
+``TMatrix_Textbook_Examples`` and ``TMatrix_Radar_Bands`` and
+``tests/fundamentals/test_tmatrix_physics.py``. The FORTRAN code loses all accuracy
+where cos(x) = 0 for a sphere of size parameter x (a drop of half a wavelength in diameter);
+the C++ code scales the spherical Bessel functions through sin(x) there.
+
 Definitions
 -----------
 The amplitude matrix :math:`S` (2 x 2, in mm for lengths in mm) and the phase matrix
@@ -97,6 +108,10 @@ References
        polarimetric characteristics of rain: Theoretical model and practical
        implications. *J. Appl. Meteor. Climatol.*, **49**, 1247-1267,
        https://doi.org/10.1175/2010JAMC2243.1
+
+.. [10] Bringi, V. N., and V. Chandrasekar, 2001: *Polarimetric Doppler Weather Radar:
+       Principles and Applications*. Cambridge University Press,
+       https://doi.org/10.1017/CBO9780511541094
 
 .. autosummary::
 
@@ -414,7 +429,7 @@ def raindrop_scattering(
     n_alpha=5,
     n_beta=10,
     ndgs=4,
-    ddelt=1e-3,
+    ddelt=1e-5,
     *,
     n_threads=None,
     engine="auto",
@@ -452,7 +467,11 @@ def raindrop_scattering(
     ndgs : int, optional
         Integration points per unit of the order, 4 as the radarx tables.
     ddelt : float, optional
-        Accuracy of the T-matrix expansion. Default 1e-3.
+        Accuracy of the T-matrix expansion. Default 1e-5. The value 1e-3 of the FORTRAN
+        code converges the total scattering, not the backscatter: at Ku, Ka and W band
+        it leaves errors of up to 25 % in the vertical backscatter cross section (in
+        its minima) and 20 % in K_DP, which 1e-5 reduces to 5e-4 for the cost of
+        about twice the computing time.
     n_threads : int, optional
         Threads. Default: all cores.
     engine : {"auto", "compiled"}, optional

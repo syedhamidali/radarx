@@ -126,8 +126,11 @@ void rjb(double x, std::vector<double>& y, std::vector<double>& u, int nmax, int
         const int i1 = l - i;
         z[i1] = 1.0 / (static_cast<double>(2 * i1 + 1) * xx - z[i1 + 1]);
     }
+    // j_0 is fixed through j_0 / j_{-1} (the recurrence) times cos(x) / x, which loses all
+    // accuracy where cos(x) = 0 (x = pi/2, 3 pi/2, ...); there sin(x) / x is used instead
     const double z0 = 1.0 / (xx - z[1]);
-    const double y0 = z0 * std::cos(x) * xx;
+    const double y0 = std::fabs(std::cos(x)) >= std::fabs(std::sin(x)) ? z0 * std::cos(x) * xx
+                                                                        : std::sin(x) * xx;
     const double y1 = y0 * z[1];
     u[1] = y0 - y1 * xx;
     y[1] = y1;
@@ -171,12 +174,21 @@ void cjb(double xr, double xi, std::vector<double>& yr, std::vector<double>& yi,
     double ar = cxxr - czr[1], ai = cxxi - czi[1];
     double ari = 1.0 / (ar * ar + ai * ai);
     const double cz0r = ar * ari, cz0i = -ai * ari;
+    // as in rjb: cos(z) / z fixes the scale unless cos(z) vanishes, then sin(z) / z is used
     const double cr = std::cos(xr) * std::cosh(xi);
     const double ci = -std::sin(xr) * std::sinh(xi);
-    ar = cz0r * cr - cz0i * ci;
-    ai = cz0i * cr + cz0r * ci;
-    const double cy0r = ar * cxxr - ai * cxxi;
-    const double cy0i = ai * cxxr + ar * cxxi;
+    const double sr = std::sin(xr) * std::cosh(xi);
+    const double si = std::cos(xr) * std::sinh(xi);
+    double cy0r, cy0i;
+    if (cr * cr + ci * ci >= sr * sr + si * si) {
+        ar = cz0r * cr - cz0i * ci;
+        ai = cz0i * cr + cz0r * ci;
+        cy0r = ar * cxxr - ai * cxxi;
+        cy0i = ai * cxxr + ar * cxxi;
+    } else {
+        cy0r = sr * cxxr - si * cxxi;
+        cy0i = si * cxxr + sr * cxxi;
+    }
     const double cy1r = cy0r * czr[1] - cy0i * czi[1];
     const double cy1i = cy0i * czr[1] + cy0r * czi[1];
     ar = cy1r * cxxr - cy1i * cxxi;
