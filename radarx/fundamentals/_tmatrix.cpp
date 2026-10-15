@@ -316,9 +316,21 @@ void const_(Grid& g) {  // CONST
             g.ann(n1, n) = ddd;
         }
     }
-    g.x.assign(ng + 4, 0.0);
-    g.w.assign(ng + 4, 0.0);
-    gauss(ng, g.x, g.w);
+    // The Gauss-Legendre points depend only on their number: every iteration of the
+    // convergence loops, and every particle of a batch with the same ndgs, asks for the
+    // same few sets, so each thread keeps the ones it has computed.
+    struct Nodes {
+        std::vector<double> x, w;
+    };
+    static thread_local std::vector<Nodes> cache(2 * NPNG1 + 1);
+    Nodes& nodes = cache[ng];
+    if (nodes.x.empty()) {
+        nodes.x.assign(ng + 4, 0.0);
+        nodes.w.assign(ng + 4, 0.0);
+        gauss(ng, nodes.x, nodes.w);
+    }
+    g.x = nodes.x;
+    g.w = nodes.w;
     g.s.assign(ng + 2, 0.0);
     g.ss.assign(ng + 2, 0.0);
     for (int i = 1; i <= ngauss; ++i) {
