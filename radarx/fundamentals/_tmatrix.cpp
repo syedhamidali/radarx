@@ -495,184 +495,219 @@ void tt(int nm, const Mat& qr, const Mat& qi, const Mat& rgqr, const Mat& rgqi, 
 }
 
 // ---------------------------------------------------------------------------
-// T-matrix blocks of the azimuthal order m = 0 (TMATR0) and m >= 1 (TMATR).
-// For m = 0 the blocks 11 and 22 vanish and mm1 = 1. tr1, ti1 hold the result
-// (2*nm x 2*nm with nm = nmax - m + 1 for m >= 1 and nm = nmax for m = 0).
-void tmatr(const Grid& g, int m, bool ncheck, Mat& tr1, Mat& ti1) {
-    const int nmax = g.nmax, ngauss = g.ngauss, ng = 2 * ngauss;
-    const bool zero = (m == 0);
-    const int mm1 = zero ? 1 : m;
-    const double qm = static_cast<double>(m), qmm = qm * qm;
-    int ngss = ng;
-    double factor = 1.0;
-    if (ncheck) {
-        ngss = ngauss;
-        factor = 2.0;
-    }
-    std::vector<double> sig(2 * nmax + 2);
-    double si = 1.0;
-    for (int n = 1; n <= 2 * nmax; ++n) {
-        si = -si;
-        sig[n] = si;
-    }
-    Mat d1(ng, nmax), d2(ng, nmax);
+// T-matrix blocks of the azimuthal order m = 0 (TMATR0) and m >= 1 (TMATR). The integrals of
+// the Q and RG(Q) matrices over the surface of the particle are sums over the Gauss points;
+// they are built from the products of the Bessel and Wigner functions of one point.
+
+struct Blocks {  // the 16 matrices R11 ... IG22 of the FORTRAN code (real and imaginary, Q and RG(Q))
+    Mat r11, r12, r21, r22, i11, i12, i21, i22, rg11, rg12, rg21, rg22, ig11, ig12, ig21, ig22;
+    explicit Blocks(int n)
+        : r11(n, n), r12(n, n), r21(n, n), r22(n, n), i11(n, n), i12(n, n), i21(n, n), i22(n, n), rg11(n, n),
+          rg12(n, n), rg21(n, n), rg22(n, n), ig11(n, n), ig12(n, n), ig21(n, n), ig22(n, n) {}
+};
+
+struct Sums {  // the sums over the Gauss points of one element (n1, n2): a = Q, g = RG(Q); r, i = parts
+    double ar11 = 0, ar12 = 0, ar21 = 0, ar22 = 0, ai11 = 0, ai12 = 0, ai21 = 0, ai22 = 0;
+    double gr11 = 0, gr12 = 0, gr21 = 0, gr22 = 0, gi11 = 0, gi12 = 0, gi21 = 0, gi22 = 0;
+};
+
+struct Terms {  // B (Bessel + Neumann of the exterior field) and C (regular part), eight each
+    double b1r, b1i, b2r, b2i, b3r, b3i, b4r, b4i, b5r, b5i, b6r, b6i, b7r, b7i, b8r, b8i;
+    double c1r, c1i, c2r, c2i, c3r, c3i, c4r, c4i, c5r, c5i, c6r, c6i, c7r, c7i, c8r, c8i;
+};
+
+// Products of the spherical Bessel functions of the particle (orders n1 outside, n2 inside) at
+// the Gauss point i, as the temporaries C1..C8 and B1..B8 of the FORTRAN code.
+Terms bessel_terms(const Grid& g, int i, int n1, int n2) {
+    Terms t;
+    const double qj1 = g.j(i, n1), qy1 = g.y(i, n1);
+    const double qjr2 = g.jr(i, n2), qji2 = g.ji(i, n2);
+    const double qdjr2 = g.djr(i, n2), qdji2 = g.dji(i, n2);
+    const double qdj1 = g.dj(i, n1), qdy1 = g.dy(i, n1);
+    t.c1r = qjr2 * qj1;
+    t.c1i = qji2 * qj1;
+    t.b1r = t.c1r - qji2 * qy1;
+    t.b1i = t.c1i + qjr2 * qy1;
+    t.c2r = qjr2 * qdj1;
+    t.c2i = qji2 * qdj1;
+    t.b2r = t.c2r - qji2 * qdy1;
+    t.b2i = t.c2i + qjr2 * qdy1;
+    const double ddri = g.ddr[i];
+    t.c3r = ddri * t.c1r;
+    t.c3i = ddri * t.c1i;
+    t.b3r = ddri * t.b1r;
+    t.b3i = ddri * t.b1i;
+    t.c4r = qdjr2 * qj1;
+    t.c4i = qdji2 * qj1;
+    t.b4r = t.c4r - qdji2 * qy1;
+    t.b4i = t.c4i + qdjr2 * qy1;
+    const double drri = g.drr[i], drii = g.dri[i];
+    t.c5r = t.c1r * drri - t.c1i * drii;
+    t.c5i = t.c1i * drri + t.c1r * drii;
+    t.b5r = t.b1r * drri - t.b1i * drii;
+    t.b5i = t.b1i * drri + t.b1r * drii;
+    t.c6r = qdjr2 * qdj1;
+    t.c6i = qdji2 * qdj1;
+    t.b6r = t.c6r - qdji2 * qdy1;
+    t.b6i = t.c6i + qdjr2 * qdy1;
+    t.c7r = t.c4r * ddri;
+    t.c7i = t.c4i * ddri;
+    t.b7r = t.b4r * ddri;
+    t.b7i = t.b4i * ddri;
+    t.c8r = t.c2r * drri - t.c2i * drii;
+    t.c8i = t.c2i * drri + t.c2r * drii;
+    t.b8r = t.b2r * drri - t.b2i * drii;
+    t.b8i = t.b2i * drri + t.b2r * drii;
+    return t;
+}
+
+// Blocks 12 and 21 (label 150 of TMATR, the whole of TMATR0): f1 = RR A22 (or RR AA2), the two
+// other weights are RR DR AN a12 and RR DR AN a21.
+void add_off_diagonal(Sums& s, const Terms& t, double f1, double f2a, double f2b) {
+    s.ar12 += f1 * t.b2r + f2a * t.b3r;
+    s.ai12 += f1 * t.b2i + f2a * t.b3i;
+    s.gr12 += f1 * t.c2r + f2a * t.c3r;
+    s.gi12 += f1 * t.c2i + f2a * t.c3i;
+    s.ar21 += f1 * t.b4r + f2b * t.b5r;
+    s.ai21 += f1 * t.b4i + f2b * t.b5i;
+    s.gr21 += f1 * t.c4r + f2b * t.c5r;
+    s.gi21 += f1 * t.c4i + f2b * t.c5i;
+}
+
+void add_block_11(Sums& s, const Terms& t, double e1) {
+    s.ar11 += e1 * t.b1r;
+    s.ai11 += e1 * t.b1i;
+    s.gr11 += e1 * t.c1r;
+    s.gi11 += e1 * t.c1i;
+}
+
+void add_block_22(Sums& s, const Terms& t, double e1, double e2, double e3) {
+    s.ar22 += e1 * t.b6r + e2 * t.b7r + e3 * t.b8r;
+    s.ai22 += e1 * t.b6i + e2 * t.b7i + e3 * t.b8i;
+    s.gr22 += e1 * t.c6r + e2 * t.c7r + e3 * t.c8r;
+    s.gi22 += e1 * t.c6i + e2 * t.c7i + e3 * t.c8i;
+}
+
+void store(Blocks& b, int n1, int n2, const Sums& s, double an12) {
+    b.r11(n1, n2) = s.ar11 * an12;
+    b.r12(n1, n2) = s.ar12 * an12;
+    b.r21(n1, n2) = s.ar21 * an12;
+    b.r22(n1, n2) = s.ar22 * an12;
+    b.i11(n1, n2) = s.ai11 * an12;
+    b.i12(n1, n2) = s.ai12 * an12;
+    b.i21(n1, n2) = s.ai21 * an12;
+    b.i22(n1, n2) = s.ai22 * an12;
+    b.rg11(n1, n2) = s.gr11 * an12;
+    b.rg12(n1, n2) = s.gr12 * an12;
+    b.rg21(n1, n2) = s.gr21 * an12;
+    b.rg22(n1, n2) = s.gr22 * an12;
+    b.ig11(n1, n2) = s.gi11 * an12;
+    b.ig12(n1, n2) = s.gi12 * an12;
+    b.ig21(n1, n2) = s.gi21 * an12;
+    b.ig22(n1, n2) = s.gi22 * an12;
+}
+
+// Wigner functions of the Gauss points of order m: D1, D2 (ng x nmax), symmetric about the equator.
+void wigner_table(const Grid& g, int m, const std::vector<double>& sig, Mat& d1, Mat& d2) {
+    const int nmax = g.nmax, ngauss = g.ngauss;
     std::vector<double> dv1(nmax + 2), dv2(nmax + 2);
     for (int i = 1; i <= ngauss; ++i) {
         const int i1 = ngauss + i, i2 = ngauss - i + 1;
         vig(g.x[i1], nmax, m, dv1, dv2);
         for (int n = 1; n <= nmax; ++n) {
             const double s = sig[n];
-            const double dd1 = dv1[n], dd2 = dv2[n];
-            d1(i1, n) = dd1;
-            d2(i1, n) = dd2;
-            d1(i2, n) = dd1 * s;
-            d2(i2, n) = -dd2 * s;
+            d1(i1, n) = dv1[n];
+            d2(i1, n) = dv2[n];
+            d1(i2, n) = dv1[n] * s;
+            d2(i2, n) = -dv2[n] * s;
         }
     }
-    std::vector<double> ds(ng + 2), dss(ng + 2), rr(ng + 2);
+}
+
+std::vector<double> parity_signs(int n) {
+    std::vector<double> sig(n + 2);
+    double si = 1.0;
+    for (int k = 1; k <= n; ++k) {
+        si = -si;
+        sig[k] = si;
+    }
+    return sig;
+}
+
+// m = 0 (TMATR0): blocks 12 and 21 only.
+void blocks_m0(const Grid& g, bool ncheck, Blocks& b) {
+    const int nmax = g.nmax, ngauss = g.ngauss;
+    const int ngss = ncheck ? ngauss : 2 * ngauss;
+    const double factor = ncheck ? 2.0 : 1.0;
+    const std::vector<double> sig = parity_signs(2 * nmax);
+    Mat d1(2 * ngauss, nmax), d2(2 * ngauss, nmax);
+    wigner_table(g, 0, sig, d1, d2);
+    std::vector<double> rr(ngss + 2);
+    for (int i = 1; i <= ngss; ++i) rr[i] = g.w[i] * g.r[i];
+    for (int n1 = 1; n1 <= nmax; ++n1)
+        for (int n2 = 1; n2 <= nmax; ++n2) {
+            Sums s;
+            if (!(ncheck && sig[n1 + n2] < 0.0)) {
+                for (int i = 1; i <= ngss; ++i) {
+                    const double a12 = d1(i, n1) * d2(i, n2), a21 = d2(i, n1) * d1(i, n2), a22 = d2(i, n1) * d2(i, n2);
+                    const Terms t = bessel_terms(g, i, n1, n2);
+                    const double f1 = rr[i] * a22;
+                    add_off_diagonal(s, t, f1, rr[i] * g.dr[i] * g.an[n1] * a12, rr[i] * g.dr[i] * g.an[n2] * a21);
+                }
+            }
+            store(b, n1, n2, s, g.ann(n1, n2) * factor);
+        }
+}
+
+// m >= 1 (TMATR): all four blocks. For spheroids (ncheck) the Gauss points of one hemisphere and the
+// parity of n1 + n2 decide which blocks are non-zero.
+void blocks_m(const Grid& g, int m, bool ncheck, Blocks& b) {
+    const int nmax = g.nmax, ngauss = g.ngauss;
+    const double qm = static_cast<double>(m), qmm = qm * qm;
+    const int ngss = ncheck ? ngauss : 2 * ngauss;
+    const double factor = ncheck ? 2.0 : 1.0;
+    const std::vector<double> sig = parity_signs(2 * nmax);
+    Mat d1(2 * ngauss, nmax), d2(2 * ngauss, nmax);
+    wigner_table(g, m, sig, d1, d2);
+    std::vector<double> ds(ngss + 2), dss(ngss + 2), rr(ngss + 2);
     for (int i = 1; i <= ngss; ++i) {
         const double wr = g.w[i] * g.r[i];
         ds[i] = g.s[i] * qm * wr;
         dss[i] = g.ss[i] * qmm;
         rr[i] = wr;
     }
-    Mat r11(nmax, nmax), r12(nmax, nmax), r21(nmax, nmax), r22(nmax, nmax), i11(nmax, nmax), i12(nmax, nmax),
-        i21(nmax, nmax), i22(nmax, nmax), rg11(nmax, nmax), rg12(nmax, nmax), rg21(nmax, nmax), rg22(nmax, nmax),
-        ig11(nmax, nmax), ig12(nmax, nmax), ig21(nmax, nmax), ig22(nmax, nmax);
-
-    for (int n1 = mm1; n1 <= nmax; ++n1) {
-        const double an1 = g.an[n1];
-        for (int n2 = mm1; n2 <= nmax; ++n2) {
-            const double an2 = g.an[n2];
-            double ar11 = 0, ar12 = 0, ar21 = 0, ar22 = 0, ai11 = 0, ai12 = 0, ai21 = 0, ai22 = 0;
-            double gr11 = 0, gr12 = 0, gr21 = 0, gr22 = 0, gi11 = 0, gi12 = 0, gi21 = 0, gi22 = 0;
-            const double sgn = sig[n1 + n2];
-            if (zero) {
-                if (!(ncheck && sgn < 0.0)) {
-                    for (int i = 1; i <= ngss; ++i) {
-                        const double d1n1 = d1(i, n1), d2n1 = d2(i, n1), d1n2 = d1(i, n2), d2n2 = d2(i, n2);
-                        const double a12 = d1n1 * d2n2, a21 = d2n1 * d1n2, a22 = d2n1 * d2n2;
-                        const double qj1 = g.j(i, n1), qy1 = g.y(i, n1);
-                        const double qjr2 = g.jr(i, n2), qji2 = g.ji(i, n2);
-                        const double qdjr2 = g.djr(i, n2), qdji2 = g.dji(i, n2);
-                        const double qdj1 = g.dj(i, n1), qdy1 = g.dy(i, n1);
-                        const double c1r = qjr2 * qj1, c1i = qji2 * qj1;
-                        const double b1r = c1r - qji2 * qy1, b1i = c1i + qjr2 * qy1;
-                        const double c2r = qjr2 * qdj1, c2i = qji2 * qdj1;
-                        const double b2r = c2r - qji2 * qdy1, b2i = c2i + qjr2 * qdy1;
-                        const double ddri = g.ddr[i];
-                        const double c3r = ddri * c1r, c3i = ddri * c1i;
-                        const double b3r = ddri * b1r, b3i = ddri * b1i;
-                        const double c4r = qdjr2 * qj1, c4i = qdji2 * qj1;
-                        const double b4r = c4r - qdji2 * qy1, b4i = c4i + qdjr2 * qy1;
-                        const double drri = g.drr[i], drii = g.dri[i];
-                        const double c5r = c1r * drri - c1i * drii, c5i = c1i * drri + c1r * drii;
-                        const double b5r = b1r * drri - b1i * drii, b5i = b1i * drri + b1r * drii;
-                        const double uri = g.dr[i], rri = rr[i];
-                        double f1 = rri * a22;
-                        double f2 = rri * uri * an1 * a12;
-                        ar12 += f1 * b2r + f2 * b3r;
-                        ai12 += f1 * b2i + f2 * b3i;
-                        gr12 += f1 * c2r + f2 * c3r;
-                        gi12 += f1 * c2i + f2 * c3i;
-                        f2 = rri * uri * an2 * a21;
-                        ar21 += f1 * b4r + f2 * b5r;
-                        ai21 += f1 * b4i + f2 * b5i;
-                        gr21 += f1 * c4r + f2 * c5r;
-                        gi21 += f1 * c4i + f2 * c5i;
-                    }
-                }
-            } else {
-                for (int i = 1; i <= ngss; ++i) {
-                    const double d1n1 = d1(i, n1), d2n1 = d2(i, n1), d1n2 = d1(i, n2), d2n2 = d2(i, n2);
-                    const double a11 = d1n1 * d1n2, a12 = d1n1 * d2n2, a21 = d2n1 * d1n2, a22 = d2n1 * d2n2;
-                    const double aa1 = a12 + a21;
-                    const double aa2 = a11 * dss[i] + a22;
-                    const double qj1 = g.j(i, n1), qy1 = g.y(i, n1);
-                    const double qjr2 = g.jr(i, n2), qji2 = g.ji(i, n2);
-                    const double qdjr2 = g.djr(i, n2), qdji2 = g.dji(i, n2);
-                    const double qdj1 = g.dj(i, n1), qdy1 = g.dy(i, n1);
-                    const double c1r = qjr2 * qj1, c1i = qji2 * qj1;
-                    const double b1r = c1r - qji2 * qy1, b1i = c1i + qjr2 * qy1;
-                    const double c2r = qjr2 * qdj1, c2i = qji2 * qdj1;
-                    const double b2r = c2r - qji2 * qdy1, b2i = c2i + qjr2 * qdy1;
-                    const double ddri = g.ddr[i];
-                    const double c3r = ddri * c1r, c3i = ddri * c1i;
-                    const double b3r = ddri * b1r, b3i = ddri * b1i;
-                    const double c4r = qdjr2 * qj1, c4i = qdji2 * qj1;
-                    const double b4r = c4r - qdji2 * qy1, b4i = c4i + qdjr2 * qy1;
-                    const double drri = g.drr[i], drii = g.dri[i];
-                    const double c5r = c1r * drri - c1i * drii, c5i = c1i * drri + c1r * drii;
-                    const double b5r = b1r * drri - b1i * drii, b5i = b1i * drri + b1r * drii;
-                    const double c6r = qdjr2 * qdj1, c6i = qdji2 * qdj1;
-                    const double b6r = c6r - qdji2 * qdy1, b6i = c6i + qdjr2 * qdy1;
-                    const double c7r = c4r * ddri, c7i = c4i * ddri;
-                    const double b7r = b4r * ddri, b7i = b4i * ddri;
-                    const double c8r = c2r * drri - c2i * drii, c8i = c2i * drri + c2r * drii;
-                    const double b8r = b2r * drri - b2i * drii, b8i = b2i * drri + b2r * drii;
-                    const double uri = g.dr[i], dsi = ds[i], rri = rr[i];
-                    const bool skip_odd = ncheck && sgn > 0.0;
-                    double e1 = 0.0;
-                    if (!skip_odd) {
-                        e1 = dsi * aa1;
-                        ar11 += e1 * b1r;
-                        ai11 += e1 * b1i;
-                        gr11 += e1 * c1r;
-                        gi11 += e1 * c1i;
-                        if (ncheck) {
-                            // label 160: only the 11 and 22 blocks for this parity
-                            double e2 = dsi * uri * a11;
-                            const double e3 = e2 * an2;
-                            e2 = e2 * an1;
-                            ar22 += e1 * b6r + e2 * b7r + e3 * b8r;
-                            ai22 += e1 * b6i + e2 * b7i + e3 * b8i;
-                            gr22 += e1 * c6r + e2 * c7r + e3 * c8r;
-                            gi22 += e1 * c6i + e2 * c7i + e3 * c8i;
-                            continue;
-                        }
-                    }
-                    // label 150
-                    const double f1 = rri * aa2;
-                    double f2 = rri * uri * an1 * a12;
-                    ar12 += f1 * b2r + f2 * b3r;
-                    ai12 += f1 * b2i + f2 * b3i;
-                    gr12 += f1 * c2r + f2 * c3r;
-                    gi12 += f1 * c2i + f2 * c3i;
-                    f2 = rri * uri * an2 * a21;
-                    ar21 += f1 * b4r + f2 * b5r;
-                    ai21 += f1 * b4i + f2 * b5i;
-                    gr21 += f1 * c4r + f2 * c5r;
-                    gi21 += f1 * c4i + f2 * c5i;
-                    if (ncheck) continue;
-                    // label 160
-                    double e2 = dsi * uri * a11;
-                    const double e3 = e2 * an2;
-                    e2 = e2 * an1;
-                    ar22 += e1 * b6r + e2 * b7r + e3 * b8r;
-                    ai22 += e1 * b6i + e2 * b7i + e3 * b8i;
-                    gr22 += e1 * c6r + e2 * c7r + e3 * c8r;
-                    gi22 += e1 * c6i + e2 * c7i + e3 * c8i;
-                }
+    for (int n1 = m; n1 <= nmax; ++n1)
+        for (int n2 = m; n2 <= nmax; ++n2) {
+            Sums s;
+            const double an1 = g.an[n1], an2 = g.an[n2];
+            const bool odd = ncheck && sig[n1 + n2] > 0.0;  // only the blocks 12 and 21 are non-zero
+            for (int i = 1; i <= ngss; ++i) {
+                const double a11 = d1(i, n1) * d1(i, n2), a12 = d1(i, n1) * d2(i, n2);
+                const double a21 = d2(i, n1) * d1(i, n2), a22 = d2(i, n1) * d2(i, n2);
+                const Terms t = bessel_terms(g, i, n1, n2);
+                const double uri = g.dr[i], dsi = ds[i], rri = rr[i];
+                const double e1 = dsi * (a12 + a21);
+                const double e2 = dsi * uri * a11;
+                if (!odd) add_block_11(s, t, e1);
+                if (!ncheck || odd)
+                    add_off_diagonal(s, t, rri * (a11 * dss[i] + a22), rri * uri * an1 * a12, rri * uri * an2 * a21);
+                if (!odd) add_block_22(s, t, e1, e2 * an1, e2 * an2);
             }
-            const double an12 = g.ann(n1, n2) * factor;
-            r11(n1, n2) = ar11 * an12;
-            r12(n1, n2) = ar12 * an12;
-            r21(n1, n2) = ar21 * an12;
-            r22(n1, n2) = ar22 * an12;
-            i11(n1, n2) = ai11 * an12;
-            i12(n1, n2) = ai12 * an12;
-            i21(n1, n2) = ai21 * an12;
-            i22(n1, n2) = ai22 * an12;
-            rg11(n1, n2) = gr11 * an12;
-            rg12(n1, n2) = gr12 * an12;
-            rg21(n1, n2) = gr21 * an12;
-            rg22(n1, n2) = gr22 * an12;
-            ig11(n1, n2) = gi11 * an12;
-            ig12(n1, n2) = gi12 * an12;
-            ig21(n1, n2) = gi21 * an12;
-            ig22(n1, n2) = gi22 * an12;
+            store(b, n1, n2, s, g.ann(n1, n2) * factor);
         }
-    }
+}
+
+// The matrices Q and RG(Q) of the null-field equations from the blocks (rows and columns of the
+// blocks 11, 12, 21, 22 of order nm = nmax - m + 1), then T = -RG(Q) Q^-1.
+void tmatr(const Grid& g, int m, bool ncheck, Mat& tr1, Mat& ti1) {
+    const int nmax = g.nmax;
+    const bool zero = (m == 0);
+    const int mm1 = zero ? 1 : m;
+    Blocks b(nmax);
+    if (zero)
+        blocks_m0(g, ncheck, b);
+    else
+        blocks_m(g, m, ncheck, b);
     const double tpir = g.pir, tpii = g.pii, tppi = g.ppi;
     const int nm = zero ? nmax : nmax - mm1 + 1;
     Mat qr(2 * nm, 2 * nm), qi(2 * nm, 2 * nm), rgqr(2 * nm, 2 * nm), rgqi(2 * nm, 2 * nm);
@@ -680,35 +715,27 @@ void tmatr(const Grid& g, int m, bool ncheck, Mat& tr1, Mat& ti1) {
         const int k1 = n1 - mm1 + 1, kk1 = k1 + nm;
         for (int n2 = mm1; n2 <= nmax; ++n2) {
             const int k2 = n2 - mm1 + 1, kk2 = k2 + nm;
-            const double tar11 = -r11(n1, n2), tai11 = -i11(n1, n2), tgr11 = -rg11(n1, n2), tgi11 = -ig11(n1, n2);
-            const double tar12 = i12(n1, n2), tai12 = -r12(n1, n2), tgr12 = ig12(n1, n2), tgi12 = -rg12(n1, n2);
-            const double tar21 = -i21(n1, n2), tai21 = r21(n1, n2), tgr21 = -ig21(n1, n2), tgi21 = rg21(n1, n2);
-            const double tar22 = -r22(n1, n2), tai22 = -i22(n1, n2), tgr22 = -rg22(n1, n2), tgi22 = -ig22(n1, n2);
+            const double tar11 = -b.r11(n1, n2), tai11 = -b.i11(n1, n2), tgr11 = -b.rg11(n1, n2), tgi11 = -b.ig11(n1, n2);
+            const double tar12 = b.i12(n1, n2), tai12 = -b.r12(n1, n2), tgr12 = b.ig12(n1, n2), tgi12 = -b.rg12(n1, n2);
+            const double tar21 = -b.i21(n1, n2), tai21 = b.r21(n1, n2), tgr21 = -b.ig21(n1, n2), tgi21 = b.rg21(n1, n2);
+            const double tar22 = -b.r22(n1, n2), tai22 = -b.i22(n1, n2), tgr22 = -b.rg22(n1, n2), tgi22 = -b.ig22(n1, n2);
             qr(k1, k2) = tpir * tar21 - tpii * tai21 + tppi * tar12;
             qi(k1, k2) = tpir * tai21 + tpii * tar21 + tppi * tai12;
             rgqr(k1, k2) = tpir * tgr21 - tpii * tgi21 + tppi * tgr12;
             rgqi(k1, k2) = tpir * tgi21 + tpii * tgr21 + tppi * tgi12;
-            if (zero) {
-                qr(k1, kk2) = qi(k1, kk2) = rgqr(k1, kk2) = rgqi(k1, kk2) = 0.0;
-                qr(kk1, k2) = qi(kk1, k2) = rgqr(kk1, k2) = rgqi(kk1, k2) = 0.0;
-                qr(kk1, kk2) = tpir * tar12 - tpii * tai12 + tppi * tar21;
-                qi(kk1, kk2) = tpir * tai12 + tpii * tar12 + tppi * tai21;
-                rgqr(kk1, kk2) = tpir * tgr12 - tpii * tgi12 + tppi * tgr21;
-                rgqi(kk1, kk2) = tpir * tgi12 + tpii * tgr12 + tppi * tgi21;
-            } else {
-                qr(k1, kk2) = tpir * tar11 - tpii * tai11 + tppi * tar22;
-                qi(k1, kk2) = tpir * tai11 + tpii * tar11 + tppi * tai22;
-                rgqr(k1, kk2) = tpir * tgr11 - tpii * tgi11 + tppi * tgr22;
-                rgqi(k1, kk2) = tpir * tgi11 + tpii * tgr11 + tppi * tgi22;
-                qr(kk1, k2) = tpir * tar22 - tpii * tai22 + tppi * tar11;
-                qi(kk1, k2) = tpir * tai22 + tpii * tar22 + tppi * tai11;
-                rgqr(kk1, k2) = tpir * tgr22 - tpii * tgi22 + tppi * tgr11;
-                rgqi(kk1, k2) = tpir * tgi22 + tpii * tgr22 + tppi * tgi11;
-                qr(kk1, kk2) = tpir * tar12 - tpii * tai12 + tppi * tar21;
-                qi(kk1, kk2) = tpir * tai12 + tpii * tar12 + tppi * tai21;
-                rgqr(kk1, kk2) = tpir * tgr12 - tpii * tgi12 + tppi * tgr21;
-                rgqi(kk1, kk2) = tpir * tgi12 + tpii * tgr12 + tppi * tgi21;
-            }
+            qr(kk1, kk2) = tpir * tar12 - tpii * tai12 + tppi * tar21;
+            qi(kk1, kk2) = tpir * tai12 + tpii * tar12 + tppi * tai21;
+            rgqr(kk1, kk2) = tpir * tgr12 - tpii * tgi12 + tppi * tgr21;
+            rgqi(kk1, kk2) = tpir * tgi12 + tpii * tgr12 + tppi * tgi21;
+            if (zero) continue;  // the blocks 11 and 22 are zero for m = 0 (the matrices start as zeros)
+            qr(k1, kk2) = tpir * tar11 - tpii * tai11 + tppi * tar22;
+            qi(k1, kk2) = tpir * tai11 + tpii * tar11 + tppi * tai22;
+            rgqr(k1, kk2) = tpir * tgr11 - tpii * tgi11 + tppi * tgr22;
+            rgqi(k1, kk2) = tpir * tgi11 + tpii * tgr11 + tppi * tgi22;
+            qr(kk1, k2) = tpir * tar22 - tpii * tai22 + tppi * tar11;
+            qi(kk1, k2) = tpir * tai22 + tpii * tar22 + tppi * tai11;
+            rgqr(kk1, k2) = tpir * tgr22 - tpii * tgi22 + tppi * tgr11;
+            rgqi(kk1, k2) = tpir * tgi22 + tpii * tgr22 + tppi * tgi11;
         }
     }
     tr1 = Mat(2 * nm, 2 * nm);
@@ -862,73 +889,50 @@ Particle calctmat(double axi, double rat, double lam, double mrr, double mri, do
 
 // ---------------------------------------------------------------------------
 // Amplitude matrix of a particle in a fixed orientation (AMPL). Angles in degrees.
-// out = (VV, VH, HV, HH), i.e. S(1,1), S(1,2), S(2,1), S(2,2) of CALCAMPL.
-void ampl(const Particle& p, double tl, double tl1, double pl, double pl1, double alpha, double beta, cd out[4]) {
-    const int nmax = p.nmax;
+
+struct Rotations {  // the rotation of the scattering plane (Eqs. 8-21 of Mishchenko 2000)
+    double r[2][2], r1[2][2];  // R and R^-1
+    double dcth0, dcth, ph;    // cosines of the incident and scattered polar angles in the particle frame, phi difference
+};
+
+void check_angles(double alpha, double beta, double tl, double tl1, double pl, double pl1) {
     if (alpha < 0.0 || alpha > 360.0 || beta < 0.0 || beta > 180.0 || tl < 0.0 || tl > 180.0 || tl1 < 0.0 ||
         tl1 > 180.0 || pl < 0.0 || pl > 360.0 || pl1 < 0.0 || pl1 > 360.0)
         fail("an angle is outside its allowed range");
-    const double pin = kPi, pin2 = pin * 0.5, pi = pin / 180.0;
-    const double alph = alpha * pi;
-    double bet = beta * pi;
-    double thetl = tl * pi, phil = pl * pi, thetl1 = tl1 * pi, phil1 = pl1 * pi;
-    const double eps = 1e-7;
-    if (thetl < pin2) thetl += eps;
-    if (thetl > pin2) thetl -= eps;
-    if (thetl1 < pin2) thetl1 += eps;
-    if (thetl1 > pin2) thetl1 -= eps;
-    if (phil < pin) phil += eps;
-    if (phil > pin) phil -= eps;
-    if (phil1 < pin) phil1 += eps;
-    if (phil1 > pin) phil1 -= eps;
-    if (bet <= pin2 && pin2 - bet <= eps) bet -= eps;
-    if (bet > pin2 && bet - pin2 <= eps) bet += eps;
+}
 
-    double cb = std::cos(bet), sb = std::sin(bet);
-    double ct = std::cos(thetl), st = std::sin(thetl);
-    double cp = std::cos(phil - alph), sp = std::sin(phil - alph);
-    const double ctp = ct * cb + st * sb * cp;
-    const double thetp = std::acos(ctp);
+// Direction in the particle frame (THETP, PHIP of Eqs. 8, 19, 20) of a direction in the laboratory frame.
+void particle_frame(double thetl, double phil, double alph, double cb, double sb, double* ctp, double* thetp,
+                    double* phip) {
+    const double pin = kPi;
+    const double ct = std::cos(thetl), st = std::sin(thetl);
+    const double cp = std::cos(phil - alph), sp = std::sin(phil - alph);
+    *ctp = ct * cb + st * sb * cp;
+    *thetp = std::acos(*ctp);
     const double cpp = cb * st * cp - sb * ct;
     const double spp = st * sp;
-    double phip = std::atan(spp / cpp);
-    if (phip > 0.0 && sp < 0.0) phip += pin;
-    if (phip < 0.0 && sp > 0.0) phip += pin;
-    if (phip < 0.0) phip += 2.0 * pin;
+    double phi = std::atan(spp / cpp);
+    if (phi > 0.0 && sp < 0.0) phi += pin;
+    if (phi < 0.0 && sp > 0.0) phi += pin;
+    if (phi < 0.0) phi += 2.0 * pin;
+    *phip = phi;
+}
 
-    double ct1 = std::cos(thetl1), st1 = std::sin(thetl1);
-    double cp1 = std::cos(phil1 - alph), sp1 = std::sin(phil1 - alph);
-    const double ctp1 = ct1 * cb + st1 * sb * cp1;
-    const double thetp1 = std::acos(ctp1);
-    const double cpp1 = cb * st1 * cp1 - sb * ct1;
-    const double spp1 = st1 * sp1;
-    double phip1 = std::atan(spp1 / cpp1);
-    if (phip1 > 0.0 && sp1 < 0.0) phip1 += pin;
-    if (phip1 < 0.0 && sp1 > 0.0) phip1 += pin;
-    if (phip1 < 0.0) phip1 += 2.0 * pin;
+// AL (Eq. 14) or AP^-1 (Eq. 15) of a direction (theta, phi) are 3x2 and 2x3 matrices.
+void direction_matrices(double theta, double phi, double al[3][2]) {
+    const double ct = std::cos(theta), st = std::sin(theta), cp = std::cos(phi), sp = std::sin(phi);
+    al[0][0] = ct * cp;
+    al[0][1] = -sp;
+    al[1][0] = ct * sp;
+    al[1][1] = cp;
+    al[2][0] = -st;
+    al[2][1] = 0.0;
+}
 
-    const double ca = std::cos(alph), sa = std::sin(alph);
-    double b[3][3] = {{ca * cb, sa * cb, -sb}, {-sa, ca, 0.0}, {ca * sb, sa * sb, cb}};
-
-    cp = std::cos(phil);
-    sp = std::sin(phil);
-    cp1 = std::cos(phil1);
-    sp1 = std::sin(phil1);
-    double al[3][2] = {{ct * cp, -sp}, {ct * sp, cp}, {-st, 0.0}};
-    double al1[3][2] = {{ct1 * cp1, -sp1}, {ct1 * sp1, cp1}, {-st1, 0.0}};
-
-    ct = ctp;
-    st = std::sin(thetp);
-    cp = std::cos(phip);
-    sp = std::sin(phip);
-    ct1 = ctp1;
-    st1 = std::sin(thetp1);
-    cp1 = std::cos(phip1);
-    sp1 = std::sin(phip1);
-    double ap[2][3] = {{ct * cp, ct * sp, -st}, {-sp, cp, 0.0}};
-    double ap1[2][3] = {{ct1 * cp1, ct1 * sp1, -st1}, {-sp1, cp1, 0.0}};
-
-    double c[3][2], r[2][2], r1[2][2];
+void polarization_rotation(const double b[3][3], const double al[3][2], double thetp, double phip, double r[2][2]) {
+    const double ct = std::cos(thetp), st = std::sin(thetp), cp = std::cos(phip), sp = std::sin(phip);
+    const double ap[2][3] = {{ct * cp, ct * sp, -st}, {-sp, cp, 0.0}};
+    double c[3][2];
     for (int i = 0; i < 3; ++i)
         for (int j = 0; j < 2; ++j) {
             double x = 0.0;
@@ -941,27 +945,55 @@ void ampl(const Particle& p, double tl, double tl1, double pl, double pl1, doubl
             for (int k = 0; k < 3; ++k) x += ap[i][k] * c[k][j];
             r[i][j] = x;
         }
-    for (int i = 0; i < 3; ++i)
-        for (int j = 0; j < 2; ++j) {
-            double x = 0.0;
-            for (int k = 0; k < 3; ++k) x += b[i][k] * al1[k][j];
-            c[i][j] = x;
-        }
-    for (int i = 0; i < 2; ++i)
-        for (int j = 0; j < 2; ++j) {
-            double x = 0.0;
-            for (int k = 0; k < 3; ++k) x += ap1[i][k] * c[k][j];
-            r1[i][j] = x;
-        }
-    const double d = 1.0 / (r1[0][0] * r1[1][1] - r1[0][1] * r1[1][0]);
-    const double x0 = r1[0][0];
-    r1[0][0] = r1[1][1] * d;
-    r1[0][1] = -r1[0][1] * d;
-    r1[1][0] = -r1[1][0] * d;
-    r1[1][1] = x0 * d;
+}
 
-    const double dcth0 = ctp, dcth = ctp1;
-    const double ph = phip1 - phip;
+Rotations rotations(double tl, double tl1, double pl, double pl1, double alpha, double beta) {
+    const double pin = kPi, pin2 = pin * 0.5, pi = pin / 180.0;
+    const double alph = alpha * pi;
+    double bet = beta * pi;
+    double thetl = tl * pi, phil = pl * pi, thetl1 = tl1 * pi, phil1 = pl1 * pi;
+    const double eps = 1e-7;  // directions exactly on the poles or the equator are moved off them
+    if (thetl < pin2) thetl += eps;
+    if (thetl > pin2) thetl -= eps;
+    if (thetl1 < pin2) thetl1 += eps;
+    if (thetl1 > pin2) thetl1 -= eps;
+    if (phil < pin) phil += eps;
+    if (phil > pin) phil -= eps;
+    if (phil1 < pin) phil1 += eps;
+    if (phil1 > pin) phil1 -= eps;
+    if (bet <= pin2 && pin2 - bet <= eps) bet -= eps;
+    if (bet > pin2 && bet - pin2 <= eps) bet += eps;
+    const double cb = std::cos(bet), sb = std::sin(bet);
+    double ctp, thetp, phip, ctp1, thetp1, phip1;
+    particle_frame(thetl, phil, alph, cb, sb, &ctp, &thetp, &phip);
+    particle_frame(thetl1, phil1, alph, cb, sb, &ctp1, &thetp1, &phip1);
+    const double ca = std::cos(alph), sa = std::sin(alph);
+    const double b[3][3] = {{ca * cb, sa * cb, -sb}, {-sa, ca, 0.0}, {ca * sb, sa * sb, cb}};
+    double al[3][2], al1[3][2];
+    direction_matrices(thetl, phil, al);
+    direction_matrices(thetl1, phil1, al1);
+    Rotations rot;
+    polarization_rotation(b, al, thetp, phip, rot.r);
+    polarization_rotation(b, al1, thetp1, phip1, rot.r1);
+    const double d = 1.0 / (rot.r1[0][0] * rot.r1[1][1] - rot.r1[0][1] * rot.r1[1][0]);
+    const double x0 = rot.r1[0][0];
+    rot.r1[0][0] = rot.r1[1][1] * d;
+    rot.r1[0][1] = -rot.r1[0][1] * d;
+    rot.r1[1][0] = -rot.r1[1][0] * d;
+    rot.r1[1][1] = x0 * d;
+    rot.dcth0 = ctp;
+    rot.dcth = ctp1;
+    rot.ph = phip1 - phip;
+    return rot;
+}
+
+void ampl(const Particle& p, double tl, double tl1, double pl, double pl1, double alpha, double beta, cd out[4]) {
+    const int nmax = p.nmax;
+    check_angles(alpha, beta, tl, tl1, pl, pl1);
+    const Rotations rot = rotations(tl, tl1, pl, pl1, alpha, beta);
+    const double dcth0 = rot.dcth0, dcth = rot.dcth, ph = rot.ph;
+    const auto& r = rot.r;
+    const auto& r1 = rot.r1;
     cd vv(0, 0), vh(0, 0), hv(0, 0), hh(0, 0);
     std::vector<double> dv1(nmax + 2), dv2(nmax + 2), dv01(nmax + 2), dv02(nmax + 2);
     for (int m = 0; m <= nmax; ++m) {
@@ -995,7 +1027,7 @@ void ampl(const Particle& p, double tl, double tl1, double pl, double pl1, doubl
             }
         }
     }
-    const double dk = 2.0 * pin / p.lam;
+    const double dk = 2.0 * kPi / p.lam;
     vv /= dk;
     vh /= dk;
     hv /= dk;
