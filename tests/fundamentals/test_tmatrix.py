@@ -231,3 +231,17 @@ def test_without_the_kernel_the_functions_say_so(monkeypatch):
     monkeypatch.setattr(tm, "HAS_COMPILED_KERNEL", False)
     with pytest.raises(ImportError, match="compiled kernel"):
         tm.raindrop_scattering([1.0], 107.0)
+
+
+def test_a_non_positive_canting_width_raises():
+    with pytest.raises(ValueError, match="std must be positive"):
+        tm.orientation_quadrature(std=0.0)
+
+
+@needs_kernel
+def test_axis_ratio_can_be_a_function_of_the_diameter():
+    d = [1.0, 3.0]
+    own = tm.raindrop_scattering(d, 107.0, axis_ratio=lambda x: np.full(len(x), 0.8))
+    fixed = tm.raindrop_scattering(d, 107.0, axis_ratio=0.8)
+    np.testing.assert_allclose(own.sigma_h, fixed.sigma_h)
+    assert (own.sigma_h != tm.raindrop_scattering(d, 107.0).sigma_h).all()
