@@ -23,6 +23,7 @@ PREFIXES = (
     "swx_20120520_0641.nc",
     "corcsapr2cmacppiM1.c1.20181111.030003.nc",
     "RAW_NA_000_125_20080411",
+    "71_20181220_060628.pvol.h5",
     "IMD/JPR220822135253-IMD-B.nc",
 )
 IMD_BASE = RAW + "syedhamidali/pyscancf_examples/main/data/goa_c/"

@@ -210,6 +210,9 @@ notebooks/Azimuthal_Shear
 
 notebooks/Hydrometeor_Classification
 notebooks/DSD_Retrieval
+notebooks/TMatrix_Validation
+notebooks/TMatrix_Textbook_Examples
+notebooks/TMatrix_Radar_Bands
 notebooks/Disdrometers
 notebooks/QVP
 notebooks/Evaporation
