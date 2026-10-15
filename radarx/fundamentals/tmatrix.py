@@ -59,8 +59,10 @@ Assumptions
 - The canting distribution is Gaussian with zero mean; 7 degrees is the radarx default
   (Huang et al. [5]_; the value is not checked against the paper). The width matters:
   at S band 20 degrees instead of 7 lowers the ZDR of a 4 mm drop by 0.65 dB, that of an
-  8 mm drop by 1.7 dB, and K_DP by 27 % (a comparison preprint of Kumjian and Ryzhkov [9]_
-  used 20 degrees; not checked in the published paper).
+  8 mm drop by 1.7 dB, and K_DP by 27 %. Kumjian and Ryzhkov [9]_ assume 20 degrees,
+  call 10 degrees more appropriate for typical rainfall (they chose 20 to enlarge the
+  effect of evaporation on the correlation coefficient), and define S band as 10.9 cm
+  and C band as 5.3 cm (radarx: 10.7 and 5.4 cm, at 2.8 and 5.6 GHz).
 - The size parameter of the largest drop sets the cost: the order of the expansion is
   about :math:`x + 4.05 x^{1/3}` with :math:`x = 2\\pi a/\\lambda`, up to 99.
 

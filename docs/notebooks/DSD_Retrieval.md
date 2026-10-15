@@ -101,9 +101,9 @@ Going from 7 to 20 degrees lowers $Z_{DR}$ by 0.65 dB for a 4 mm drop and by
 of 8 mm drops by 0.36 dB, and $K_{DP}$, which scales as $1/\lambda$ for small
 drops (a factor 1.11), is 26 % larger for 8 mm drops; between 0 and 30 degrees
 Celsius the $Z_{DR}$ of 8 mm drops changes by 0.3 dB. The
-differences between scattering assumptions in the literature (a comparison preprint
-of Kumjian and Ryzhkov used 10.9 cm and 20 degrees of canting, here 10.7 cm and 7
-degrees; not checked in the published paper) are therefore of the size of the
+differences between scattering assumptions in the literature (Kumjian and Ryzhkov 2010
+use 10.9 cm and 20 degrees of canting, which they call too wide for typical rainfall, where
+10 degrees is more appropriate; here 10.7 cm and 7 degrees) are therefore of the size of the
 large-drop signal itself, and the tables should be rebuilt (`ci/build_dsd_tables.py`, a few seconds) with the assumptions
 of the data they are applied to.
 
