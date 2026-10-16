@@ -169,12 +169,13 @@ $ pytest tests/test_radarx.py
 The 16 slowest tests (listed in `tests/conftest.py`) are skipped when the
 environment variable `RADARX_SKIP_SLOW=1` is set; the CI runs them in one job.
 
-The tests of the compiled kernels skip themselves when a kernel is not built, and
-pytest imports radarx from the checkout, so the kernels have to be installed in place
-(`pip install -e .`, as above). Set `RADARX_REQUIRE_KERNELS=1` to make pytest stop
-with an error instead of skipping when one is missing; the CI sets it. One CI job also
-builds the wheel, installs it and runs the tests from a copy outside the checkout, so
-that what users install is tested too.
+The tests of the compiled kernels skip themselves when a kernel is not built. For
+local work, install in place (`pip install -e .`, as above) so that pytest finds them,
+and set `RADARX_REQUIRE_KERNELS=1` to make pytest stop with an error instead of
+skipping when one is missing. The CI does not test the source tree: every unit-test job
+builds the wheel, installs it, and runs the tests from a copy of the repository without
+the `radarx` source (`.github/actions/test-installed`), so that what users install is
+what is tested, and a missing kernel or package file fails the job.
 
 ## Deploying
 
