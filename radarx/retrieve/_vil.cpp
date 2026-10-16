@@ -142,6 +142,29 @@ Integral integrate_column(const double* sh, const double* sz, int64_t n, double 
     return r;
 }
 
+// Constant layers (operational scheme): each sample holds over the layer from the middle
+// between it and the sample below to the middle between it and the sample above; the lowest
+// layer starts at base_height and the highest ends at the top of its beam st[n - 1].
+Integral integrate_operational(const double* sh, const double* st, const double* sz, int64_t n,
+                               double ceil_h, double base_height) {
+    Integral r;
+    const double base = std::isfinite(base_height) ? base_height : sh[0];
+    double lower = base;
+    for (int64_t i = 0; i < n; ++i) {
+        const double upper = (i + 1 < n) ? 0.5 * (sh[i] + sh[i + 1]) : st[i];
+        const double lo = std::max(lower, base);
+        const double zr = std::pow(sz[i], kExponent);
+        r.total += zr * std::max(upper - lo, 0.0);
+        r.has = true;
+        if (!std::isnan(ceil_h) && lo < ceil_h) {
+            r.liquid += zr * std::max(std::min(upper, ceil_h) - lo, 0.0);
+            r.has_liquid = true;
+        }
+        lower = upper;
+    }
+    return r;
+}
+
 // Echo top: the highest sample at or above the threshold, interpolated in dBZ towards the
 // next higher sample, or the top of its beam.
 double echo_top_height(const double* sh, const double* st, const double* sv, int64_t n,
@@ -187,7 +210,7 @@ py::array_t<double> columns_py(const DArray& h, const DArray& h_top, const DArra
                                const DArray& ceiling, bool shared, double dbz_cap,
                                double min_dbz, double top_threshold, double no_echo_dbz,
                                bool fill_below, double base_height, bool interpolate,
-                               bool partial_layers, int n_threads) {
+                               bool partial_layers, bool operational, int n_threads) {
     check_shapes(h, h_top, v, ceiling, shared);
     const int64_t nk = v.shape(0);
     const int64_t nc = v.shape(1);
@@ -216,8 +239,10 @@ py::array_t<double> columns_py(const DArray& h, const DArray& h_top, const DArra
                     for (int64_t i = 0; i < n; ++i)
                         sz[i] = (sv[i] < floor_dbz) ? 0.0 : std::pow(10.0, std::min(sv[i], cap) / 10.0);
                     const Integral r =
-                        integrate_column(sh.data(), sz.data(), n, cp[c], fill_below, base_height,
-                                         partial_layers);
+                        operational ? integrate_operational(sh.data(), st.data(), sz.data(), n,
+                                                            cp[c], base_height)
+                                    : integrate_column(sh.data(), sz.data(), n, cp[c], fill_below,
+                                                       base_height, partial_layers);
                     if (r.has) vil = kCoefficient * r.total;
                     if (r.has_liquid) liquid = kCoefficient * r.liquid;
                     top = echo_top_height(sh.data(), st.data(), sv.data(), n, top_threshold,
@@ -241,5 +266,6 @@ PYBIND11_MODULE(_vil, m) {
           py::arg("ceiling"), py::arg("shared"), py::arg("dbz_cap"), py::arg("min_dbz"),
           py::arg("top_threshold"), py::arg("no_echo_dbz"), py::arg("fill_below"),
           py::arg("base_height"), py::arg("interpolate"),
-          py::arg("partial_layers") = true, py::arg("n_threads") = 0);
+          py::arg("partial_layers") = true, py::arg("operational") = false,
+          py::arg("n_threads") = 0);
 }
