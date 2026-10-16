@@ -216,7 +216,7 @@ def compare(azimuth, range_km, half_width_km, cartesian_km=0.5):
         line_color="black", line_width=0.1, title="uxarray (gate polygons)",
         **{**style, "colorbar": True, "frame_width": 250},
     )
-    return (p_polar + p_grid + p_ux).opts(shared_axes=False).cols(3)
+    return (p_polar + p_grid + p_ux).opts(shared_axes=False).cols(2)
 ```
 
 **Near the radar (10 km, 6 km × 6 km).** Gates are only about 90 m wide and
