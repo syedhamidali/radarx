@@ -156,6 +156,7 @@ dask arrays.
 | Computes | `radarx.retrieve.tornado` | `tornado_probability`, `tornet_inputs` |
 | Computes | `radarx.retrieve.vertical_profiles` | `cvp`, `mask_above_melting_layer`, `melting_layer`, `melting_layer_ppi`, `qvp_timeseries`, `rd_qvp`, `rhi_qvp` |
 | Computes | `radarx.retrieve.wind_profile` | `vad_profile` |
+| Computes | `radarx.retrieve.zdr_arc` | `zdr_arc` |
 | Computes, cannot be lazy | `radarx.retrieve.lightning` | `cell_flash_rate`, `cluster_flashes` |
 | Computes, cannot be lazy | `radarx.retrieve.rain_trajectories` | `rain_source_points`, `trajectory_matched_times` |
 | Computes, cannot be lazy | `radarx.retrieve.superobs` | `superobs` |

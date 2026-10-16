@@ -41,6 +41,7 @@ shown.
 | 15 | dual-PRF velocity correction | `correct_dual_prf` |
 | 16 | ensembles and uncertainty of the retrievals: errors of the measurements, calibration and DSD prior propagated by Monte Carlo | `perturb_radar`, `measurement_error`, `ensemble_retrieval`, `ensemble_statistics`, `relation_scatter` |
 | 17 | ZDR column depth, area and volume above the freezing level | `zdr_column`, `zdr_column_metrics` |
+| 18 | ZDR arc and KDP-ZDR separation of supercells on a grid | `zdr_arc` |
 
 ```{code-cell} ipython3
 import math
@@ -1058,6 +1059,58 @@ paper's way of keeping the three-body scatter signature out of the product.
 The depth needs a freezing level in the vertical reference of the grid (a
 sounding or a model) and a calibrated $Z_{DR}$.
 
+## 18. ZDR arc and KDP-ZDR separation
+
+In the forward flank of a supercell the storm-relative wind sorts the drops by size: the
+big ones fall out near the inflow edge and form an arc of high $Z_{DR}$, the small ones are
+carried deeper into the storm, where $K_{DP}$ is enhanced. The distance between the two, and
+its angle to the storm motion, indicate the low-level shear (Wilson and Van Den Broeke 2021).
+`zdr_arc` finds the arc, the storm and the $K_{DP}$ foot on a grid of the lowest level and
+gives the arc area, the mean and top-10 $Z_{DR}$ of the arc, and the length and angle of the
+separation vector. The data are synthetic: a storm with its arc on the south (inflow) side,
+a patch of high $Z_{DR}$ on the north side that the inflow mask removes, and a foot in the core.
+The forward-flank downdraft vector points north and the storm moves east.
+
+```{code-cell} ipython3
+from radarx.retrieve import zdr_arc
+
+xa = ya = np.arange(0.0, 60001.0, 500.0)
+XX, YY = np.meshgrid(xa, ya)
+core = (XX - 30e3) ** 2 + (YY - 32e3) ** 2
+supercell = xr.Dataset(
+    {
+        "DBZH": (("y", "x"), 60.0 * np.exp(-core / (2 * 9e3**2))),
+        "ZDR": (("y", "x"), np.where(
+            ((XX >= 26e3) & (XX <= 34e3) & (YY >= 20e3) & (YY <= 23e3))
+            | ((XX >= 26e3) & (XX <= 34e3) & (YY >= 41e3) & (YY <= 43e3)), 4.0, 0.5)),
+        "RHOHV": (("y", "x"), np.full(XX.shape, 0.98)),
+        "KDP": (("y", "x"), np.where(np.hypot(XX - 30e3, YY - 29e3) <= 3e3, 2.5, 0.1)),
+    },
+    coords={"x": xa, "y": ya},
+)
+arc = zdr_arc(supercell, rhohv="RHOHV", kdp="KDP", ffd_direction=0.0, storm_motion=90.0)
+s = arc.isel(storm=0)
+print(f"{arc.sizes['candidate']} candidate of the arc; arc {float(s.arc_area):.1f} km2, mean ZDR {float(s.arc_mean_zdr):.1f} dB, "
+      f"top-10 {float(s.arc_top10_zdr):.1f} dB; separation {float(s.separation_length):.1f} km at {float(s.separation_angle):.0f}° to the storm motion")
+# the accessor gives the same
+print(bool(supercell.radarx.zdr_arc(rhohv="RHOHV", kdp="KDP", ffd_direction=0.0, storm_motion=90.0).arc_area[0] == s.arc_area))
+fig, ax = plt.subplots(figsize=(5.2, 4.6), layout="constrained")
+ax.pcolormesh(xa / 1e3, ya / 1e3, supercell.DBZH, cmap="Greys", vmin=0, vmax=60, shading="auto")
+ax.contour(xa / 1e3, ya / 1e3, supercell.ZDR, levels=[3.25], colors="tab:blue")
+ax.contour(xa / 1e3, ya / 1e3, arc.ZDR_ARC_STORM >= 0, levels=[0.5], colors="tab:red")
+ax.contour(xa / 1e3, ya / 1e3, arc.KDP_FOOT_STORM >= 0, levels=[0.5], colors="tab:green")
+ax.annotate("", xy=(float(s.arc_x) / 1e3, float(s.arc_y) / 1e3), xytext=(float(s.foot_x) / 1e3, float(s.foot_y) / 1e3),
+            arrowprops=dict(arrowstyle="->", color="k"))
+ax.set(xlabel="x (km)", ylabel="y (km)", aspect="equal", title="ZDR arc (red), KDP foot (green), 3.25 dB contours (blue)")
+```
+
+The paper removes the candidates that are not part of the arc with a random forest trained on
+hand-labelled objects; `classifier` takes a model of your own or a function of the features
+(`radarx.retrieve.zdr_arc.FEATURES`), and without it every candidate near a storm is part of
+the arc. The reflectivity gradient mask keeps the north patch out here. The algorithm is for
+supercells: the leading edge of a squall line and the high $Z_{DR}$ below developing
+updrafts are often detected as arcs, and $Z_{DR}$ must be calibrated.
+
 ## References
 
 - Holleman, I., and H. Beekhuis, 2003: Analysis and Correction of Dual PRF Velocity Data. *Journal of Atmospheric and Oceanic Technology*, **20**, 443-453, <https://doi.org/10.1175/1520-0426(2003)20<443:AACODP>2.0.CO;2>
@@ -1069,6 +1122,7 @@ sounding or a model) and a calibrated $Z_{DR}$.
 - Ryzhkov, A. V., J. Snyder, J. T. Carlin, A. Khain, and M. Pinsky, 2020: What Polarimetric Weather Radars Offer to Cloud Modelers: Forward Radar Operators and Microphysical/Thermodynamic Retrievals. *Atmosphere*, **11**, 362, <https://doi.org/10.3390/atmos11040362>
 - Ryzhkov, A., M. Diederich, P. Zhang, and C. Simmer, 2014: Potential Utilization of Specific Attenuation for Rainfall Estimation, Mitigation of Partial Beam Blockage, and Radar Networking. *Journal of Atmospheric and Oceanic Technology*, **31**, 599-619, <https://doi.org/10.1175/JTECH-D-13-00038.1>
 - Snyder, J. C., A. V. Ryzhkov, M. R. Kumjian, A. P. Khain, and J. Picca, 2015: A ZDR Column Detection Algorithm to Examine Convective Storm Updrafts. *Weather and Forecasting*, **30**, 1819-1844, <https://doi.org/10.1175/WAF-D-15-0068.1>
+- Wilson, M. B., and M. S. Van Den Broeke, 2021: An Automated Python Algorithm to Quantify ZDR Arc and KDP-ZDR Separation Signatures in Supercells. *Journal of Atmospheric and Oceanic Technology*, **38**, 371-386, <https://doi.org/10.1175/JTECH-D-20-0056.1>
 - Shapiro, A., 1993: The Use of an Exact Solution of the Navier-Stokes Equations in a Validation Test of a Three-Dimensional Nonhydrostatic Numerical Model. *Monthly Weather Review*, **121**, 2420-2425, <https://doi.org/10.1175/1520-0493(1993)121<2420:TUOAES>2.0.CO;2>
 - Veillette, M. S., J. M. Kurdzo, P. M. Stepanian, J. Y. N. Cho, T. Reis, S. Samsi, J. McDonald, and N. Chisler, 2025: A Benchmark Dataset for Tornado Detection and Prediction Using Full-Resolution Polarimetric Weather Radar Data. *Artificial Intelligence for the Earth Systems*, **4**, <https://doi.org/10.1175/AIES-D-24-0006.1>
 - Ziegler, C. L., 2013a: A Diabatic Lagrangian Technique for the Analysis of Convective Storms. Part I: Description and Validation via an Observing System Simulation Experiment. *Journal of Atmospheric and Oceanic Technology*, **30**, 2248-2265, <https://doi.org/10.1175/JTECH-D-12-00194.1>

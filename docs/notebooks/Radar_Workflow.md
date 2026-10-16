@@ -2327,6 +2327,7 @@ notebooks or from this index.
 | `storm_relative_helicity` | `radarx.retrieve.wind_profile` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
 | `storm_relative_wind` | `radarx.retrieve.wind_profile` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
 | `vad_profile` | `radarx.retrieve.wind_profile` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
+| `zdr_arc` | `radarx.retrieve.zdr_arc` | [part 3](Radar_Workflow_Advanced_2): 18. ZDR arc and KDP-ZDR separation |
 | `hvplot_cappi` | `radarx.vis.interactive` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `hvplot_centroids` | `radarx.vis.interactive` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `hvplot_max_cappi` | `radarx.vis.interactive` | [core](Radar_Workflow): Other ways to grid, section and plot |
@@ -2450,6 +2451,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.vil` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.vil_density` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.z_offset` | [core](Radar_Workflow): 15. Noise and calibration |
+| `.radarx.zdr_arc` | [part 3](Radar_Workflow_Advanced_2): 18. ZDR arc and KDP-ZDR separation |
 | `.radarx.zdr_column` | [part 3](Radar_Workflow_Advanced_2): 17. ZDR columns |
 | `.radarx.zdr_column_metrics` | [part 3](Radar_Workflow_Advanced_2): 17. ZDR columns |
 | `.radarx.zdr_offset` | [core](Radar_Workflow): 15. Noise and calibration |
