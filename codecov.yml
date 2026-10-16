@@ -14,3 +14,9 @@ coverage:
       default:
         # tolerate rounding noise between runs
         threshold: 0.1%
+    patch:
+      default:
+        # a fixed target: with "auto" (the coverage of the base commit, 98.7 %) one missed
+        # line in a patch of 27 lines failed the check of a merge. A patch must cover
+        # nine lines in ten; the project check above guards the total.
+        target: 90%

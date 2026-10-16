@@ -955,3 +955,27 @@ def test_heatmap_stride_is_found_from_the_shape():
     assert tor_mod._heatmap_stride((8, 8), 121, 121) == 16
     # a shape that no power of two gives: the stride of the TorNet CNN
     assert tor_mod._heatmap_stride((7, 7), 120, 240) == tor_mod._HEATMAP_STRIDE
+
+
+def test_onnx_path_gives_up_when_the_upstream_file_keeps_disappearing(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("RADARX_CACHE_DIR", str(tmp_path / "cache"))
+    calls = []
+
+    def retrieve(url, known_hash, path, progressbar):
+        calls.append(url)
+        return str(tmp_path / "upstream.h5")
+
+    def read(source):
+        raise FileNotFoundError(source)
+
+    import pooch
+
+    monkeypatch.setattr(pooch, "retrieve", retrieve)
+    monkeypatch.setitem(
+        _onnx_models._READERS, "tornet-baseline-v1", (read, lambda params: None)
+    )
+    with pytest.raises(FileNotFoundError):
+        _onnx_models.onnx_path("tornet-baseline-v1")
+    assert len(calls) == 3  # three attempts, no converted file appeared

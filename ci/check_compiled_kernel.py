@@ -25,9 +25,15 @@ sources = sorted(root.rglob("_*.cpp"))
 if not sources:
     sys.exit("no kernel sources found")
 
+names = [
+    ".".join(("radarx",) + s.relative_to(root).with_suffix("").parts) for s in sources
+]
+if "--list" in sys.argv:  # the module names, for RADARX_REQUIRE_KERNELS=<file>
+    print("\n".join(names))
+    sys.exit(0)
+
 missing = []
-for source in sources:
-    name = ".".join(("radarx",) + source.relative_to(root).with_suffix("").parts)
+for name in names:
     try:
         importlib.import_module(name)
     except ImportError as err:

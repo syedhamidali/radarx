@@ -18,3 +18,10 @@ show_missing = True
 
 # Optionally skip showing files that are 100% covered
 skip_covered = True
+
+[paths]
+# the tests run against the installed wheel: map its files back to the checkout
+source =
+    radarx/
+    */site-packages/radarx/
+    *\site-packages\radarx\

@@ -4,6 +4,9 @@
 
 """Test configuration shared by the whole suite."""
 
+import os
+from pathlib import Path
+
 # open-radar-data files that several test modules read, and the one the QVP
 # time-series test starts from
 SHARED_DATA = (
@@ -15,8 +18,57 @@ SHARED_DATA = (
 RETRIES = 5
 
 
+def _expected_kernels():
+    """Module names of the compiled kernels the tests must find.
+
+    ``RADARX_REQUIRE_KERNELS`` is either 1 (every ``radarx/**/_*.cpp`` of the checkout) or
+    the path of a file with one module name per line (for tests run outside the checkout).
+    """
+    value = os.environ.get("RADARX_REQUIRE_KERNELS", "")
+    if value in ("", "0"):
+        return []
+    if value != "1":
+        return [n for n in Path(value).read_text().split() if n]
+    root = Path(__file__).resolve().parents[1] / "radarx"
+    return [
+        ".".join(("radarx",) + source.relative_to(root).with_suffix("").parts)
+        for source in sorted(root.rglob("_*.cpp"))
+    ]
+
+
+def _require_kernels():
+    """Fail the session if a compiled kernel is missing from the radarx that is tested.
+
+    The kernel tests skip themselves without the extension, and a skip is easy to miss
+    in a CI log: pytest imports radarx from the checkout, which has no compiled kernels
+    unless the package was installed in place, so every one of them was skipped for months.
+    CI sets RADARX_REQUIRE_KERNELS, which turns that into a failure.
+    """
+    import importlib
+
+    import pytest
+
+    expected = _expected_kernels()
+    if not expected and os.environ.get("RADARX_REQUIRE_KERNELS", "") not in ("", "0"):
+        raise pytest.UsageError("RADARX_REQUIRE_KERNELS is set but no kernel is listed")
+    missing = []
+    for name in expected:
+        try:
+            importlib.import_module(name)
+        except ImportError as error:
+            missing.append(f"{name}: {error}")
+    if missing:
+        import radarx
+
+        raise pytest.UsageError(
+            f"compiled kernels missing from the radarx the tests import ({radarx.__file__}); "
+            "install it in place (pip install -e .) or as a wheel:\n  "
+            + "\n  ".join(missing)
+        )
+
+
 def pytest_configure(config):
-    """Make the test-data downloads robust.
+    """Check the compiled kernels, then make the test-data downloads robust.
 
     The files come from GitHub, whose raw endpoint answers 504 (gateway
     time-out) when many workers ask at once, and on Windows two workers that
@@ -26,6 +78,7 @@ def pytest_configure(config):
     controller fetches the shared files once, before the workers start. A
     download that still fails is left to the tests that need the file.
     """
+    _require_kernels()
     try:
         from open_radar_data import DATASETS
     except ImportError:
@@ -73,8 +126,6 @@ SLOW_TESTS = (
 
 def pytest_collection_modifyitems(config, items):
     """Skip the slow tests when RADARX_SKIP_SLOW is set (see SLOW_TESTS)."""
-    import os
-
     import pytest
 
     if os.environ.get("RADARX_SKIP_SLOW", "") in ("", "0"):
