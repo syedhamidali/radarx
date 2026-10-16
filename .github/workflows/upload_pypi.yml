@@ -21,8 +21,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macos-15-intel: Intel macOS (macos-13 runners are being retired)
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-15-intel, macos-14, windows-latest]
+        # macos-15-intel: Intel macOS (macos-13 runners are being retired). macos-15 is
+        # the arm64 runner: netCDF4 1.7.5 has no arm64 wheel for macOS 14, and the
+        # wheel test would build it from source
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-15-intel, macos-15, windows-latest]
     steps:
       - uses: actions/checkout@v4
         with:
