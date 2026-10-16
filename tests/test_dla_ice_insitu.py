@@ -212,8 +212,10 @@ def test_adjustment_engines_agree():
     for ice in (False, True):
         a, b = _adjust("compiled", th, p, qv, qc, qi, ice=ice)
         c, d = _adjust("numpy", th, p, qv, qc, qi, ice=ice)
-        np.testing.assert_allclose(a, c, rtol=1e-12, atol=1e-15)
-        np.testing.assert_allclose(b, d, rtol=1e-12, atol=1e-15)
+        # the saturation adjustment iterates to a tolerance, and the compiled loop and
+        # NumPy differ in rounding (one element in 10 000 differs by 2e-12 on Linux)
+        np.testing.assert_allclose(a, c, rtol=1e-10, atol=1e-15)
+        np.testing.assert_allclose(b, d, rtol=1e-10, atol=1e-15)
 
 
 @pytest.mark.parametrize("engine", ["auto", "numpy"])
