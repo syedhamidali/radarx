@@ -36,8 +36,13 @@ defaults only where a paper gives them:
 | band | $R(Z)$ | $R(K_{DP})$ | $R(Z, Z_{DR})$ | $R(A)$ |
 |---|---|---|---|---|
 | S | 0.017 $Z^{0.714}$ | 44.0 $K_{DP}^{0.822}$ | 0.0142 $Z^{0.770} z_{dr}^{-1.67}$ | Table 1, 0 to 30 °C |
-| C | none | none | none | Table 1, 0 to 30 °C |
-| X | 0.029 $Z^{0.67}$ | 16.9 $K_{DP}^{0.801}$ | none | Table 1, 0 to 30 °C |
+| C | none | 30.5 $K_{DP}^{0.85}$ | 0.0058 $Z^{0.91} z_{dr}^{-2.09}$ | Table 1, 0 to 30 °C |
+| X | 0.029 $Z^{0.67}$ | 16.9 $K_{DP}^{0.801}$ | 0.0039 $Z^{1.07} z_{dr}^{-5.97}$ | Table 1, 0 to 30 °C |
+
+The C-band $R(K_{DP})$ and $R(Z, Z_{DR})$ and the X-band $R(Z, Z_{DR})$ come from the
+T-matrix simulations of [Bringi and Chandrasekar (2001)](https://doi.org/10.1017/CBO9780511541094)
+(Table 8.1 and Eq. 8.14, at 5.45 and 10 GHz); they are not fitted to a region.
+The notebook `TMatrix_Textbook_Examples` reproduces them with the T-matrix code of radarx.
 
 A rain rate is only as good as its inputs. Before the estimate, correct $Z_H$
 and $Z_{DR}$ for attenuation (strong at C and X band) and calibrate them,
@@ -328,8 +333,8 @@ The ARM CSAPR2 C-band radar observed deep convection in Argentina. The file
 holds the reflectivity and differential reflectivity corrected for
 attenuation, the specific attenuation $A_h$ of the Py-ART CMAC processing, a
 sounding temperature at every gate and an echo classification. There is no
-verified default for $R(Z)$, $R(K_{DP})$ and $R(Z, Z_{DR})$ at C band, only
-the $R(A)$ table, and the functions say so:
+verified default for $R(Z)$ at C band, and the function says so ($R(K_{DP})$,
+$R(Z, Z_{DR})$ and $R(A)$ have defaults):
 
 ```{code-cell} ipython3
 file = DATASETS.fetch("corcsapr2cmacppiM1.c1.20181111.030003.nc")
@@ -360,7 +365,7 @@ print(f"with the gate temperature: median {np.median(ratio_t):.3f}, 5-95 %: "
 
 The blend with the C-band classification of the
 [hydrometeor classification notebook](Hydrometeor_Classification) uses
-$R(A)$ in the rain classes, the only relation with a C-band default:
+$R(A)$ in the rain classes:
 
 ```{code-cell} ipython3
 kdp = estimate_kdp(

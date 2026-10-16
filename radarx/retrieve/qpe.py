@@ -65,11 +65,27 @@ the function raises an error that says so: pass ``coefficients``.
   and ``z_zdr`` 1.42e-2, 0.770, -1.67 from Giangrande and Ryzhkov (2007), Eqs.
   1-3 (Ryzhkov et al. 2014, Eqs. 18-19 give the same ``z`` and ``kdp``);
   ``a`` from Table 1 of Ryzhkov et al. (2014).
-* **C band**: ``a`` from Table 1 of Ryzhkov et al. (2014) only.
+* **C band**: ``kdp`` 30.5, 0.85 (Eq. 8.14 of Bringi and Chandrasekar (2001),
+  :math:`R = 129 (K_{DP}/f)^{0.85}` at 5.45 GHz) and ``z_zdr`` 5.8e-3, 0.91, -2.09
+  (their Table 8.1, 5.45 GHz); ``a`` from Table 1 of Ryzhkov et al. (2014). There
+  is no ``z`` default.
 * **X band**: ``z`` 0.029, 0.67 and ``kdp`` 16.9, 0.801 from Ryzhkov et al.
-  (2014), Eqs. 21-22 (the X-band radar BoXPol, Bonn, Germany); ``a`` from
-  their Table 1.
+  (2014), Eqs. 21-22 (the X-band radar BoXPol, Bonn, Germany); ``z_zdr``
+  3.9e-3, 1.07, -5.97 from Table 8.1 of Bringi and Chandrasekar (2001) (10 GHz);
+  ``a`` from Table 1 of Ryzhkov et al. (2014).
 
+* The C-band ``kdp`` and ``z_zdr`` and the X-band ``z_zdr`` relations are not fitted
+  to a region: Bringi and Chandrasekar (2001) simulated gamma distributions
+  (:math:`10^3 \\le N_w \\le 10^5` mm-1 m-3, :math:`0.5 \\le D_0 \\le 2.5` mm,
+  :math:`-1 \\le \\mu \\le 5`, rain rates up to 300 mm h-1) with the T-matrix
+  method at 20 degrees Celsius, 7 degrees of canting and the drop shape of Beard and
+  Chuang (1987), and fitted the rain rate. The C++ T-matrix code of radarx
+  reproduces them (``TMatrix_Textbook_Examples``): applied to such distributions the
+  C-band ``z_zdr`` has a bias of -7 % and a normalized error of 25 %, the C-band
+  ``kdp`` +5 % and 29 %. The X-band ``z_zdr`` coefficients are poorly determined
+  by the simulation (a large exponent of :math:`z_{dr}` that the other
+  coefficients compensate), but give the rain rate of the simulation with a bias of
+  -9 %. Real rain differs from the ensemble, as it does for every relation here.
 * The S-band ``z_zdr`` and ``kdp`` relations were selected by the authors for
   rain of central Oklahoma, from 2002-2003 disdrometer and gauge data of the
   JPOLE experiment. The WSR-88D ``z`` relation is the operational one of the
@@ -79,8 +95,8 @@ the function raises an error that says so: pass ``coefficients``.
   coefficients.
 * The X-band ``z`` relation is the Marshall-Palmer type relation used for the
   Bonn radar in Germany; the X-band ``kdp`` relation is the one used by
-  Ryzhkov et al. (2014) for that radar. No X-band ``z_zdr``, and no C-band
-  ``z``, ``kdp`` or ``z_zdr``, could be verified, so these have no default.
+  Ryzhkov et al. (2014) for that radar. No C-band ``z`` could be verified, so it has
+  no default.
 * ``a`` is the optimal :math:`R(A)` relation of Table 1 of Ryzhkov et al.
   (2014) for the polarization of the specific attenuation (``polarization``,
   horizontal by default), at 0, 10, 20 and 30 degrees Celsius for S, C and X
@@ -173,10 +189,16 @@ COEFFICIENTS = {
         "kdp": (44.0, 0.822),
         "z_zdr": (1.42e-2, 0.770, -1.67),
     },
-    "C": {},
+    # C band: Table 8.1 and Eq. 8.14 (5.45 GHz) of Bringi and Chandrasekar (2001); X band:
+    # Ryzhkov et al. (2014) for z and kdp, Table 8.1 of Bringi and Chandrasekar (2001) for z_zdr
+    "C": {
+        "kdp": (30.5, 0.85),
+        "z_zdr": (5.8e-3, 0.91, -2.09),
+    },
     "X": {
         "z": (0.029, 0.67),
         "kdp": (16.9, 0.801),
+        "z_zdr": (3.9e-3, 1.07, -5.97),
     },
 }
 
@@ -739,7 +761,8 @@ def rain_rate_z(
     ``R = 1.70e-2 Z**0.714`` (:math:`Z = 300 R^{1.4}`), the one for X band the
     Marshall-Palmer type relation ``R = 0.029 Z**0.67`` used for the Bonn
     radar; see :mod:`radarx.retrieve.qpe` for the sources and for what to
-    correct before using it. There is no default for C band.
+    correct before using it. There is no default for C band (no relation for it
+    could be verified).
 
     Parameters
     ----------
@@ -824,7 +847,9 @@ def rain_rate_kdp(
     :math:`K_{DP}` is in degrees km-1. The default for S band is
     ``R = 44.0 |KDP|**0.822`` of Giangrande and Ryzhkov (2007); for X band
     ``R = 16.9 |KDP|**0.801`` as used by Ryzhkov et al. (2014) for the Bonn
-    radar (see :mod:`radarx.retrieve.qpe`). There is no default for C band.
+    radar, and ``R = 30.5 |KDP|**0.85`` for C band (Eq. 8.14 of Bringi and
+    Chandrasekar 2001 at 5.45 GHz, from T-matrix simulations; see
+    :mod:`radarx.retrieve.qpe`).
     The relation is independent of the reflectivity calibration and of
     attenuation, but KDP is noisy below about 0.3 degrees km-1 and
     the relation is not meant for light rain.
@@ -870,6 +895,12 @@ def rain_rate_kdp(
     Technol.*, **31** (3), 599-619,
     https://doi.org/10.1175/JTECH-D-13-00038.1 (Eq. 19, S band; Eq. 22,
     X band).
+
+    Bringi, V. N., and V. Chandrasekar, 2001: *Polarimetric Doppler Weather
+    Radar: Principles and Applications*. Cambridge University Press,
+    https://doi.org/10.1017/CBO9780511541094 (Eq. 8.14, the C-band relation
+    at 5.45 GHz; reproduced with the T-matrix code of radarx in the notebook
+    ``TMatrix_Textbook_Examples``).
 
     Giangrande, S. E., and A. V. Ryzhkov, 2008: Estimation of rainfall based
     on the results of polarimetric echo classification. *J. Appl. Meteor.
@@ -930,7 +961,11 @@ def rain_rate_z_zdr(
     of ``R(Z)`` on the drop size: large drops (high ZDR) give a lower rain rate
     for the same reflectivity. The default for S band is the relation
     ``R = 1.42e-2 Z**0.770 zdr**-1.67`` that Giangrande and Ryzhkov (2007)
-    selected for central Oklahoma; there is no default for C and X band. The
+    selected for central Oklahoma. The C-band default is
+    ``R = 5.8e-3 Z**0.91 zdr**-2.09`` and the X-band one
+    ``R = 3.9e-3 Z**1.07 zdr**-5.97`` (Table 8.1 of Bringi and Chandrasekar 2001, from
+    T-matrix simulations of gamma distributions at 5.45 and 10 GHz, not fitted to a
+    region). The
     differential reflectivity must be calibrated (a bias of 0.2 dB changes the
     rain rate by about 7 %), and corrected for differential attenuation; see
     :mod:`radarx.retrieve.qpe`.
@@ -977,6 +1012,12 @@ def rain_rate_z_zdr(
     https://doi.org/10.1175/2008JAMC1753.1 (the relation is taken from the
     extended abstract of the same title, 33rd Conf. on Radar Meteorology,
     2007, paper P6B.7, Eq. 3; the journal article has not been compared).
+
+    Bringi, V. N., and V. Chandrasekar, 2001: *Polarimetric Doppler Weather
+    Radar: Principles and Applications*. Cambridge University Press,
+    https://doi.org/10.1017/CBO9780511541094 (Table 8.1, the C- and X-band
+    relations; reproduced with the T-matrix code of radarx in the notebook
+    ``TMatrix_Textbook_Examples``).
 
     Ryzhkov, A. V., S. E. Giangrande, and T. J. Schuur, 2005: Rainfall
     estimation with a polarimetric prototype of WSR-88D. *J. Appl. Meteor.*,
@@ -1415,10 +1456,11 @@ def rain_rate(
 
     Notes
     -----
-    The default relations are those of Giangrande and Ryzhkov (2007) for S
-    band; at C and X band pass ``coefficients`` for the relations of your
-    radar, or choose with ``class_relations`` relations that have a default
-    (``"kdp"`` and ``"z"`` at X band, ``"a"`` at C and X band). The factors
+    The default relations are those of Giangrande and Ryzhkov (2007) at S band, and
+    the T-matrix relations of Bringi and Chandrasekar (2001) for ``"z_zdr"`` and
+    ``"kdp"`` at C band, so the blend works at S, C and X band. There is no C-band
+    ``"z"``. Pass ``coefficients`` for the relations of your radar, or choose with
+    ``class_relations`` relations that have a default. The factors
     fitted to gauges for wet snow, graupel, dry snow and crystals in that
     paper are for Oklahoma and are not applied unless you ask for them.
 
@@ -1430,6 +1472,12 @@ def rain_rate(
     https://doi.org/10.1175/2008JAMC1753.1 (the class table is taken from the
     extended abstract of the same title, 33rd Conf. on Radar Meteorology,
     2007, paper P6B.7, Eq. 4; the journal article has not been compared).
+
+    Bringi, V. N., and V. Chandrasekar, 2001: *Polarimetric Doppler Weather
+    Radar: Principles and Applications*. Cambridge University Press,
+    https://doi.org/10.1017/CBO9780511541094 (Table 8.1 and Eq. 8.14, the C-band
+    defaults of the blend; reproduced with the T-matrix code of radarx in the notebook
+    ``TMatrix_Textbook_Examples``).
 
     Ryzhkov, A. V., S. E. Giangrande, and T. J. Schuur, 2005: Rainfall
     estimation with a polarimetric prototype of WSR-88D. *J. Appl. Meteor.*,

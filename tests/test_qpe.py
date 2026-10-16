@@ -244,15 +244,94 @@ def test_user_coefficients(engine):
 
 def test_no_default_is_not_invented():
     ds = sweep(3, 3)
-    for func in (rain_rate_z, rain_rate_kdp, rain_rate_z_zdr):
-        with pytest.raises(ValueError, match="no verified default"):
-            func(ds, band="C")
+    # there is no C-band Z-R relation that could be verified
     with pytest.raises(ValueError, match="no verified default"):
-        rain_rate_z_zdr(ds, band="X")
+        rain_rate_z(ds, band="C")
     # R(A) has a table for every band
     for band in qpe.BANDS:
         assert rain_rate_a(ds, band=band).name == "RAIN_RATE_A"
-    assert set(qpe.COEFFICIENTS["C"]) == set()
+    assert set(qpe.COEFFICIENTS["C"]) == {"kdp", "z_zdr"}
+    assert set(qpe.COEFFICIENTS["X"]) == {"z", "kdp", "z_zdr"}
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_textbook_defaults_at_c_and_x_band(engine):
+    # Table 8.1 and Eq. 8.14 of Bringi and Chandrasekar (2001): 129 (KDP / f)^0.85 at 5.45 GHz
+    assert qpe.COEFFICIENTS["C"]["kdp"][0] == pytest.approx(129 / 5.45**0.85, rel=2e-3)
+    ds = sweep(3, 3)
+    kdp = ds.KDP.values
+    out = rain_rate_kdp(ds, band="C", negative="keep", engine=engine)
+    np.testing.assert_allclose(
+        out, 30.5 * np.abs(kdp) ** 0.85 * np.sign(kdp), rtol=2e-7
+    )
+    for band, (a, b, c) in (("C", (5.8e-3, 0.91, -2.09)), ("X", (3.9e-3, 1.07, -5.97))):
+        out = rain_rate_z_zdr(ds, band=band, engine=engine)
+        expected = a * np.minimum(z_of(ds.DBZH), z_of(53.0)) ** b * z_of(ds.ZDR) ** c
+        np.testing.assert_allclose(out, expected, rtol=2e-7)
+
+
+def simulated_rain(wavelength, n=3000, seed=2001):
+    """Z, ZDR, KDP and R of gamma distributions as in Bringi and Chandrasekar (2001), 8.1.1."""
+    from math import lgamma
+
+    from radarx.fundamentals import raindrop_scattering
+
+    d = np.arange(0.05, 8.001, 0.05)
+    rng = np.random.default_rng(seed)
+    d0, mu, lognw = (
+        rng.uniform(0.5, 2.5, n),
+        rng.uniform(-1.0, 5.0, n),
+        rng.uniform(3.0, 5.0, n),
+    )
+    f = np.array(
+        [6 * (3.67 + m) ** (m + 4) / (3.67**4 * np.exp(lgamma(m + 4))) for m in mu]
+    )
+    x = d[None, :] / d0[:, None]
+    dsd = (
+        (10**lognw)[:, None]
+        * f[:, None]
+        * x ** mu[:, None]
+        * np.exp(-(3.67 + mu[:, None]) * x)
+    )
+    beard_chuang = lambda dd: (  # noqa: E731
+        1.0048 + 5.7e-4 * dd - 2.628e-2 * dd**2 + 3.682e-3 * dd**3 - 1.677e-4 * dd**4
+    )
+    t = raindrop_scattering(
+        d, wavelength, temperature=20.0, canting_std=7.0, axis_ratio=beard_chuang
+    )
+    scale = wavelength**4 / (np.pi**5 * 0.93) * 0.05
+    zh = scale * (dsd * t.sigma_h.values).sum(axis=1)
+    zv = scale * (dsd * t.sigma_v.values).sum(axis=1)
+    kdp = (dsd * t.kdp.values).sum(axis=1) * 0.05
+    rate = (
+        0.6
+        * np.pi
+        * 1e-3
+        * (dsd * d**3 * (9.65 - 10.3 * np.exp(-0.6 * d))).sum(axis=1)
+        * 0.05
+    )
+    return zh, zh / zv, kdp, rate
+
+
+@pytest.mark.parametrize(
+    ("band", "frequency", "relation"),
+    [("C", 5.45, "z_zdr"), ("C", 5.45, "kdp"), ("X", 10.0, "z_zdr")],
+)
+def test_textbook_defaults_reproduce_the_tmatrix_simulation(band, frequency, relation):
+    # the defaults are fitted to this simulation: they give its rain rate with a bias of
+    # at most 12 % and a normalized error of at most 30 % (the C++ T-matrix of radarx)
+    pytest.importorskip("radarx.fundamentals._tmatrix")
+    zh, zeta, kdp, rate = simulated_rain(299.792458 / frequency)
+    keep = (rate <= 300.0) & (kdp > 0.05)
+    coef = qpe.COEFFICIENTS[band][relation]
+    if relation == "z_zdr":
+        a, b, c = coef
+        estimate = a * zh**b * zeta**c
+    else:
+        estimate = coef[0] * kdp ** coef[1]
+    bias = (estimate[keep] - rate[keep]).mean() / rate[keep].mean()
+    nse = np.sqrt(((estimate[keep] - rate[keep]) ** 2).mean()) / rate[keep].mean()
+    assert abs(bias) < 0.12 and nse < 0.30, (bias, nse)
 
 
 def test_input_errors():
@@ -651,17 +730,20 @@ def test_default_blend_by_class(engine):
 
 @pytest.mark.parametrize("engine", ENGINES)
 def test_dolan_c_band_classes(engine):
-    """Hail and ice have no relation; rain needs coefficients that C band lacks."""
+    """Hail and ice have no relation; rain has the C-band relations of the textbook."""
     ds = one_class_dataset("dolan", ("dolan", "C"))
-    with pytest.raises(ValueError, match="no verified default"):
-        rain_rate(ds, band="C", engine=engine)
+    default = rain_rate(
+        ds, band="C", engine=engine
+    )  # z_zdr and kdp have C-band defaults
+    names = [c[2] for c in hid_classes("dolan", "C")]
+    assert np.isfinite(default.RAIN_RATE[names.index("rain")])
+    assert np.isnan(float(default.RAIN_RATE[names.index("hail")]))
     out = rain_rate(
         ds,
         band="C",
         class_relations={"drizzle": "a", "rain": "a", "big_drops": "a"},
         engine=engine,
     )
-    names = [c[2] for c in hid_classes("dolan", "C")]
     ra = float(rain_rate_a(ds, band="C", engine=engine)[0])
     for i, name in enumerate(names):
         if name in ("drizzle", "rain", "big_drops"):
