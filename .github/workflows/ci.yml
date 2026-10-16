@@ -44,6 +44,7 @@ jobs:
       CONDA_ENV_FILE: ci/unittests.yml
       PYTHON_VERSION: ${{ matrix.python-version }}
       RADARX_DOWNLOAD_CACHE: ${{ github.workspace }}/.download_cache
+      RADARX_REQUIRE_KERNELS: "1"  # fail, not skip, when a compiled kernel is missing (tests/conftest.py)
       # the slow tests (tests/conftest.py) run once, in the Python 3.12 NumPy 2 job
       RADARX_SKIP_SLOW: ${{ (matrix.python-version == '3.12' && matrix.numpy-version == '2') && '0' || '1' }}
     strategy:
@@ -99,7 +100,7 @@ jobs:
         restore-keys: nexrad-downloads-${{ runner.os }}-
     - name: Install radarx
       run: |
-        python -m pip install . --no-deps
+        python -m pip install -e . --no-deps
     - name: Fetch the test data
       run: |
         python ci/fetch_test_data.py
@@ -132,6 +133,7 @@ jobs:
     env:
       CONDA_ENV_FILE: ci/unittests.yml
       RADARX_DOWNLOAD_CACHE: ${{ github.workspace }}/.download_cache
+      RADARX_REQUIRE_KERNELS: "1"  # fail, not skip, when a compiled kernel is missing (tests/conftest.py)
       RADARX_SKIP_SLOW: "1"
     strategy:
       fail-fast: false
@@ -181,7 +183,7 @@ jobs:
         restore-keys: nexrad-downloads-${{ runner.os }}-
     - name: Install radarx
       run: |
-        python -m pip install . --no-deps
+        python -m pip install -e . --no-deps
     - name: Fetch the test data
       run: |
         python ci/fetch_test_data.py
@@ -205,6 +207,7 @@ jobs:
     env:
       CONDA_ENV_FILE: ci/unittests.yml
       RADARX_DOWNLOAD_CACHE: ${{ github.workspace }}/.download_cache
+      RADARX_REQUIRE_KERNELS: "1"  # fail, not skip, when a compiled kernel is missing (tests/conftest.py)
       RADARX_SKIP_SLOW: "1"
     steps:
     - uses: actions/checkout@v4
@@ -246,7 +249,7 @@ jobs:
         restore-keys: nexrad-downloads-${{ runner.os }}-
     - name: Install radarx
       run: |
-        python -m pip install . --no-deps
+        python -m pip install -e . --no-deps
     - name: Fetch the test data
       run: |
         python ci/fetch_test_data.py
@@ -270,6 +273,7 @@ jobs:
     env:
       CONDA_ENV_FILE: ci/unittests.yml
       RADARX_DOWNLOAD_CACHE: ${{ github.workspace }}/.download_cache
+      RADARX_REQUIRE_KERNELS: "1"  # fail, not skip, when a compiled kernel is missing (tests/conftest.py)
       RADARX_SKIP_SLOW: "1"
     steps:
     - uses: actions/checkout@v4
@@ -308,7 +312,7 @@ jobs:
         restore-keys: nexrad-downloads-${{ runner.os }}-
     - name: Install radarx
       run: |
-        python -m pip install . --no-deps
+        python -m pip install -e . --no-deps
     - name: Fetch the test data
       run: |
         python ci/fetch_test_data.py
@@ -321,6 +325,80 @@ jobs:
     - name: Test with pytest
       run: |
         pytest -n auto --dist loadfile --verbose --durations=15 --pyargs tests
+
+  build_wheel:
+    # The jobs above install radarx in place (pip install -e .), which is what makes pytest
+    # import the checkout with its compiled kernels. This one tests what users install: the
+    # wheel, from a copy of the tests outside the checkout, so that nothing but the
+    # installed package can be imported (a missing kernel, missing package data).
+    name: radarx unit tests - installed wheel
+    runs-on: ubuntu-latest
+    needs: [lint]
+    defaults:
+      run:
+        shell: bash -l {0}
+    env:
+      CONDA_ENV_FILE: ci/unittests.yml
+      RADARX_DOWNLOAD_CACHE: ${{ github.workspace }}/.download_cache
+      RADARX_SKIP_SLOW: "1"
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: Get date for the environment cache key
+      id: date
+      run: echo "today=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+    - name: Install micromamba environment
+      uses: mamba-org/setup-micromamba@v2
+      with:
+          environment-name: radarx-unit-tests
+          environment-file: ${{env.CONDA_ENV_FILE}}
+          cache-environment: true
+          cache-environment-key: "${{runner.os}}-${{runner.arch}}-py3.12-np2-${{steps.date.outputs.today}}-${{hashFiles(env.CONDA_ENV_FILE)}}"
+          create-args: >-
+              python=3.12
+              numpy=2
+    - name: Install pytest plugins via pip
+      run: |
+        python -m pip install pytest-xdist pytest-mock
+    - name: Cache the test data
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/open-radar-data
+          ~/.cache/radarx_data
+        key: test-data-${{ runner.os }}-v1
+        restore-keys: test-data-${{ runner.os }}-
+    - name: Cache the NEXRAD volumes the tests and notebooks download
+      uses: actions/cache@v4
+      with:
+        path: .download_cache
+        key: nexrad-downloads-${{ runner.os }}-${{ hashFiles('tests/**/*.py', 'docs/notebooks/*.md') }}
+        restore-keys: nexrad-downloads-${{ runner.os }}-
+    - name: Build the wheel
+      run: |
+        python -m pip wheel . --no-deps --wheel-dir dist
+    - name: Install the wheel
+      run: |
+        python -m pip install dist/*.whl --no-deps
+    - name: Fetch the test data
+      run: |
+        python ci/fetch_test_data.py
+    - name: Check the compiled kernels of the wheel
+      run: |
+        python ci/check_compiled_kernel.py
+        python ci/check_compiled_kernel.py --list > "$RUNNER_TEMP/kernels.txt"
+    - name: Test the installed wheel from outside the checkout
+      env:
+        RADARX_REQUIRE_KERNELS: ${{ runner.temp }}/kernels.txt
+      run: |
+        # everything the tests read from the repository (docs, ml/data, the citation file) except the radarx
+        # source, which must not shadow the installed package
+        mkdir "$RUNNER_TEMP/suite"
+        git archive HEAD tests docs ml ci CITATION.cff | tar -x -C "$RUNNER_TEMP/suite"
+        cd "$RUNNER_TEMP/suite"
+        python -c "import radarx; print(radarx.__file__)"
+        pytest -n auto --dist loadfile --verbose --durations=15 tests
 
   build_1:
     name: radarx notebook tests - linux
