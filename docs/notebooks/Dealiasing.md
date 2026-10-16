@@ -228,7 +228,7 @@ plt.show()
 A dual-PRF radar unfolds the velocity of each ray with a noisy estimate and
 leaves isolated dealiasing errors of a different kind; they are corrected with
 `correct_dual_prf` (Holleman and Beekhuis 2003), shown on synthetic data in
-section 13 of the [second workflow notebook](Radar_Workflow_Advanced).
+section 15 of the [third workflow notebook](Radar_Workflow_Advanced_2).
 
 ## UNRAVEL
 

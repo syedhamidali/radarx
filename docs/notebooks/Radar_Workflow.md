@@ -48,11 +48,13 @@ multi-radar steps.
 | 17 | runtime summary and one `DataTree` with all products | |
 | | function index of the whole package | |
 
-The [second part](Radar_Workflow_Advanced) of this notebook shows the rest of
-radarx on small open or synthetic data: the radar equation and unit helpers,
-disdrometers, raindrop trajectories, surface stations and cold pools, lightning,
-tornado detection, single-Doppler winds, the diabatic Lagrangian analysis,
-the machine-learning interface, beam blockage from a digital elevation model and tropical-cyclone winds from one radar. The *Function index* at the end of this page
+The [second part](Radar_Workflow_Advanced) of this notebook shows the first half of
+the rest of radarx on small open or synthetic data: the radar equation and unit helpers,
+disdrometers, the Bayesian DSD retrieval, raindrop trajectories, surface stations and cold pools,
+and lightning. The [third part](Radar_Workflow_Advanced_2) shows tornado detection, single-Doppler
+winds, the diabatic Lagrangian analysis, the machine-learning interface, beam blockage from a
+digital elevation model, tropical-cyclone winds from one radar, the forward operator, dual-PRF
+correction and ensembles. The *Function index* at the end of this page
 lists every function of radarx with the section where it is used.
 
 All heavy steps run in compiled, multithreaded kernels; the runtimes in the
@@ -1984,7 +1986,8 @@ products
 Every public name of radarx (the `__all__` of `radarx.retrieve`, `radarx.grid`,
 `radarx.io`, `radarx.ml`, `radarx.vis`, `radarx.fundamentals`, `radarx.core`),
 with its module and the section of this notebook or of the
-[second part](Radar_Workflow_Advanced) where it is used in an example. The
+[second part](Radar_Workflow_Advanced) or the
+[third part](Radar_Workflow_Advanced_2) where it is used in an example. The
 radarx IMD reader (`read_sweep`, `read_volume`, `to_cfradial2`,
 `to_cfradial2_volumes` and the helpers of `radarx.testing`) is deprecated
 and shown through xradar in the [IMD notebook](IMD_Radar_Data). A test
@@ -2124,11 +2127,11 @@ notebooks or from this index.
 | `compute_max_unambiguous_velocity` | `radarx.fundamentals.timing` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `compute_prf` | `radarx.fundamentals.timing` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `compute_pulse_repetition_interval` | `radarx.fundamentals.timing` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
-| `axis_ratio_brandes` | `radarx.fundamentals.tmatrix` | [part 2](Radar_Workflow_Advanced): 14. Forward operator for WRF and MPAS output |
-| `orientation_quadrature` | `radarx.fundamentals.tmatrix` | [part 2](Radar_Workflow_Advanced): 14. Forward operator for WRF and MPAS output |
-| `raindrop_scattering` | `radarx.fundamentals.tmatrix` | [part 2](Radar_Workflow_Advanced): 14. Forward operator for WRF and MPAS output |
-| `spheroid_scattering` | `radarx.fundamentals.tmatrix` | [part 2](Radar_Workflow_Advanced): 14. Forward operator for WRF and MPAS output |
-| `water_refractive_index` | `radarx.fundamentals.tmatrix` | [part 2](Radar_Workflow_Advanced): 14. Forward operator for WRF and MPAS output |
+| `axis_ratio_brandes` | `radarx.fundamentals.tmatrix` | [part 3](Radar_Workflow_Advanced_2): 14. Forward operator for WRF and MPAS output |
+| `orientation_quadrature` | `radarx.fundamentals.tmatrix` | [part 3](Radar_Workflow_Advanced_2): 14. Forward operator for WRF and MPAS output |
+| `raindrop_scattering` | `radarx.fundamentals.tmatrix` | [part 3](Radar_Workflow_Advanced_2): 14. Forward operator for WRF and MPAS output |
+| `spheroid_scattering` | `radarx.fundamentals.tmatrix` | [part 3](Radar_Workflow_Advanced_2): 14. Forward operator for WRF and MPAS output |
+| `water_refractive_index` | `radarx.fundamentals.tmatrix` | [part 3](Radar_Workflow_Advanced_2): 14. Forward operator for WRF and MPAS output |
 | `circular_depolarization_ratio` | `radarx.fundamentals.variables` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `differential_reflectivity` | `radarx.fundamentals.variables` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `linear_depolarization_ratio` | `radarx.fundamentals.variables` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
@@ -2152,11 +2155,11 @@ notebooks or from this index.
 | `parsivel_classes` | `radarx.io.disdrometer` | [part 2](Radar_Workflow_Advanced): 2. Disdrometers |
 | `read_parsivel` | `radarx.io.disdrometer` | [part 2](Radar_Workflow_Advanced): 2. Disdrometers |
 | `read_pips_netcdf` | `radarx.io.disdrometer` | [part 2](Radar_Workflow_Advanced): 2. Disdrometers |
-| `write_cfradial1` | `radarx.io.export` | [part 2](Radar_Workflow_Advanced): 12. Export to files |
-| `write_cfradial2` | `radarx.io.export` | [part 2](Radar_Workflow_Advanced): 12. Export to files |
-| `write_netcdf_cf` | `radarx.io.export` | [part 2](Radar_Workflow_Advanced): 12. Export to files |
-| `write_odim` | `radarx.io.export` | [part 2](Radar_Workflow_Advanced): 12. Export to files |
-| `write_zarr` | `radarx.io.export` | [part 2](Radar_Workflow_Advanced): 12. Export to files |
+| `write_cfradial1` | `radarx.io.export` | [part 3](Radar_Workflow_Advanced_2): 12. Export to files |
+| `write_cfradial2` | `radarx.io.export` | [part 3](Radar_Workflow_Advanced_2): 12. Export to files |
+| `write_netcdf_cf` | `radarx.io.export` | [part 3](Radar_Workflow_Advanced_2): 12. Export to files |
+| `write_odim` | `radarx.io.export` | [part 3](Radar_Workflow_Advanced_2): 12. Export to files |
+| `write_zarr` | `radarx.io.export` | [part 3](Radar_Workflow_Advanced_2): 12. Export to files |
 | `read_lma` | `radarx.io.lma` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `parcel_diagnostics` | `radarx.io.parcel` | [core](Radar_Workflow): Parcel thermodynamics: CAPE, CIN, the lifted index and the levels |
 | `read_mrr` | `radarx.io.profiler` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
@@ -2185,21 +2188,21 @@ notebooks or from this index.
 | `read_sticknet` | `radarx.io.surface` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `read_sticknet_locations` | `radarx.io.surface` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `write_wrfda_radar` | `radarx.io.wrfda` | [core](Radar_Workflow): 16. Super-observations for data assimilation |
-| `list_models` | `radarx.ml.model` | [part 2](Radar_Workflow_Advanced): 10. Machine-learning plumbing |
-| `load_model` | `radarx.ml.model` | [part 2](Radar_Workflow_Advanced): 10. Machine-learning plumbing |
-| `Model` | `radarx.ml.model` | [part 2](Radar_Workflow_Advanced): 10. Machine-learning plumbing |
-| `register_model` | `radarx.ml.model` | [part 2](Radar_Workflow_Advanced): 10. Machine-learning plumbing |
-| `denormalize` | `radarx.ml.patches` | [part 2](Radar_Workflow_Advanced): 10. Machine-learning plumbing |
-| `normalize` | `radarx.ml.patches` | [part 2](Radar_Workflow_Advanced): 10. Machine-learning plumbing |
-| `PatchIndex` | `radarx.ml.patches` | [part 2](Radar_Workflow_Advanced): 10. Machine-learning plumbing |
-| `polar_patches` | `radarx.ml.patches` | [part 2](Radar_Workflow_Advanced): 10. Machine-learning plumbing |
-| `reassemble` | `radarx.ml.patches` | [part 2](Radar_Workflow_Advanced): 10. Machine-learning plumbing |
+| `list_models` | `radarx.ml.model` | [part 3](Radar_Workflow_Advanced_2): 10. Machine-learning plumbing |
+| `load_model` | `radarx.ml.model` | [part 3](Radar_Workflow_Advanced_2): 10. Machine-learning plumbing |
+| `Model` | `radarx.ml.model` | [part 3](Radar_Workflow_Advanced_2): 10. Machine-learning plumbing |
+| `register_model` | `radarx.ml.model` | [part 3](Radar_Workflow_Advanced_2): 10. Machine-learning plumbing |
+| `denormalize` | `radarx.ml.patches` | [part 3](Radar_Workflow_Advanced_2): 10. Machine-learning plumbing |
+| `normalize` | `radarx.ml.patches` | [part 3](Radar_Workflow_Advanced_2): 10. Machine-learning plumbing |
+| `PatchIndex` | `radarx.ml.patches` | [part 3](Radar_Workflow_Advanced_2): 10. Machine-learning plumbing |
+| `polar_patches` | `radarx.ml.patches` | [part 3](Radar_Workflow_Advanced_2): 10. Machine-learning plumbing |
+| `reassemble` | `radarx.ml.patches` | [part 3](Radar_Workflow_Advanced_2): 10. Machine-learning plumbing |
 | `advect` | `radarx.retrieve.advection` | [core](Radar_Workflow): 11. Storm motion, common analysis time and time interpolation |
 | `estimate_motion` | `radarx.retrieve.advection` | [core](Radar_Workflow): 11. Storm motion, common analysis time and time interpolation |
 | `interpolate_time` | `radarx.retrieve.advection` | [core](Radar_Workflow): 11. Storm motion, common analysis time and time interpolation |
-| `biological_echo` | `radarx.retrieve.biology` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
+| `biological_echo` | `radarx.retrieve.biology` | [part 3](Radar_Workflow_Advanced_2): 7. Tornado detection and biological echo |
 | `correct_attenuation` | `radarx.retrieve.attenuation` | [core](Radar_Workflow): 5. ΦDP processing and KDP |
-| `beam_blockage` | `radarx.retrieve.beam_blockage` | [part 2](Radar_Workflow_Advanced): 11. Beam blockage and terrain clutter |
+| `beam_blockage` | `radarx.retrieve.beam_blockage` | [part 3](Radar_Workflow_Advanced_2): 11. Beam blockage and terrain clutter |
 | `beam_path` | `radarx.retrieve.beam_path` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `zdr_offset` | `radarx.retrieve.calibration` | [core](Radar_Workflow): 15. Noise and calibration |
 | `z_offset` | `radarx.retrieve.calibration` | [core](Radar_Workflow): 15. Noise and calibration |
@@ -2215,12 +2218,12 @@ notebooks or from this index.
 | `rkw_ratio` | `radarx.retrieve.coldpool` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `dealias_confidence` | `radarx.retrieve.dealias` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
 | `dealias_velocity` | `radarx.retrieve.dealias` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
-| `correct_dual_prf` | `radarx.retrieve.dealias` | [part 2](Radar_Workflow_Advanced): 15. Dual-PRF velocity correction |
-| `diabatic_lagrangian` | `radarx.retrieve.diabatic_lagrangian` | [part 2](Radar_Workflow_Advanced): 9. Diabatic Lagrangian analysis |
-| `microphysical_rates` | `radarx.retrieve.diabatic_lagrangian` | [part 2](Radar_Workflow_Advanced): 9. Diabatic Lagrangian analysis |
-| `polarimetric_precipitation` | `radarx.retrieve.diabatic_lagrangian` | [part 2](Radar_Workflow_Advanced): 9. Diabatic Lagrangian analysis |
-| `ziegler2013_precipitation` | `radarx.retrieve.diabatic_lagrangian` | [part 2](Radar_Workflow_Advanced): 9. Diabatic Lagrangian analysis |
-| `ziegler2013_profiles` | `radarx.retrieve.diabatic_lagrangian` | [part 2](Radar_Workflow_Advanced): 9. Diabatic Lagrangian analysis |
+| `correct_dual_prf` | `radarx.retrieve.dealias` | [part 3](Radar_Workflow_Advanced_2): 15. Dual-PRF velocity correction |
+| `diabatic_lagrangian` | `radarx.retrieve.diabatic_lagrangian` | [part 3](Radar_Workflow_Advanced_2): 9. Diabatic Lagrangian analysis |
+| `microphysical_rates` | `radarx.retrieve.diabatic_lagrangian` | [part 3](Radar_Workflow_Advanced_2): 9. Diabatic Lagrangian analysis |
+| `polarimetric_precipitation` | `radarx.retrieve.diabatic_lagrangian` | [part 3](Radar_Workflow_Advanced_2): 9. Diabatic Lagrangian analysis |
+| `ziegler2013_precipitation` | `radarx.retrieve.diabatic_lagrangian` | [part 3](Radar_Workflow_Advanced_2): 9. Diabatic Lagrangian analysis |
+| `ziegler2013_profiles` | `radarx.retrieve.diabatic_lagrangian` | [part 3](Radar_Workflow_Advanced_2): 9. Diabatic Lagrangian analysis |
 | `disdrometer_qc` | `radarx.retrieve.disdrometer` | [part 2](Radar_Workflow_Advanced): 2. Disdrometers |
 | `dsd_moments` | `radarx.retrieve.disdrometer` | [part 2](Radar_Workflow_Advanced): 2. Disdrometers |
 | `fit_gamma` | `radarx.retrieve.disdrometer` | [part 2](Radar_Workflow_Advanced): 2. Disdrometers |
@@ -2239,18 +2242,18 @@ notebooks or from this index.
 | `dsd_bayesian` | `radarx.retrieve.dsd_bayes` | [core](Radar_Workflow): 7. Rain drop size distribution |
 | `dsd_prior` | `radarx.retrieve.dsd_bayes` | [core](Radar_Workflow): 7. Rain drop size distribution |
 | `forward_grid` | `radarx.retrieve.dsd_bayes` | [core](Radar_Workflow): 7. Rain drop size distribution |
-| `ensemble_retrieval` | `radarx.retrieve.ensemble` | [part 2](Radar_Workflow_Advanced): 16. Ensembles and uncertainty of the retrievals |
-| `ensemble_statistics` | `radarx.retrieve.ensemble` | [part 2](Radar_Workflow_Advanced): 16. Ensembles and uncertainty of the retrievals |
-| `measurement_error` | `radarx.retrieve.ensemble` | [part 2](Radar_Workflow_Advanced): 16. Ensembles and uncertainty of the retrievals |
-| `perturb_radar` | `radarx.retrieve.ensemble` | [part 2](Radar_Workflow_Advanced): 16. Ensembles and uncertainty of the retrievals |
-| `relation_scatter` | `radarx.retrieve.ensemble` | [part 2](Radar_Workflow_Advanced): 16. Ensembles and uncertainty of the retrievals |
+| `ensemble_retrieval` | `radarx.retrieve.ensemble` | [part 3](Radar_Workflow_Advanced_2): 16. Ensembles and uncertainty of the retrievals |
+| `ensemble_statistics` | `radarx.retrieve.ensemble` | [part 3](Radar_Workflow_Advanced_2): 16. Ensembles and uncertainty of the retrievals |
+| `measurement_error` | `radarx.retrieve.ensemble` | [part 3](Radar_Workflow_Advanced_2): 16. Ensembles and uncertainty of the retrievals |
+| `perturb_radar` | `radarx.retrieve.ensemble` | [part 3](Radar_Workflow_Advanced_2): 16. Ensembles and uncertainty of the retrievals |
+| `relation_scatter` | `radarx.retrieve.ensemble` | [part 3](Radar_Workflow_Advanced_2): 16. Ensembles and uncertainty of the retrievals |
 | `drop_evaporation_rate` | `radarx.retrieve.evaporation` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `evaporation` | `radarx.retrieve.evaporation` | [core](Radar_Workflow): 13. Evaporation |
 | `integrate_evaporation` | `radarx.retrieve.evaporation` | [core](Radar_Workflow): 13. Evaporation |
-| `forward_operator` | `radarx.retrieve.forward_operator` | [part 2](Radar_Workflow_Advanced): 14. Forward operator for WRF and MPAS output |
-| `to_radar_grid` | `radarx.retrieve.forward_operator` | [part 2](Radar_Workflow_Advanced): 14. Forward operator for WRF and MPAS output |
-| `wrf_state` | `radarx.retrieve.forward_operator` | [part 2](Radar_Workflow_Advanced): 14. Forward operator for WRF and MPAS output |
-| `mpas_state` | `radarx.retrieve.forward_operator` | [part 2](Radar_Workflow_Advanced): 14. Forward operator for WRF and MPAS output |
+| `forward_operator` | `radarx.retrieve.forward_operator` | [part 3](Radar_Workflow_Advanced_2): 14. Forward operator for WRF and MPAS output |
+| `to_radar_grid` | `radarx.retrieve.forward_operator` | [part 3](Radar_Workflow_Advanced_2): 14. Forward operator for WRF and MPAS output |
+| `wrf_state` | `radarx.retrieve.forward_operator` | [part 3](Radar_Workflow_Advanced_2): 14. Forward operator for WRF and MPAS output |
+| `mpas_state` | `radarx.retrieve.forward_operator` | [part 3](Radar_Workflow_Advanced_2): 14. Forward operator for WRF and MPAS output |
 | `hail_kinetic_energy` | `radarx.retrieve.hail` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `hail_products` | `radarx.retrieve.hail` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `mesh` | `radarx.retrieve.hail` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
@@ -2261,14 +2264,14 @@ notebooks or from this index.
 | `hail_fall_speed` | `radarx.retrieve.ice_fall` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `melting_snow_fall_speed` | `radarx.retrieve.ice_fall` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `estimate_kdp` | `radarx.retrieve.kdp` | [core](Radar_Workflow): 5. ΦDP processing and KDP |
-| `trajectories` | `radarx.retrieve.lagrangian` | [part 2](Radar_Workflow_Advanced): 9. Diabatic Lagrangian analysis |
+| `trajectories` | `radarx.retrieve.lagrangian` | [part 3](Radar_Workflow_Advanced_2): 9. Diabatic Lagrangian analysis |
 | `cell_flash_rate` | `radarx.retrieve.lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `cluster_flashes` | `radarx.retrieve.lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `grid_lightning` | `radarx.retrieve.lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `lightning_jump` | `radarx.retrieve.lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `vertical_source_distribution` | `radarx.retrieve.lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `dual_doppler_analytic` | `radarx.retrieve.multidoppler` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
-| `fall_speed` | `radarx.retrieve.multidoppler` | [part 2](Radar_Workflow_Advanced): 9. Diabatic Lagrangian analysis |
+| `fall_speed` | `radarx.retrieve.multidoppler` | [part 3](Radar_Workflow_Advanced_2): 9. Diabatic Lagrangian analysis |
 | `multi_doppler` | `radarx.retrieve.multidoppler` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `multi_doppler_input` | `radarx.retrieve.multidoppler` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `radar_geometry` | `radarx.retrieve.multidoppler` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
@@ -2294,16 +2297,16 @@ notebooks or from this index.
 | `azimuthal_shear_layer_max` | `radarx.retrieve.shear` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `llsd` | `radarx.retrieve.shear` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `radial_divergence` | `radarx.retrieve.shear` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
-| `single_doppler_winds` | `radarx.retrieve.single_doppler` | [part 2](Radar_Workflow_Advanced): 8. Wind from a single Doppler radar |
-| `gbvtd` | `radarx.retrieve.tc_winds` | [part 2](Radar_Workflow_Advanced): 13. Tropical-cyclone winds from one radar |
-| `synthetic_vortex` | `radarx.retrieve.tc_winds` | [part 2](Radar_Workflow_Advanced): 13. Tropical-cyclone winds from one radar |
-| `tc_center` | `radarx.retrieve.tc_winds` | [part 2](Radar_Workflow_Advanced): 13. Tropical-cyclone winds from one radar |
-| `tc_decompose` | `radarx.retrieve.tc_winds` | [part 2](Radar_Workflow_Advanced): 13. Tropical-cyclone winds from one radar |
-| `vortex_profile` | `radarx.retrieve.tc_winds` | [part 2](Radar_Workflow_Advanced): 13. Tropical-cyclone winds from one radar |
+| `single_doppler_winds` | `radarx.retrieve.single_doppler` | [part 3](Radar_Workflow_Advanced_2): 8. Wind from a single Doppler radar |
+| `gbvtd` | `radarx.retrieve.tc_winds` | [part 3](Radar_Workflow_Advanced_2): 13. Tropical-cyclone winds from one radar |
+| `synthetic_vortex` | `radarx.retrieve.tc_winds` | [part 3](Radar_Workflow_Advanced_2): 13. Tropical-cyclone winds from one radar |
+| `tc_center` | `radarx.retrieve.tc_winds` | [part 3](Radar_Workflow_Advanced_2): 13. Tropical-cyclone winds from one radar |
+| `tc_decompose` | `radarx.retrieve.tc_winds` | [part 3](Radar_Workflow_Advanced_2): 13. Tropical-cyclone winds from one radar |
+| `vortex_profile` | `radarx.retrieve.tc_winds` | [part 3](Radar_Workflow_Advanced_2): 13. Tropical-cyclone winds from one radar |
 | `superobs` | `radarx.retrieve.superobs` | [core](Radar_Workflow): 16. Super-observations for data assimilation |
-| `rotation_couplets` | `radarx.retrieve.tornado` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
-| `tornado_probability` | `radarx.retrieve.tornado` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
-| `tornet_inputs` | `radarx.retrieve.tornado` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
+| `rotation_couplets` | `radarx.retrieve.tornado` | [part 3](Radar_Workflow_Advanced_2): 7. Tornado detection and biological echo |
+| `tornado_probability` | `radarx.retrieve.tornado` | [part 3](Radar_Workflow_Advanced_2): 7. Tornado detection and biological echo |
+| `tornet_inputs` | `radarx.retrieve.tornado` | [part 3](Radar_Workflow_Advanced_2): 7. Tornado detection and biological echo |
 | `cvp` | `radarx.retrieve.vertical_profiles` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `mask_above_melting_layer` | `radarx.retrieve.vertical_profiles` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `melting_layer` | `radarx.retrieve.vertical_profiles` | [core](Radar_Workflow): 8. QVP time series and melting layer |
@@ -2348,34 +2351,34 @@ The methods of the `.radarx` accessors:
 | `.radarx.azimuthal_shear_layer_max` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `.radarx.background` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `.radarx.baroclinic_generation` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
-| `.radarx.beam_blockage` | [part 2](Radar_Workflow_Advanced): 11. Beam blockage and terrain clutter |
+| `.radarx.beam_blockage` | [part 3](Radar_Workflow_Advanced_2): 11. Beam blockage and terrain clutter |
 | `.radarx.beam_path` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
-| `.radarx.biological_echo` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
+| `.radarx.biological_echo` | [part 3](Radar_Workflow_Advanced_2): 7. Tornado detection and biological echo |
 | `.radarx.bulk_shear` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
 | `.radarx.bunkers_storm_motion` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
 | `.radarx.cluster_flashes` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `.radarx.cold_pool_intensity` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `.radarx.correct_attenuation` | [core](Radar_Workflow): 5. ΦDP processing and KDP |
-| `.radarx.correct_dual_prf` | [part 2](Radar_Workflow_Advanced): 15. Dual-PRF velocity correction |
+| `.radarx.correct_dual_prf` | [part 3](Radar_Workflow_Advanced_2): 15. Dual-PRF velocity correction |
 | `.radarx.correct_rhohv_noise` | [core](Radar_Workflow): 15. Noise and calibration |
 | `.radarx.correct_zdr_noise` | [core](Radar_Workflow): 15. Noise and calibration |
 | `.radarx.create_cappi` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `.radarx.cvp` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `.radarx.dealias` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
 | `.radarx.dealias_confidence` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
-| `.radarx.diabatic_lagrangian` | [part 2](Radar_Workflow_Advanced): 9. Diabatic Lagrangian analysis |
+| `.radarx.diabatic_lagrangian` | [part 3](Radar_Workflow_Advanced_2): 9. Diabatic Lagrangian analysis |
 | `.radarx.disdrometer` | [part 2](Radar_Workflow_Advanced): 2. Disdrometers |
 | `.radarx.dsd` | [core](Radar_Workflow): 7. Rain drop size distribution |
 | `.radarx.dsd_bayesian` | [core](Radar_Workflow): 7. Rain drop size distribution |
 | `.radarx.dual_doppler_analytic` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `.radarx.echo_mask` | [core](Radar_Workflow): 2. Remove non-meteorological echo |
 | `.radarx.echo_top` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
-| `.radarx.ensemble_retrieval` | [part 2](Radar_Workflow_Advanced): 16. Ensembles and uncertainty of the retrievals |
-| `.radarx.ensemble_statistics` | [part 2](Radar_Workflow_Advanced): 16. Ensembles and uncertainty of the retrievals |
+| `.radarx.ensemble_retrieval` | [part 3](Radar_Workflow_Advanced_2): 16. Ensembles and uncertainty of the retrievals |
+| `.radarx.ensemble_statistics` | [part 3](Radar_Workflow_Advanced_2): 16. Ensembles and uncertainty of the retrievals |
 | `.radarx.estimate_motion` | [core](Radar_Workflow): 11. Storm motion, common analysis time and time interpolation |
 | `.radarx.evaporation` | [core](Radar_Workflow): 13. Evaporation |
-| `.radarx.forward_operator` | [part 2](Radar_Workflow_Advanced): 14. Forward operator for WRF and MPAS output |
-| `.radarx.gbvtd` | [part 2](Radar_Workflow_Advanced): 13. Tropical-cyclone winds from one radar |
+| `.radarx.forward_operator` | [part 3](Radar_Workflow_Advanced_2): 14. Forward operator for WRF and MPAS output |
+| `.radarx.gbvtd` | [part 3](Radar_Workflow_Advanced_2): 13. Tropical-cyclone winds from one radar |
 | `.radarx.grid_gates` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `.radarx.grid_lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `.radarx.grid_radars` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
@@ -2392,7 +2395,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.liquid_water_content` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.llsd` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `.radarx.mask_above_melting_layer` | [core](Radar_Workflow): 8. QVP time series and melting layer |
-| `.radarx.measurement_error` | [part 2](Radar_Workflow_Advanced): 16. Ensembles and uncertainty of the retrievals |
+| `.radarx.measurement_error` | [part 3](Radar_Workflow_Advanced_2): 16. Ensembles and uncertainty of the retrievals |
 | `.radarx.melting_layer` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `.radarx.melting_layer_ppi` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `.radarx.melting_snow_fall_speed` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
@@ -2402,7 +2405,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.network_bias` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `.radarx.noise_level` | [core](Radar_Workflow): 15. Noise and calibration |
 | `.radarx.parcel_diagnostics` | [core](Radar_Workflow): Parcel thermodynamics: CAPE, CIN, the lifted index and the levels |
-| `.radarx.perturb_radar` | [part 2](Radar_Workflow_Advanced): 16. Ensembles and uncertainty of the retrievals |
+| `.radarx.perturb_radar` | [part 3](Radar_Workflow_Advanced_2): 16. Ensembles and uncertainty of the retrievals |
 | `.radarx.phidp_offset` | [core](Radar_Workflow): 15. Noise and calibration |
 | `.radarx.plot` | [core](Radar_Workflow): 10. Cone gridding, Max-CAPPI, interactive view and UGRID |
 | `.radarx.plot_cappi` | [core](Radar_Workflow): Other ways to grid, section and plot |
@@ -2422,25 +2425,25 @@ The methods of the `.radarx` accessors:
 | `.radarx.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `.radarx.rd_qvp` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `.radarx.rhi_qvp` | [core](Radar_Workflow): 8. QVP time series and melting layer |
-| `.radarx.rotation_couplets` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
+| `.radarx.rotation_couplets` | [part 3](Radar_Workflow_Advanced_2): 7. Tornado detection and biological echo |
 | `.radarx.shi` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
-| `.radarx.single_doppler_winds` | [part 2](Radar_Workflow_Advanced): 8. Wind from a single Doppler radar |
+| `.radarx.single_doppler_winds` | [part 3](Radar_Workflow_Advanced_2): 8. Wind from a single Doppler radar |
 | `.radarx.snr` | [core](Radar_Workflow): 15. Noise and calibration |
 | `.radarx.sounding` | [core](Radar_Workflow): 3. Environment |
 | `.radarx.storm_relative_helicity` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
 | `.radarx.superobs` | [core](Radar_Workflow): 16. Super-observations for data assimilation |
 | `.radarx.to_cappi` | [core](Radar_Workflow): Other ways to grid, section and plot |
-| `.radarx.to_cfradial1` | [part 2](Radar_Workflow_Advanced): 12. Export to files |
-| `.radarx.to_cfradial2` | [part 2](Radar_Workflow_Advanced): 12. Export to files |
+| `.radarx.to_cfradial1` | [part 3](Radar_Workflow_Advanced_2): 12. Export to files |
+| `.radarx.to_cfradial2` | [part 3](Radar_Workflow_Advanced_2): 12. Export to files |
 | `.radarx.to_grid` | [core](Radar_Workflow): 10. Cone gridding, Max-CAPPI, interactive view and UGRID |
-| `.radarx.to_netcdf_cf` | [part 2](Radar_Workflow_Advanced): 12. Export to files |
-| `.radarx.to_odim` | [part 2](Radar_Workflow_Advanced): 12. Export to files |
-| `.radarx.to_radar_grid` | [part 2](Radar_Workflow_Advanced): 14. Forward operator for WRF and MPAS output |
+| `.radarx.to_netcdf_cf` | [part 3](Radar_Workflow_Advanced_2): 12. Export to files |
+| `.radarx.to_odim` | [part 3](Radar_Workflow_Advanced_2): 12. Export to files |
+| `.radarx.to_radar_grid` | [part 3](Radar_Workflow_Advanced_2): 14. Forward operator for WRF and MPAS output |
 | `.radarx.to_uxarray` | [core](Radar_Workflow): 10. Cone gridding, Max-CAPPI, interactive view and UGRID |
-| `.radarx.to_zarr` | [part 2](Radar_Workflow_Advanced): 12. Export to files |
-| `.radarx.tc_center` | [part 2](Radar_Workflow_Advanced): 13. Tropical-cyclone winds from one radar |
-| `.radarx.tornado_probability` | [part 2](Radar_Workflow_Advanced): 7. Tornado detection and biological echo |
-| `.radarx.trajectories` | [part 2](Radar_Workflow_Advanced): 9. Diabatic Lagrangian analysis |
+| `.radarx.to_zarr` | [part 3](Radar_Workflow_Advanced_2): 12. Export to files |
+| `.radarx.tc_center` | [part 3](Radar_Workflow_Advanced_2): 13. Tropical-cyclone winds from one radar |
+| `.radarx.tornado_probability` | [part 3](Radar_Workflow_Advanced_2): 7. Tornado detection and biological echo |
+| `.radarx.trajectories` | [part 3](Radar_Workflow_Advanced_2): 9. Diabatic Lagrangian analysis |
 | `.radarx.vad_profile` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
 | `.radarx.vil` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.vil_density` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
