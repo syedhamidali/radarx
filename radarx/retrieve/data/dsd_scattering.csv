@@ -1,5 +1,5 @@
 # Single-drop scattering of raindrops, T-matrix (pytmatrix), built by ci/build_dsd_tables.py
-# axis ratio Brandes et al. (2002); Gaussian canting, 0 mean, 7 deg std; horizontal incidence; water refractive index Ray (1972)
+# canting_std_deg=7; frequency_ghz_S=2.8; frequency_ghz_C=5.6; frequency_ghz_X=9.4; elevation_deg=0; axis_ratio=Brandes et al. (2002); canting=Gaussian, 0 mean; refractive_index=Ray (1972)
 # diameter: equal-volume diameter [mm]; sigma_h, sigma_v, copol_re, copol_im: backscatter cross sections and copolar correlation terms [mm2]
 # kdp [deg km-1], ah, av [dB km-1] per drop per m3
 band,wavelength,temperature,diameter,sigma_h,sigma_v,copol_re,copol_im,kdp,ah,av

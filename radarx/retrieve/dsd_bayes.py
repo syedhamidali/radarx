@@ -239,6 +239,7 @@ from .dsd import (
     _ZDR_NAMES,
     MU_LAMBDA,
     _as_mask,
+    _assumption_attrs,
     _check_band,
     _f_mu,
     _find,
@@ -409,7 +410,12 @@ def forward_grid(band="S", temperature=20.0):
             ),
             "mu": ("mu", mu, {"long_name": "Shape parameter", "units": "1"}),
         },
-        attrs={"band": band, "temperature": float(temperature), "nw": 1.0},
+        attrs={
+            "band": band,
+            "temperature": float(temperature),
+            "nw": 1.0,
+            **_assumption_attrs(band),
+        },
     )
 
 
@@ -1363,6 +1369,7 @@ def dsd_bayesian(
         "method": "bayesian",
         "band": band,
         "temperature": temperature,
+        **_assumption_attrs(band),
         "prior": str(prior_ds.attrs.get("prior", "custom")),
         "errors": ", ".join(f"{k}={v:g}" for k, v in errs.items()),
         "comment": (
