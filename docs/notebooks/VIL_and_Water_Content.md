@@ -247,7 +247,9 @@ print("DVL: product", dvl.prod_desc.prod_code, "| NVL: product", nvl.prod_desc.p
 The comparison is made on the reference grids, in the range 20 to 150 km:
 my VIL is averaged over each DVL bin (1° by 1 km), over each 4 km NVL cell and
 over each MRMS pixel. `fill_below` is the VIL with the lowest value extended
-to the ground.
+to the ground; `operational` is `layers="operational"`, constant layers between
+the middles of consecutive beams, the lowest from the ground and the highest to the
+top of its beam.
 
 ```{code-cell} ipython3
 def scores(mine, ref):
@@ -281,6 +283,7 @@ def binned(values, ia, ib, shape, reduce="mean"):
 variants = {
     "default": vil_polar.VIL.values,
     "fill_below": filled.VIL.values,
+    "operational": vil(volume, layers="operational").VIL.values,
     "no cap": vil(volume, dbz_cap=None).VIL.values,
     "min_dbz 18": vil(volume, min_dbz=18.0).VIL.values,
 }
@@ -303,6 +306,7 @@ for name, values in variants.items():
     rows[f"{name}, bin mean"] = scores(binned(values, iaz, ibin, dvl_vil.shape), dvl_vil)
 rows["default, bin maximum"] = scores(binned(variants["default"], iaz, ibin, dvl_vil.shape, "max"), dvl_vil)
 rows["fill_below, bin maximum"] = scores(binned(variants["fill_below"], iaz, ibin, dvl_vil.shape, "max"), dvl_vil)
+rows["operational, bin maximum"] = scores(binned(variants["operational"], iaz, ibin, dvl_vil.shape, "max"), dvl_vil)
 print(f"DVL maximum {np.nanmax(dvl_vil):.1f} kg m-2, radarx maximum {float(vil_polar.VIL.max()):.1f}")
 pd.DataFrame(rows).T.round(2)
 ```
@@ -413,11 +417,18 @@ changes the mean by 0.02 kg m$^{-2}$). Three things explain part of it. The
 layer below the lowest beam: with `fill_below` the bias falls from −1.1 to
 −0.7 kg m$^{-2}$. The cell size: the DVL value of a 1° by 1 km bin is closer to the
 maximum than to the mean of my 0.5° by 0.25 km gates (the bin maximum gives −0.7
-and, with `fill_below`, −0.3 kg m$^{-2}$). What remains, about 20 % in the
-cores, is not explained here: the algorithm of the radar product is not
-published in the files, and the part of the storm above the highest beam, which
-radarx leaves out (`VIL_TOP_TRUNCATED`) and an operational product may extend,
-is one candidate. The NVL classes agree with radarx in 72 % of the cells and
+and, with `fill_below`, −0.3 kg m$^{-2}$). `layers="operational"` extends both
+the lowest and the highest beam as in the layer depths of the WSR-88D algorithm
+description (constant layers between the middles of the beams, the lowest from
+the ground, the highest to its top; see the references of `vil`). It gives about
+the same as `fill_below` (bias −0.8, and −0.4 with the bin maximum), so the part of
+the storm above the highest beam adds little here. What remains, a deficit in
+the cores, is not explained here: the algorithm of the radar product is not
+published in the files, and the description that `layers="operational"`
+follows is that of the original algorithm, not of the digital VIL. Over four
+volumes of the squall line of 30 March 2022 at KGWX (30 to 230 km) the median ratio to
+the DVL is 0.53 for the default, 0.78 for `fill_below` and 0.74 for
+`layers="operational"`, and 0.67, 0.99 and 0.93 with the bin maximum. The NVL classes agree with radarx in 72 % of the cells and
 within one class in 96 %; where they differ, radarx is the lower class
 (27 % of the cells, against 1 % higher), the same direction as for the DVL, and
 the classes are 5 kg m$^{-2}$ wide above 5. The MRMS VIL is smoother and lower in the cores: its maximum in this scene is

@@ -1008,3 +1008,210 @@ def test_liquid_water_content_cap():
     assert "capped at 56 dBZ" in capped.attrs["comment"]
     with pytest.raises(ValueError, match="dbz_cap"):
         liquid_water_content(ds.assign(ZDR=ds.DBZH * 0), "dsd", dbz_cap=56.0)
+
+
+# --------------------------------------------------------------------------
+# operational layers
+# --------------------------------------------------------------------------
+
+
+def hand_operational(h, top, dbz, base, cap=56.0, floor=0.0, ceiling=np.inf):
+    """Constant layers between the middles of consecutive samples, from the definition."""
+    h = np.asarray(h, dtype=float)
+    dbz = np.asarray(dbz, dtype=float)
+    z = np.where(dbz < floor, 0.0, z_of(np.minimum(dbz, cap)))
+    edges = np.r_[base, 0.5 * (h[1:] + h[:-1]), top]
+    edges = np.minimum(np.maximum(edges, base), ceiling)
+    return K * float(np.sum(z ** (4.0 / 7.0) * np.maximum(np.diff(edges), 0.0)))
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_operational_layers_closed_form(engine):
+    # levels 500, 1500, 3000 m: layers 0-1000, 1000-2250 and 2250-3750 m
+    z = np.array([500.0, 1500.0, 3000.0])
+    dbz = np.array([30.0, 40.0, 20.0])
+    out = vil(column(dbz, z), layers="operational", engine=engine)
+    by_hand = K * (
+        z_of(30.0) ** (4 / 7) * 1000.0
+        + z_of(40.0) ** (4 / 7) * 1250.0
+        + z_of(20.0) ** (4 / 7) * 1500.0
+    )
+    np.testing.assert_allclose(out.VIL.values.squeeze(), by_hand, rtol=1e-6)
+    np.testing.assert_allclose(
+        out.VIL.values.squeeze(),
+        hand_operational(z, 3750.0, dbz, 0.0),
+        rtol=1e-6,
+    )
+    assert int(out.VIL_LOWER_BOUND.squeeze()) == 0
+    assert "constant layers" in out.VIL.attrs["comment"]
+    # the default is unchanged
+    default = vil(column(dbz, z), engine=engine)
+    np.testing.assert_allclose(
+        default.VIL.values.squeeze(), hand_vil(z, dbz), rtol=1e-6
+    )
+    # fill_below and partial_layers have no effect
+    same = vil(
+        column(dbz, z),
+        layers="operational",
+        fill_below=True,
+        partial_layers=False,
+        engine=engine,
+    )
+    np.testing.assert_allclose(same.VIL, out.VIL)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_operational_layers_edge_cases(engine):
+    z = np.array([0.0, 1000.0, 2000.0, 3000.0])
+    # one valid sample is enough: it holds from the base to the top of its level
+    one = column(np.array([np.nan, 40.0, np.nan, np.nan]), z)
+    out = vil(one, layers="operational", engine=engine)
+    np.testing.assert_allclose(
+        out.VIL.values.squeeze(), K * z_of(40.0) ** (4 / 7) * 1500.0, rtol=1e-6
+    )
+    assert np.isnan(vil(one, engine=engine).VIL.values).all()
+    # no valid sample: no VIL
+    none = vil(column(np.full(4, np.nan), z), layers="operational", engine=engine)
+    assert np.isnan(none.VIL.values).all()
+    # base height above the lowest sample: the layer starts at the base
+    dbz = np.array([30.0, 30.0, 30.0, 30.0])
+    high = vil(
+        column(dbz, z), layers="operational", base_height=800.0, engine=engine
+    ).VIL.item()
+    assert high == pytest.approx(K * z_of(30.0) ** (4 / 7) * (3500.0 - 800.0), rel=1e-6)
+    # samples without echo carry no water; the cap and the floor apply
+    zero = column(np.array([-np.inf, 40.0, -np.inf, -np.inf]), z)
+    got = vil(zero, layers="operational", missing="clear", engine=engine).VIL.item()
+    assert got == pytest.approx(K * z_of(40.0) ** (4 / 7) * 1000.0, rel=1e-6)
+    hot = column(np.array([70.0, 70.0]), z[:2])
+    capped = vil(hot, layers="operational", engine=engine).VIL.item()
+    assert capped == pytest.approx(K * z_of(56.0) ** (4 / 7) * 1500.0, rel=1e-6)
+    free = vil(hot, layers="operational", dbz_cap=None, engine=engine).VIL.item()
+    assert free == pytest.approx(K * z_of(70.0) ** (4 / 7) * 1500.0, rel=1e-6)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_operational_liquid_part_below_the_melting_level(engine):
+    z = np.array([500.0, 1500.0, 3000.0])
+    dbz = np.array([30.0, 40.0, 20.0])
+    ds = column(dbz, z)
+    for ceiling in (800.0, 1600.0, 5000.0, 400.0):
+        out = vil(ds, layers="operational", melting=ceiling, engine=engine)
+        np.testing.assert_allclose(
+            out.VIL_LIQUID.values.squeeze(),
+            hand_operational(z, 3750.0, dbz, 0.0, ceiling=ceiling),
+            rtol=1e-6,
+        )
+    whole = vil(ds, layers="operational", melting=1.0e5, engine=engine)
+    np.testing.assert_allclose(whole.VIL_LIQUID, whole.VIL, rtol=1e-6)
+    below = vil(ds, layers="operational", melting=-10.0, engine=engine)
+    assert np.isnan(below.VIL_LIQUID.values).all()
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_operational_polar_volume_against_a_hand_loop(engine):
+    tree = storm_volume()
+    out = vil(tree, layers="operational", engine=engine)
+    plain = vil(tree, engine=engine)
+    ground = out.ground_range.values
+    checked = 0
+    for iaz in (10, 55, 100, 160):
+        for j in range(40, ground.size, 37):
+            h, v = hand_loop_column(tree, iaz, ground[j])
+            if h.size < 2:
+                continue
+            el_top = float(tree["sweep_0"].elevation[iaz])
+            # the highest sample of the column is the beam of the highest sweep
+            # that reaches this range
+            top = None
+            for name in sorted(tree.children, key=lambda n: int(n.split("_")[1])):
+                ds = tree[name].to_dataset(inherit=False)
+                g = ground_distance(ds.range.values, float(ds.elevation[iaz]))
+                if (
+                    g[0] - 0.5 * (g[1] - g[0])
+                    <= ground[j]
+                    <= g[-1] + 0.5 * (g[-1] - g[-2])
+                ):
+                    el_top = float(ds.elevation[iaz])
+            top = radarx_height(ground[j], el_top + 0.5)
+            ref = hand_operational(h, top, v, ALT)
+            np.testing.assert_allclose(
+                out.VIL.values[iaz, j], ref, rtol=2e-4, atol=1e-4
+            )
+            checked += 1
+    assert checked > 10
+    assert (out.VIL_LOWER_BOUND == 0).all()
+    ok = np.isfinite(plain.VIL.values)
+    assert (out.VIL.values[ok] >= 0).all()
+    assert out.VIL.values[ok].sum() > plain.VIL.values[ok].sum()
+    # more columns have a VIL: one valid sample is enough
+    assert np.isfinite(out.VIL.values).sum() >= ok.sum()
+
+
+@pytest.mark.parametrize("fill", [False, True])
+@compiled_only
+def test_operational_compiled_equals_numpy_on_random_columns(fill):
+    rnd = np.random.default_rng(11)
+    nk, nc = 14, 600
+    h = np.sort(rnd.uniform(0, 15e3, (nk, nc)), axis=0)
+    h[:, ::7] = h[::-1, ::7]  # unsorted columns
+    h[rnd.random(h.shape) < 0.05] = np.nan
+    v = rnd.uniform(-10, 70, (nk, nc))
+    v[rnd.random(v.shape) < 0.15] = np.nan
+    v[rnd.random(v.shape) < 0.1] = -np.inf
+    v[:, 5] = np.nan  # an empty column
+    ceiling = np.where(rnd.random(nc) < 0.7, rnd.uniform(0, 12e3, nc), np.nan)
+    opts = vilmod._options(fill_below=fill, layers="operational")
+    for base in (100.0, np.nan):
+        a = vilmod._columns(h, h + 300.0, v, ceiling, False, opts, base, False, 1)
+        b = vilmod._columns(h, h + 300.0, v, ceiling, False, opts, base, True, 3)
+        np.testing.assert_allclose(a, b, rtol=1e-12, atol=0, equal_nan=True)
+        assert np.isfinite(a[0]).sum() > 400 and np.isfinite(a[1]).sum() > 200
+    hs = np.sort(rnd.uniform(0, 15e3, nk))
+    a = vilmod._columns(hs, hs + 300, v, ceiling, True, opts, 100.0, False, 1)
+    b = vilmod._columns(hs, hs + 300, v, ceiling, True, opts, 100.0, True, 2)
+    np.testing.assert_allclose(a, b, rtol=1e-12, atol=0, equal_nan=True)
+    # a single level
+    a = vilmod._columns(hs[:1], hs[:1] + 300, v[:1], ceiling, True, opts, 0.0, False, 1)
+    b = vilmod._columns(hs[:1], hs[:1] + 300, v[:1], ceiling, True, opts, 0.0, True, 1)
+    np.testing.assert_allclose(a, b, rtol=1e-12, atol=0, equal_nan=True)
+
+
+@compiled_only
+def test_operational_polar_volume_engines_agree(monkeypatch):
+    tree = storm_volume(nray=180)
+    monkeypatch.setattr(vilmod, "_CHUNK", 5000)
+    a = vil(tree, layers="operational", melting=3000.0, engine="numpy")
+    b = vil(tree, layers="operational", melting=3000.0, engine="compiled", n_threads=2)
+    xr.testing.assert_allclose(a, b, rtol=1e-6)
+    assert np.isfinite(a.VIL).sum() > 1000
+
+
+def test_layers_must_be_known():
+    with pytest.raises(ValueError, match="layers"):
+        vil(column(np.array([30.0, 30.0])), layers="midpoint")
+
+
+def test_operational_accessor_and_real_nexrad_volume():
+    pytest.importorskip("open_radar_data")
+    from open_radar_data import DATASETS
+
+    from .test_dealias import nexrad_volume
+
+    try:
+        path = DATASETS.fetch("KLBB20160601_150025_V06")
+    except Exception as err:  # pragma: no cover - network
+        pytest.skip(f"sample data unavailable: {err}")
+    tree = nexrad_volume(path)
+    out = tree.radarx.vil(layers="operational")
+    plain = vil(tree)
+    both = np.isfinite(out.VIL.values) & np.isfinite(plain.VIL.values)
+    a, b = out.VIL.values[both], plain.VIL.values[both]
+    assert both.sum() > 1000 and a.max() < 80.0
+    echo = (a > 0) & (b > 0)
+    # extending the lowest and the highest beam adds water to the column
+    assert np.median(b[echo] / a[echo]) < 1.0
+    assert (out.VIL_LOWER_BOUND.values[both] == 0).all()
+    if vilmod.HAS_COMPILED_KERNEL:
+        other = vil(tree, layers="operational", engine="numpy")
+        xr.testing.assert_allclose(out, other, rtol=1e-6)

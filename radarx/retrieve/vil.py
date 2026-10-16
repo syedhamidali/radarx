@@ -52,19 +52,34 @@ sample the column is left out by default, so the VIL is a lower bound, and
 lowest value is extended down to the base height (compare the pseudo-CAPPI).
 Between two samples (the tilts of a volume, or a gap of missing levels) the
 reflectivity varies linearly with height; a column needs two samples.
+``layers="operational"`` replaces this by constant layers that extend the
+lowest and the highest sample to the ground and to the top of the beam.
 
 Compared with the Level III digital VIL (DVL) of one event (KGWX, 30 March
-2022, four volumes, one cut per elevation) the default VIL is about 0.71 of
-DVL at 30 to 60 km from the radar and 0.35 at 150 to 230 km (correlation
-0.92, median ratio 0.53), because the layer under the lowest beam is left
-out. With ``fill_below=True`` the correlation is 0.965 and the ratio is flat
-at about 0.78 for DVL below 10 kg m-2: a deficit of 22 % remains whose cause
-was not found (how the operational product extends the lowest and highest
-beam was not checked). The VIL matches MRMS VIL closely (ratio 0.99,
-correlation 0.90), and MRMS VIL is itself 0.57 of DVL. Use ``fill_below=True``
-to compare with operational products. The layer between the last sample with
-echo and the next sample without echo contributes the mean of the two ends
-as in the sum above; ``partial_layers=False`` leaves such layers out.
+2022, four volumes, one cut per elevation, radarx averaged into the 1 degree
+by 1 km DVL bins, 30 to 230 km) the default VIL is about 0.71 of DVL at 30 to
+60 km from the radar and 0.34 at 150 to 230 km (correlation 0.92, median
+ratio 0.53), because the layer under the lowest beam is left out. With
+``fill_below=True`` the correlation is 0.965 and the ratio is flat at 0.78.
+``layers="operational"`` (constant layers between the middles of consecutive
+beams, the lowest from the ground and the highest to the top of its beam, as in
+the layer depths of the WSR-88D algorithm description, see :func:`vil`) gives
+correlation 0.964 and a flat ratio of 0.74, a little below ``fill_below``
+because it has no linear interpolation between beams. So extending the lowest
+and the highest beam does not by itself close the gap. Most of what remains
+depends on how the values are brought onto the DVL bin: the DVL value of a
+bin is closer to the maximum than to the mean of the radarx gates in it, and
+with the bin maximum the median ratio is 0.99 for ``fill_below=True`` and
+0.93 for ``layers="operational"`` (0.67 for the default, still 0.45 at 150 to
+230 km). The same bin maximum raises the ratio to MRMS VIL from 0.99 to 1.23
+for the default. The VIL matches MRMS VIL closely with the default settings and
+a bin mean (ratio 0.99, correlation 0.90), and MRMS VIL is itself 0.57 of
+DVL. For DVL above 30 kg m-2 the ratio stays 0.54 to 0.65 with every setting.
+Use ``fill_below=True`` or ``layers="operational"`` to compare with operational
+products, and compare on the bin maximum when the reference is a coarser grid.
+The layer between the last sample with echo and the next sample without echo
+contributes the mean of the two ends as in the sum above;
+``partial_layers=False`` leaves such layers out.
 
 Reflectivity above ``dbz_cap`` (default 56 dBZ, a radarx choice that follows
 the operational product, where it limits the contribution of hail) is set to
@@ -171,6 +186,35 @@ def _use_compiled(engine):
 # --------------------------------------------------------------------------
 
 
+def _operational_numpy(hs, ts, z, ok, n, ceiling, base_height):
+    """
+    Constant-layer VIL of the sorted columns (NumPy reference of the kernel).
+
+    Each sample holds over the layer from the middle between it and the
+    sample below to the middle between it and the sample above; the lowest
+    layer starts at ``base_height`` and the highest ends at the top of its
+    beam ``ts``. Returns the VIL sum, whether it exists, the sum below the
+    ceiling and whether that exists, each per column.
+    """
+    nk = hs.shape[0]
+    base = base_height if np.isfinite(base_height) else hs[0]
+    # upper edge of each layer: middle to the next sample, the beam top for the last
+    upper = ts.copy()
+    if nk > 1:
+        upper[:-1] = np.where(ok[1:], 0.5 * (hs[:-1] + hs[1:]), ts[:-1])
+    lower = np.empty_like(upper)
+    lower[0] = base
+    lower[1:] = upper[:-1]
+    lower = np.maximum(lower, base)
+    zr = np.power(z, EXPONENT)
+    total = np.where(ok, zr * np.maximum(upper - lower, 0.0), 0.0).sum(axis=0)
+    c = ceiling[None, :]
+    use = ok & ~np.isnan(c) & (lower < c)
+    cut = np.minimum(upper, c)
+    liquid = np.where(use, zr * np.maximum(cut - lower, 0.0), 0.0).sum(axis=0)
+    return total, n > 0, liquid, use.any(axis=0)
+
+
 def _columns_numpy(
     h,
     h_top,
@@ -185,6 +229,7 @@ def _columns_numpy(
     base_height,
     interpolate,
     partial_layers=True,
+    operational=False,
 ):
     """
     NumPy implementation of the kernel ``_vil.columns`` (same results).
@@ -232,7 +277,11 @@ def _columns_numpy(
         total_liquid = liquid_layer.sum(axis=0)
         has_liquid = use.any(axis=0)
 
-        if fill_below and np.isfinite(base_height):
+        if operational:
+            total, has, total_liquid, has_liquid = _operational_numpy(
+                hs, ts, z, ok, n, ceiling, base_height
+            )
+        elif fill_below and np.isfinite(base_height):
             fill = np.power(z[0], EXPONENT)
             seg = hs[0] - base_height
             add = (n > 0) & (seg > 0)
@@ -294,6 +343,7 @@ def _columns(
         float(base_height),
         bool(options["interpolate"]),
         bool(options.get("partial_layers", True)),
+        bool(options.get("operational", False)),
     )
     if use_compiled:
         return _vil.columns(*args, n_threads=int(n_threads or 0))
@@ -634,8 +684,12 @@ def _options(
     no_echo_dbz=-14.0,
     interpolate=True,
     partial_layers=True,
+    layers="linear",
 ):
+    if layers not in ("linear", "operational"):
+        raise ValueError(f"layers must be 'linear' or 'operational', not {layers!r}")
     return {
+        "operational": layers == "operational",
         "partial_layers": bool(partial_layers),
         "dbz_cap": dbz_cap,
         "min_dbz": min_dbz,
@@ -743,6 +797,7 @@ def vil(
     min_dbz=0.0,
     fill_below=False,
     partial_layers=True,
+    layers="linear",
     melting=None,
     kind=None,
     missing=None,
@@ -781,19 +836,36 @@ def vil(
         Extend the lowest valid value down to ``base_height`` (like a
         pseudo-CAPPI) instead of leaving that layer out. Default False.
         Compared with the Level III digital VIL (DVL), the default VIL is
-        about 0.7 of it at 30-60 km from the radar and 0.35 at 150-230 km,
+        about 0.7 of it at 30-60 km from the radar and 0.34 at 150-230 km,
         because the layer under the lowest beam is missing; with
-        ``fill_below=True`` the ratio is flat at about 0.78 for DVL below
-        10 kg m-2 (correlation 0.965 against 0.92), so a deficit of about
-        22 % is left whose cause is not known. Compared with MRMS VIL the
-        ratio is 0.99 (correlation 0.90). These numbers are from one event
-        (KGWX, 30 March 2022, four volumes, one cut per elevation) and are
-        not a calibration.
+        ``fill_below=True`` the ratio is flat at about 0.78 (correlation 0.965
+        against 0.92). Most of the remaining deficit is the comparison on a
+        coarser grid: against the maximum of the radarx values in a DVL bin
+        the ratio is 0.99. Compared with MRMS VIL the default ratio is 0.99
+        (correlation 0.90). These numbers are from one event (KGWX, 30 March
+        2022, four volumes, one cut per elevation) and are not a calibration;
+        see :mod:`radarx.retrieve.vil`.
     partial_layers : bool, optional
         The layer between a sample with echo and the next one without
         contributes ``(Z / 2)**(4/7) dh`` (the mean of the two ends), which
         adds up to several tenths of kg m-2 for coarse upper tilts. Default
         True; with False those layers are left out (a lower bound).
+    layers : {"linear", "operational"}, optional
+        How the samples of a column are turned into layers. ``"linear"``
+        (default): Z varies linearly with height between consecutive samples,
+        and the layer under the lowest sample is left out unless
+        ``fill_below`` is set. ``"operational"``: each sample holds over the
+        layer between the middle to the sample below and the middle to the
+        sample above, the lowest layer starts at ``base_height`` and the
+        highest ends at the top of its beam, as in the layer depths of the
+        WSR-88D algorithm description (NWS 1999, see References). It extends
+        the lowest and the highest sample, so ``fill_below`` and
+        ``partial_layers`` have no effect, a column with one valid sample has
+        a VIL, and ``VIL_LOWER_BOUND`` is 0. On one NEXRAD case (KGWX, 30
+        March 2022) it raises the median ratio to the Level III DVL from 0.53
+        to 0.74, about the same as ``fill_below=True`` (0.78); both give 0.9
+        to 1.0 when radarx is compared with the maximum of its values in a DVL
+        bin instead of the mean.
     melting : float or xarray.DataArray or xarray.Dataset, optional
         Height (m above sea level) of the melting level, a number, an array
         that broadcasts against the columns (e.g. the 0 degC height of a
@@ -868,12 +940,25 @@ def vil(
     with size. *J. Meteor.*, **5** (4), 165-166,
     https://doi.org/10.1175/1520-0469(1948)005<0165:TDORWS>2.0.CO;2
 
+    National Weather Service, Radar Operations Center, 1999: Vertically-
+    integrated liquid water algorithm description, NX-DR-03-006/25 (the
+    layer depths used by ``layers="operational"``: each beam holds from the
+    middle to the beam below to the middle to the beam above, the lowest layer
+    from the ground, the highest to the top of the beam; the document
+    describes the original algorithm with 4 km boxes, not the digital VIL of
+    the current radar product, whose algorithm was not checked),
+    https://www2.mmm.ucar.edu/episodes/ROC/WSR-88D_algorithms/pdfs/vertically_integrated_liquid_water.pdf
+
     Examples
     --------
     >>> out = radarx.retrieve.vil(grid)  # doctest: +SKIP
     >>> out = dtree.radarx.vil(fill_below=True)  # doctest: +SKIP
+    >>> out = dtree.radarx.vil(layers="operational")  # doctest: +SKIP
     """
-    options = _options(dbz_cap, min_dbz, fill_below, partial_layers=partial_layers)
+    options = _options(
+        dbz_cap, min_dbz, fill_below, partial_layers=partial_layers, layers=layers
+    )
+    fill_below = fill_below or options["operational"]
     products, template, base, attrs = _column_products(
         obj,
         dbz,
@@ -893,8 +978,14 @@ def vil(
         "Greene and Clark (1972) sum of 3.44e-6 ((Z_i + Z_i+1) / 2)^(4/7) dh; "
         f"reflectivity cap {cap}; values below "
         f"{'no threshold' if min_dbz is None else f'{min_dbz:g} dBZ'} count as "
-        f"no echo; the layer below the lowest sample is "
-        f"{'filled with its value' if fill_below else 'left out'}"
+        f"no echo; "
+        + (
+            "constant layers between the middles of consecutive samples, the "
+            "lowest from the base height and the highest to the top of its beam"
+            if options["operational"]
+            else "the layer below the lowest sample is "
+            f"{'filled with its value' if fill_below else 'left out'}"
+        )
     )
     out = xr.Dataset(
         {
