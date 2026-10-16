@@ -2216,6 +2216,8 @@ notebooks or from this index.
 | `cold_pool_perturbation` | `radarx.retrieve.coldpool` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `potential_temperatures` | `radarx.retrieve.coldpool` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `rkw_ratio` | `radarx.retrieve.coldpool` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
+| `zdr_column` | `radarx.retrieve.columns` | [part 3](Radar_Workflow_Advanced_2): 17. ZDR columns |
+| `zdr_column_metrics` | `radarx.retrieve.columns` | [part 3](Radar_Workflow_Advanced_2): 17. ZDR columns |
 | `dealias_confidence` | `radarx.retrieve.dealias` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
 | `dealias_velocity` | `radarx.retrieve.dealias` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
 | `correct_dual_prf` | `radarx.retrieve.dealias` | [part 3](Radar_Workflow_Advanced_2): 15. Dual-PRF velocity correction |
@@ -2448,6 +2450,8 @@ The methods of the `.radarx` accessors:
 | `.radarx.vil` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.vil_density` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.z_offset` | [core](Radar_Workflow): 15. Noise and calibration |
+| `.radarx.zdr_column` | [part 3](Radar_Workflow_Advanced_2): 17. ZDR columns |
+| `.radarx.zdr_column_metrics` | [part 3](Radar_Workflow_Advanced_2): 17. ZDR columns |
 | `.radarx.zdr_offset` | [core](Radar_Workflow): 15. Noise and calibration |
 
 ## References

@@ -40,6 +40,7 @@ shown.
 | 14 | polarimetric forward operator for WRF and MPAS model output | `wrf_state`, `mpas_state`, `forward_operator`, `to_radar_grid` |
 | 15 | dual-PRF velocity correction | `correct_dual_prf` |
 | 16 | ensembles and uncertainty of the retrievals: errors of the measurements, calibration and DSD prior propagated by Monte Carlo | `perturb_radar`, `measurement_error`, `ensemble_retrieval`, `ensemble_statistics`, `relation_scatter` |
+| 17 | ZDR column depth, area and volume above the freezing level | `zdr_column`, `zdr_column_metrics` |
 
 ```{code-cell} ipython3
 import math
@@ -1013,6 +1014,50 @@ for ax, (da, title, style) in zip(axes, [
 plt.show()
 ```
 
+## 17. ZDR columns
+
+Drops that an updraft lofts above the freezing level freeze slowly, so a column
+of differential reflectivity of 1 dB or more stands above the 0 °C level, and its
+depth follows the strength of the updraft (Snyder et al. 2015). `zdr_column`
+gives the depth at every point of a grid, counting the levels from the freezing
+level up while $Z_{DR} \ge 1$ dB and the copolar correlation coefficient is at least
+0.8; `zdr_column_metrics` gives the maximum depth, the area and the volume of
+the columns. The data are synthetic: an updraft whose column is 3 km deep in the
+centre, with a hail spike of low $\rho_{hv}$ on its flank.
+
+```{code-cell} ipython3
+from radarx.retrieve import zdr_column, zdr_column_metrics
+
+zc = np.arange(0.0, 12001.0, 250.0)
+yc = xc = np.arange(41) * 1000.0
+r = np.hypot(yc[:, None] - 20e3, xc[None, :] - 20e3)
+column_top = 4000.0 + 3000.0 * np.clip(1 - r / 8e3, 0, None)  # freezing level 4 km
+zdr_grid = xr.DataArray(
+    np.where(zc[:, None, None] < column_top[None], 2.0, 0.2),
+    dims=("z", "y", "x"),
+    coords={"z": zc, "y": yc, "x": xc},
+    name="ZDR",
+)
+rho_grid = xr.full_like(zdr_grid, 0.98)
+rho_grid[:, 20:24, 28:32] = 0.6  # a hail spike
+depth = zdr_column(zdr_grid, rhohv=rho_grid, freezing_level=4000.0)
+metrics = zdr_column_metrics(depth, min_depth=1000.0)
+print(f"deepest column {float(metrics.ZDR_COLUMN_MAX_DEPTH):.0f} m, "
+      f"area {float(metrics.ZDR_COLUMN_AREA):.0f} km2, volume {float(metrics.ZDR_COLUMN_VOLUME):.0f} km3")
+# the accessors give the same
+same = zdr_grid.radarx.zdr_column(rhohv=rho_grid, freezing_level=4000.0)
+print(bool(np.allclose(same, depth)), float(same.radarx.zdr_column_metrics(min_depth=2000.0).ZDR_COLUMN_AREA))
+fig, ax = plt.subplots(figsize=(5, 4.2), layout="constrained")
+pm = ax.pcolormesh(xc / 1e3, yc / 1e3, depth, cmap="viridis", vmin=0, vmax=3000, shading="auto")
+fig.colorbar(pm, label="ZDR column depth (m)")
+ax.set(xlabel="x (km)", ylabel="y (km)", aspect="equal")
+```
+
+The hail spike removes the grid points of low $\rho_{hv}$ from the column, the
+paper's way of keeping the three-body scatter signature out of the product.
+The depth needs a freezing level in the vertical reference of the grid (a
+sounding or a model) and a calibrated $Z_{DR}$.
+
 ## References
 
 - Holleman, I., and H. Beekhuis, 2003: Analysis and Correction of Dual PRF Velocity Data. *Journal of Atmospheric and Oceanic Technology*, **20**, 443-453, <https://doi.org/10.1175/1520-0426(2003)20<443:AACODP>2.0.CO;2>
@@ -1023,6 +1068,7 @@ plt.show()
 - Melnikov, V. M., and D. S. Zrnic, 2004: Simultaneous transmission mode for the polarimetric WSR-88D: statistical biases and standard deviations of polarimetric variables. NOAA/NSSL report, 84 pp., <https://www.nssl.noaa.gov/publications/wsr88d_reports/SHV_statistics.pdf>
 - Ryzhkov, A. V., J. Snyder, J. T. Carlin, A. Khain, and M. Pinsky, 2020: What Polarimetric Weather Radars Offer to Cloud Modelers: Forward Radar Operators and Microphysical/Thermodynamic Retrievals. *Atmosphere*, **11**, 362, <https://doi.org/10.3390/atmos11040362>
 - Ryzhkov, A., M. Diederich, P. Zhang, and C. Simmer, 2014: Potential Utilization of Specific Attenuation for Rainfall Estimation, Mitigation of Partial Beam Blockage, and Radar Networking. *Journal of Atmospheric and Oceanic Technology*, **31**, 599-619, <https://doi.org/10.1175/JTECH-D-13-00038.1>
+- Snyder, J. C., A. V. Ryzhkov, M. R. Kumjian, A. P. Khain, and J. Picca, 2015: A ZDR Column Detection Algorithm to Examine Convective Storm Updrafts. *Weather and Forecasting*, **30**, 1819-1844, <https://doi.org/10.1175/WAF-D-15-0068.1>
 - Shapiro, A., 1993: The Use of an Exact Solution of the Navier-Stokes Equations in a Validation Test of a Three-Dimensional Nonhydrostatic Numerical Model. *Monthly Weather Review*, **121**, 2420-2425, <https://doi.org/10.1175/1520-0493(1993)121<2420:TUOAES>2.0.CO;2>
 - Veillette, M. S., J. M. Kurdzo, P. M. Stepanian, J. Y. N. Cho, T. Reis, S. Samsi, J. McDonald, and N. Chisler, 2025: A Benchmark Dataset for Tornado Detection and Prediction Using Full-Resolution Polarimetric Weather Radar Data. *Artificial Intelligence for the Earth Systems*, **4**, <https://doi.org/10.1175/AIES-D-24-0006.1>
 - Ziegler, C. L., 2013a: A Diabatic Lagrangian Technique for the Analysis of Convective Storms. Part I: Description and Validation via an Observing System Simulation Experiment. *Journal of Atmospheric and Oceanic Technology*, **30**, 2248-2265, <https://doi.org/10.1175/JTECH-D-12-00194.1>
