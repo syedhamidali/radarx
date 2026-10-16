@@ -165,6 +165,8 @@ dask arrays.
 :caption: Getting started
 
 notebooks/Radar_Workflow
+notebooks/Radar_Workflow_Advanced
+notebooks/Radar_Workflow_Advanced_2
 notebooks/Grid_Radar
 notebooks/aws_data
 notebooks/IMD_Radar_Data

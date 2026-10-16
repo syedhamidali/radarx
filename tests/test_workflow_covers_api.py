@@ -5,7 +5,7 @@
 """The end-to-end workflow notebooks must show every public radarx function.
 
 ``docs/notebooks/Radar_Workflow.md`` (the core pipeline on the KGWX squall
-line) and ``docs/notebooks/Radar_Workflow_Advanced.md`` (the rest, on small
+line) and ``docs/notebooks/Radar_Workflow_Advanced.md`` and ``Radar_Workflow_Advanced_2.md`` (the rest, on small
 open or synthetic data) together call every name of the ``__all__`` of the
 public sub-packages and every method of the ``.radarx`` accessors. This test
 fails when a function is added to radarx without an example in the notebooks,
@@ -29,6 +29,7 @@ import radarx  # noqa: F401  registers the accessors
 NOTEBOOKS = Path(__file__).resolve().parents[1] / "docs" / "notebooks"
 CORE = NOTEBOOKS / "Radar_Workflow.md"
 ADVANCED = NOTEBOOKS / "Radar_Workflow_Advanced.md"
+ADVANCED_2 = NOTEBOOKS / "Radar_Workflow_Advanced_2.md"
 
 PACKAGES = [
     "radarx.retrieve",
@@ -117,13 +118,13 @@ def test_public_names_are_found():
     assert len(names) > 250
 
 
-@pytest.mark.parametrize("path", [CORE, ADVANCED], ids=lambda p: p.name)
+@pytest.mark.parametrize("path", [CORE, ADVANCED, ADVANCED_2], ids=lambda p: p.name)
 def test_notebooks_exist(path):
     assert path.exists()
 
 
 def test_every_public_name_is_in_a_workflow_notebook():
-    code = code_of(CORE) + "\n" + code_of(ADVANCED)
+    code = "\n".join(code_of(p) for p in (CORE, ADVANCED, ADVANCED_2))
     missing = []
     for name, module in public_names().items():
         obj = getattr(importlib.import_module(module), name)
@@ -143,7 +144,7 @@ def test_every_public_name_is_in_a_workflow_notebook():
 
 
 def test_every_accessor_method_is_in_a_workflow_notebook():
-    code = code_of(CORE) + "\n" + code_of(ADVANCED)
+    code = "\n".join(code_of(p) for p in (CORE, ADVANCED, ADVANCED_2))
     missing = [
         n
         for n in accessor_methods()
