@@ -787,5 +787,6 @@ def test_methods_text():
 
 
 def test_registry_file_is_valid_json():
-    path = ROOT / "radarx" / "data" / "references.json"
+    # the file of the package that is imported (the installed wheel in CI)
+    path = Path(radarx.__file__).parent / "data" / "references.json"
     assert isinstance(json.loads(path.read_text(encoding="utf-8")), dict)
