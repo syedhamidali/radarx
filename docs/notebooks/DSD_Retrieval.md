@@ -67,6 +67,46 @@ ax.legend()
 ax.grid(alpha=0.3);
 ```
 
+## Scattering by single drops: canting, frequency, temperature
+
+The tables above are fixed to 7 degrees of canting and three frequencies.
+`radarx.fundamentals.raindrop_scattering` computes the same quantities for any
+wavelength, temperature, axis ratio and canting width with a threaded C++
+T-matrix code (a translation of the code of Mishchenko that `pytmatrix` wraps;
+the 1920 rows of the packaged table are reproduced to 1e-6), so the assumptions
+behind the tables can be changed and their effect measured. At S band (2.8 GHz,
+20 degrees Celsius) the width of the canting distribution matters more than the
+frequency or the temperature:
+
+```{code-cell} ipython3
+from radarx.fundamentals import raindrop_scattering
+
+d = np.arange(0.5, 8.01, 0.25)
+wavelength = 299.792458 / 2.8  # mm
+fig, axes = plt.subplots(1, 2, figsize=(10, 3.8), layout="constrained")
+for std in (0.5, 7.0, 10.0, 20.0):
+    out = raindrop_scattering(d, wavelength, canting_std=std)
+    axes[0].plot(d, 10 * np.log10(out.sigma_h / out.sigma_v), label=f"canting {std:g}°")
+    axes[1].plot(d, out.kdp, label=f"canting {std:g}°")
+axes[0].set(xlabel="equal-volume diameter (mm)", ylabel="single-drop $Z_{DR}$ (dB)")
+axes[1].set(xlabel="equal-volume diameter (mm)", ylabel="$K_{DP}$ per drop per m$^3$ (° km$^{-1}$)")
+axes[0].legend()
+for ax in axes:
+    ax.grid(alpha=0.3)
+```
+
+Going from 7 to 20 degrees lowers $Z_{DR}$ by 0.65 dB for a 4 mm drop and by
+1.7 dB for an 8 mm drop, and $K_{DP}$ by 27 % at every size. Between 2.7 and
+3.0 GHz the $Z_{DR}$ of drops up to 6 mm changes by less than 0.02 dB, but that
+of 8 mm drops by 0.36 dB, and $K_{DP}$, which scales as $1/\lambda$ for small
+drops (a factor 1.11), is 26 % larger for 8 mm drops; between 0 and 30 degrees
+Celsius the $Z_{DR}$ of 8 mm drops changes by 0.3 dB. The
+differences between scattering assumptions in the literature (Kumjian and Ryzhkov 2010
+use 10.9 cm and 20 degrees of canting, which they call too wide for typical rainfall, where
+10 degrees is more appropriate; here 10.7 cm and 7 degrees) are therefore of the size of the
+large-drop signal itself, and the tables should be rebuilt (`ci/build_dsd_tables.py`, a few seconds) with the assumptions
+of the data they are applied to.
+
 ## A squall line in Mississippi
 
 The lowest sweep of the KGWX (Columbus, Mississippi) WSR-88D volume of 30

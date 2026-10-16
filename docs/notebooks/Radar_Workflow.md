@@ -2124,6 +2124,11 @@ notebooks or from this index.
 | `compute_max_unambiguous_velocity` | `radarx.fundamentals.timing` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `compute_prf` | `radarx.fundamentals.timing` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `compute_pulse_repetition_interval` | `radarx.fundamentals.timing` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
+| `axis_ratio_brandes` | `radarx.fundamentals.tmatrix` | [part 2](Radar_Workflow_Advanced): 14. Forward operator for WRF and MPAS output |
+| `orientation_quadrature` | `radarx.fundamentals.tmatrix` | [part 2](Radar_Workflow_Advanced): 14. Forward operator for WRF and MPAS output |
+| `raindrop_scattering` | `radarx.fundamentals.tmatrix` | [part 2](Radar_Workflow_Advanced): 14. Forward operator for WRF and MPAS output |
+| `spheroid_scattering` | `radarx.fundamentals.tmatrix` | [part 2](Radar_Workflow_Advanced): 14. Forward operator for WRF and MPAS output |
+| `water_refractive_index` | `radarx.fundamentals.tmatrix` | [part 2](Radar_Workflow_Advanced): 14. Forward operator for WRF and MPAS output |
 | `circular_depolarization_ratio` | `radarx.fundamentals.variables` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `differential_reflectivity` | `radarx.fundamentals.variables` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `linear_depolarization_ratio` | `radarx.fundamentals.variables` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |

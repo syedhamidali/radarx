@@ -6,9 +6,10 @@
 
 The tables hold single-drop scattering properties of oblate raindrops at
 S, C and X band for a few temperatures, computed with the T-matrix method
-(Mishchenko and Travis 1998) through the ``pytmatrix`` interface
-(Leinonen 2014). ``pytmatrix`` is only needed here, at table-build time;
-radarx itself reads the CSV file this script writes.
+(Mishchenko and Travis 1998) by :func:`radarx.fundamentals.tmatrix.raindrop_scattering`,
+radarx's own C++ translation of the code of Mishchenko (the code that
+``pytmatrix``, Leinonen 2014, wraps; ``pytmatrix`` is no longer needed). The full
+table takes a few seconds. radarx itself reads the CSV file this script writes.
 
 Provenance and caveats are also summarised in
 ``radarx/retrieve/data/README_dsd.md``. Assumptions (documented in
@@ -27,7 +28,7 @@ Provenance and caveats are also summarised in
   Ray (1972), at 0, 10, 20 and 30 degrees Celsius (the constants in
   ``water_refractive_index`` are not checked against the paper);
 - radar frequencies 2.8, 5.6 and 9.4 GHz for S, C and X band, and the
-  quadrature order ``ndgs = 4`` of ``pytmatrix``: radarx choices, not from the
+  quadrature order ``ndgs = 4`` of the T-matrix code: radarx choices, not from the
   cited papers. The axis-ratio polynomial agrees with Eq. 15 of Kumjian and
   Ryzhkov (2010) (who print the second coefficient as 0.025 10); the equation
   number of Brandes et al. (2002) and the value of 7 degrees for the width of
@@ -72,15 +73,7 @@ from pathlib import Path
 
 import numpy as np
 
-try:
-    from pytmatrix import orientation, radar
-    from pytmatrix import scatter as tm_scatter
-    from pytmatrix.tmatrix import Scatterer
-except ImportError:  # pragma: no cover - build-time tool
-    sys.exit(
-        "pytmatrix is needed to build the scattering tables "
-        "(pip install pytmatrix, or build it from source with numpy.f2py)"
-    )
+from radarx.fundamentals import tmatrix
 
 # radar wavelengths [mm]: 2.8, 5.6 and 9.4 GHz (radarx choices, representative
 # of S, C and X band; wavelength = c / f)
@@ -91,93 +84,47 @@ CANTING_STD = 7.0  # degrees (Huang et al. 2008; value not checked, see above)
 OUTPUT = Path(__file__).resolve().parents[1] / "radarx/retrieve/data/dsd_scattering.csv"
 
 
-def axis_ratio(d):
-    """
-    Brandes et al. (2002) vertical-to-horizontal axis ratio, D in mm.
-
-    The polynomial agrees with Eq. 15 of Kumjian and Ryzhkov (2010); it is
-    capped at 1 (a radarx choice).
-    """
-    r = 0.9951 + 0.0251 * d - 0.03644 * d**2 + 0.005303 * d**3 - 0.0002492 * d**4
-    return np.minimum(r, 1.0)
-
-
-def water_refractive_index(wavelength_mm, temperature_c):
-    """
-    Complex refractive index of liquid water after Ray (1972).
-
-    Debye-type model: static and high-frequency permittivities, relaxation
-    wavelength, distribution parameter alpha and ionic conductivity term, as
-    functions of temperature. The constants are not checked against the paper.
-    """
-    t = temperature_c
-    lam = wavelength_mm / 10.0  # cm
-    eps_s = 78.54 * (
-        1.0
-        - 4.579e-3 * (t - 25.0)
-        + 1.19e-5 * (t - 25.0) ** 2
-        - 2.8e-8 * (t - 25.0) ** 3
-    )
-    eps_inf = 5.27137 + 0.0216474 * t - 0.00131198 * t**2
-    alpha = -16.8129 / (t + 273.0) + 0.0609265
-    lam_s = 0.00033836 * np.exp(2513.98 / (t + 273.0))  # cm
-    sigma = 12.5664e8
-    x = (lam_s / lam) ** (1.0 - alpha)
-    s, c = np.sin(alpha * np.pi / 2.0), np.cos(alpha * np.pi / 2.0)
-    den = 1.0 + 2.0 * x * s + x * x
-    eps_r = eps_inf + (eps_s - eps_inf) * (1.0 + x * s) / den
-    eps_i = (eps_s - eps_inf) * x * c / den + sigma * lam / 18.8496e10
-    return np.sqrt(complex(eps_r, eps_i))
-
-
-def drop_properties(d, wavelength, m):
-    """
-    Orientation-averaged scattering properties of one drop of diameter d.
-
-    Backscattering (sigma_h, sigma_v and the copolar correlation terms from
-    the Z matrix) and forward scattering (K_DP, attenuation) from the T-matrix
-    code at horizontal incidence.
-    """
-    s = Scatterer(
-        radius=d / 2.0,
-        wavelength=wavelength,
-        m=m,
-        axis_ratio=1.0 / axis_ratio(d),
-        ndgs=4,
-    )
-    s.orient = orientation.orient_averaged_fixed
-    s.or_pdf = orientation.gaussian_pdf(std=CANTING_STD)
-    # backscattering, horizontal incidence
-    s.set_geometry((90.0, 90.0, 0.0, 180.0, 0.0, 0.0))
-    z = s.get_Z()
-    sigma_h = radar.radar_xsect(s, True)
-    sigma_v = radar.radar_xsect(s, False)
-    copol_re = 2.0 * np.pi * (z[2, 2] + z[3, 3])
-    copol_im = 2.0 * np.pi * (z[3, 2] - z[2, 3])
-    # forward scattering
-    s.set_geometry((90.0, 90.0, 0.0, 0.0, 0.0, 0.0))
-    kdp = radar.Kdp(s)
-    # specific attenuation per drop per m3: 10 log10(e) = 4.343, times the
-    # extinction cross section [mm2] and the unit conversions (1e-6 m2 mm-2,
-    # 1e3 m km-1) -> dB km-1
-    ah = 4.343e-3 * tm_scatter.ext_xsect(s, h_pol=True)
-    av = 4.343e-3 * tm_scatter.ext_xsect(s, h_pol=False)
-    return sigma_h, sigma_v, copol_re, copol_im, kdp, ah, av
-
-
 def main(path=OUTPUT):
     rows = []
     for band, wl in BANDS.items():
         for t in TEMPERATURES:
-            m = water_refractive_index(wl, t)
+            m = tmatrix.water_refractive_index(wl, t)
             print(f"{band} band ({wl:.2f} mm), {t:.0f} C, m = {m:.4f}", flush=True)
-            for d in DIAMETERS:
-                rows.append((band, wl, t, d, *drop_properties(d, wl, m)))
+            d = tmatrix.raindrop_scattering(
+                DIAMETERS,
+                wl,
+                temperature=t,
+                canting_std=CANTING_STD,
+                ndgs=4,
+                ddelt=1e-3,  # the value of pytmatrix, with which the table was first built
+            )
+            for i, diameter in enumerate(DIAMETERS):
+                rows.append(
+                    (
+                        band,
+                        wl,
+                        t,
+                        diameter,
+                        *(
+                            float(d[v].values[i])
+                            for v in (
+                                "sigma_h",
+                                "sigma_v",
+                                "copol_re",
+                                "copol_im",
+                                "kdp",
+                                "ah",
+                                "av",
+                            )
+                        ),
+                    )
+                )
+
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     header = (
-        "# Single-drop scattering of raindrops, T-matrix (pytmatrix), "
-        "built by ci/build_dsd_tables.py\n"
+        "# Single-drop scattering of raindrops, T-matrix "
+        "(radarx.fundamentals.tmatrix), built by ci/build_dsd_tables.py\n"
         "# axis ratio Brandes et al. (2002); Gaussian canting, 0 mean, "
         f"{CANTING_STD:g} deg std; horizontal incidence; water refractive "
         "index Ray (1972)\n"

@@ -23,6 +23,7 @@ This module adapts and extends concepts and calculations inspired by the CSU Rad
 .. automodule:: radarx.fundamentals.refraction
 .. automodule:: radarx.fundamentals.scattering
 .. automodule:: radarx.fundamentals.system
+.. automodule:: radarx.fundamentals.tmatrix
 .. automodule:: radarx.fundamentals.timing
 .. automodule:: radarx.fundamentals.variables
 
@@ -42,6 +43,7 @@ from .refraction import *  # noqa
 from .scattering import *  # noqa
 from .system import *  # noqa
 from .timing import *  # noqa
+from .tmatrix import *  # noqa
 from .variables import *  # noqa
 
 # Four names are defined in two modules with different meaning:
