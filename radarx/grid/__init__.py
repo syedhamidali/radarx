@@ -12,6 +12,7 @@ Radarx Grid
 .. automodule:: radarx.grid.grid
 .. automodule:: radarx.grid.cone
 .. automodule:: radarx.grid.gates
+.. automodule:: radarx.grid.mixed
 .. automodule:: radarx.grid.multi
 .. automodule:: radarx.grid.ugrid
 """
@@ -19,6 +20,7 @@ Radarx Grid
 from .grid import *  # noqa
 from .cone import *  # noqa
 from .gates import *  # noqa
+from .mixed import *  # noqa
 from .multi import *  # noqa
 from .ugrid import *  # noqa
 
