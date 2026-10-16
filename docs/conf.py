@@ -291,7 +291,10 @@ nb_execution_raise_on_error = True
 # their outputs from the cache and are never executed (they are executed in
 # GitHub Actions); a pull request that changes their code shows them without
 # outputs in its preview until the change is merged
-_RTD_CACHE_ONLY = ["notebooks/Radar_Workflow.md"]
+_RTD_CACHE_ONLY = [
+    "notebooks/Radar_Workflow.md",
+    "notebooks/Radar_Workflow_Advanced.md",
+]
 
 _DOCS_CACHE_URL = (
     "https://raw.githubusercontent.com/syedhamidali/radarx/"
