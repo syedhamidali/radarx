@@ -34,7 +34,8 @@ runs:
       # everything the tests read from the repository, except the radarx source
       suite="$RUNNER_TEMP/suite"
       mkdir "$suite"
-      git archive HEAD tests docs ml ci CITATION.cff pytest.ini | tar -x -C "$suite"
+      # extract into the current directory: GNU tar on Windows reads "D:\a" in -C as a remote host
+      git -C "$GITHUB_WORKSPACE" archive HEAD tests docs ml ci CITATION.cff pytest.ini | (cd "$suite" && tar -x)
       cd "$suite"
       python -c "import radarx; print(radarx.__file__)"
       options=""
