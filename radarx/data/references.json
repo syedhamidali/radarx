@@ -2837,5 +2837,19 @@
   "issue": "6",
   "pages": "1819-1844",
   "doi": "10.1175/WAF-D-15-0068.1"
+ },
+ "10.1175/JTECH-D-20-0056.1": {
+  "authors": [
+   "Wilson, M. B.",
+   "Van Den Broeke, M. S."
+  ],
+  "year": 2021,
+  "title": "An Automated Python Algorithm to Quantify ZDR Arc and KDP–ZDR Separation Signatures in Supercells",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "38",
+  "issue": "2",
+  "pages": "371-386",
+  "doi": "10.1175/JTECH-D-20-0056.1"
  }
 }
