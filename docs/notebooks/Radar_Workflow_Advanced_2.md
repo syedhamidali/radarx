@@ -51,6 +51,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import xarray as xr
+import cmweather  # noqa: F401  radar colormaps
 import xradar as xd
 
 import radarx  # noqa: F401  registers the .radarx accessors
