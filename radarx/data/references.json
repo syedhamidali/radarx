@@ -3135,5 +3135,46 @@
   "issue": "10",
   "pages": "2022-2036",
   "doi": "10.1175/2009JAMC2172.1"
+ },
+ "10.1175/2008JAS2586.1": {
+  "authors": [
+   "Seifert, A."
+  ],
+  "year": 2008,
+  "title": "On the Parameterization of Evaporation of Raindrops as Simulated by a One-Dimensional Rainshaft Model",
+  "type": "article",
+  "journal": "Journal of the Atmospheric Sciences",
+  "volume": "65",
+  "issue": "11",
+  "pages": "3608-3619",
+  "doi": "10.1175/2008JAS2586.1"
+ },
+ "10.1175/JAS3534.1": {
+  "authors": [
+   "Milbrandt, J. A.",
+   "Yau, M. K."
+  ],
+  "year": 2005,
+  "title": "A Multimoment Bulk Microphysics Parameterization. Part I: Analysis of the Role of the Spectral Shape Parameter",
+  "type": "article",
+  "journal": "Journal of the Atmospheric Sciences",
+  "volume": "62",
+  "issue": "9",
+  "pages": "3051-3064",
+  "doi": "10.1175/JAS3534.1"
+ },
+ "10.1175/JAS3535.1": {
+  "authors": [
+   "Milbrandt, J. A.",
+   "Yau, M. K."
+  ],
+  "year": 2005,
+  "title": "A Multimoment Bulk Microphysics Parameterization. Part II: A Proposed Three-Moment Closure and Scheme Description",
+  "type": "article",
+  "journal": "Journal of the Atmospheric Sciences",
+  "volume": "62",
+  "issue": "9",
+  "pages": "3065-3081",
+  "doi": "10.1175/JAS3535.1"
  }
 }

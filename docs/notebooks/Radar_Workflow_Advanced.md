@@ -27,10 +27,10 @@ written on the fly).
 
 | Section | What it shows | radarx calls |
 |---|---|---|
-| 1 | radar equation, beam geometry (4/3 Earth and ray tracing through a refractivity profile), Doppler and unit helpers | `radarx.fundamentals`, `radarx.core`, `refractivity`, `beam_path` |
+| 1 | radar equation, beam geometry (4/3 Earth and ray tracing through a refractivity profile), Doppler and unit helpers | `radarx.fundamentals`, `radarx.core`, `refractivity`, `beam_path`, `modified_refractivity`, `ducting_layers` |
 | 2 | disdrometer spectra, quality control, gamma fits, radar variables | `radarx.io.read_parsivel`, `disdrometer_qc`, `fit_gamma`, `match_radar` |
 | 3 | Bayesian DSD retrieval with uncertainty | `dsd_prior`, `forward_grid`, `dsd_bayesian` |
-| 4 | raindrop trajectories and size sorting, collisions in a rain shaft, hail and melting snow fall speeds | `rain_trajectories`, `size_sorting`, `surface_dsd`, `rain_shaft`, `hail_fall_speed`, `melting_snow_fall_speed` |
+| 4 | raindrop trajectories and size sorting, collisions in a rain shaft, hail and melting snow fall speeds | `rain_trajectories`, `size_sorting`, `surface_dsd`, `rain_shaft`, `rain_shaft_bulk`, `hail_fall_speed`, `melting_snow_fall_speed` |
 | 5 | surface stations, profilers, cold pools | `read_sticknet`, `read_pips`, `cold_pool_intensity` |
 | 6 | lightning mapping | `read_lma`, `cluster_flashes`, `lightning_jump` |
 
@@ -108,6 +108,7 @@ from radarx.retrieve import (
     dsd_moments,
     dsd_prior,
     dsd_spectrum,
+    ducting_layers,
     echo_mask,
     ensemble_retrieval,
     ensemble_statistics,
@@ -124,6 +125,7 @@ from radarx.retrieve import (
     measurement_error,
     melting_snow_fall_speed,
     microphysical_rates,
+    modified_refractivity,
     mpas_state,
     number_concentration,
     parsivel_bins,
@@ -135,6 +137,7 @@ from radarx.retrieve import (
     radar_from_dsd,
     radar_geometry,
     rain_shaft,
+    rain_shaft_bulk,
     rain_source_points,
     rain_trajectories,
     raupach_berne_correction,
@@ -413,6 +416,30 @@ profile_r = xr.Dataset({"refractivity": ("height", n_r)}, coords={"height": zr})
 path = beam_path(sweep_r, profile_r)
 print("beam_path, accessor:", float(sweep_r.radarx.beam_path(profile_r).beam_height.isel(azimuth=0, range=-1)),
       "m =", float(path.beam_height.isel(azimuth=0, range=-1)), "m")
+```
+
+A layer where the refractivity falls faster than 157 N-units per km traps the
+beam. `modified_refractivity` adds the curvature term, so that such a layer is
+where it decreases with height, and `ducting_layers` (also a method of a
+profile) lists the layers with their strength and the elevation below which a
+ray from the base is trapped. The numbers of Bean and Dutton (1966) are a
+ground-based layer of 100 m with a gradient of -0.5 N-units per m (8.3 mrad)
+and one of 30 m (4.5 mrad); a ray at 0.97 of the angle stays in the layer and
+one at 1.03 leaves it:
+
+```{code-cell} ipython3
+z_d = np.array([0.0, 30.0, 3000.0])
+duct = xr.DataArray([330.0, 315.0, 315.0 - 0.04 * 2970.0], dims="height", coords={"height": z_d})
+layers = ducting_layers(duct)
+theta = float(layers.trapping_angle.isel(layer=0))
+print(f"layer {float(layers.layer_base.isel(layer=0)):g}-{float(layers.layer_top.isel(layer=0)):g} m, "
+      f"M deficit {float(layers.m_deficit.isel(layer=0)):.1f}, trapping angle {np.radians(theta) * 1e3:.2f} mrad")
+print("M at the levels:", modified_refractivity(duct).values.round(1))
+r_d = np.arange(0.0, 100e3, 500.0)
+for frac in (0.97, 1.03):
+    tr = refraction.trace_rays(r_d, frac * theta, z_d, duct.values, radar_height=0.0)
+    print(f"{frac} of the angle: highest point {float(tr.beam_height.max()):.0f} m")
+print(duct.to_dataset(name="refractivity").radarx.ducting_layers().layer_count.item(), "layer (accessor)")
 ```
 
 ## 2. Disdrometers
@@ -890,6 +917,20 @@ for name, out in runs.items():
 via = nd_shaft.radarx.rain_shaft(depth=2000.0)  # the accessor of a DSD
 ```
 
+`rain_shaft_bulk` is the two-moment counterpart of Seifert (2008): it carries
+the number and the water content of the rain, with self-collection and a
+breakup that relaxes the mean volume diameter toward 1.1 mm, so that it is
+cheap enough for every gate. It takes the output of `rain_shaft` (or any
+dataset with `number_concentration` and `liquid_water_content`):
+
+```{code-cell} ipython3
+top = runs["low_list1982"].isel(depth=0)[["number_concentration", "liquid_water_content"]]
+bulk = rain_shaft_bulk(top, depth=[0.0, 2000.0, 8000.0])
+print("mean volume diameter (mm):", bulk.mean_volume_diameter.values.round(2),
+      "shape parameter:", bulk.shape_parameter.values.round(1))
+via_bulk = top.radarx.rain_shaft_bulk(depth=2000.0)  # the accessor of a dataset
+```
+
 Above and in the melting layer the fall speeds are other laws.
 `hail_fall_speed` is the size relation of Heymsfield et al. (2020) for the
 maximum dimension of a stone, and `melting_snow_fall_speed` mixes the dry-snow
@@ -901,6 +942,8 @@ to be given: the one here is an example). Both are also `fall_speed` options of
 stones = np.array([8.0, 15.0, 30.0, 60.0])
 print("hail:", ", ".join(f"{d:g} mm {v:.1f} m/s" for d, v in zip(stones, hail_fall_speed(stones).values)))
 print("percentiles at 30 mm:", [float(hail_fall_speed(30.0, f"heymsfield2020_p{p}")) for p in (10, 50, 90)])
+print("Milbrandt and Yau (2005) law, 30 mm, at the ground and at 6 km:",
+      [round(float(hail_fall_speed(30.0, "milbrandt_yau2005", air_density=rho)), 1) for rho in (1.204, 0.66)])
 liquid = xr.DataArray([0.0, 0.3, 0.6, 0.9, 1.0], dims="liquid_fraction")
 print("2 mm melting snow:", melting_snow_fall_speed(2.0, liquid, snow=(1.0, 0.3)).values.round(2), "m/s")
 print("accessors:", xr.DataArray(stones, dims="d").radarx.hail_fall_speed().values.round(1),

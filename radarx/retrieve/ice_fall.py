@@ -31,11 +31,23 @@ et al. (2020) to Heymsfield et al. (2018):
 * ``"heymsfield2020_p10"``, ``"_p25"``, ``"_p50"``, ``"_p75"``, ``"_p90"``:
   the power laws of the 10th to 90th percentile of the velocities at a given
   size (Table 3), to represent their natural variability.
+* ``"milbrandt_yau2005"``: :math:`V_t = \\gamma\\, 206.89\\, D_m^{0.6384}` with the
+  diameter :math:`D_m` in m, the hail law of the multimoment bulk scheme of
+  Milbrandt and Yau (2005, Table 2 of Part II, after Ferrier 1994) and the one
+  law here with a density dependence, :math:`\\gamma = (\\rho_0/\\rho)^{1/2}`
+  (Part I, Eq. A1), applied when ``air_density`` is given (with
+  :math:`\\rho_0 = 1.204` kg m\\ :sup:`-3`, the density of the other fall speeds of
+  radarx) and in the trajectory model with its profile. It gives 10.9 m
+  s\\ :sup:`-1` for 1 cm and 26.5 m s\\ :sup:`-1` for 4 cm at sea level
+  (Heymsfield et al.: 7.6 and 21.3 for the same sizes). The paper states no
+  size range and does not say where its coefficient comes from (it cites Ferrier
+  for them), and the fit has not been compared with measurements here.
 
 The laws are fits to size, not physical models of the drag: they hold for
 the maximum dimension, not for the diameter of the sphere of the same volume,
-and the corrigendum gives no air-density dependence, so none is applied (a
-hailstone falls faster aloft than these laws say). The validity range of the
+and the corrigendum gives no air-density dependence, so none is applied to
+its laws (a hailstone falls faster aloft than these laws say; use
+``"milbrandt_yau2005"`` for a law with one). The validity range of the
 percentile laws is not stated there; 0.5 cm is used for all. Diameters below
 it give a warning, because the laws fall off from the measured speeds there.
 Earlier versions: the single law of Heymsfield et al. (2018) was in error and
@@ -80,6 +92,12 @@ References
    melting snowflakes with explicit liquid water fraction for the COSMO
    model. *Geosci. Model Dev.*, **6** (6), 1925-1939,
    https://doi.org/10.5194/gmd-6-1925-2013
+.. [3] Milbrandt, J. A., and M. K. Yau, 2005: A multimoment bulk
+   microphysics parameterization. Part I: Analysis of the role of the spectral
+   shape parameter. *J. Atmos. Sci.*, **62** (9), 3051-3064,
+   https://doi.org/10.1175/JAS3534.1; Part II: A proposed three-moment closure
+   and scheme description. *J. Atmos. Sci.*, **62** (9), 3065-3081,
+   https://doi.org/10.1175/JAS3535.1
 
 .. autosummary::
    :nosignatures:
@@ -114,7 +132,7 @@ def _diameters(diameter):
 @provenance(
     "Terminal fall speed of hail from the size relations of Heymsfield et al. (2020)"
 )
-def hail_fall_speed(diameter, law="heymsfield2020"):
+def hail_fall_speed(diameter, law="heymsfield2020", *, air_density=None):
     """
     Terminal fall speed of hail from its maximum dimension.
 
@@ -125,7 +143,12 @@ def hail_fall_speed(diameter, law="heymsfield2020"):
     law : str, optional
         ``"heymsfield2020"`` (default), ``"graupel_hail_obs"`` or
         ``"heymsfield2020_p10"``, ``"_p25"``, ``"_p50"``, ``"_p75"``,
-        ``"_p90"`` (percentiles), see :mod:`radarx.retrieve.ice_fall`.
+        ``"_p90"`` (percentiles) or ``"milbrandt_yau2005"``, see
+        :mod:`radarx.retrieve.ice_fall`.
+    air_density : float or xarray.DataArray, optional
+        Air density (kg m-3) for the laws that depend on it (only
+        ``"milbrandt_yau2005"``). Without it the speed is that at the sea-level
+        density of radarx, 1.204 kg m-3.
 
     Returns
     -------
@@ -142,13 +165,15 @@ def hail_fall_speed(diameter, law="heymsfield2020"):
     Raises
     ------
     ValueError
-        For a diameter that is not positive or an unknown ``law``.
+        For a diameter that is not positive, an unknown ``law``, or an
+        ``air_density`` that is not positive or is given for a law without a
+        density dependence.
 
     Notes
     -----
     See the module documentation for the validity range, the choice of the
-    break of the default law at 1.576 cm and the missing air-density
-    dependence. The input is not changed.
+    break of the default law at 1.576 cm and the air-density dependence. The
+    inputs are not changed.
 
     References
     ----------
@@ -157,14 +182,36 @@ def hail_fall_speed(diameter, law="heymsfield2020"):
        study of graupel and hail terminal velocity, mass flux, and kinetic
        energy). *J. Atmos. Sci.*, **77** (1), 405-412,
        https://doi.org/10.1175/JAS-D-19-0185.1
+    .. [2] Milbrandt, J. A., and M. K. Yau, 2005: A multimoment bulk
+       microphysics parameterization. Part II: A proposed three-moment closure
+       and scheme description. *J. Atmos. Sci.*, **62** (9), 3065-3081,
+       https://doi.org/10.1175/JAS3535.1
 
     Examples
     --------
     >>> round(float(hail_fall_speed(20.0)), 1)
     13.4
+    >>> round(float(hail_fall_speed(20.0, "milbrandt_yau2005", air_density=0.6)), 1)
+    24.1
     """
     d, values = _diameters(diameter)
     speed = _ice_fall.hail_speed(values, law)[0]
+    exponent = _ice_fall.density_exponent(law)
+    if air_density is not None:
+        if exponent == 0.0:
+            raise ValueError(
+                f"the hail law {law!r} has no air density dependence; "
+                "air_density is for 'milbrandt_yau2005'"
+            )
+        rho = (
+            air_density
+            if isinstance(air_density, xr.DataArray)
+            else xr.DataArray(np.asarray(air_density, dtype=np.float64))
+        )
+        rho_values = np.asarray(rho.values, dtype=np.float64)
+        if np.any(rho_values[np.isfinite(rho_values)] <= 0.0):
+            raise ValueError("air_density must be positive (kg m-3)")
+        factor = (_raindrop_fall.RHO0 / rho.astype(np.float64)) ** exponent
     below = np.isfinite(values) & (values < _ice_fall.HAIL_MIN_DIAMETER)
     if below.any():
         warnings.warn(
@@ -173,7 +220,10 @@ def hail_fall_speed(diameter, law="heymsfield2020"):
             UserWarning,
             stacklevel=2,
         )
-    out = d.copy(data=speed).rename("terminal_fall_speed")
+    out = d.copy(data=speed)
+    if air_density is not None:
+        out = out * factor
+    out = out.rename("terminal_fall_speed")
     out.attrs = {
         "long_name": "Terminal fall speed of hail",
         "units": "m s-1",

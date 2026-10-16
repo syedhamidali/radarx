@@ -80,7 +80,9 @@ def test_hail_laws_are_the_printed_ones():
         got = float(hail_fall_speed(25.0, f"heymsfield2020_{name}"))
         assert got == pytest.approx(a * 2.5**b, rel=1e-12)
     assert set(table) == set(_ice_fall.PERCENTILES)
-    assert len(_ice_fall.HAIL_LAWS) == 7
+    assert (
+        len(_ice_fall.HAIL_LAWS) == 8
+    )  # the 7 of Heymsfield et al. and Milbrandt and Yau
 
 
 def test_hail_speed_is_continuous_and_increases_with_size():
@@ -106,6 +108,35 @@ def test_hail_speed_is_continuous_and_increases_with_size():
             for p in (10, 25, 50, 75, 90)
         ]
         assert speeds == sorted(speeds)
+
+
+def test_milbrandt_yau_hail_law_and_its_density_factor():
+    # V = 206.89 D^0.6384 with D in m (Table 2 of Milbrandt and Yau 2005, Part II)
+    for d_mm in (8.0, 20.0, 50.0):
+        want = 206.89 * (d_mm * 1e-3) ** 0.6384
+        assert float(hail_fall_speed(d_mm, "milbrandt_yau2005")) == pytest.approx(want)
+    # the density factor (rho0/rho)^(1/2) of Part I, Eq. A1, rho0 = 1.204 kg m-3
+    rho = xr.DataArray([1.204, 0.9, 0.6], dims="level")
+    v = hail_fall_speed(20.0, "milbrandt_yau2005", air_density=rho)
+    sea = float(hail_fall_speed(20.0, "milbrandt_yau2005"))
+    np.testing.assert_allclose(v, sea * np.sqrt(1.204 / rho.values), rtol=1e-13)
+    assert v.dims == ("level",)
+    assert float(hail_fall_speed(20.0, "milbrandt_yau2005", air_density=1.204)) == sea
+    assert _ice_fall.density_exponent("milbrandt_yau2005") == 0.5
+    assert _ice_fall.density_exponent("heymsfield2020") == 0.0
+    # a law without a density dependence refuses an air density
+    with pytest.raises(ValueError, match="no air density dependence"):
+        hail_fall_speed(20.0, air_density=1.0)
+    with pytest.raises(ValueError, match="positive"):
+        hail_fall_speed(20.0, "milbrandt_yau2005", air_density=[1.0, -1.0])
+    # the derivative of the law used by the trajectory model
+    v, dv = _ice_fall.hail_speed(np.array([8.0, 20.0, 40.0]), "milbrandt_yau2005")
+    eps = 1e-6
+    num = (
+        _ice_fall.hail_speed(np.array([8.0, 20.0, 40.0]) + eps, "milbrandt_yau2005")[0]
+        - v
+    ) / eps
+    np.testing.assert_allclose(dv, num, rtol=1e-5)
 
 
 def test_hail_xarray_warning_and_errors():
@@ -247,6 +278,51 @@ def test_hail_trajectories_fall_at_the_hail_speed(engine):
 
 
 @pytest.mark.parametrize("engine", ENGINES)
+def test_milbrandt_yau_hail_trajectories_have_the_density_factor(engine):
+    prof = standard_profile()
+    point = {"x": 0.0, "y": 0.0, "z": 6000.0}
+    law = ("hail", "milbrandt_yau2005")
+    off = rain_trajectories(
+        point,
+        DIAMS,
+        profile=prof,
+        fall_speed=law,
+        density_correction=False,
+        time_step=10.0,
+        engine=engine,
+    )
+    v = hail_fall_speed(DIAMS, "milbrandt_yau2005").values
+    np.testing.assert_allclose(off.fall_speed_start.values.ravel(), v, rtol=1e-12)
+    np.testing.assert_allclose(off.fall_time.values.ravel(), 6000.0 / v, rtol=1e-9)
+    on = rain_trajectories(
+        point, DIAMS, profile=prof, fall_speed=law, time_step=10.0, engine=engine
+    )
+    # faster aloft by (rho0/rho)^0.5 with the density of the profile at the start,
+    # and the same factor at the ground within the profile's density there
+    ratio = on.fall_speed_start.values.ravel() / v
+    assert np.all(ratio > 1.3) and np.all(
+        ratio < 1.6
+    )  # (1.204/0.66)^0.5 = 1.35 at 6 km
+    assert (on.fall_time.values < off.fall_time.values).all()
+    # the law of the other family keeps its sea-level speed (kind 4, no factor)
+    hm = rain_trajectories(
+        point, DIAMS, profile=prof, fall_speed=("hail", "heymsfield2020"), engine=engine
+    )
+    np.testing.assert_allclose(
+        hm.fall_speed_start.values.ravel(), hail_fall_speed(DIAMS).values, rtol=1e-12
+    )
+    # trajectory speed at the start equals the public function with the profile density
+    rho = float(
+        np.interp(6000.0, prof.height, prof.pressure / (287.04 * prof.temperature))
+    )
+    np.testing.assert_allclose(
+        on.fall_speed_start.values.ravel(),
+        hail_fall_speed(DIAMS, "milbrandt_yau2005", air_density=rho).values,
+        rtol=0.02,
+    )
+
+
+@pytest.mark.parametrize("engine", ENGINES)
 def test_melting_snow_trajectories_follow_the_mixed_speed(engine):
     prof = standard_profile()
     point = {"x": 0.0, "y": 0.0, "z": 3000.0}
@@ -325,6 +401,9 @@ def test_fall_speed_specifications():
     np.testing.assert_allclose(fc, [2.0, 10.0 * D_X, 7.6, 0.89, 8.4, 0.67])
     kind, fc = rt._fall(("hail", "graupel_hail_obs"))
     np.testing.assert_allclose(fc, [1.0, 7.2, 0.84])
+    kind, fc = rt._fall(("hail", "milbrandt_yau2005"))
+    assert kind == 6
+    np.testing.assert_allclose(fc, [1.0, 206.89 * 0.01**0.6384, 0.6384])
     kind, fc = rt._fall(("melting_snow", 0.5, 1.1, 0.3))
     assert kind == 5
     np.testing.assert_allclose(

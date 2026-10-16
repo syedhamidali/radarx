@@ -200,7 +200,7 @@ def _v0(m, d):
     kind = m["fall_kind"]
     fc = m["fc"]
     with np.errstate(all="ignore"):
-        if kind == 4:
+        if kind in (4, 6):
             nseg = int(fc[0])
             k = np.searchsorted(fc[1:nseg], d, side="right")
             v = fc[nseg + 2 * k] * np.power(d / 10.0, fc[nseg + 2 * k + 1])
@@ -245,7 +245,9 @@ def _rhs(m, t, y, turb):
     rho, drho, nu, fkd, ssat, cs = _environment(m, z)
     d = np.sqrt(np.maximum(s, D_FLOOR * D_FLOOR))
     v0, dv0 = _v0(m, d)
-    dexp = 0.0 if m["fall_kind"] >= 4 else 0.4  # no density correction of ice laws
+    # no density correction of the laws of Heymsfield et al. (2020) and of melting
+    # snow (kinds 4, 5); the hail law of Milbrandt and Yau (2005, kind 6) has (rho0/rho)^0.5
+    dexp = {4: 0.0, 5: 0.0, 6: 0.5}.get(m["fall_kind"], 0.4)
     corr = np.power(m["rho0"] / rho, dexp) if m["dens"] else 1.0
     vt = v0 * corr
     f = np.zeros_like(y)

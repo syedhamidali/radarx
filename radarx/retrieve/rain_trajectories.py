@@ -69,8 +69,11 @@ same mass with the weight of Frick et al. (2013, Eqs. 14 and 15), for a liquid
 fraction that is constant along the path; both are described, with their
 validity ranges, in :mod:`radarx.retrieve.ice_fall`. They are laws of the
 fall speed only: the particle is not melted or evaporated along the way,
-there is no air-density correction, and ``evaporation`` must be off. The
-density correction of the rain laws is the one described above.
+and ``evaporation`` must be off. These laws have no air-density correction,
+except the hail law ``("hail", "milbrandt_yau2005")``, which is multiplied by
+:math:`(\\rho_0/\\rho)^{1/2}` (the correction of its source; ``density_correction``
+switches it off). The density correction of the rain laws is the one described
+above.
 
 Wind
 ----
@@ -349,7 +352,8 @@ def _fall(fall_speed):
                 raise ValueError("fall_speed hail needs ('hail', law)")
             breaks, a, b = _ice_fall.hail_segments(seq[1])
             coeffs = [float(a.size), *breaks, *np.ravel(np.column_stack([a, b]))]
-            return 4, _f64(coeffs)
+            # kind 6: the same segments with the density factor (rho0/rho)^0.5
+            return (6 if _ice_fall.density_exponent(seq[1]) > 0.0 else 4), _f64(coeffs)
         if seq[0] == "melting_snow":
             if len(seq) != 4:
                 raise ValueError(

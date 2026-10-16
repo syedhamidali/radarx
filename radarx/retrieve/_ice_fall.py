@@ -29,6 +29,13 @@ Hail
     laws are not given in the corrigendum, and 0.5 cm is used for all.
     No dependence on air density is given there, and none is applied.
 
+    ``"milbrandt_yau2005"`` is the hail law of the multimoment bulk scheme of
+    Milbrandt and Yau (2005; Table 2 of Part II, from Ferrier 1994),
+    :math:`V_t = \\gamma\\,206.89\\,D^{0.6384}` with :math:`D` in m, :math:`V_t`
+    in m s-1 and the density factor :math:`\\gamma = (\\rho_0/\\rho)^{1/2}`
+    (Part I, Eq. A1). It is the one hail law here with an air density
+    dependence; no size range is stated.
+
 Melting snow
     :math:`V_m = V_s + (V_r - V_s)\\,\\Psi(\\ell)` with the terminal velocities
     :math:`V_s` and :math:`V_r` of the dry snowflake and of the raindrop of the
@@ -53,10 +60,16 @@ PERCENTILES = {
     "p75": (10.54, 0.63),
     "p90": (11.58, 0.58),
 }
+# Milbrandt and Yau (2005b, Table 2, after Ferrier 1994): V = gamma a D^b, D in m, a = 206.89
+# m^(1-b) s-1, b = 0.6384, gamma = (rho0 / rho)^(1/2) (Milbrandt and Yau 2005a, Eq. A1)
+MY2005_A = 206.89
+MY2005_B = 0.6384
+MY2005_DENSITY_EXPONENT = 0.5
 HAIL_LAWS = (
     "heymsfield2020",
     "graupel_hail_obs",
     *(f"heymsfield2020_{p}" for p in PERCENTILES),
+    "milbrandt_yau2005",
 )
 _BRANCH_CROSSING_CM = (8.4 / 7.6) ** (1.0 / 0.22)
 
@@ -83,7 +96,20 @@ def hail_segments(law):
     ):
         a, b = PERCENTILES[law[15:]]
         return np.zeros(0), np.array([a]), np.array([b])
+    if law == "milbrandt_yau2005":
+        # V = a D_m^b with D_m in m is a (0.01 D_cm)^b with D_cm in cm
+        return np.zeros(0), np.array([MY2005_A * 0.01**MY2005_B]), np.array([MY2005_B])
     raise ValueError(f"hail law must be one of {HAIL_LAWS}, not {law!r}")
+
+
+def density_exponent(law):
+    """
+    Exponent ``e`` of the air density factor ``(rho0 / rho)^e`` of a hail law.
+
+    Only ``"milbrandt_yau2005"`` has one (0.5); the laws of Heymsfield et al.
+    (2020) are given without a density dependence (0).
+    """
+    return MY2005_DENSITY_EXPONENT if law == "milbrandt_yau2005" else 0.0
 
 
 def hail_speed(d, law="heymsfield2020"):

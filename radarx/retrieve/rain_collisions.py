@@ -13,7 +13,9 @@ distribution (DSD) at the top of a column of still air and returns it at the
 distances below, with the drops colliding, coalescing and breaking up as they
 fall at their terminal speeds (the same fall-speed laws, with the same air
 density correction, as the trajectory model). It conserves the mass flux of
-rain, that is the rain rate, to rounding.
+rain, that is the rain rate, to rounding. :func:`radarx.retrieve.rain_shaft_bulk` is the two-moment version
+(self-collection and a breakup that relaxes the mean volume diameter toward
+1.1 mm, after Seifert 2008), cheap enough for every gate of a volume.
 
 Equations
 ---------
