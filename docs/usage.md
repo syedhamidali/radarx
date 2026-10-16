@@ -115,6 +115,7 @@ dask arrays.
 |---|---|---|
 | Lazy, extra dimensions | `radarx.retrieve.attenuation` | `correct_attenuation` |
 | Lazy, extra dimensions | `radarx.retrieve.calibration` | `phidp_offset`, `z_offset`, `zdr_offset` |
+| Lazy, extra dimensions | `radarx.retrieve.columns` | `zdr_column`, `zdr_column_metrics` |
 | Lazy, extra dimensions | `radarx.retrieve.dealias` | `correct_dual_prf`, `dealias_confidence`, `dealias_velocity` |
 | Lazy, extra dimensions | `radarx.retrieve.dsd` | `dsd` |
 | Lazy, extra dimensions | `radarx.retrieve.hid` | `hid` |

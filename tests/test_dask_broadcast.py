@@ -12,6 +12,7 @@ for dask input, keep its input, attributes and provenance, and process the
 sweeps of a volume with dask arrays.
 """
 
+import functools
 import importlib
 from collections.abc import Callable
 from typing import NamedTuple
@@ -51,6 +52,8 @@ from radarx.retrieve import (
     vil,
     vil_density,
     z_offset,
+    zdr_column,
+    zdr_column_metrics,
     zdr_offset,
 )
 from radarx.retrieve import dealias as dealias_mod
@@ -72,6 +75,7 @@ from .sweepwise_helpers import CHUNKS, check_stack, check_volume, stacked, volum
 dsd_mod = importlib.import_module("radarx.retrieve.dsd")
 hid_mod = importlib.import_module("radarx.retrieve.hid")
 vil_mod = importlib.import_module("radarx.retrieve.vil")
+columns_mod = importlib.import_module("radarx.retrieve.columns")
 noise_mod = importlib.import_module("radarx.retrieve.noise")
 attenuation_mod = importlib.import_module("radarx.retrieve.attenuation")
 calibration_mod = importlib.import_module("radarx.retrieve.calibration")
@@ -153,6 +157,38 @@ def column_grid(k):
             "x": np.arange(4) * 1000.0,
             "altitude": ((), 100.0),
         },
+    )
+
+
+@functools.wraps(zdr_column_metrics)
+def metrics_without_engine(obj, engine=None, **kwargs):
+    """The harness passes an engine; the metrics are plain xarray reductions."""
+    return zdr_column_metrics(obj, **kwargs)
+
+
+def zdr_grid(k):
+    rnd = np.random.default_rng(k)
+    shape = (12, 5, 4)
+    zdr = np.where(rnd.random(shape) < 0.05, np.nan, rnd.uniform(0.0, 2.5, shape))
+    return xr.Dataset(
+        {
+            "ZDR": (("z", "y", "x"), zdr),
+            "RHOHV": (("z", "y", "x"), rnd.uniform(0.7, 1.0, shape)),
+        },
+        coords={
+            "z": 500.0 + 1000.0 * np.arange(12),
+            "y": np.arange(5) * 1000.0,
+            "x": np.arange(4) * 1000.0,
+        },
+    )
+
+
+def column_depth_map(k):
+    rnd = np.random.default_rng(k)
+    depth = np.where(rnd.random((5, 4)) < 0.1, np.nan, rnd.uniform(0.0, 4000.0, (5, 4)))
+    return xr.Dataset(
+        {"ZDR_COLUMN_DEPTH": (("y", "x"), depth)},
+        coords={"y": np.arange(5) * 1000.0, "x": np.arange(4) * 1000.0},
     )
 
 
@@ -340,6 +376,25 @@ CASES = [
         volume=False,
         melting=4000.0,
         fill_below=True,
+    ),
+    case(
+        "zdr_column",
+        zdr_column,
+        columns_mod.HAS_COMPILED_KERNEL,
+        zdr_grid,
+        chunks=GRID_CHUNKS,
+        volume=False,
+        rhohv="RHOHV",
+        freezing_level=4000.0,
+    ),
+    case(
+        "zdr_column_metrics",
+        metrics_without_engine,
+        True,
+        column_depth_map,
+        chunks={"time": 1, "y": 2},
+        volume=False,
+        min_depth=1000.0,
     ),
     case(
         "echo_top",

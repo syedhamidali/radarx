@@ -2820,5 +2820,22 @@
   "issue": "5",
   "pages": "535-575",
   "doi": "10.1016/0022-4073(96)00002-7"
+ },
+ "10.1175/WAF-D-15-0068.1": {
+  "authors": [
+   "Snyder, J. C.",
+   "Ryzhkov, A. V.",
+   "Kumjian, M. R.",
+   "Khain, A. P.",
+   "Picca, J."
+  ],
+  "year": 2015,
+  "title": "A ZDR Column Detection Algorithm to Examine Convective Storm Updrafts",
+  "type": "article",
+  "journal": "Weather and Forecasting",
+  "volume": "30",
+  "issue": "6",
+  "pages": "1819-1844",
+  "doi": "10.1175/WAF-D-15-0068.1"
  }
 }
