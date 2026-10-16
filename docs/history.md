@@ -5,6 +5,31 @@
 ```{include} changes/unreleased.md
 ```
 
+## 0.5.1 (2026-10-16)
+
+The main addition is a compiled T-matrix code for raindrops (`raindrop_scattering`,
+`spheroid_scattering`): single-drop scattering for any radar wavelength, temperature,
+axis ratio and canting width, validated against the Mie theory, the optical theorem and
+the simulations of Bringi and Chandrasekar (2001) at S, C, X, Ku, Ka and W band. The unit tests
+now run against the installed package, so the compiled-kernel tests that CI had been
+skipping run on Linux, macOS and Windows.
+
+**Change that can break existing code**
+
+- radarx needs Python 3.12 or newer.
+
+- **MNT:** Document a uv setup for development and add `ci/unittests-requirements.txt` for installing the test dependencies from PyPI wheels. ({pull}`296`) by [@syedhamidali](https://github.com/syedhamidali)
+- **DOC:** Fix the figure layout of the multi-radar grid notebook and the plots that the radius-of-influence section of the workflow notebook showed twice. ({pull}`297`) by [@syedhamidali](https://github.com/syedhamidali)
+- **MNT:** Drop Python 3.11: radarx needs Python 3.12 or newer, which shortens the CI. ({pull}`298`) by [@syedhamidali](https://github.com/syedhamidali)
+- **DOC:** Mask reflectivity below 0 dBZ in the gridding comparison figures of the grid and workflow notebooks. ({pull}`299`) by [@syedhamidali](https://github.com/syedhamidali)
+- **DOC:** The `zhang2001` mu-Lambda coefficients of the constrained-gamma DSD are checked against Eq. 18 of Zhang et al. (2001): they agree, and the docstrings say so. The conference preprint of Zhang et al. (2003) gives a regression of Lambda on mu, which is why its values differ. ({issue}`271`, {pull}`300`) by [@syedhamidali](https://github.com/syedhamidali)
+- **FIX:** `dealias_velocity` on a volume warns when neighbouring tilts differ by about one fold over a connected block of at least 1000 gates, and stores the number of gates in `dealias_disagreement_gates`. The folds are not changed. ({issue}`294`, {pull}`301`) by [@syedhamidali](https://github.com/syedhamidali)
+- **MNT:** Make Codecov wait for six coverage uploads instead of eight, the number left after dropping Python 3.11. ({pull}`302`) by [@syedhamidali](https://github.com/syedhamidali)
+- **MNT:** Add a kernel benchmark job that times eight compiled kernels against their NumPy twins and fails when one is slower than NumPy or loses most of its recorded speedup. ({pull}`303`) by [@syedhamidali](https://github.com/syedhamidali)
+- **MNT:** Make the CI faster: the multi-Doppler cost gradient uses one thread on grids below 4000 cells (the error estimate of the tests was 13 times slower on the runner than on a laptop because of it), `download_file` can store NEXRAD volumes in the directory named by `RADARX_DOWNLOAD_CACHE`, the notebook tests run in parallel, and the 16 slowest tests run only in one CI job (`RADARX_SKIP_SLOW`). The conversion of the ML models (`onnx_path`) no longer fails when another process converts the same model at the same time. ({pull}`304`) by [@syedhamidali](https://github.com/syedhamidali)
+- **ADD:** T-matrix scattering of raindrops in C++: `raindrop_scattering` gives the quantities of the radarx scattering tables for any wavelength, temperature, axis ratio and canting width, `spheroid_scattering` the amplitude and phase matrices of spheroids in any directions and orientations, with `orientation_quadrature`, `water_refractive_index` and `axis_ratio_brandes`. The code is a re-entrant, threaded C++ translation of the FORTRAN code of Mishchenko that `pytmatrix` wraps; it reproduces the 1920 rows of the packaged table to 1e-6, builds the whole table in 2 s, is validated against the Mie theory, the optical theorem, reciprocity and the Rayleigh limit at S, C, X, Ku, Ka and W band and against the tables of Bringi and Chandrasekar (2001) (three example notebooks), and `ci/build_dsd_tables.py` no longer needs `pytmatrix`. Canting and frequency are now selectable inputs (at S band 20 instead of 7 degrees of canting lowers the ZDR of a 4 mm drop by 0.65 dB, of an 8 mm drop by 1.7 dB, and KDP by 27 %). The spherical Bessel functions of the FORTRAN code lose all accuracy where cos(x) = 0 (a sphere of half a wavelength in diameter, for example 4.2 mm at 8.4 mm, gave a backscatter cross section 58 % too large); the C++ code does not, and `raindrop_scattering` converges the expansion to `ddelt = 1e-5` by default, because the `1e-3` of the FORTRAN code leaves errors of up to 25 % in the vertically polarized backscatter at W band and of 23 % in KDP at Ku band. ({issue}`274`, {pull}`305`) by [@syedhamidali](https://github.com/syedhamidali)
+- **MNT:** The compiled-kernel tests ran in no CI job: pytest imports radarx from the checkout, which has no built extensions, and the tests skip themselves without them (179 skipped per job). Every unit-test job now builds the wheel, installs it and runs the tests from a copy of the repository without the `radarx` source (`.github/actions/test-installed`), with the coverage mapped back to the checkout, and `RADARX_REQUIRE_KERNELS` makes `tests/conftest.py` stop with an error naming the missing kernels instead of skipping. Codecov checks the lines a pull request adds against a fixed 90 % instead of the coverage of the base commit. ({pull}`306`) by [@syedhamidali](https://github.com/syedhamidali)
+
 ## 0.5.0 (2026-10-13)
 
 This release adds most of the radar analysis chain: quality control, polarimetric
