@@ -3519,5 +3519,292 @@
   "issue": "4",
   "pages": "451-455",
   "doi": "10.1109/TAU.1970.1162132"
+ },
+ "10.1175/1520-0450(2003)042<0381:ADASSA>2.0.CO;2": {
+  "authors": [
+   "Seed, A. W."
+  ],
+  "year": 2003,
+  "title": "A Dynamic and Spatial Scaling Approach to Advection Forecasting",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology",
+  "volume": "42",
+  "issue": "3",
+  "pages": "381-388",
+  "doi": "10.1175/1520-0450(2003)042<0381:ADASSA>2.0.CO;2"
+ },
+ "10.1256/qj.04.100": {
+  "authors": [
+   "Bowler, N. E.",
+   "Pierce, C. E.",
+   "Seed, A. W."
+  ],
+  "year": 2006,
+  "title": "STEPS: A probabilistic precipitation forecasting scheme which merges an extrapolation nowcast with downscaled NWP",
+  "type": "article",
+  "journal": "Quarterly Journal of the Royal Meteorological Society",
+  "volume": "132",
+  "issue": "620",
+  "pages": "2127-2155",
+  "doi": "10.1256/qj.04.100"
+ },
+ "10.1002/wrcr.20536": {
+  "authors": [
+   "Seed, A. W.",
+   "Pierce, C. E.",
+   "Norman, K."
+  ],
+  "year": 2013,
+  "title": "Formulation and evaluation of a scale decomposition-based stochastic precipitation nowcast scheme",
+  "type": "article",
+  "journal": "Water Resources Research",
+  "volume": "49",
+  "issue": "10",
+  "pages": "6624-6641",
+  "doi": "10.1002/wrcr.20536"
+ },
+ "10.1175/1520-0493(2002)130<2859:SDOTPO>2.0.CO;2": {
+  "authors": [
+   "Germann, U.",
+   "Zawadzki, I."
+  ],
+  "year": 2002,
+  "title": "Scale-Dependence of the Predictability of Precipitation from Continental Radar Images. Part I: Description of the Methodology",
+  "type": "article",
+  "journal": "Monthly Weather Review",
+  "volume": "130",
+  "issue": "12",
+  "pages": "2859-2873",
+  "doi": "10.1175/1520-0493(2002)130<2859:SDOTPO>2.0.CO;2"
+ },
+ "10.1175/1520-0450(2004)043<0074:SDOTPO>2.0.CO;2": {
+  "authors": [
+   "Germann, U.",
+   "Zawadzki, I."
+  ],
+  "year": 2004,
+  "title": "Scale Dependence of the Predictability of Precipitation from Continental Radar Images. Part II: Probability Forecasts",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology",
+  "volume": "43",
+  "issue": "1",
+  "pages": "74-89",
+  "doi": "10.1175/1520-0450(2004)043<0074:SDOTPO>2.0.CO;2"
+ },
+ "10.1175/2007MWR2123.1": {
+  "authors": [
+   "Roberts, N. M.",
+   "Lean, H. W."
+  ],
+  "year": 2008,
+  "title": "Scale-Selective Verification of Rainfall Accumulations from High-Resolution Forecasts of Convective Events",
+  "type": "article",
+  "journal": "Monthly Weather Review",
+  "volume": "136",
+  "issue": "1",
+  "pages": "78-97",
+  "doi": "10.1175/2007MWR2123.1"
+ },
+ "10.1002/met.25": {
+  "authors": [
+   "Ebert, E. E."
+  ],
+  "year": 2008,
+  "title": "Fuzzy verification of high‐resolution gridded forecasts: a review and proposed framework",
+  "type": "article",
+  "journal": "Meteorological Applications",
+  "volume": "15",
+  "issue": "1",
+  "pages": "51-64",
+  "doi": "10.1002/met.25"
+ },
+ "10.1287/mnsc.22.10.1087": {
+  "authors": [
+   "Matheson, J. E.",
+   "Winkler, R. L."
+  ],
+  "year": 1976,
+  "title": "Scoring Rules for Continuous Probability Distributions",
+  "type": "article",
+  "journal": "Management Science",
+  "volume": "22",
+  "issue": "10",
+  "pages": "1087-1096",
+  "doi": "10.1287/mnsc.22.10.1087"
+ },
+ "10.1175/1520-0434(2000)015<0559:DOTCRP>2.0.CO;2": {
+  "authors": [
+   "Hersbach, H."
+  ],
+  "year": 2000,
+  "title": "Decomposition of the Continuous Ranked Probability Score for Ensemble Prediction Systems",
+  "type": "article",
+  "journal": "Weather and Forecasting",
+  "volume": "15",
+  "issue": "5",
+  "pages": "559-570",
+  "doi": "10.1175/1520-0434(2000)015<0559:DOTCRP>2.0.CO;2"
+ },
+ "10.1198/016214506000001437": {
+  "authors": [
+   "Gneiting, T.",
+   "Raftery, A. E."
+  ],
+  "year": 2007,
+  "title": "Strictly Proper Scoring Rules, Prediction, and Estimation",
+  "type": "article",
+  "journal": "Journal of the American Statistical Association",
+  "volume": "102",
+  "issue": "477",
+  "pages": "359-378",
+  "doi": "10.1198/016214506000001437"
+ },
+ "10.1002/qj.2270": {
+  "authors": [
+   "Ferro, C. A. T."
+  ],
+  "year": 2013,
+  "title": "Fair scores for ensemble forecasts",
+  "type": "article",
+  "journal": "Quarterly Journal of the Royal Meteorological Society",
+  "volume": "140",
+  "issue": "683",
+  "pages": "1917-1923",
+  "doi": "10.1002/qj.2270"
+ },
+ "10.1175/1520-0493(1987)115<1330:AGFFFV>2.0.CO;2": {
+  "authors": [
+   "Murphy, A. H.",
+   "Winkler, R. L."
+  ],
+  "year": 1987,
+  "title": "A General Framework for Forecast Verification",
+  "type": "article",
+  "journal": "Monthly Weather Review",
+  "volume": "115",
+  "issue": "7",
+  "pages": "1330-1338",
+  "doi": "10.1175/1520-0493(1987)115<1330:AGFFFV>2.0.CO;2"
+ },
+ "10.1175/1520-0493(1950)078<0001:VOFEIT>2.0.CO;2": {
+  "authors": [
+   "BRIER, G. W."
+  ],
+  "year": 1950,
+  "title": "VERIFICATION OF FORECASTS EXPRESSED IN TERMS OF PROBABILITY",
+  "type": "article",
+  "journal": "Monthly Weather Review",
+  "volume": "78",
+  "issue": "1",
+  "pages": "1-3",
+  "doi": "10.1175/1520-0493(1950)078<0001:VOFEIT>2.0.CO;2"
+ },
+ "10.1175/1520-0493(2001)129<0550:IORHFV>2.0.CO;2": {
+  "authors": [
+   "Hamill, T. M."
+  ],
+  "year": 2001,
+  "title": "Interpretation of Rank Histograms for Verifying Ensemble Forecasts",
+  "type": "article",
+  "journal": "Monthly Weather Review",
+  "volume": "129",
+  "issue": "3",
+  "pages": "550-560",
+  "doi": "10.1175/1520-0493(2001)129<0550:IORHFV>2.0.CO;2"
+ },
+ "10.1109/CVPR.1994.323794": {
+  "authors": [
+   "Jianbo Shi",
+   "Tomasi"
+  ],
+  "year": 1994,
+  "title": "Good features to track",
+  "type": "inproceedings",
+  "journal": "Proceedings of IEEE Conference on Computer Vision and Pattern Recognition CVPR-94",
+  "pages": "593-600",
+  "doi": "10.1109/CVPR.1994.323794"
+ },
+ "10.1175/2011JTECHA1496.1": {
+  "authors": [
+   "Ruzanski, E.",
+   "Chandrasekar, V.",
+   "Wang, Y."
+  ],
+  "year": 2011,
+  "title": "The CASA Nowcasting System",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "28",
+  "issue": "5",
+  "pages": "640-655",
+  "doi": "10.1175/2011JTECHA1496.1"
+ },
+ "lucas-kanade-1981": {
+  "authors": [
+   "Lucas, B. D.",
+   "Kanade, T."
+  ],
+  "year": 1981,
+  "title": "An iterative image registration technique with an application to stereo vision",
+  "type": "inproceedings",
+  "journal": "Proceedings of the 7th International Joint Conference on Artificial Intelligence (IJCAI)",
+  "pages": "674-679"
+ },
+ "bouguet-2001": {
+  "authors": [
+   "Bouguet, J.-Y."
+  ],
+  "year": 2001,
+  "title": "Pyramidal implementation of the affine Lucas Kanade feature tracker: description of the algorithm",
+  "type": "inproceedings",
+  "journal": "Intel Corporation, Microprocessor Research Labs",
+  "publisher": "Intel Corporation"
+ },
+ "10.5194/gmd-13-2631-2020": {
+  "authors": [
+   "Ayzel, G.",
+   "Scheffer, T.",
+   "Heistermann, M."
+  ],
+  "year": 2020,
+  "title": "RainNet v1.0: a convolutional neural network for radar-based precipitation nowcasting",
+  "type": "article",
+  "journal": "Geoscientific Model Development",
+  "volume": "13",
+  "issue": "6",
+  "pages": "2631-2644",
+  "doi": "10.5194/gmd-13-2631-2020"
+ },
+ "10.1038/s41586-021-03854-z": {
+  "authors": [
+   "Ravuri, S.",
+   "Lenc, K.",
+   "Willson, M.",
+   "Kangin, D.",
+   "Lam, R.",
+   "Mirowski, P.",
+   "Fitzsimons, M.",
+   "Athanassiadou, M.",
+   "Kashem, S.",
+   "Madge, S.",
+   "Prudden, R.",
+   "Mandhane, A.",
+   "Clark, A.",
+   "Brock, A.",
+   "Simonyan, K.",
+   "Hadsell, R.",
+   "Robinson, N.",
+   "Clancy, E.",
+   "Arribas, A.",
+   "Mohamed, S."
+  ],
+  "year": 2021,
+  "title": "Skilful precipitation nowcasting using deep generative models of radar",
+  "type": "article",
+  "journal": "Nature",
+  "volume": "597",
+  "issue": "7878",
+  "pages": "672-677",
+  "doi": "10.1038/s41586-021-03854-z"
  }
 }
