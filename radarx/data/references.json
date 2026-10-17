@@ -2865,5 +2865,61 @@
   "issue": "2",
   "pages": "209-228",
   "doi": "10.1016/0021-9991(75)90037-6"
+ },
+ "10.1175/2010JTECHA1403.1": {
+  "authors": [
+   "Schwaller, M. R.",
+   "Morris, K. R."
+  ],
+  "year": 2011,
+  "title": "A Ground Validation Network for the Global Precipitation Measurement Mission",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "28",
+  "issue": "3",
+  "pages": "301-319",
+  "doi": "10.1175/2010JTECHA1403.1"
+ },
+ "10.2151/jmsj.2021-011": {
+  "authors": [
+   "Seto, S.",
+   "Iguchi, T.",
+   "Meneghini, R.",
+   "Awaka, J.",
+   "Kubota, T.",
+   "Masaki, T.",
+   "Takahashi, N."
+  ],
+  "year": 2021,
+  "title": "The Precipitation Rate Retrieval Algorithms for the GPM Dual-frequency Precipitation Radar",
+  "type": "article",
+  "journal": "Journal of the Meteorological Society of Japan. Ser. II",
+  "volume": "99",
+  "issue": "2",
+  "pages": "205-237",
+  "doi": "10.2151/jmsj.2021-011"
+ },
+ "10.1007/978-3-030-24568-9_19": {
+  "authors": [
+   "Huffman, G. J.",
+   "Bolvin, D. T.",
+   "Braithwaite, D.",
+   "Hsu, K.-L.",
+   "Joyce, R. J.",
+   "Kidd, C.",
+   "Nelkin, E. J.",
+   "Sorooshian, S.",
+   "Stocker, E. F.",
+   "Tan, J.",
+   "Wolff, D. B.",
+   "Xie, P."
+  ],
+  "year": 2020,
+  "title": "Integrated Multi-satellitE Retrievals for the Global Precipitation Measurement (GPM) Mission (IMERG)",
+  "type": "inproceedings",
+  "journal": "Satellite Precipitation Measurement, Advances in Global Change Research",
+  "pages": "343-353",
+  "publisher": "Springer International Publishing",
+  "doi": "10.1007/978-3-030-24568-9_19"
  }
 }

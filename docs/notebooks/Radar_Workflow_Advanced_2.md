@@ -42,6 +42,7 @@ shown.
 | 16 | ensembles and uncertainty of the retrievals: errors of the measurements, calibration and DSD prior propagated by Monte Carlo | `perturb_radar`, `measurement_error`, `ensemble_retrieval`, `ensemble_statistics`, `relation_scatter` |
 | 17 | ZDR column depth, area and volume above the freezing level | `zdr_column`, `zdr_column_metrics` |
 | 18 | ZDR arc and KDP-ZDR separation of supercells on a grid | `zdr_arc` |
+| 19 | volume matching of a ground radar and the GPM DPR, DPR drop size parameters, comparison with IMERG | `match_dpr`, `match_statistics`, `dpr_parallax`, `dpr_dsd`, `match_imerg` |
 
 ```{code-cell} ipython3
 import math
@@ -1111,9 +1112,104 @@ the arc. The reflectivity gradient mask keeps the north patch out here. The algo
 supercells: the leading edge of a squall line and the high $Z_{DR}$ below developing
 updrafts are often detected as arcs, and $Z_{DR}$ must be calibrated.
 
+## 19. Radar and satellite matching
+
+A ground radar and the Dual-frequency Precipitation Radar (DPR) of the GPM core satellite see the
+same storm with different beams. `match_dpr` averages both over the volume that they share: the
+DPR ray is slanted, so the part at the height $h$ lies $h \tan\theta$ closer to the track than
+the position in the file, and the ground radar beam is at the height that its elevation gives
+(Schwaller and Morris 2011). `match_statistics` compares the pairs, `dpr_dsd` splits the DSD
+parameters of the DPR (Dm and 10 log10 Nw with $\mu = 3$, the conventions of the radarx DSD retrieval,
+Seto et al. 2021) and `match_imerg` puts a radar rain rate on the grid and the half hours of IMERG
+(Huffman et al. 2020). The files of the DPR and of IMERG need an Earthdata login, so the data are
+synthetic: a storm that leans with height. The [Satellite_Matching](Satellite_Matching) notebook
+shows the geometry, the DSD check and the IMERG comparison in full.
+
+```{code-cell} ipython3
+import pyproj
+from xradar.georeference import antenna_to_cartesian
+
+from radarx._gridcf import aeqd_crs, lonlat
+from radarx.retrieve import dpr_dsd, dpr_parallax, match_dpr, match_imerg, match_statistics
+
+
+def sat_storm(x, y, h):
+    dbz = 50.0 * np.exp(-((x - 55e3 - 0.5 * h) ** 2 + (y - 5e3) ** 2) / (2 * 9e3**2)) - 3e-3 * np.maximum(h - 8e3, 0.0)
+    return np.where(dbz > 5.0, dbz, np.nan)
+
+
+sat_az = np.arange(0.0, 360.0, 2.0) + 1.0
+sat_rng = 125.0 + 250.0 * np.arange(500)
+sat_sweeps = {}
+for i, el in enumerate((1.0, 4.0, 9.0, 15.0)):
+    gx, gy, gz = antenna_to_cartesian(sat_rng[None, :], sat_az[:, None], np.full((sat_az.size, 1), el))
+    sat_sweeps[f"/sweep_{i}"] = xr.Dataset(
+        {"DBZH": (("azimuth", "range"), sat_storm(gx, gy, gz), {"units": "dBZ"})},
+        coords={"azimuth": sat_az, "elevation": ("azimuth", np.full(sat_az.size, el)), "range": sat_rng},
+    )
+sat_site = xr.Dataset(coords={"latitude": 30.0, "longitude": -90.0, "altitude": 0.0})
+sat_volume = xr.DataTree.from_dict({"/": sat_site, **sat_sweeps})
+
+# a DPR swath that observes the same storm along its slanted rays (track 30 km west of the radar)
+sat_crs = aeqd_crs(30.0, -90.0)
+sat_zenith = (np.arange(49) - 24) * 17.5 / 24.0
+sat_xx, sat_yy = np.meshgrid(-30e3 + 407e3 * np.tan(np.radians(sat_zenith)), np.arange(-60e3, 60e3, 5e3))
+sat_lon, sat_lat = pyproj.Transformer.from_crs(sat_crs, 4326, always_xy=True).transform(sat_xx, sat_yy)
+sat_h = ((175 - np.arange(176)) * 125.0)[None, None, :] * np.cos(np.radians(sat_zenith))[None, :, None]
+sat_h = np.broadcast_to(sat_h, (sat_xx.shape[0], 49, 176)).copy()
+sat_true_x = sat_xx[..., None] - sat_h * np.tan(np.radians(sat_zenith))[None, :, None]
+sat_dpr = xr.Dataset(
+    {
+        "Longitude": (("scan", "ray"), sat_lon),
+        "Latitude": (("scan", "ray"), sat_lat),
+        "localZenithAngle": (("scan", "ray"), np.broadcast_to(sat_zenith, sat_lon.shape).copy()),
+        "height": (("scan", "ray", "bin"), sat_h),
+        "zFactorFinal": (("scan", "ray", "bin"), sat_storm(sat_true_x, sat_yy[..., None], sat_h), {"units": "dBZ"}),
+    }
+)
+print(f"parallax of a 5 km bin on the outer ray: {float(dpr_parallax(5000.0, sat_zenith[-1])):.0f} m")
+sat_kwargs = dict(gr_fields="DBZH", dpr_fields="zFactorFinal", min_range=20e3, max_range=100e3)
+sat_match = match_dpr(sat_volume, sat_dpr, **sat_kwargs)
+sat_flat = sat_dpr.assign(localZenithAngle=sat_dpr.localZenithAngle * 0.0)  # without the parallax
+sat_none = sat_volume.radarx.match_dpr(sat_flat, **sat_kwargs)
+for label, m in (("with parallax correction", sat_match), ("without", sat_none)):
+    ok = m.valid & (m.gr_DBZH > 15) & (m.elevation >= 4.0) & (abs(m.ray - 24) >= 10)
+    s = match_statistics(m.gr_DBZH.where(ok), m.dpr_zFactorFinal.where(ok))
+    print(f"{label}: {int(s['count'])} pairs, bias {float(s.bias):.2f} dB, RMSE {float(s.rmse):.2f} dB")
+
+# the DSD parameters of the file: 10 log10 Nw and Dm
+sat_param = xr.DataArray(np.stack([np.full(sat_h.shape, 34.0), np.full(sat_h.shape, 1.8)], axis=-1), dims=("scan", "ray", "bin", "nDSD"))
+print(float(dpr_dsd(sat_param).DM[0, 0, 0]), "mm,", float(dpr_dsd(sat_param).NW[0, 0, 0]), "m-3 mm-1")
+
+# IMERG: a radar rain rate every 10 minutes and the half hour of IMERG that holds them
+sat_x = np.arange(-100e3, 100e3 + 1, 1000.0)
+sat_glon, sat_glat = lonlat(sat_crs.to_cf(), sat_x, sat_x)
+sat_times = np.datetime64("2024-05-01T00:05", "ns") + np.arange(3) * np.timedelta64(10, "m")
+sat_rate = xr.DataArray(
+    np.stack([np.full((sat_x.size, sat_x.size), r) for r in (3.0, 6.0, 9.0)]),
+    dims=("time", "y", "x"),
+    coords={"time": sat_times, "x": sat_x, "y": sat_x, "lon": (("y", "x"), sat_glon), "lat": (("y", "x"), sat_glat)},
+)
+sat_imerg = xr.DataArray(
+    np.full((1, 20, 20), 5.0),
+    dims=("time", "lon", "lat"),
+    coords={"time": np.array(["2024-05-01T00:00"], dtype="datetime64[ns]"), "lon": np.round(np.arange(-90.95, -89.0, 0.1), 2), "lat": np.round(np.arange(29.05, 31.0, 0.1), 2)},
+)
+sat_both = sat_rate.radarx.match_imerg(sat_imerg)  # the same as match_imerg(sat_rate, sat_imerg)
+print(f"{float(sat_both.radar.max()):.1f} mm/h from the three scans (3, 6, 9: 10 minutes each), IMERG {float(sat_both.imerg.max()):.1f}")
+```
+
+The storm is known, so the check is exact: with the parallax correction the pairs agree to about
+1 dB (RMSE; the two beams do not sample the same volume), without it the RMSE is more than 3 dB
+where the beams are high. Three scans of 3, 6 and 9 mm/h that represent 10 minutes each average to
+6 mm/h in the half hour. The choices that the papers leave open (the footprint size, the weights, the
+fraction of the volume that must have data) are listed in the documentation of
+`radarx.retrieve.satellite_match`.
+
 ## References
 
 - Holleman, I., and H. Beekhuis, 2003: Analysis and Correction of Dual PRF Velocity Data. *Journal of Atmospheric and Oceanic Technology*, **20**, 443-453, <https://doi.org/10.1175/1520-0426(2003)20<443:AACODP>2.0.CO;2>
+- Huffman, G. J., et al., 2020: Integrated Multi-satellitE Retrievals for the Global Precipitation Measurement (GPM) Mission (IMERG). *Satellite Precipitation Measurement*, Springer, 343-353, <https://doi.org/10.1007/978-3-030-24568-9_19>
 - Gao, J., M. Xue, A. Shapiro, and K. K. Droegemeier, 1999: A Variational Method for the Analysis of Three-Dimensional Wind Fields from Two Doppler Radars. *Monthly Weather Review*, **127**, 2128-2142, <https://doi.org/10.1175/1520-0493(1999)127<2128:AVMFTA>2.0.CO;2>
 - Jung, Y., G. Zhang, and M. Xue, 2008: Assimilation of Simulated Polarimetric Radar Data for a Convective Storm Using the Ensemble Kalman Filter. Part I: Observation Operators for Reflectivity and Polarimetric Variables. *Monthly Weather Review*, **136**, 2228-2245, <https://doi.org/10.1175/2007MWR2083.1>
 - Lin, T.-Y., K. Winner, G. Bernstein, A. Mittal, A. M. Dokter, K. G. Horton, C. Nilsson, B. M. Van Doren, A. Farnsworth, F. A. La Sorte, S. Maji, and D. Sheldon, 2019: MistNet: Measuring historical bird migration in the US using archived weather radar data and convolutional neural networks. *Methods in Ecology and Evolution*, **10**, 1908-1922, <https://doi.org/10.1111/2041-210X.13280>
@@ -1121,7 +1217,10 @@ updrafts are often detected as arcs, and $Z_{DR}$ must be calibrated.
 - Melnikov, V. M., and D. S. Zrnic, 2004: Simultaneous transmission mode for the polarimetric WSR-88D: statistical biases and standard deviations of polarimetric variables. NOAA/NSSL report, 84 pp., <https://www.nssl.noaa.gov/publications/wsr88d_reports/SHV_statistics.pdf>
 - Ryzhkov, A. V., J. Snyder, J. T. Carlin, A. Khain, and M. Pinsky, 2020: What Polarimetric Weather Radars Offer to Cloud Modelers: Forward Radar Operators and Microphysical/Thermodynamic Retrievals. *Atmosphere*, **11**, 362, <https://doi.org/10.3390/atmos11040362>
 - Ryzhkov, A., M. Diederich, P. Zhang, and C. Simmer, 2014: Potential Utilization of Specific Attenuation for Rainfall Estimation, Mitigation of Partial Beam Blockage, and Radar Networking. *Journal of Atmospheric and Oceanic Technology*, **31**, 599-619, <https://doi.org/10.1175/JTECH-D-13-00038.1>
+- Schwaller, M. R., and K. R. Morris, 2011: A Ground Validation Network for the Global Precipitation Measurement Mission. *Journal of Atmospheric and Oceanic Technology*, **28**, 301-319, <https://doi.org/10.1175/2010JTECHA1403.1>
+- Seto, S., T. Iguchi, R. Meneghini, J. Awaka, T. Kubota, T. Masaki, and N. Takahashi, 2021: The Precipitation Rate Retrieval Algorithms for the GPM Dual-frequency Precipitation Radar. *Journal of the Meteorological Society of Japan*, **99**, 205-237, <https://doi.org/10.2151/jmsj.2021-011>
 - Snyder, J. C., A. V. Ryzhkov, M. R. Kumjian, A. P. Khain, and J. Picca, 2015: A ZDR Column Detection Algorithm to Examine Convective Storm Updrafts. *Weather and Forecasting*, **30**, 1819-1844, <https://doi.org/10.1175/WAF-D-15-0068.1>
+- Testud, J., S. Oury, R. A. Black, P. Amayenc, and X. Dou, 2001: The Concept of "Normalized" Distribution to Describe Raindrop Spectra: A Tool for Cloud Physics and Cloud Remote Sensing. *Journal of Applied Meteorology*, **40**, 1118-1140, <https://doi.org/10.1175/1520-0450(2001)040<1118:TCONDT>2.0.CO;2>
 - Wilson, M. B., and M. S. Van Den Broeke, 2021: An Automated Python Algorithm to Quantify ZDR Arc and KDP-ZDR Separation Signatures in Supercells. *Journal of Atmospheric and Oceanic Technology*, **38**, 371-386, <https://doi.org/10.1175/JTECH-D-20-0056.1>
 - Shapiro, A., 1993: The Use of an Exact Solution of the Navier-Stokes Equations in a Validation Test of a Three-Dimensional Nonhydrostatic Numerical Model. *Monthly Weather Review*, **121**, 2420-2425, <https://doi.org/10.1175/1520-0493(1993)121<2420:TUOAES>2.0.CO;2>
 - Veillette, M. S., J. M. Kurdzo, P. M. Stepanian, J. Y. N. Cho, T. Reis, S. Samsi, J. McDonald, and N. Chisler, 2025: A Benchmark Dataset for Tornado Detection and Prediction Using Full-Resolution Polarimetric Weather Radar Data. *Artificial Intelligence for the Earth Systems*, **4**, <https://doi.org/10.1175/AIES-D-24-0006.1>
