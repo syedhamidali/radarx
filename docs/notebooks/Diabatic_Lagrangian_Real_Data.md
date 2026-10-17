@@ -19,9 +19,9 @@ The [diabatic Lagrangian notebook](Diabatic_Lagrangian) runs
 `radarx.retrieve.diabatic_lagrangian` on a synthetic storm with known winds.
 Here the same function runs on the squall line that crossed Mississippi on
 30 March 2022 (PERiLS IOP 2), seen by the KGWX radar at Columbus, from four
-volumes between 23:46 and 00:09 UTC, one volume every 6.5 minutes. Everything
-is open data: the NEXRAD volumes and the ERA5 reanalysis can be read without
-credentials, and the surface stations that serve as the independent check are
+volumes at 23:46, 23:53, 23:59 and 00:06 UTC, about 6.5 minutes apart. Everything
+is open data: the NEXRAD volumes (from `open-radar-data`) and the ERA5 reanalysis
+can be read without credentials, and the surface stations that serve as the independent check are
 the ASOS and AWOS stations of the Iowa Environmental Mesonet.
 
 The run has four steps:
@@ -38,7 +38,6 @@ NEXRAD-only winds take the method, not a validation of the method. The text
 says where it falls short.
 
 ```{code-cell} ipython3
-import tempfile
 import urllib.request
 
 import matplotlib.pyplot as plt
@@ -46,18 +45,17 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 import xradar as xd
+from open_radar_data import DATASETS
 from xradar.io.backends.nexrad_level2 import NEXRADLevel2File
 
 import radarx as rx
 from radarx.io import sounding
-from radarx.io.aws_data import download_file
 from radarx.retrieve import diabatic_lagrangian
 ```
 
 ## Winds from KGWX
 
-The four KGWX volumes are read from the public NEXRAD archive on AWS (they are
-also in `open-radar-data`). The Nyquist velocity comes from the radial
+The four KGWX volumes come from `open-radar-data` (0.9.0 or later). The Nyquist velocity comes from the radial
 headers, the no-data codes are masked, and the velocity is dealiased with a
 limit of 50 m/s on the radial speed.
 
@@ -68,12 +66,10 @@ keys = [
     "KGWX20220330_235959_V06",
     "KGWX20220331_000624_V06",
 ]
-cache = tempfile.mkdtemp()
 
 
 def nexrad_volume(key):
-    day = f"{key[4:8]}/{key[8:10]}/{key[10:12]}"
-    path = download_file("unidata-nexrad-level2", f"{day}/{key[:4]}/{key}", cache)
+    path = DATASETS.fetch(key)
     with NEXRADLevel2File(path) as nf:
         nyquist = [h["msg_31_data_header"]["RAD"]["nyquist_vel"] / 100.0 for h in nf.msg_31_data_header]
     tree = xd.io.open_nexradlevel2_datatree(path)
@@ -254,7 +250,7 @@ for col, (name, label, cmap, lim) in enumerate(panels):
     bottom.contour(dla.x / 1e3, dla.z / 1e3, sec.qc * 1e3, [0.5, 1.0, 2.0], colors="m", linewidths=1.0)
     bottom.set(title=f"{label.split(' (')[0]}, y = {float(sec.y) / 1e3:.0f} km", xlabel="x (km east of KGWX)", ylabel="height (km)", ylim=(0, 6))
     fig.colorbar(im, ax=bottom, label=label, shrink=0.8)
-fig.suptitle("Analysis at 00:09 UTC. Black: 40 dBZ at 1 km (maps), 20 and 40 dBZ (sections). Magenta: cloud water 0.5, 1, 2 g/kg")
+fig.suptitle("Analysis at 00:09 UTC (mid-time of the last volume). Black: 40 dBZ at 1 km (maps), 20 and 40 dBZ (sections). Magenta: cloud water 0.5, 1, 2 g/kg")
 plt.show()
 print(f"surface: minimum delta theta_v {float(sfc.delta_theta_v.min()):.1f} K, "
       f"maximum delta q_v {float(sfc.delta_qv.max()):.1f} g/kg, "
