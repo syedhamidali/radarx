@@ -29,7 +29,15 @@ and :math:`d < R`, are
     :math:`w = \\exp(-4 d^2 / R^2)`, the Gaussian weight of Barnes (1964),
     :math:`\\exp(-d^2/\\kappa)` with :math:`\\kappa = R^2/4`, cut at the radius,
 ``"nearest"``
-    the value of the closest gate.
+    the value of the closest gate,
+``"beam"``
+    the pulse volume of the gate: a Gaussian that is :math:`\\sigma_\\theta r`
+    wide across the beam and :math:`\\sigma_r` along it,
+    :math:`w = \\exp[-\\tfrac12 (d_\\perp^2/\\sigma_\\theta^2 r^2 +
+    d_\\parallel^2/\\sigma_r^2)]`, with :math:`\\sigma_\\theta = \\theta_1 /
+    (4\\sqrt{{\\ln 2}})` for the half-power beamwidth :math:`\\theta_1` (the second
+    central moment of the two-way power pattern of a Gaussian beam, Doviak and
+    Zrnic 1993, Eq. 5.75).
 
 The radius is :math:`R = \\max(R_0,\\; a\\,s + b\\,(z - z_0))` with the distance
 :math:`s` of the output point from the radar and its height above the radar
@@ -73,7 +81,10 @@ except ImportError:  # pragma: no cover - depends on the build
     _cone = None
     HAS_COMPILED_KERNEL = False
 
-WEIGHTINGS = {"cressman": 0, "barnes": 1, "nearest": 2}
+WEIGHTINGS = {"cressman": 0, "barnes": 1, "nearest": 2, "beam": 3}
+
+# 1 / (2 sqrt(2 ln 2)): standard deviation of a Gaussian per half-power width
+_SIGMA_PER_FWHM = 1.0 / (2.0 * np.sqrt(2.0 * np.log(2.0)))
 
 
 def _weighting(weighting):
@@ -105,13 +116,58 @@ def _radius_parameters(roi, roi_range_factor, roi_height_factor, beamwidth, min_
     return roi, range_factor, height_factor, min_gates
 
 
-def _gate_positions(arrays, shifts, site_altitude, k_e):
-    """Positions ``(n, 3)`` and values of the valid gates of all sweeps."""
+# step (m) of the central difference that gives the beam direction at a gate, and
+# the smallest standard deviation (m) across the beam; those of the kernel
+_BEAM_STEP = 10.0
+_MIN_SIGMA = 1.0
+
+
+def _beam_parameters(weighting, beamwidth, range_resolution, arrays):
+    """
+    ``(sigma_theta, [sigma_r per sweep])`` of the beam weighting, else ``None``.
+
+    ``sigma_theta`` is the standard deviation (radians) of the two-way power
+    pattern, ``beamwidth / (4 sqrt(ln 2))`` (Doviak and Zrnic 1993, Eq. 5.75),
+    and ``sigma_r`` that of a Gaussian range weighting whose half-power width is
+    ``range_resolution`` (default: the gate spacing of the sweep).
+    """
+    if weighting != "beam":
+        if range_resolution is not None:
+            raise ValueError("range_resolution applies to weighting='beam' only")
+        return None
+    if beamwidth is None:
+        raise ValueError("weighting='beam' needs beamwidth (degrees)")
+    sigma_theta = np.radians(float(beamwidth)) / (4.0 * np.sqrt(np.log(2.0)))
+    if range_resolution is not None:
+        resolution = float(range_resolution)
+        if not np.isfinite(resolution) or resolution <= 0:
+            raise ValueError("range_resolution must be a positive number of metres")
+    sigma_r = []
+    for _, _, _, rng in arrays:
+        if range_resolution is None:
+            spacing = float(np.median(np.diff(rng))) if rng.size > 1 else 0.0
+            if not spacing > 0:
+                raise ValueError("a sweep with one range gate needs range_resolution")
+        else:
+            spacing = resolution
+        sigma_r.append(spacing * _SIGMA_PER_FWHM)
+    return float(sigma_theta), sigma_r
+
+
+def _gate_positions(arrays, shifts, site_altitude, k_e, beam=None):
+    """
+    Positions ``(n, 3)`` and values of the valid gates of all sweeps.
+
+    With ``beam = (sigma_theta, [sigma_r per sweep])`` also the unit vectors
+    along the beams ``(n, 3)`` and the inverse variances across and along them.
+    """
     from xradar.georeference import antenna_to_cartesian
 
     kwargs = cone._antenna_kwargs(k_e)
-    points, values = [], []
-    for (data, azimuth, elevation, rng), (dx, dy) in zip(arrays, shifts):
+    points, values, direction, inv_across, inv_along = [], [], [], [], []
+    for k, ((data, azimuth, elevation, rng), (dx, dy)) in enumerate(
+        zip(arrays, shifts)
+    ):
         gx, gy, gz = antenna_to_cartesian(
             rng[None, :],
             azimuth[:, None],
@@ -122,7 +178,36 @@ def _gate_positions(arrays, shifts, site_altitude, k_e):
         ok = np.isfinite(data)
         points.append(np.column_stack([gx[ok] + dx, gy[ok] + dy, gz[ok]]))
         values.append(data[ok])
-    return np.concatenate(points), np.concatenate(values)
+        if beam is None:
+            continue
+        sigma_theta, sigma_r = beam
+        ends = [
+            antenna_to_cartesian(
+                np.maximum(rng + sign * _BEAM_STEP, 0.0)[None, :],
+                azimuth[:, None],
+                elevation[:, None],
+                site_altitude=site_altitude,
+                **kwargs,
+            )
+            for sign in (-1.0, 1.0)
+        ]
+        tangent = np.stack([ends[1][i] - ends[0][i] for i in range(3)], axis=-1)
+        tangent /= np.linalg.norm(tangent, axis=-1, keepdims=True)
+        direction.append(tangent[ok])
+        across = np.maximum(
+            sigma_theta * np.broadcast_to(rng[None, :], ok.shape), _MIN_SIGMA
+        )
+        inv_across.append(1.0 / across[ok] ** 2)
+        inv_along.append(np.full(int(ok.sum()), 1.0 / sigma_r[k] ** 2))
+    points, values = np.concatenate(points), np.concatenate(values)
+    if beam is None:
+        return points, values
+    extras = (
+        np.concatenate(direction),
+        np.concatenate(inv_across),
+        np.concatenate(inv_along),
+    )
+    return points, values, extras
 
 
 def _map_numpy(
@@ -138,13 +223,19 @@ def _map_numpy(
     range_factor,
     height_factor,
     min_gates,
+    beam=None,
 ):
     """NumPy and SciPy implementation of the compiled kernel (same results)."""
     from scipy.spatial import cKDTree
 
     nz, ncol = z.size, cx.size
     out = np.full((nz, ncol), np.nan, dtype=np.float32)
-    points, values = _gate_positions(arrays, shifts, site_altitude, k_e)
+    if weighting == "beam":
+        points, values, (unit, inv_across, inv_along) = _gate_positions(
+            arrays, shifts, site_altitude, k_e, beam
+        )
+    else:
+        points, values = _gate_positions(arrays, shifts, site_altitude, k_e)
     if values.size == 0:
         return out
     tree = cKDTree(points)
@@ -171,7 +262,19 @@ def _map_numpy(
         i, j, d = i[inside], j[inside], d[inside]
         n = rad.size
         count = np.bincount(i, minlength=n)
-        if weighting == "nearest":
+        if weighting == "beam":
+            delta = points[j] - query[i]
+            along = np.einsum("ij,ij->i", delta, unit[j])
+            m2 = np.maximum(d**2 - along**2, 0.0) * inv_across[j] + (
+                along**2 * inv_along[j]
+            )
+            m2min = np.full(n, np.inf)
+            np.minimum.at(m2min, i, m2)
+            w = np.exp(-0.5 * (m2 - m2min[i]))
+            den = np.bincount(i, w, minlength=n)
+            num = np.bincount(i, w * values[j], minlength=n)
+            result = np.where(den > 0, num / np.where(den > 0, den, 1.0), np.nan)
+        elif weighting == "nearest":
             order = np.lexsort((d, i))
             first = np.unique(i[order], return_index=True)
             result = np.full(n, np.nan)
@@ -204,9 +307,15 @@ def _map_compiled(
     range_factor,
     height_factor,
     min_gates,
+    beam,
     n_threads,
 ):
     data, azimuth, elevation, rng = (list(a) for a in zip(*arrays))
+    beam_options = (
+        {"beam_sigma": beam[0], "along_sigma": [float(a) for a in beam[1]]}
+        if weighting == "beam"
+        else {}
+    )
     return _cone.grid_gates(
         cx,
         cy,
@@ -225,6 +334,7 @@ def _map_compiled(
         min_gates=min_gates,
         n_threads=int(n_threads or 0),
         shift=[float(c) for pair in shifts for c in pair],
+        **beam_options,
     )
 
 
@@ -270,6 +380,7 @@ def _map_fields(
     time,
     n_threads,
     engine,
+    range_resolution=None,
 ):
     """Gate-map every field onto the points; returns fields, volume pieces."""
     _weighting(weighting)
@@ -295,6 +406,7 @@ def _map_fields(
             if motion is not None
             else [(0.0, 0.0)] * len(selected)
         )
+        beam = _beam_parameters(weighting, beamwidth, range_resolution, arrays)
         options = (
             shifts,
             site_altitude,
@@ -304,6 +416,7 @@ def _map_fields(
             range_factor,
             height_factor,
             min_gates,
+            beam,
         )
         if use_compiled:
             field = _map_compiled(cx, cy, z, arrays, *options, n_threads)
@@ -320,6 +433,8 @@ def _map_fields(
         range_factor=range_factor,
         height_factor=height_factor,
         min_gates=min_gates,
+        beamwidth=float(beamwidth) if weighting == "beam" else None,
+        range_resolution=range_resolution,
     )
     return fields, info
 
@@ -333,6 +448,10 @@ def _describe(out, info, weighting, motion, time):
     out.attrs["roi_height_factor"] = info["height_factor"]
     out.attrs["min_gates"] = info["min_gates"]
     out.attrs["k_e"] = info["k_e"]
+    if weighting == "beam":
+        out.attrs["beamwidth"] = info["beamwidth"]
+        if info["range_resolution"] is not None:
+            out.attrs["range_resolution"] = float(info["range_resolution"])
     if motion is not None:
         u, v = cone._motion_pair(motion)
         out = out.assign_coords(
@@ -348,8 +467,8 @@ def _describe(out, info, weighting, motion, time):
 @dask_support("computes", "the result is interpolated from the gates of all sweeps.")
 @renamed_arguments(dtree="obj", beam_width="beamwidth")
 @provenance(
-    "Radius-of-influence gridding of radar gates with Cressman and Barnes weights, "
-    "radarx implementation; radius functions as in Py-ART",
+    "Radius-of-influence gridding of radar gates with Cressman, Barnes and "
+    "beam-pattern weights, radarx implementation; radius functions as in Py-ART",
     extra_refs=("doviak-zrnic-1993",),
 )
 def grid_gates(
@@ -368,6 +487,7 @@ def grid_gates(
     k_e=K_E,
     motion=None,
     time=None,
+    range_resolution=None,
     n_threads=None,
     engine="auto",
 ):
@@ -391,10 +511,14 @@ def grid_gates(
         Target coordinates east and north of the radar, in metres.
     z : array-like
         Target heights above sea level, in metres.
-    weighting : {"cressman", "barnes", "nearest"}, optional
+    weighting : {"cressman", "barnes", "nearest", "beam"}, optional
         Weight of a gate at the distance :math:`d < R`: Cressman,
         :math:`(R^2-d^2)/(R^2+d^2)` (default); Barnes, :math:`\\exp(-4d^2/R^2)`;
-        or the value of the nearest gate.
+        the value of the nearest gate; or ``"beam"``, the Gaussian pulse volume
+        of the gate (needs ``beamwidth``). The beam weight follows the beams
+        instead of the distance: gates of the beams that pass the point
+        dominate, and a velocity, which is a projection on the beam, is mixed
+        less with gates of other directions.
     roi : float, optional
         Radius of influence in metres, and the smallest one when it grows
         with the distance from the radar. Default 1000.
@@ -408,7 +532,8 @@ def grid_gates(
         added to ``roi_range_factor``: the radius is the width of the beam at
         the distance of the output point (the ``dist_beam`` term of Py-ART), so
         that the weights reach as far as the gates of the beam do, at any range.
-        Default ``None``.
+        Also sets the width of the pulse volume of ``weighting="beam"``, which
+        needs it. Default ``None``.
     min_gates : int, optional
         Fewest gates within the radius for a value. Default 1.
     k_e : float, optional
@@ -420,6 +545,9 @@ def grid_gates(
         ``None``.
     time : datetime-like, optional
         Analysis time for ``motion``. Default: the mean time of the volume.
+    range_resolution : float, optional
+        With ``weighting="beam"``, the half-power width in metres of the
+        Gaussian weight along the beam. Default: the gate spacing of each sweep.
     n_threads : int, optional
         Threads for the compiled kernel. Default: all cores.
     engine : {"auto", "compiled", "numpy"}, optional
@@ -464,7 +592,25 @@ def grid_gates(
     :func:`grid_cones`: it smooths over :math:`R`, does not reproduce the gate
     values, and a velocity gridded this way mixes gates of different beams (see
     the note on velocity in :func:`grid_cones`). A radius that follows the beam
-    width, or at most a gate spacing, limits that.
+    width, or at most a gate spacing, limits that, and so does
+    ``weighting="beam"``.
+
+    Beam weighting. The weight of a gate at the point is the pulse volume of the
+    gate evaluated there: a Gaussian whose standard deviation is
+    :math:`\\sigma_\\theta r` across the beam, with :math:`\\sigma_\\theta^2 =
+    \\theta_1^2 / (16 \\ln 2)` the second central moment of the two-way power
+    pattern of a circularly symmetric Gaussian beam of half-power width
+    :math:`\\theta_1` (Doviak and Zrnic 1993 [4]_, Eq. 5.75; the one-way power
+    pattern is :math:`\\exp(-4 \\ln 2\\,\\phi^2/\\theta_1^2)`, Eq. C.18), so
+    the weight is 0.25 at half the beamwidth off the axis. Along the beam it is
+    a Gaussian whose half-power width is ``range_resolution``, a radarx choice
+    (the range weighting of the book depends on the pulse and the receiver
+    filter). The beam direction at a gate is taken from the path of the beam in
+    the effective Earth radius model, and the weights of the gates in the radius
+    are taken relative to the largest one, so that they do not vanish at a point
+    between two beams. The radius :math:`R` still decides which gates take part.
+    Averaging with these weights is a radarx construction, not a published
+    gridding scheme; only the beam pattern is taken from the book.
 
     References
     ----------
@@ -512,6 +658,7 @@ def grid_gates(
         time=time,
         n_threads=n_threads,
         engine=engine,
+        range_resolution=range_resolution,
     )
     gridded = {
         name: (("z", "y", "x"), field.reshape(z.size, y.size, x.size), attrs)
@@ -537,8 +684,8 @@ def _plane_azimuth(dtree, azimuth):
 @dask_support("computes", "the result is interpolated from the gates of all sweeps.")
 @renamed_arguments(dtree="obj", beam_width="beamwidth")
 @provenance(
-    "Radius-of-influence gridding of radar gates with Cressman and Barnes weights, "
-    "radarx implementation; radius functions as in Py-ART",
+    "Radius-of-influence gridding of radar gates with Cressman, Barnes and "
+    "beam-pattern weights, radarx implementation; radius functions as in Py-ART",
     extra_refs=("doviak-zrnic-1993",),
 )
 def grid_rhi(
@@ -557,6 +704,7 @@ def grid_rhi(
     k_e=K_E,
     motion=None,
     time=None,
+    range_resolution=None,
     n_threads=None,
     engine="auto",
 ):
@@ -588,6 +736,9 @@ def grid_rhi(
     roi : float, optional
         Radius of influence in metres. Default 500, smaller than for
         :func:`grid_gates`, as an RHI is dense in the plane.
+    range_resolution : float, optional
+        Half-power width of the weight along the beam for ``weighting="beam"``,
+        in metres. Default: the gate spacing.
 
     Returns
     -------
@@ -657,6 +808,7 @@ def grid_rhi(
         time=time,
         n_threads=n_threads,
         engine=engine,
+        range_resolution=range_resolution,
     )
     out = xr.Dataset(
         {
