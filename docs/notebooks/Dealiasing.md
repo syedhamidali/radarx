@@ -418,6 +418,15 @@ number of neighbouring pairs that differ by more than $V_n$ rises from 6 476 to 
 (UNRAVEL leaves 8 805). Give the limit to the lowest sweeps only, as in
 `dealias_velocity(dtree["sweep_1"], max_speed=...)`.
 
+The default call does not change the values, but it reports this case. A block of
+at most 200 connected gates that the folds shifted by one fold, with 10 or more gates
+beyond $2\,V_n$ (and beyond 50 m/s), raises a `UserWarning` that names the number of
+pockets and gates and the largest speed. On the KBMX cut it names one pocket of 13
+gates with speeds up to 88 m/s; the cell with the default call above shows the same
+warning for the synthetic pocket. A limit of 1.5 $V_n$ cannot be the default: it
+undoes this core but also moves 1 100 gates of a squall line at KGWX (30 March 2022)
+where UNRAVEL agrees with the unmoved fold.
+
 ## References
 
 - Jing, Z., and G. Wiener, 1993: Two-dimensional dealiasing of Doppler
