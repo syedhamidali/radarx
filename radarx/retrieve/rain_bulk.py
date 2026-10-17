@@ -348,6 +348,11 @@ def rain_shaft_bulk(
     out.attrs = {"fall_speed_law": "a - b exp(-c D), Seifert (2008) Eq. A4"}
     if np.ndim(depth) == 0:
         out = out.isel(depth=0)
+        # older xarray drops the attributes of the scalar coordinate
+        out["depth"].attrs = {
+            "long_name": "Distance below the top of the shaft",
+            "units": "m",
+        }
     return out
 
 
