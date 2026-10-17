@@ -76,7 +76,16 @@ beside a region that really is folded can join that region through a chain of
 small steps, and the least-squares folds then shift the whole region, core
 included, because most of its border pairs are fold lines; the core ends up at
 speeds far beyond :math:`V_n`. The sweep alone cannot tell this from a strong
-real wind, so nothing in the default method changes. ``max_speed`` is the
+real wind, so nothing in the default method changes: a limit of 1.5
+Nyquist velocities undoes the core on the lowest tilt of the KBMX volume of
+27 April 2011 but also moves 1 100 gates of the lowest tilt of a squall line
+at KGWX, 30 March 2022, where UNRAVEL agrees with the unmoved fold on 684 of
+806 of them. The default result is checked instead. A block of at most 200 connected gates that the folds shifted
+by the same single fold, and that holds 10 gates or more with speeds beyond
+two Nyquist velocities (and beyond 50 m/s, so that the strong winds that a
+radar with a small Nyquist velocity folds several times do not count), raises
+a ``UserWarning`` that names the number of pockets, of gates and the largest
+speed. These thresholds are radarx choices. ``max_speed`` is the
 choice of the user: the largest radial speed the storm can have. A gate that
 the folds put beyond it, in a cluster of at most 100 connected gates beyond the
 limit and next to gates that are folded less and match it better without its
@@ -240,6 +249,10 @@ _GUARD_PASSES = 100  # passes of the speed guard (it peels a core from its edge)
 _GUARD_SIZE = (
     100  # gates of the largest cluster beyond the limit that the guard examines
 )
+_FAST_SPEED = 2.0  # speed (in Nyquist velocities) that a compact pocket must exceed
+_FAST_FLOOR = 50.0  # and the speed in m/s below which a pocket is never reported
+_FAST_GATES = 10  # gates beyond that speed in a pocket that is reported
+_FAST_POCKET = 200  # gates of the largest pocket (one fold) that is reported
 
 
 @dask_support(
@@ -425,6 +438,14 @@ def dealias_velocity(
     the region method puts a block of 29 500 gates one fold away from the
     tilts above; compare ``method="unravel"`` where this warning appears.
 
+    With the default ``max_speed=None`` the result is checked for the shifted
+    vortex core of the module documentation: compact blocks (at most 200
+    connected gates) that are shifted by one fold and hold 10 or more gates
+    beyond two Nyquist velocities and 50 m/s raise a ``UserWarning``. The
+    values are not changed. On the 0.5 degree cut of KBMX (27 April 2011) it
+    reports one pocket of 13 gates with speeds up to 88 m/s, the core of the
+    couplet, and ``max_speed=36`` gives peaks of -36 and +26 m/s there.
+
     Missing gates of ``method="unravel"``. The region method gives a value to
     every gate that has data. UNRAVEL makes a gate missing when its first step
     takes it for noise: the velocity is more than two median absolute
@@ -607,6 +628,9 @@ def _dealias_core(batch, method, options):
         ]
         solved = _region_folds(sweeps, **options)
         folds = _absolute_folds(sweeps, solved, refs, **options)
+        if not options["max_speed"]:
+            for sw, f in zip(sweeps, folds):
+                _warn_fast_pockets(sw, f, stacklevel=8)
         codes = [
             _ANCHORS.index(
                 _anchor_of(
@@ -623,6 +647,51 @@ def _dealias_core(batch, method, options):
         (sw.velocity + 2.0 * sw.nyquist * f, code)
         for sw, f, code in zip(sweeps, folds, codes)
     ]
+
+
+def _fast_pockets(sweep, folds):
+    """
+    Compact pockets of one fold that hold speeds beyond ``_FAST_SPEED`` Vn.
+
+    The speed is ``_FAST_SPEED`` Nyquist velocities, but at least
+    ``_FAST_FLOOR`` m/s, so that the strong winds that a radar with a small
+    Nyquist velocity folds several times do not count. A pocket is a block of
+    at most ``_FAST_POCKET`` connected gates that are shifted by the same
+    single fold (+1 or -1), and it is reported when ``_FAST_GATES`` of its
+    gates or more are beyond the speed. Returns the number of pockets, of
+    gates beyond the speed in them, the largest speed and the speed limit.
+    """
+    vel, nyq = sweep.velocity, sweep.nyquist
+    valid = ~np.isnan(vel)
+    fold = valid & (np.abs(folds) == 1)
+    speed = np.abs(np.where(valid, vel, 0.0) + 2.0 * nyq * folds)
+    limit = max(_FAST_SPEED * nyq, _FAST_FLOOR)
+    beyond = fold & (speed > limit)
+    if np.count_nonzero(beyond) < _FAST_GATES:
+        return 0, 0, 0.0, limit
+    label, count = _cluster_labels(fold, valid, sweep.links, same=folds)
+    size = np.bincount(label[fold], minlength=count)
+    fast = np.bincount(label[beyond], minlength=count)
+    report = (fast >= _FAST_GATES) & (size <= _FAST_POCKET)
+    inside = beyond & report[label]
+    if not inside.any():
+        return 0, 0, 0.0, limit
+    return int(report.sum()), int(inside.sum()), float(speed[inside].max()), limit
+
+
+def _warn_fast_pockets(sweep, folds, stacklevel, name=""):
+    """Warn about compact pockets whose speed no storm is likely to reach."""
+    pockets, gates, peak, limit = _fast_pockets(sweep, folds)
+    if not pockets:
+        return
+    warnings.warn(
+        f"dealias_velocity: {name}{pockets} compact pocket(s) shifted by one fold hold "
+        f"{gates} gates with speeds beyond {limit:.0f} m/s, up to {peak:.0f} m/s. The core of a velocity couplet that was shifted with a "
+        "folded region next to it looks like this. If the storm cannot be that "
+        "fast, pass max_speed (m/s), the largest radial speed it can have.",
+        UserWarning,
+        stacklevel=stacklevel,
+    )
 
 
 def _dealias_sweep(ds, field, nyquist, reference, wind_profile, method, options):
@@ -1112,6 +1181,8 @@ def _dealias_tree(
     )
     results = []
     for i, (n, s, f) in enumerate(zip(names, sweeps, folds)):
+        if not options["max_speed"]:
+            _warn_fast_pockets(s, f, stacklevel=6, name=f"{n}: ")
         ref = winds[i]
         source = "wind_profile"
         if previous is not None and previous[i] >= 0:
@@ -1684,21 +1755,35 @@ def _gate_check(vel, folds, comp, links, nyq, passes):
     return f.astype(np.int32)
 
 
-def _cluster_sizes(mask, valid, links):
-    """Gates in the cluster (connected gates of ``mask``) of every gate of the mask."""
+def _cluster_labels(mask, valid, links, same=None):
+    """
+    Connected components of the gates of ``mask``: their labels and their number.
+
+    With ``same``, neighbouring gates are only joined when they hold the same
+    value of that array (the fold, for the pockets of one fold).
+    """
     from scipy.sparse import coo_matrix
     from scipy.sparse.csgraph import connected_components
 
     index = np.arange(mask.size).reshape(mask.shape)
+    arrays = (mask, index) if same is None else (mask, index, same)
     first, second = [], []
-    for ok, inside, iw in _neighbours((mask, index), valid, links):
+    for ok, inside, iw, *other in _neighbours(arrays, valid, links):
         joined = ok & mask & inside
+        if other:
+            joined &= other[0] == same
         first.append(index[joined])
         second.append(iw[joined])
     a, b = np.concatenate(first), np.concatenate(second)
     graph = coo_matrix((np.ones(a.size), (a, b)), shape=(mask.size,) * 2)
-    _, label = connected_components(graph, directed=False)
-    return np.where(mask, np.bincount(label)[label].reshape(mask.shape), 0)
+    count, label = connected_components(graph, directed=False)
+    return label.reshape(mask.shape), count
+
+
+def _cluster_sizes(mask, valid, links):
+    """Gates in the cluster (connected gates of ``mask``) of every gate of the mask."""
+    label, count = _cluster_labels(mask, valid, links)
+    return np.where(mask, np.bincount(label.ravel(), minlength=count)[label], 0)
 
 
 def _speed_guard(vel, folds, comp, links, nyq, max_speed):
