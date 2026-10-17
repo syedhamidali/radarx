@@ -42,54 +42,23 @@ from xradar.io.backends.nexrad_level2 import NEXRADLevel2File
 
 import radarx  # noqa: F401
 from radarx.io.aws_data import download_file
-from radarx.retrieve import dealias, dealias_velocity
+from radarx.retrieve import dealias_velocity
 
 warnings.filterwarnings("ignore", message="The input coordinates to pcolormesh")
 ```
 
 ## The data
 
-The volume is read from the public NEXRAD archive on AWS. The Doppler cut at
-0.5 degrees has a Nyquist velocity of 29.97 m/s. Gates without data are masked.
-Without a network connection the notebook builds two small synthetic sweeps
-with the same two problems and uses the true velocity as the reference where
-the real case uses UNRAVEL.
+The real case is read from the public NEXRAD archive on AWS: the Doppler cut
+at 0.5 degrees of KBMX, Nyquist velocity 29.97 m/s, with the no-data codes
+masked. The synthetic sweeps are built here and need no network; without a
+connection the notebook shows them only.
 
 ```{code-cell} ipython3
 def xy(ds):
     az = np.deg2rad(ds.azimuth.values)[:, None]
     r = ds.range.values[None, :] / 1000.0
     return r * np.sin(az), r * np.cos(az)
-
-
-def kbmx_cases():
-    packed = download_file(
-        "unidata-nexrad-level2", "2011/04/27/KBMX/KBMX20110427_221945_V03.gz", "."
-    )
-    with gzip.open(packed) as src, open("KBMX20110427_221945_V03", "wb") as dst:
-        shutil.copyfileobj(src, dst)
-    path = "KBMX20110427_221945_V03"
-    with NEXRADLevel2File(path) as nf:
-        nyquist = [
-            h["msg_31_data_header"]["RAD"]["nyquist_vel"] / 100.0
-            for h in nf.msg_31_data_header
-        ]
-    dtree = xd.io.open_nexradlevel2_datatree(path)
-    ds = dtree["sweep_1"].to_dataset().assign_coords(nyquist_velocity=nyquist[1])
-    ds["VRADH"] = ds.VRADH.where(ds.VRADH > -63.9)  # no-data codes
-    reference = dealias_velocity(ds, "VRADH", method="unravel")
-    x, y = xy(ds)
-    block = (x > 0) & (x < 69) & (y > 52) & (y < 133)
-    neck = dict(
-        ds=ds, ref=reference.values, block=block, label="KBMX 27 April 2011, 0.5 degree cut",
-        ref_name="UNRAVEL", window=(-110, 100, 20, 170),
-    )
-    couplet = dict(
-        ds=ds, ref=reference.values, label="KBMX 27 April 2011, 0.5 degree cut",
-        ref_name="UNRAVEL", window=(-110, 100, 20, 170),
-        centre=(64.0 * np.sin(np.deg2rad(276.0)), 64.0 * np.cos(np.deg2rad(276.0))), half=7.0,
-    )
-    return neck, couplet
 
 
 def sweep(measured, nyquist, nray, azimuth, rng):
@@ -104,7 +73,25 @@ def sweep(measured, nyquist, nray, azimuth, rng):
     )
 
 
-def synthetic_cases():
+def load_kbmx():
+    packed = download_file(
+        "unidata-nexrad-level2", "2011/04/27/KBMX/KBMX20110427_221945_V03.gz", "."
+    )
+    with gzip.open(packed) as src, open("KBMX20110427_221945_V03", "wb") as dst:
+        shutil.copyfileobj(src, dst)
+    path = "KBMX20110427_221945_V03"
+    with NEXRADLevel2File(path) as nf:
+        nyquist = [
+            h["msg_31_data_header"]["RAD"]["nyquist_vel"] / 100.0
+            for h in nf.msg_31_data_header
+        ]
+    dtree = xd.io.open_nexradlevel2_datatree(path)
+    ds = dtree["sweep_1"].to_dataset().assign_coords(nyquist_velocity=nyquist[1])
+    ds["VRADH"] = ds.VRADH.where(ds.VRADH > -63.9)  # no-data codes
+    return ds
+
+
+def synthetic_neck():
     # two blocks of one echo, 15 m/s apart in truth, joined by a two-ray neck
     vn, nray, ngate = 30.0, 360, 200
     rnd = np.random.default_rng(3)
@@ -113,14 +100,12 @@ def synthetic_cases():
     truth = truth + 0.4 * rnd.standard_normal(truth.shape)
     measured = (truth + vn) % (2 * vn) - vn
     measured[170:172, 96:104] = np.linspace(20.0, 35.0 - 2 * vn, 8)  # the neck
-    ds = sweep(measured, vn, nray, az, rng)
-    x, y = xy(ds)
-    neck = dict(
-        ds=ds, ref=truth, block=np.hypot(x, y) > 27.0, label="synthetic sweep with a neck",
-        ref_name="truth", window=(-51, 51, -51, 51),
-    )
+    return sweep(measured, vn, nray, az, rng), truth
 
+
+def synthetic_couplet():
     # a vortex core inside a folded patch, as in the Dealiasing notebook
+    vn = 30.0
     ray, gate = np.meshgrid(np.arange(120), np.arange(100), indexing="ij")
 
     def box(lo, hi, v, width=1.5):
@@ -133,99 +118,110 @@ def synthetic_cases():
     measured = (truth + vn) % (2 * vn) - vn
     ds = sweep(measured, vn, 120, (np.arange(120) + 0.5) * 3.0, 2000.0 + 250.0 * np.arange(100))
     r0, a0 = 2.0 + 0.25 * 50, np.deg2rad(181.5)
-    couplet = dict(
-        ds=ds, ref=truth, label="synthetic vortex", ref_name="truth",
-        window=(-27, 27, -27, 27), centre=(r0 * np.sin(a0), r0 * np.cos(a0)), half=6.0,
-    )
-    return neck, couplet
+    return ds, truth, (r0 * np.sin(a0), r0 * np.cos(a0))
 
 
 try:
-    case_neck, case_couplet = kbmx_cases()
+    kbmx = load_kbmx()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        unravel = dealias_velocity(kbmx, "VRADH", method="unravel").values
 except Exception as err:  # offline or archive unavailable
-    print(f"no NEXRAD data ({type(err).__name__}), using synthetic sweeps")
-    case_neck, case_couplet = synthetic_cases()
-print(case_neck["label"])
+    print(f"no NEXRAD data ({type(err).__name__}), the real case is skipped")
+    kbmx = unravel = None
 ```
 
 ## The thin neck
 
 At a fold line next to a vortex, a neck of two or three gates whose velocities
-pass through zero is enough to link the block north of the radar to its western
-neighbour by a chain of small steps. Both ended up in one region of 57 892
-gates. Inside a region the fold is constant by construction, so the fold line
-between the blocks was never looked at.
+pass through zero is enough to link two blocks that are a fold apart by a chain
+of small steps. They used to end up in one region (57 892 gates on the KBMX
+cut). Inside a region the fold is constant by construction, so the fold line
+between the blocks was never looked at and one block stayed one fold off.
 
 Now only core gates (joined to all four neighbours, in a core of at least 1000
 connected gates) connect regions. Every other gate takes, ring by ring, the
 region of the joined neighbour closest in velocity. Two blocks joined by a neck
 stay two regions, and the boundary between them fixes their relative fold.
 
-The old segmentation is still in the NumPy engine behind the module constant
-`_CORE_JOINS` (0 restores it). The cell sets it to 0 for the "before" panel and
-back afterwards; both results come from the NumPy engine.
+The synthetic sweep below is the test case of this fix (`tests/test_dealias_bridge.py`).
+The west block is at 20 m/s and the east block at 35 m/s, which the Nyquist
+velocity of 30 m/s folds to -25 m/s. The two rays of the neck pass through zero in
+steps below $0.3\,V_n$. The old segmentation made one region of the two blocks
+and left the east block one fold off (the test fails under it). Without any
+reference the boundary alone decides now:
 
 ```{code-cell} ipython3
-ds = case_neck["ds"]
-vn = float(ds.nyquist_velocity)
-with warnings.catch_warnings():
-    warnings.simplefilter("ignore")  # the vortex warning is the subject of the next section
-    dealias._CORE_JOINS = 0
-    try:
-        before = dealias_velocity(ds, "VRADH", engine="numpy").values
-    finally:
-        dealias._CORE_JOINS = 4
-    after = dealias_velocity(ds, "VRADH", engine="numpy").values
-ref = case_neck["ref"]
-
-
-def beyond_vn(a, b, mask=None):
-    ok = np.isfinite(a) & np.isfinite(b)
-    if mask is not None:
-        ok &= mask
-    return int(np.count_nonzero(np.abs(a - b)[ok] > vn)), int(np.count_nonzero(ok))
-
-
-ref_name = case_neck["ref_name"]
-for label, values in (("before", before), ("after", after)):
-    bad, total = beyond_vn(values, ref)
-    bad_b, total_b = beyond_vn(values, ref, case_neck["block"])
-    print(
-        f"{label:6s} gates more than Vn from {ref_name}: {bad:6d} of {total}; "
-        f"in the block {100 * (1 - bad_b / total_b):5.1f} % within Vn"
-    )
+ds_neck, truth_neck = synthetic_neck()
+neck_out = dealias_velocity(ds_neck, "VRADH")
+west, east = np.s_[:, 10:90], np.s_[:, 110:]
+for label, values in (("measured", ds_neck.VRADH.values), ("dealiased", neck_out.values),
+                      ("truth", truth_neck)):
+    print(f"{label:10s} median west {np.nanmedian(values[west]):6.1f} m/s, "
+          f"east {np.nanmedian(values[east]):6.1f} m/s")
+within = np.abs(neck_out.values - truth_neck) < 30.0
+print(f"gates within Vn of the truth: {100 * np.mean(within):.1f} %")
 ```
 
 ```{code-cell} ipython3
-x, y = xy(ds)
-x0, x1, y0, y1 = case_neck["window"]
-fig, axs = plt.subplots(1, 4, figsize=(18, 4.8), sharex=True, sharey=True, constrained_layout=True)
-panels = (
-    ("measured", ds.VRADH.values),
-    ("before: one region", before),
-    ("after: two regions", after),
-    (ref_name, ref),
-)
-for ax, (title, values) in zip(axs, panels):
+x, y = xy(ds_neck)
+fig, axs = plt.subplots(1, 3, figsize=(14, 4.6), sharex=True, sharey=True, constrained_layout=True)
+for ax, (title, values) in zip(axs, (("measured", ds_neck.VRADH.values),
+                                     ("dealiased", neck_out.values), ("truth", truth_neck))):
     pm = ax.pcolormesh(x, y, values, cmap="RdBu_r", vmin=-60, vmax=60, shading="auto")
-    ax.contour(x, y, case_neck["block"].astype(float), levels=[0.5], colors="k", linewidths=0.7, linestyles="--")
     ax.set_title(title)
     ax.set_aspect("equal")
-    ax.set_xlim(x0, x1)
-    ax.set_ylim(y0, y1)
     ax.set_xlabel("x (km)")
 axs[0].set_ylabel("y (km)")
 fig.colorbar(pm, ax=axs, label="radial velocity (m/s)", shrink=0.8)
-fig.suptitle(case_neck["label"])
+fig.suptitle("Synthetic sweep, two blocks joined by a thin neck")
 plt.show()
 ```
 
-The dashed box is the block of the issue. Before, it keeps the folded (blue)
-velocities of the measurement; after, it is one fold up and agrees with UNRAVEL.
-On the KBMX cut the share of the block within one Nyquist velocity of UNRAVEL
-rises from 1.6 % to 99.9 %. Over the whole cut the gates more than $V_n$ from
-UNRAVEL drop from 29 539 to 9 667. What is left is a separate echo at 250 km
-range whose absolute fold has no support in the rest of the sweep.
+The east block is one fold above the measurement and 15 m/s above the west block,
+as in the truth.
+
+### The same on KBMX
+
+On the 0.5 degree cut of KBMX the block north of the radar (x 0 to 69 km, y 52
+to 133 km, dashed) is the one of the issue. The current result is compared with
+UNRAVEL, which needs no reference wind.
+
+```{code-cell} ipython3
+if kbmx is not None:
+    vn = float(kbmx.nyquist_velocity)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # the vortex warning is the subject of the next section
+        result = dealias_velocity(kbmx, "VRADH").values
+    x, y = xy(kbmx)
+    block = (x > 0) & (x < 69) & (y > 52) & (y < 133)
+    both = np.isfinite(result) & np.isfinite(unravel)
+    far = (np.abs(result - unravel) > vn) & both
+    print(f"gates more than Vn from UNRAVEL: {far.sum()} of {both.sum()}; "
+          f"in the block {100 * (1 - far[block].sum() / both[block].sum()):.1f} % within Vn")
+    fig, axs = plt.subplots(1, 3, figsize=(14, 4.8), sharex=True, sharey=True, constrained_layout=True)
+    for ax, (title, values) in zip(axs, (("measured", kbmx.VRADH.values),
+                                         ("region, current", result), ("UNRAVEL", unravel))):
+        pm = ax.pcolormesh(x, y, values, cmap="RdBu_r", vmin=-60, vmax=60, shading="auto")
+        ax.contour(x, y, block.astype(float), levels=[0.5], colors="k", linewidths=0.7, linestyles="--")
+        ax.set_title(title)
+        ax.set_aspect("equal")
+        ax.set_xlim(-110, 100)
+        ax.set_ylim(20, 170)
+        ax.set_xlabel("x (km)")
+    axs[0].set_ylabel("y (km)")
+    fig.colorbar(pm, ax=axs, label="radial velocity (m/s)", shrink=0.8)
+    fig.suptitle("KBMX 27 April 2011, 0.5 degree cut")
+    plt.show()
+else:
+    print("skipped, no NEXRAD data")
+```
+
+With the neck cut the block is one fold above its measurement and agrees with
+UNRAVEL: 99.9 % of its gates are within one Nyquist velocity. Before the fix only
+1.6 % were, and 29 539 gates of the cut were more than $V_n$ from UNRAVEL against
+9 667 now (the numbers of the pull request). What is left is a separate echo at
+250 km range whose absolute fold has no support in the rest of the sweep.
 
 The fix changes the default result wherever such a neck occurred. On nine NEXRAD
 volumes five were unchanged or changed in fewer than 20 gates, and four changed
@@ -242,10 +238,17 @@ of at most 200 connected gates that the folds shifted by the same single fold,
 with 10 or more gates beyond 2 $V_n$ and 50 m/s, raises a `UserWarning`.
 
 ```{code-cell} ipython3
-ds = case_couplet["ds"]
+if kbmx is not None:
+    ds_c, ref_c, name_c = kbmx, unravel, "UNRAVEL"
+    cx, cy = 64.0 * np.sin(np.deg2rad(276.0)), 64.0 * np.cos(np.deg2rad(276.0))
+    half, label_c = 7.0, "KBMX 27 April 2011, 0.5 degree cut"
+else:
+    ds_c, ref_c, centre = synthetic_couplet()
+    cx, cy = centre
+    name_c, half, label_c = "truth", 6.0, "synthetic vortex"
 with warnings.catch_warnings(record=True) as caught:
     warnings.simplefilter("always")
-    default = dealias_velocity(ds, "VRADH").values
+    default = dealias_velocity(ds_c, "VRADH").values
 for w in caught:
     if issubclass(w.category, UserWarning):
         print("UserWarning:", w.message)
@@ -258,17 +261,14 @@ case. The guard is described in the section "Vortex cores and the speed limit"
 of the [Dealiasing](Dealiasing) notebook.
 
 ```{code-cell} ipython3
-limited = dealias_velocity(ds, "VRADH", max_speed=36.0).values
-ref = case_couplet["ref"]
-x, y = xy(ds)
-cx, cy = case_couplet["centre"]
-half = case_couplet["half"]
+limited = dealias_velocity(ds_c, "VRADH", max_speed=36.0).values
+x, y = xy(ds_c)
 near = (abs(x - cx) < half - 2) & (abs(y - cy) < half - 2)
 panels = (
-    ("measured", ds.VRADH.values),
+    ("measured", ds_c.VRADH.values),
     ("default", default),
     ("max_speed=36", limited),
-    (case_couplet["ref_name"], ref),
+    (name_c, ref_c),
 )
 fig, axs = plt.subplots(1, 4, figsize=(17, 4.2), sharex=True, sharey=True, constrained_layout=True)
 for ax, (title, values) in zip(axs, panels):
@@ -281,7 +281,7 @@ for ax, (title, values) in zip(axs, panels):
     ax.set_xlabel("x (km)")
 axs[0].set_ylabel("y (km)")
 fig.colorbar(pm, ax=axs, label="radial velocity (m/s)", shrink=0.8)
-fig.suptitle(case_couplet["label"])
+fig.suptitle(label_c)
 plt.show()
 ```
 
