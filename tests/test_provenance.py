@@ -99,6 +99,8 @@ KEY_MARKS = {
     "giangrande-2004": "Giangrande, S. E., A. V. Ryzhkov, V. M. Melnikov",
     "itu-r-p676-13": "Rec. ITU-R P.676-13",
     "itu-r-p840-9": "Rec. ITU-R P.840-9",
+    "lucas-kanade-1981": "Lucas, B. D., and T. Kanade",
+    "bouguet-2001": "Bouguet, J.-Y., 2001",
 }
 
 

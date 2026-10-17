@@ -2406,6 +2406,16 @@ notebooks or from this index.
 | `multi_doppler_input` | `radarx.retrieve.multidoppler` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `radar_geometry` | `radarx.retrieve.multidoppler` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `velocity_error` | `radarx.retrieve.multidoppler` | [core](Radar_Workflow): 15. Noise and calibration |
+| `optical_flow` | `radarx.retrieve.motion` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
+| `brier_score` | `radarx.retrieve.nowcast_verification` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
+| `categorical_scores` | `radarx.retrieve.nowcast_verification` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
+| `crps` | `radarx.retrieve.nowcast_verification` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
+| `fss` | `radarx.retrieve.nowcast_verification` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
+| `rank_histogram` | `radarx.retrieve.nowcast_verification` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
+| `reliability` | `radarx.retrieve.nowcast_verification` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
+| `exceedance_probability` | `radarx.retrieve.nowcasting` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
+| `nowcast` | `radarx.retrieve.nowcasting` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
+| `nowcast_model` | `radarx.retrieve.nowcasting` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
 | `noise_level` | `radarx.retrieve.noise` | [core](Radar_Workflow): 15. Noise and calibration |
 | `snr` | `radarx.retrieve.noise` | [core](Radar_Workflow): 15. Noise and calibration |
 | `correct_rhohv_noise` | `radarx.retrieve.noise` | [core](Radar_Workflow): 15. Noise and calibration |
@@ -2529,6 +2539,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.ensemble_statistics` | [part 3](Radar_Workflow_Advanced_2): 16. Ensembles and uncertainty of the retrievals |
 | `.radarx.estimate_motion` | [core](Radar_Workflow): 11. Storm motion, common analysis time and time interpolation |
 | `.radarx.evaporation` | [core](Radar_Workflow): 13. Evaporation |
+| `.radarx.exceedance_probability` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
 | `.radarx.forward_operator` | [part 3](Radar_Workflow_Advanced_2): 14. Forward operator for WRF and MPAS output |
 | `.radarx.gauge_adjust` | [part 3](Radar_Workflow_Advanced_2): 25. Radar-gauge merging |
 | `.radarx.gas_path_attenuation` | [part 3](Radar_Workflow_Advanced_2): 22. Ka and W band cloud radar |
@@ -2565,6 +2576,8 @@ The methods of the `.radarx` accessors:
 | `.radarx.multi_doppler` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `.radarx.network_bias` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `.radarx.noise_level` | [core](Radar_Workflow): 15. Noise and calibration |
+| `.radarx.nowcast` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
+| `.radarx.optical_flow` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
 | `.radarx.parcel_diagnostics` | [core](Radar_Workflow): Parcel thermodynamics: CAPE, CIN, the lifted index and the levels |
 | `.radarx.perturb_radar` | [part 3](Radar_Workflow_Advanced_2): 16. Ensembles and uncertainty of the retrievals |
 | `.radarx.phidp_offset` | [core](Radar_Workflow): 15. Noise and calibration |

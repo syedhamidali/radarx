@@ -47,6 +47,7 @@ shown.
 | 21 | KDP columns, KDP-ZDR size sorting, storm-cell identification, tracking and statistics | `kdp_column`, `kdp_column_metrics`, `storm_size_sorting`, `identify_cells`, `track_cells`, `cell_statistics` |
 | 22 | Ka and W band cloud radar: gas, cloud liquid and rain attenuation, echo classification, dual-frequency ratio retrievals | `gas_specific_attenuation`, `cloud_liquid_attenuation`, `gas_path_attenuation`, `rain_attenuation_relation`, `rain_path_attenuation`, `classify_cloud_targets`, `dual_frequency_ratio`, `dfr_rain`, `dfr_snow` |
 | 23 | Level I: IQ time series, clutter filtering, Doppler spectra and moments, dealiasing with the spectra | `read_iq`, `as_iq`, `simulate_iq`, `regression_filter`, `notch_filter`, `doppler_spectra`, `spectral_noise`, `spectral_moments`, `pulse_pair_moments`, `dealias_spectra` |
+| 24 | nowcasting (extrapolation, S-PROG, STEPS), optical flow and verification scores | `nowcast`, `optical_flow`, `exceedance_probability`, `fss`, `crps`, `categorical_scores`, `brier_score`, `reliability`, `rank_histogram`, `nowcast_model` |
 
 ```{code-cell} ipython3
 import math
@@ -1651,6 +1652,142 @@ print(f"unfolded within 4 m/s: {float((abs(unfolded.VRADH - ramp) < 4).mean()):.
       f"largest fold {int(unfolded.FOLD.max())}")
 ```
 
+## 24. Nowcasting and verification
+
+A nowcast moves the precipitation of the last few radar volumes forward in time.
+`nowcast` estimates the motion (or takes it from `estimate_motion` or
+`optical_flow`), splits the field into spatial scales that each follow an
+autoregressive model, adds spatially correlated noise to every scale for an
+ensemble (S-PROG and STEPS; Seed 2003, Bowler et al. 2006) and advects the
+result with the same semi-Lagrangian scheme as `advect`. `optical_flow` gives
+the motion by the Lucas-Kanade or the DARTS-type least squares, and the
+verification functions score the result: `fss` (Roberts and Lean 2008), `crps`,
+`categorical_scores`, `brier_score`, `reliability` and `rank_histogram`. The data
+are synthetic: a random echo pattern that moves with 12 m/s to the east and 5 m/s
+to the north and changes a little in time, seen in five volumes five minutes apart.
+
+```{code-cell} ipython3
+from scipy.ndimage import gaussian_filter, shift
+
+from radarx.retrieve import (
+    brier_score,
+    categorical_scores,
+    crps,
+    exceedance_probability,
+    fss,
+    nowcast,
+    optical_flow,
+    rank_histogram,
+    reliability,
+)
+
+rng = np.random.default_rng(7)
+size, step_s = 90, 300.0
+pattern = gaussian_filter(rng.standard_normal((260, 260)), 5, mode="wrap")
+pattern += 0.5 * gaussian_filter(rng.standard_normal((260, 260)), 2, mode="wrap")
+pattern = 30.0 + 12.0 * (pattern - pattern.mean()) / pattern.std()
+evolving = gaussian_filter(rng.standard_normal((260, 260)), 4, mode="wrap")
+
+
+def volume(k):
+    """Volume k of the moving, slowly changing pattern (12 m/s east, 5 m/s north)."""
+    field = pattern + 2.0 * k * evolving
+    moved = shift(field, (5.0 * step_s * k / 1000.0, 12.0 * step_s * k / 1000.0), order=3, mode="wrap")
+    moved = moved[60 : 60 + size, 60 : 60 + size]
+    grid = np.arange(size) * 1000.0
+    return xr.Dataset(
+        {"DBZH": (("y", "x"), np.where(moved >= 10.0, moved, np.nan).astype("f4"), {"units": "dBZ"})},
+        coords={"x": ("x", grid, {"units": "m"}), "y": ("y", grid, {"units": "m"})},
+    ).assign(time=np.datetime64("2026-01-01T00:00:00", "ns") + np.timedelta64(int(step_s * k), "s"))
+
+
+volumes = [volume(k) for k in range(11)]
+history, future = volumes[:5], volumes[5:]
+```
+
+```{code-cell} ipython3
+flow = optical_flow(history, method="lucas_kanade")
+darts = optical_flow(history, method="darts", uniform=True)
+print(f"Lucas-Kanade: u = {float(flow.u.mean()):.1f}, v = {float(flow.v.mean()):.1f} m/s; "
+      f"DARTS: u = {float(darts.u):.1f}, v = {float(darts.v):.1f} m/s")
+ens = nowcast(history, 6, n_members=16, motion=flow, seed=1)  # STEPS, 16 members
+det = nowcast(history, 6, method="sprog", motion=flow)
+via = xr.concat(history, dim="time").radarx.nowcast(6, method="extrapolation")  # a Dataset with a time dimension
+flow_acc = xr.concat(history, dim="time").radarx.optical_flow(uniform=True)  # the accessor of a field
+print(ens.dims, ens.shape, float(abs(via.isel(lead_time=0)).mean() > 0))
+```
+
+```{code-cell} ipython3
+truth = xr.concat([f["DBZH"].fillna(5.0).where(lambda a: a >= 10.0, 5.0) for f in future], dim="lead_time")
+truth = truth.assign_coords(lead_time=ens.lead_time.values)
+prob = exceedance_probability(ens, 30.0)
+prob_acc = ens.radarx.exceedance_probability(30.0)  # the accessor gives the same
+print("FSS of 30 dBZ at 5 and 20 km, lead times 5 to 30 min:")
+for name, fc in (("S-PROG", det), ("STEPS member", ens.isel(member=0))):
+    print(f"  {name:12s}", fss(fc, truth, 30.0, [5e3, 20e3]).mean("lead_time").values.round(2))
+print("CRPS of the ensemble:", float(crps(ens, truth, dim=["x", "y", "lead_time"])), "dBZ; fair CRPS:",
+      float(crps(ens, truth, fair=True, dim=["x", "y", "lead_time"])))
+table = categorical_scores(det, truth, 30.0, dim=["x", "y", "lead_time"])
+print(f"S-PROG 30 dBZ: POD {float(table.pod):.2f}, FAR {float(table.far):.2f}, CSI {float(table.csi):.2f}")
+event = truth >= 30.0
+print(f"Brier score of the 30 dBZ probability {float(brier_score(prob, event)):.3f}")
+rel = reliability(prob, event, bins=5)
+hist = rank_histogram(ens, truth, seed=0)
+print(rel.observed_frequency.values.round(2), hist.values)
+fig, axes = plt.subplots(1, 3, figsize=(11, 3.6), layout="constrained")
+axes[0].pcolormesh(truth.x / 1e3, truth.y / 1e3, truth.isel(lead_time=-1), cmap="ChaseSpectral", vmin=0, vmax=60)
+axes[0].set_title("observed, +30 min")
+pm = axes[1].pcolormesh(prob.x / 1e3, prob.y / 1e3, prob.isel(lead_time=-1), cmap="Blues", vmin=0, vmax=1)
+axes[1].set_title("P(Z >= 30 dBZ), +30 min")
+fig.colorbar(pm, ax=axes[1], shrink=0.8)
+axes[2].bar(hist["rank"], hist.values)
+axes[2].set(title="rank histogram", xlabel="rank of the observation")
+for ax in axes[:2]:
+    ax.set(xlabel="x (km)", ylabel="y (km)", aspect="equal")
+```
+
+A single member scores below the deterministic S-PROG forecast, as it should: it keeps the small
+scales that cannot be predicted, and an ensemble is judged by the CRPS, the Brier score and the
+reliability instead. The synthetic pattern changes less in time than the noise that STEPS adds
+(the noise is estimated from the frames), so its rank histogram is a dome, too much spread; the
+[nowcasting notebook](Nowcasting) runs the methods on the NEXRAD squall line.
+
+`nowcast_model` runs a trained network on the last frames. radarx ships no weights: a model is
+registered in `radarx.ml` with its licence and citation. A toy network built here (it adds
+1 dB per step to the last frame) stands in for a real one such as RainNet.
+
+```{code-cell} ipython3
+import hashlib
+
+import onnx
+from onnx import TensorProto, helper
+
+from radarx.retrieve import nowcast_model
+
+n_in = 3
+inp = helper.make_tensor_value_info("x", TensorProto.FLOAT, ["N", n_in, None, None])
+outp = helper.make_tensor_value_info("y", TensorProto.FLOAT, ["N", 1, None, None])
+consts = [
+    helper.make_tensor("starts", TensorProto.INT64, [1], [-1]),
+    helper.make_tensor("ends", TensorProto.INT64, [1], [np.iinfo(np.int64).max]),
+    helper.make_tensor("axes", TensorProto.INT64, [1], [1]),
+    helper.make_tensor("step", TensorProto.FLOAT, [], [0.1]),  # 0.1 * 10 dB
+]
+nodes = [helper.make_node("Slice", ["x", "starts", "ends", "axes"], ["last"]),
+         helper.make_node("Add", ["last", "step"], ["y"])]
+graph = helper.make_graph(nodes, "drift", [inp], [outp], consts)
+toy = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
+toy.ir_version = 8
+onnx.checker.check_model(toy)
+toy_path = work / "drift.onnx"
+onnx.save(toy, toy_path)
+ml.register_model("drift-toy", toy_path, hashlib.sha256(toy_path.read_bytes()).hexdigest(), licence="MIT",
+                  citation="radarx documentation example (2026)", task="nowcast")
+learned = nowcast_model(history[-3:], "drift-toy", 3, scale=10.0)
+base = history[-1].DBZH.values
+print(learned.attrs["ml_model"], learned.dims, float((learned.isel(lead_time=2).values - base)[base >= 10].mean()))
+```
+
 ## References
 
 - Feng, Z., J. Hardin, H. C. Barnes, J. Li, L. R. Leung, A. Varble, and Z. Zhang, 2023: PyFLEXTRKR: a flexible feature tracking Python software for convective cloud analysis. *Geoscientific Model Development*, **16**, 2753-2776, <https://doi.org/10.5194/gmd-16-2753-2023>
@@ -1678,3 +1815,6 @@ print(f"unfolded within 4 m/s: {float((abs(unfolded.VRADH - ramp) < 4).mean()):.
 - Ziegler, C. L., 2013a: A Diabatic Lagrangian Technique for the Analysis of Convective Storms. Part II: Application to a Radar-Observed Storm. *Journal of Atmospheric and Oceanic Technology*, **30**, 2266-2280, <https://doi.org/10.1175/JTECH-D-13-00036.1>
 - Goudenhoofdt, E., and L. Delobbe, 2009: Evaluation of radar-gauge merging methods for quantitative precipitation estimates. *Hydrology and Earth System Sciences*, **13**, 195-203, <https://doi.org/10.5194/hess-13-195-2009>
 - Sinclair, S., and G. Pegram, 2005: Combining radar and rain gauge rainfall estimates using conditional merging. *Atmospheric Science Letters*, **6**, 19-22, <https://doi.org/10.1002/asl.85>
+- Seed, A. W., 2003: A Dynamic and Spatial Scaling Approach to Advection Forecasting. *Journal of Applied Meteorology*, **42**, 381-388, <https://doi.org/10.1175/1520-0450(2003)042<0381:ADASSA>2.0.CO;2>
+- Bowler, N. E., C. E. Pierce, and A. W. Seed, 2006: STEPS: A probabilistic precipitation forecasting scheme which merges an extrapolation nowcast with downscaled NWP. *Quarterly Journal of the Royal Meteorological Society*, **132**, 2127-2155, <https://doi.org/10.1256/qj.04.100>
+- Roberts, N. M., and H. W. Lean, 2008: Scale-Selective Verification of Rainfall Accumulations from High-Resolution Forecasts of Convective Events. *Monthly Weather Review*, **136**, 78-97, <https://doi.org/10.1175/2007MWR2123.1>
