@@ -99,7 +99,6 @@ import xarray as xr
 
 from .._provenance import provenance
 from .._registry import accessor_method
-from .._sweepwise import dask_support
 from ..fundamentals.constants import EARTH_RADIUS
 from . import _ducts_numpy as _ref
 from .beam_path import _vapor_pressure
@@ -251,7 +250,6 @@ def modified_refractivity(profile, *, earth_radius=EARTH_RADIUS, form="bean_dutt
     return m
 
 
-@dask_support("lazy_only")
 @provenance(
     "Trapping layers (ducts) of a refractivity profile from the modified "
     "refractivity and Snell's law, after Bean and Dutton (1966)"
