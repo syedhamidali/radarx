@@ -1210,6 +1210,120 @@ where the beams are high. Three scans of 3, 6 and 9 mm/h that represent 10 minut
 fraction of the volume that must have data) are listed in the documentation of
 `radarx.retrieve.satellite_match`.
 
+## 25. Radar-gauge merging
+
+A radar field has errors that vary in space, a gauge measures one point well. `gauge_adjust`
+merges them on the radar grid with the methods compared by Goudenhoofdt and Delobbe (2009): the
+mean field bias (`"mfb"`), a range-dependent adjustment (`"rda"`), the Brandes spatial adjustment
+(`"brandes"`), ordinary kriging of the gauges (`"ok"`), conditional merging of Sinclair and
+Pegram (2005) (`"conditional"`) and kriging with the radar as external drift (`"ked"`). The
+variograms are fitted automatically (`gauge_variogram`) and the kriging systems of all pixels
+and times run in one multithreaded call. The data are synthetic: a rain accumulation field, a
+radar that reads 40 % too low and loses more with range, and 30 gauges that sample the truth.
+The [gauge adjustment notebook](Gauge_Adjustment) has the full comparison.
+
+```{code-cell} ipython3
+from radarx.retrieve import gauge_adjust, gauge_variogram, radar_at_gauges
+
+gx = gy = (np.arange(60) - 29.5) * 1000.0
+GX, GY = np.meshgrid(gx, gy)
+rain_truth = 12.0 * np.exp(-((GX - 8e3) ** 2 + (GY + 5e3) ** 2) / (2 * 9e3**2)) + 3.0
+radar_acc = xr.DataArray(
+    rain_truth * 0.6 * np.exp(-np.hypot(GX, GY) / 90e3)
+    * np.exp(0.15 * np.random.default_rng(2).standard_normal(GX.shape)),
+    dims=("y", "x"), coords={"x": gx, "y": gy}, attrs={"units": "mm"}, name="RAIN",
+)
+rg = np.random.default_rng(5)
+px, py = rg.uniform(-28e3, 28e3, 30), rg.uniform(-28e3, 28e3, 30)
+gauge_obs = xr.DataArray(
+    12.0 * np.exp(-((px - 8e3) ** 2 + (py + 5e3) ** 2) / (2 * 9e3**2)) + 3.0,
+    dims="station", coords={"x": ("station", px), "y": ("station", py)}, attrs={"units": "mm"},
+)
+variogram = gauge_variogram(gauge_obs, model="exponential", n_lags=8)
+print(f"fitted range {float(variogram['range']) / 1000:.0f} km; radar at the gauges "
+      f"{float(radar_at_gauges(radar_acc, gauge_obs).mean()):.1f} mm, gauges {float(gauge_obs.mean()):.1f} mm")
+errors = {}
+for method in ["mfb", "rda", "brandes", "ok", "conditional", "ked"]:
+    merged = gauge_adjust(radar_acc, gauge_obs, method=method)
+    errors[method] = float(np.sqrt(((merged.RAIN_ADJUSTED - rain_truth) ** 2).mean()))
+print("RMSE against the truth (mm):", {k: round(v, 2) for k, v in errors.items()},
+      "radar", round(float(np.sqrt(((radar_acc - rain_truth) ** 2).mean())), 2))
+# the accessor gives the same
+same = radar_acc.radarx.gauge_adjust(gauge_obs, method="ked")
+print(bool(np.allclose(same.RAIN_ADJUSTED, gauge_adjust(radar_acc, gauge_obs, method="ked").RAIN_ADJUSTED)))
+```
+
+The kriging methods come closest to the truth here, and conditional merging, which keeps the
+structure of the radar field and matches the gauges, is the best; which of them wins depends on the
+field and the network (see the notebook). `RAIN_ADJUSTED_STD` is the kriging standard deviation,
+zero at the gauges. The radar must be corrected for attenuation, calibration and
+clutter first, and the gauge and the radar must have the same units.
+
+## 26. Machine-learning rain rate
+
+`rain_rate_ml` runs a model of the registry (`radarx.ml`) on the polarimetric variables, and the
+height and temperature if the model uses them, and returns the rain rate with a lower and an
+upper bound. The radarx network is trained on simulated drop size distributions
+(`ml/models/qpe`) and its weights are not published yet, so this example registers a model that
+is built here: the C-band-like power law $R(Z_H, Z_{DR})$ written as an ONNX graph. The
+[machine-learning rain rate notebook](ML_Rainfall_Estimation) fits such a model to simulated
+drop size distributions and runs it on a real sweep.
+
+```{code-cell} ipython3
+import tempfile
+from pathlib import Path
+
+import onnx
+from onnx import TensorProto, helper
+
+from radarx import ml
+from radarx.retrieve import rain_rate_ml, rain_rate_z_zdr
+
+f32 = TensorProto.FLOAT
+a_c, b_c, c_c = 0.0058, 0.91, -2.09  # C-band R(Z, ZDR), Bringi and Chandrasekar (2001)
+w_zdr = np.array([[0.1 * np.log(10.0) * b_c], [0.1 * np.log(10.0) * c_c]], dtype=np.float32)
+graph = helper.make_graph(
+    [
+        helper.make_node("Gemm", ["features", "w", "b"], ["ln_r"]),
+        helper.make_node("Exp", ["ln_r"], ["col"]),
+        helper.make_node("Squeeze", ["col", "axes"], ["rain_rate"]),
+    ],
+    "power_law",
+    [helper.make_tensor_value_info("features", f32, ["N", 2])],
+    [helper.make_tensor_value_info("rain_rate", f32, ["N"])],
+    [
+        helper.make_tensor("w", f32, [2, 1], w_zdr.ravel().tolist()),
+        helper.make_tensor("b", f32, [1], [float(np.log(a_c))]),
+        helper.make_tensor("axes", TensorProto.INT64, [1], [1]),
+    ],
+)
+onnx_model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
+onnx_model.ir_version = 8
+path = Path(tempfile.mkdtemp()) / "c_band_z_zdr.onnx"
+onnx.save(onnx_model, str(path))
+ml.register_model("c-band-power-law", path, None, "MIT", "Bringi and Chandrasekar (2001), https://doi.org/10.1017/CBO9780511541094",
+                  task="rainfall-estimation", features=["dbz", "zdr"], overwrite=True)
+
+rain_sweep = xr.Dataset(
+    {"DBZH": (("azimuth", "range"), np.random.default_rng(1).uniform(15, 50, (36, 80))),
+     "ZDR": (("azimuth", "range"), np.random.default_rng(2).uniform(0.2, 3.0, (36, 80)))},
+    coords={"azimuth": np.arange(36) * 10.0, "range": 500.0 + np.arange(80) * 250.0},
+)
+learned = rain_rate_ml(rain_sweep, model="c-band-power-law", band="C", mask=rain_sweep.DBZH > 20)
+physical = rain_rate_z_zdr(rain_sweep, band="C", z_cap=None)
+print({k: v for k, v in learned.RAIN_RATE_ML.attrs.items() if k.startswith("ml_")})
+print("same as the power law of radarx.retrieve where estimated:",
+      bool(np.allclose(learned.RAIN_RATE_ML.values[rain_sweep.DBZH.values > 20],
+                       physical.values[rain_sweep.DBZH.values > 20], rtol=1e-4)))
+# the accessor gives the same
+print(bool(np.allclose(rain_sweep.radarx.rain_rate_ml(model="c-band-power-law", band="C", mask=rain_sweep.DBZH > 20).RAIN_RATE_ML,
+                       learned.RAIN_RATE_ML, equal_nan=True)))
+```
+
+The gates without a finite input or outside the mask are NaN and the network is not run on them. A
+model that returns `rain_rate_lower` and `rain_rate_upper` gets them as `RAIN_RATE_ML_LOWER` and
+`RAIN_RATE_ML_UPPER`.
+
 ## References
 
 - Holleman, I., and H. Beekhuis, 2003: Analysis and Correction of Dual PRF Velocity Data. *Journal of Atmospheric and Oceanic Technology*, **20**, 443-453, <https://doi.org/10.1175/1520-0426(2003)20<443:AACODP>2.0.CO;2>
@@ -1230,3 +1344,5 @@ fraction of the volume that must have data) are listed in the documentation of
 - Veillette, M. S., J. M. Kurdzo, P. M. Stepanian, J. Y. N. Cho, T. Reis, S. Samsi, J. McDonald, and N. Chisler, 2025: A Benchmark Dataset for Tornado Detection and Prediction Using Full-Resolution Polarimetric Weather Radar Data. *Artificial Intelligence for the Earth Systems*, **4**, <https://doi.org/10.1175/AIES-D-24-0006.1>
 - Ziegler, C. L., 2013a: A Diabatic Lagrangian Technique for the Analysis of Convective Storms. Part I: Description and Validation via an Observing System Simulation Experiment. *Journal of Atmospheric and Oceanic Technology*, **30**, 2248-2265, <https://doi.org/10.1175/JTECH-D-12-00194.1>
 - Ziegler, C. L., 2013a: A Diabatic Lagrangian Technique for the Analysis of Convective Storms. Part II: Application to a Radar-Observed Storm. *Journal of Atmospheric and Oceanic Technology*, **30**, 2266-2280, <https://doi.org/10.1175/JTECH-D-13-00036.1>
+- Goudenhoofdt, E., and L. Delobbe, 2009: Evaluation of radar-gauge merging methods for quantitative precipitation estimates. *Hydrology and Earth System Sciences*, **13**, 195-203, <https://doi.org/10.5194/hess-13-195-2009>
+- Sinclair, S., and G. Pegram, 2005: Combining radar and rain gauge rainfall estimates using conditional merging. *Atmospheric Science Letters*, **6**, 19-22, <https://doi.org/10.1002/asl.85>
