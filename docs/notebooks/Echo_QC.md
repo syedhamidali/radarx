@@ -211,6 +211,9 @@ less echo.
 
 ## The classifier of Gourley et al. (2007)
 
+The [Gourley classifier notebook](Echo_Classifier_Gourley) shows it on its own,
+with the options and the numbers against the default.
+
 `method="gourley2007"` follows the structure of the paper. The texture of
 $Z_{DR}$ and $\Phi_{DP}$ is the root-mean-square difference between a gate and
 its 3 x 3 neighbours (rays times gates). Each of the three variables, $\rho_{hv}$
