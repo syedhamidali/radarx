@@ -10,7 +10,10 @@
 // 1. Segmentation: neighbouring gates (along the ray and between adjacent
 //    rays) whose velocities differ by less than a threshold are joined with a
 //    union-find. Within a region the field is continuous, so all its gates
-//    share one Nyquist fold.
+//    share one Nyquist fold. Only cores (gates joined to all four neighbours) of at
+//    least kCoreSize gates connect regions; every other gate takes the region of
+//    the joined neighbour closest in velocity, one ring per pass, so a thin neck
+//    of in-between gates does not merge two blocks that are a fold apart.
 // 2. Region adjacency: for every pair of touching regions (also across
 //    short gaps along and across rays) the number of boundary gate pairs
 //    and the summed velocity jump across the boundary (in units of the
@@ -88,6 +91,8 @@ namespace {
 
 constexpr int64_t kScale = int64_t(1) << 20;  // fixed point for jumps / (2 Vn)
 constexpr int64_t kMaxVote = 127;             // folds beyond this are not physical
+constexpr int kCoreJoins = 4;                 // joined neighbours of a gate in a region core
+constexpr int64_t kCoreSize = 1000;           // gates of a core that can hold a region apart
 
 // floor(a / b) for b > 0
 inline int64_t floor_div(int64_t a, int64_t b) {
@@ -279,6 +284,135 @@ struct SweepIn {
     double nyquist;
 };
 
+// Joins every pair of neighbouring gates (along the ray, and on the next ray when
+// the two rays touch) for which ok(g, h) holds, in parallel over blocks of rays.
+template <class Ok>
+void unite_pairs(int32_t* parent, const uint8_t* link, int64_t nray, int64_t ngate,
+                 int64_t ray_block, int nt, Ok&& ok) {
+    // blocks of rays are disjoint, so threads only touch their own nodes
+    parallel_blocks(nray, ray_block, nt, [&](int, int64_t r0, int64_t r1) {
+        for (int64_t r = r0; r < r1; ++r) {
+            const int64_t base = r * ngate;
+            for (int64_t j = 0; j + 1 < ngate; ++j)
+                if (ok(base + j, base + j + 1)) unite(parent, int32_t(base + j), int32_t(base + j + 1));
+            if (r + 1 < r1 && link[r]) {
+                for (int64_t j = 0; j < ngate; ++j)
+                    if (ok(base + j, base + ngate + j))
+                        unite(parent, int32_t(base + j), int32_t(base + ngate + j));
+            }
+        }
+    });
+    // links across block boundaries and the 360 degree wrap
+    for (int64_t r = 0; r < nray; ++r) {
+        const int64_t r2 = (r + 1) % nray;
+        const bool inner = (r + 1 < nray) && ((r + 1) % ray_block != 0);
+        if (!link[r] || inner || r2 == r) continue;
+        for (int64_t j = 0; j < ngate; ++j)
+            if (ok(r * ngate + j, r2 * ngate + j))
+                unite(parent, int32_t(r * ngate + j), int32_t(r2 * ngate + j));
+    }
+}
+
+// Segmentation with region cores. A gate joined to all of its (up to four)
+// neighbours is a core gate, and cores of at least kCoreSize connected gates seed
+// the regions. Every other gate takes, one ring per pass, the region of the
+// assigned neighbour it is joined to that is closest in velocity (the lower gate
+// index on a tie). A thin bridge of gates with in-between velocities then no
+// longer merges the regions on its two sides. Gates that no core reaches stay
+// together as before. Returns false when no core is large enough (the plain
+// segmentation applies); otherwise rid holds a region id of every valid gate.
+bool segment_cores(const double* v, const uint8_t* link, int64_t nray, int64_t ngate,
+                   double thr, int64_t ray_block, int nt, std::vector<int32_t>& rid) {
+    const int64_t N = nray * ngate;
+    auto joined = [&](int64_t g, int64_t h) { return std::fabs(v[g] - v[h]) < thr; };
+    // f(h) for every neighbour h of g that is joined to it
+    auto neighbours = [&](int64_t g, auto&& f) {
+        const int64_t r = g / ngate, j = g - r * ngate;
+        const int64_t rp = (r == 0 ? nray - 1 : r - 1), rn = (r + 1 == nray ? 0 : r + 1);
+        if (link[rp] && rp != r && joined(g, rp * ngate + j)) f(rp * ngate + j);
+        if (j > 0 && joined(g, g - 1)) f(g - 1);
+        if (j + 1 < ngate && joined(g, g + 1)) f(g + 1);
+        if (link[r] && rn != r && joined(g, rn * ngate + j)) f(rn * ngate + j);
+    };
+    std::vector<uint8_t> core(N, 0);
+    std::atomic<bool> any_core{false};
+    parallel_blocks(nray, ray_block, nt, [&](int, int64_t r0, int64_t r1) {
+        bool found = false;
+        for (int64_t g = r0 * ngate; g < r1 * ngate; ++g) {
+            if (std::isnan(v[g])) continue;
+            int deg = 0;
+            neighbours(g, [&](int64_t) { ++deg; });
+            if (deg >= kCoreJoins) {
+                core[g] = 1;
+                found = true;
+            }
+        }
+        if (found) any_core = true;
+    });
+    if (!any_core) return false;
+    std::vector<int32_t> parent(N);
+    for (int64_t g = 0; g < N; ++g) parent[g] = int32_t(g);
+    unite_pairs(parent.data(), link, nray, ngate, ray_block, nt, [&](int64_t g, int64_t h) {
+        return core[g] && core[h] && joined(g, h);
+    });
+    std::vector<int64_t> csize(N, 0);
+    for (int64_t g = 0; g < N; ++g)
+        if (core[g]) ++csize[find(parent.data(), int32_t(g))];
+    rid.assign(N, -1);
+    std::vector<int32_t> frontier;
+    for (int64_t g = 0; g < N; ++g)
+        if (core[g]) {
+            const int32_t root = find(parent.data(), int32_t(g));
+            if (csize[root] >= kCoreSize) {
+                rid[g] = root;
+                frontier.push_back(int32_t(g));
+            }
+        }
+    if (frontier.empty()) return false;
+    // A loose gate next to an assigned gate takes the closest one, ring by ring: only
+    // the gates assigned in the last pass can have loose neighbours, and all choices of
+    // a pass are made before any is applied.
+    std::vector<int32_t> candidate, chosen;
+    std::vector<uint8_t> queued(N, 0);
+    while (!frontier.empty()) {
+        candidate.clear();
+        for (int32_t g : frontier)
+            neighbours(g, [&](int64_t h) {
+                if (rid[h] < 0 && !queued[h]) {
+                    queued[h] = 1;
+                    candidate.push_back(int32_t(h));
+                }
+            });
+        chosen.assign(candidate.size(), 0);
+        for (size_t i = 0; i < candidate.size(); ++i) {
+            const int64_t g = candidate[i];
+            int64_t best = -1;
+            double bd = 0.0;
+            neighbours(g, [&](int64_t h) {
+                if (rid[h] < 0) return;
+                const double d = std::fabs(v[g] - v[h]);
+                if (best < 0 || d < bd || (d == bd && h < best)) {
+                    best = h;
+                    bd = d;
+                }
+            });
+            chosen[i] = rid[best];
+        }
+        for (size_t i = 0; i < candidate.size(); ++i) rid[candidate[i]] = chosen[i];
+        frontier.swap(candidate);
+    }
+    // what no core reaches stays together as before
+    for (int64_t g = 0; g < N; ++g) parent[g] = int32_t(g);
+    for (int64_t g = 0; g < N; ++g)
+        if (rid[g] < 0 && !std::isnan(v[g]))
+            neighbours(g, [&](int64_t h) {
+                if (rid[h] < 0) unite(parent.data(), int32_t(g), int32_t(h));
+            });
+    for (int64_t g = 0; g < N; ++g)
+        if (rid[g] < 0 && !std::isnan(v[g])) rid[g] = find(parent.data(), int32_t(g));
+    return true;
+}
+
 // Steps 1-3 for one sweep: fold of every gate relative to its component's
 // first region (k) and that component's id (comp, -1 for empty gates).
 void solve_sweep(const SweepIn& in, double threshold, int64_t max_gap, int64_t max_ray_gap,
@@ -296,46 +430,29 @@ void solve_sweep(const SweepIn& in, double threshold, int64_t max_gap, int64_t m
     };
 
     // ---- 1. segmentation ------------------------------------------------------
-    std::vector<int32_t> parent_vec(N);
-    int32_t* parent = parent_vec.data();
-    for (int64_t g = 0; g < N; ++g) parent[g] = static_cast<int32_t>(g);
-    // blocks of rays are disjoint, so threads only touch their own nodes
-    const int64_t ray_block = std::max<int64_t>(1, (nray + nt - 1) / nt);
-    parallel_blocks(nray, ray_block, nt, [&](int, int64_t r0, int64_t r1) {
-        for (int64_t r = r0; r < r1; ++r) {
-            const int64_t base = r * ngate;
-            for (int64_t j = 0; j + 1 < ngate; ++j)
-                if (joins(base + j, base + j + 1))
-                    unite(parent, int32_t(base + j), int32_t(base + j + 1));
-            if (r + 1 < r1 && link[r]) {
-                for (int64_t j = 0; j < ngate; ++j)
-                    if (joins(base + j, base + ngate + j))
-                        unite(parent, int32_t(base + j), int32_t(base + ngate + j));
-            }
-        }
-    });
-    // links across block boundaries and the 360 degree wrap
-    for (int64_t r = 0; r < nray; ++r) {
-        const int64_t r2 = (r + 1) % nray;
-        const bool inner = (r + 1 < nray) && ((r + 1) % ray_block != 0);
-        if (!link[r] || inner || r2 == r) continue;
-        for (int64_t j = 0; j < ngate; ++j)
-            if (joins(r * ngate + j, r2 * ngate + j))
-                unite(parent, int32_t(r * ngate + j), int32_t(r2 * ngate + j));
-    }
-
-    // canonical labels: regions numbered by their first gate (raster order)
+    // regions are numbered by their first gate (raster order)
     int32_t* label = cout;  // reuse the output buffer
     int32_t nreg = 0;
-    for (int64_t g = 0; g < N; ++g) {
-        if (std::isnan(v[g])) {
-            label[g] = -1;
-            continue;
-        }
-        const int32_t root = find(parent, int32_t(g));
-        label[g] = (root == g) ? nreg++ : label[root];
+    const int64_t ray_block = std::max<int64_t>(1, (nray + nt - 1) / nt);
+    std::vector<int32_t> rid;
+    if (!segment_cores(v, link, nray, ngate, thr, ray_block, nt, rid)) {
+        rid.resize(N);
+        for (int64_t g = 0; g < N; ++g) rid[g] = static_cast<int32_t>(g);
+        unite_pairs(rid.data(), link, nray, ngate, ray_block, nt,
+                    [&](int64_t g, int64_t h) { return joins(g, h); });
     }
-    std::vector<int32_t>().swap(parent_vec);
+    {
+        std::vector<int32_t> number(N, -1);
+        for (int64_t g = 0; g < N; ++g) {
+            if (std::isnan(v[g])) {
+                label[g] = -1;
+                continue;
+            }
+            const int32_t root = find(rid.data(), int32_t(g));  // rid is idempotent
+            if (number[root] < 0) number[root] = nreg++;
+            label[g] = number[root];
+        }
+    }
     std::vector<int64_t> size(nreg, 0);
     for (int64_t g = 0; g < N; ++g)
         if (label[g] >= 0) ++size[label[g]];
