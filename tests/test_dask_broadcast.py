@@ -38,6 +38,9 @@ from radarx.retrieve import (
     echo_top,
     estimate_kdp,
     hid,
+    identify_cells,
+    kdp_column,
+    kdp_column_metrics,
     liquid_water_content,
     llsd,
     noise_level,
@@ -78,6 +81,7 @@ dsd_mod = importlib.import_module("radarx.retrieve.dsd")
 hid_mod = importlib.import_module("radarx.retrieve.hid")
 vil_mod = importlib.import_module("radarx.retrieve.vil")
 columns_mod = importlib.import_module("radarx.retrieve.columns")
+tracking_cells = importlib.import_module("radarx.retrieve._cells")
 noise_mod = importlib.import_module("radarx.retrieve.noise")
 attenuation_mod = importlib.import_module("radarx.retrieve.attenuation")
 calibration_mod = importlib.import_module("radarx.retrieve.calibration")
@@ -191,6 +195,44 @@ def column_depth_map(k):
     return xr.Dataset(
         {"ZDR_COLUMN_DEPTH": (("y", "x"), depth)},
         coords={"y": np.arange(5) * 1000.0, "x": np.arange(4) * 1000.0},
+    )
+
+
+def kdp_grid(k):
+    rnd = np.random.default_rng(k)
+    shape = (12, 5, 4)
+    kdp = np.where(rnd.random(shape) < 0.05, np.nan, rnd.uniform(0.0, 3.0, shape))
+    return xr.Dataset(
+        {
+            "KDP": (("z", "y", "x"), kdp),
+            "RHOHV": (("z", "y", "x"), rnd.uniform(0.7, 1.0, shape)),
+        },
+        coords={
+            "z": 500.0 + 1000.0 * np.arange(12),
+            "y": np.arange(5) * 1000.0,
+            "x": np.arange(4) * 1000.0,
+        },
+    )
+
+
+def kdp_column_map(k):
+    return kdp_column(kdp_grid(k), freezing_level=4000.0, smooth=None, min_depth=100.0)
+
+
+@functools.wraps(kdp_column_metrics)
+def kdp_metrics_without_engine(obj, engine=None, **kwargs):
+    """The harness passes an engine; the metrics are plain xarray reductions."""
+    return kdp_column_metrics(obj, **kwargs)
+
+
+def reflectivity_map(k):
+    rnd = np.random.default_rng(k)
+    field = np.where(
+        rnd.random((20, 24)) < 0.1, np.nan, rnd.uniform(0.0, 50.0, (20, 24))
+    )
+    return xr.Dataset(
+        {"DBZH": (("y", "x"), field, {"units": "dBZ"})},
+        coords={"y": np.arange(20) * 1000.0, "x": np.arange(24) * 1000.0},
     )
 
 
@@ -404,6 +446,36 @@ CASES = [
         chunks={"time": 1, "y": 2},
         volume=False,
         min_depth=1000.0,
+    ),
+    case(
+        "kdp_column",
+        kdp_column,
+        columns_mod.HAS_COMPILED_KERNEL,
+        kdp_grid,
+        chunks=GRID_CHUNKS,
+        volume=False,
+        rhohv="RHOHV",
+        freezing_level=4000.0,
+        smooth=None,
+        min_depth=100.0,
+    ),
+    case(
+        "kdp_column_metrics",
+        kdp_metrics_without_engine,
+        True,
+        kdp_column_map,
+        chunks={"time": 1, "y": 2},
+        volume=False,
+    ),
+    case(
+        "identify_cells",
+        identify_cells,
+        tracking_cells.HAS_COMPILED_KERNEL,
+        reflectivity_map,
+        chunks={"time": 1, "y": 10},
+        volume=False,
+        thresholds=(20.0, 35.0),
+        min_area=1.0,
     ),
     case(
         "echo_top",

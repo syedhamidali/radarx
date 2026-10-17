@@ -30,6 +30,8 @@ from . import (
     test_qc,
     test_qvp,
     test_shear_layer,
+    test_sorting,
+    test_tracking,
     test_wind_profile,
 )
 from .sweepwise_helpers import assert_tree_allclose
@@ -157,6 +159,9 @@ def patches():
 
 
 CASES = {
+    "storm_size_sorting": test_sorting.size_sorting_case,
+    "track_cells": test_tracking.moving_cells_case,
+    "cell_statistics": test_tracking.cell_statistics_case,
     "polar_patches": patches,
     "dealias-continuity": dealias_volume,
     "hid-thompson": winter_hid,

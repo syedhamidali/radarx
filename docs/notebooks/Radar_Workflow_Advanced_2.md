@@ -44,6 +44,7 @@ shown.
 | 18 | ZDR arc and KDP-ZDR separation of supercells on a grid | `zdr_arc` |
 | 19 | volume matching of a ground radar and the GPM DPR, DPR drop size parameters, comparison with IMERG | `match_dpr`, `match_statistics`, `dpr_parallax`, `dpr_dsd`, `match_imerg` |
 | 20 | linear wind, divergence and deformation from one radar in analysis volumes (VVP) | `vvp_winds` |
+| 21 | KDP columns, KDP-ZDR size sorting, storm-cell identification, tracking and statistics | `kdp_column`, `kdp_column_metrics`, `storm_size_sorting`, `identify_cells`, `track_cells`, `cell_statistics` |
 
 ```{code-cell} ipython3
 import math
@@ -1391,15 +1392,129 @@ print(bool(np.allclose(rain_sweep.radarx.rain_rate_ml(model="c-band-power-law", 
 The gates without a finite input or outside the mask are NaN and the network is not run on them. A
 model that returns `rain_rate_lower` and `rain_rate_upper` gets them as `RAIN_RATE_ML_LOWER` and
 `RAIN_RATE_ML_UPPER`.
+## 21. Storm diagnostics: KDP columns, size sorting and cells
+
+Three more diagnostics of a convective storm on a grid (the
+[KDP columns](KDP_Columns), [size sorting](Size_Sorting) and [cell tracking](Cell_Tracking) notebooks show them in more detail).
+`kdp_column` finds the columns of specific differential phase that an updraft
+carries above the freezing level, after van Lier-Walqui et al. (2016): the KDP
+integrated in a slab above the freezing level is smoothed and divided into one
+column per maximum with a watershed, and every grid point gets the height of the
+highest level with $K_{DP}\ge 0.75$ °/km. `storm_size_sorting` measures the separation
+of the low-level KDP and $Z_{DR}$ regions that the storm-relative wind causes by
+sorting the raindrops by size, after Loeffler and Kumjian (2018): the centroids of
+the regions above an adaptive threshold, the distance between them and the angle
+of the vector from the KDP to the $Z_{DR}$ centroid to the storm motion.
+`identify_cells`, `track_cells` and `cell_statistics` find the storm cells with
+several thresholds and a watershed (Heikenfeld et al. 2019), link them from volume
+to volume by their overlap after the storm motion (Feng et al. 2023) and collect the
+statistics of any gridded field inside every cell. The data are synthetic: two
+updrafts, and two storms that move at 20 and 12 m/s, one of which has a $Z_{DR}$
+region 4 km east of its KDP region.
+
+```{code-cell} ipython3
+from radarx.retrieve import (
+    cell_statistics,
+    identify_cells,
+    kdp_column,
+    kdp_column_metrics,
+    storm_size_sorting,
+    track_cells,
+)
+
+# KDP columns: two updrafts, freezing level at 4 km
+zk = np.arange(0.0, 12001.0, 250.0)
+yk = xk = np.arange(41) * 1000.0
+r1 = np.hypot(yk[:, None] - 12e3, xk[None, :] - 12e3)
+r2 = np.hypot(yk[:, None] - 30e3, xk[None, :] - 28e3)
+tops = np.maximum(4000 + 3000 * np.clip(1 - r1 / 6e3, 0, None), 4000 + 2000 * np.clip(1 - r2 / 5e3, 0, None))
+kdp_grid = xr.DataArray(
+    np.where((zk[:, None, None] >= 4000) & (zk[:, None, None] < tops[None]), 1.5, 0.0),
+    dims=("z", "y", "x"),
+    coords={"z": zk, "y": yk, "x": xk},
+    name="KDP",
+)
+columns = kdp_column(kdp_grid, freezing_level=4000.0)
+col_metrics = kdp_column_metrics(columns)
+print(f"{int(col_metrics.KDP_COLUMN_COUNT)} KDP columns, tops up to {float(col_metrics.KDP_COLUMN_MAX_TOP):.0f} m, "
+      f"{float(col_metrics.KDP_COLUMN_AREA):.0f} km2, KDP volume {float(col_metrics.KDP_VOLUME):.0f} km3")
+print("accessor agrees:", bool(np.allclose(kdp_grid.radarx.kdp_column(freezing_level=4000.0).KDP_COLUMN_TOP.fillna(-1),
+                                           columns.KDP_COLUMN_TOP.fillna(-1))),
+      "| metrics accessor:", int(columns.radarx.kdp_column_metrics().KDP_COLUMN_COUNT))
+
+# two storms that move, 5 min apart; the first has its ZDR region 4 km east of its KDP region
+nt, step = 6, 300.0
+xs = ys = np.arange(80) * 1000.0
+times = np.datetime64("2022-03-30T22:00") + np.arange(nt) * np.timedelta64(300, "s")
+
+
+def blob(cx, cy, peak, sigma):
+    return peak * np.exp(-((xs[None, :] - cx) ** 2 + (ys[:, None] - cy) ** 2) / (2 * sigma**2))
+
+
+dbz, kdp, zdr = [], [], []
+for i in range(nt):
+    c1 = (10e3 + 20.0 * step * i, 15e3 + 5.0 * step * i)
+    c2 = (45e3 + 12.0 * step * i, 55e3 - 4.0 * step * i)
+    dbz.append(blob(*c1, 55, 3000.0) + blob(*c2, 50, 3500.0) - 10)
+    kdp.append(blob(c1[0] - 1e3, c1[1], 3.0, 2000.0))
+    zdr.append(blob(c1[0] + 3e3, c1[1], 4.0, 2000.0))
+coords = {"time": times, "y": ys, "x": xs}
+storms = xr.Dataset(
+    {
+        "DBZH": (("time", "y", "x"), np.array(dbz)),
+        "KDP": (("time", "y", "x"), np.array(kdp)),
+        "ZDR": (("time", "y", "x"), np.array(zdr)),
+    },
+    coords=coords,
+)
+sorting = storm_size_sorting(storms, box=(0, 50e3, 0, 40e3))
+print("separation distance (km):", np.round(sorting.SEPARATION_DISTANCE.values, 2),
+      "| orientation to the storm motion (deg):", np.round(sorting.SEPARATION_ORIENTATION.values, 0))
+print(f"fitted storm motion {float(sorting.STORM_MOTION_U[0]):.1f}, {float(sorting.STORM_MOTION_V[0]):.1f} m/s;",
+      f"size sorting parameter {float(sorting.SIZE_SORTING_PARAMETER.median()):.1f} km")
+
+cells = identify_cells(storms, thresholds=(20, 30, 40))
+tracks = track_cells(cells, motion=(16.0, 2.0), max_speed=30.0)
+series = cell_statistics(tracks.CELL_ID, storms[["DBZH", "KDP"]], stats=("max", "mean"))
+print("cells per volume:", cells.CELL_COUNT.values.tolist(),
+      "| tracks:", tracks.sizes["cell"], "lifetimes:", tracks.cell_lifetime.values.tolist())
+print("peak reflectivity of track 1 (dBZ):", np.round(series.DBZH_max.sel(cell=1).values, 0))
+# the accessors give the same
+same = storms.radarx.storm_size_sorting(box=(0, 50e3, 0, 40e3))
+c2 = storms.DBZH.radarx.identify_cells(thresholds=(20, 30, 40))
+t2 = c2.radarx.track_cells(motion=(16.0, 2.0), max_speed=30.0)
+s2 = t2.CELL_ID.radarx.cell_statistics(storms[["DBZH", "KDP"]], stats=("max", "mean"))
+print(bool(np.allclose(same.SEPARATION_DISTANCE, sorting.SEPARATION_DISTANCE)),
+      bool(np.array_equal(t2.CELL_ID, tracks.CELL_ID)), bool(np.allclose(s2.DBZH_max, series.DBZH_max, equal_nan=True)))
+fig, axes = plt.subplots(1, 2, figsize=(10, 4.2), layout="constrained")
+pm = axes[0].pcolormesh(xk / 1e3, yk / 1e3, columns.KDP_COLUMN_TOP, cmap="viridis", vmin=4000, vmax=8000, shading="auto")
+fig.colorbar(pm, ax=axes[0], label="KDP column top (m)")
+axes[0].contour(xk / 1e3, yk / 1e3, columns.KDP_COLUMN_OBJECT > 0, levels=[0.5], colors="k", linewidths=0.8)
+axes[0].set(xlabel="x (km)", ylabel="y (km)", aspect="equal", title="KDP columns")
+for tid in tracks.cell:
+    axes[1].plot(tracks.cell_x.sel(cell=tid) / 1e3, tracks.cell_y.sel(cell=tid) / 1e3, "o-", ms=3, label=f"track {int(tid)}")
+axes[1].set(xlabel="x (km)", ylabel="y (km)", aspect="equal", title="cell tracks")
+axes[1].legend(frameon=False, fontsize=8)
+plt.show()
+```
+
+`kdp_column` and `storm_size_sorting` need the grid of `grid_cones` and a KDP from
+`estimate_kdp`; the slab, the smoothing and the sizes of the regions are choices of
+the user, as in the papers. `track_cells` takes the storm motion from the user or from
+`estimate_motion`.
 
 ## References
 
+- Feng, Z., J. Hardin, H. C. Barnes, J. Li, L. R. Leung, A. Varble, and Z. Zhang, 2023: PyFLEXTRKR: a flexible feature tracking Python software for convective cloud analysis. *Geoscientific Model Development*, **16**, 2753-2776, <https://doi.org/10.5194/gmd-16-2753-2023>
+- Heikenfeld, M., P. J. Marinescu, M. Christensen, D. Watson-Parris, F. Senf, S. C. van den Heever, and P. Stier, 2019: tobac 1.2: towards a flexible framework for tracking and analysis of clouds in diverse datasets. *Geoscientific Model Development*, **12**, 4551-4570, <https://doi.org/10.5194/gmd-12-4551-2019>
 - Holleman, I., and H. Beekhuis, 2003: Analysis and Correction of Dual PRF Velocity Data. *Journal of Atmospheric and Oceanic Technology*, **20**, 443-453, <https://doi.org/10.1175/1520-0426(2003)20<443:AACODP>2.0.CO;2>
 - Huffman, G. J., et al., 2020: Integrated Multi-satellitE Retrievals for the Global Precipitation Measurement (GPM) Mission (IMERG). *Satellite Precipitation Measurement*, Springer, 343-353, <https://doi.org/10.1007/978-3-030-24568-9_19>
 - Gao, J., M. Xue, A. Shapiro, and K. K. Droegemeier, 1999: A Variational Method for the Analysis of Three-Dimensional Wind Fields from Two Doppler Radars. *Monthly Weather Review*, **127**, 2128-2142, <https://doi.org/10.1175/1520-0493(1999)127<2128:AVMFTA>2.0.CO;2>
 - Jung, Y., G. Zhang, and M. Xue, 2008: Assimilation of Simulated Polarimetric Radar Data for a Convective Storm Using the Ensemble Kalman Filter. Part I: Observation Operators for Reflectivity and Polarimetric Variables. *Monthly Weather Review*, **136**, 2228-2245, <https://doi.org/10.1175/2007MWR2083.1>
 - Lin, T.-Y., K. Winner, G. Bernstein, A. Mittal, A. M. Dokter, K. G. Horton, C. Nilsson, B. M. Van Doren, A. Farnsworth, F. A. La Sorte, S. Maji, and D. Sheldon, 2019: MistNet: Measuring historical bird migration in the US using archived weather radar data and convolutional neural networks. *Methods in Ecology and Evolution*, **10**, 1908-1922, <https://doi.org/10.1111/2041-210X.13280>
 - Lin, Y.-L., R. D. Farley, and H. D. Orville, 1983: Bulk Parameterization of the Snow Field in a Cloud Model. *Journal of Climate and Applied Meteorology*, **22**, 1065-1092, <https://doi.org/10.1175/1520-0450(1983)022<1065:BPOTSF>2.0.CO;2>
+- Loeffler, S. D., and M. R. Kumjian, 2018: Quantifying the Separation of Enhanced ZDR and KDP Regions in Nonsupercell Tornadic Storms. *Weather and Forecasting*, **33**, 1143-1157, <https://doi.org/10.1175/WAF-D-18-0011.1>
 - Melnikov, V. M., and D. S. Zrnic, 2004: Simultaneous transmission mode for the polarimetric WSR-88D: statistical biases and standard deviations of polarimetric variables. NOAA/NSSL report, 84 pp., <https://www.nssl.noaa.gov/publications/wsr88d_reports/SHV_statistics.pdf>
 - Ryzhkov, A. V., J. Snyder, J. T. Carlin, A. Khain, and M. Pinsky, 2020: What Polarimetric Weather Radars Offer to Cloud Modelers: Forward Radar Operators and Microphysical/Thermodynamic Retrievals. *Atmosphere*, **11**, 362, <https://doi.org/10.3390/atmos11040362>
 - Ryzhkov, A., M. Diederich, P. Zhang, and C. Simmer, 2014: Potential Utilization of Specific Attenuation for Rainfall Estimation, Mitigation of Partial Beam Blockage, and Radar Networking. *Journal of Atmospheric and Oceanic Technology*, **31**, 599-619, <https://doi.org/10.1175/JTECH-D-13-00038.1>
@@ -1409,6 +1524,7 @@ model that returns `rain_rate_lower` and `rain_rate_upper` gets them as `RAIN_RA
 - Testud, J., S. Oury, R. A. Black, P. Amayenc, and X. Dou, 2001: The Concept of "Normalized" Distribution to Describe Raindrop Spectra: A Tool for Cloud Physics and Cloud Remote Sensing. *Journal of Applied Meteorology*, **40**, 1118-1140, <https://doi.org/10.1175/1520-0450(2001)040<1118:TCONDT>2.0.CO;2>
 - Wilson, M. B., and M. S. Van Den Broeke, 2021: An Automated Python Algorithm to Quantify ZDR Arc and KDP-ZDR Separation Signatures in Supercells. *Journal of Atmospheric and Oceanic Technology*, **38**, 371-386, <https://doi.org/10.1175/JTECH-D-20-0056.1>
 - Shapiro, A., 1993: The Use of an Exact Solution of the Navier-Stokes Equations in a Validation Test of a Three-Dimensional Nonhydrostatic Numerical Model. *Monthly Weather Review*, **121**, 2420-2425, <https://doi.org/10.1175/1520-0493(1993)121<2420:TUOAES>2.0.CO;2>
+- van Lier-Walqui, M., A. M. Fridlind, A. S. Ackerman, S. Collis, J. Helmus, D. R. MacGorman, K. North, P. Kollias, and D. J. Posselt, 2016: On Polarimetric Radar Signatures of Deep Convection for Model Evaluation: Columns of Specific Differential Phase Observed during MC3E. *Monthly Weather Review*, **144**, 737-758, <https://doi.org/10.1175/MWR-D-15-0100.1>
 - Veillette, M. S., J. M. Kurdzo, P. M. Stepanian, J. Y. N. Cho, T. Reis, S. Samsi, J. McDonald, and N. Chisler, 2025: A Benchmark Dataset for Tornado Detection and Prediction Using Full-Resolution Polarimetric Weather Radar Data. *Artificial Intelligence for the Earth Systems*, **4**, <https://doi.org/10.1175/AIES-D-24-0006.1>
 - Ziegler, C. L., 2013a: A Diabatic Lagrangian Technique for the Analysis of Convective Storms. Part I: Description and Validation via an Observing System Simulation Experiment. *Journal of Atmospheric and Oceanic Technology*, **30**, 2248-2265, <https://doi.org/10.1175/JTECH-D-12-00194.1>
 - Ziegler, C. L., 2013a: A Diabatic Lagrangian Technique for the Analysis of Convective Storms. Part II: Application to a Radar-Observed Storm. *Journal of Atmospheric and Oceanic Technology*, **30**, 2266-2280, <https://doi.org/10.1175/JTECH-D-13-00036.1>

@@ -115,7 +115,8 @@ dask arrays.
 |---|---|---|
 | Lazy, extra dimensions | `radarx.retrieve.attenuation` | `correct_attenuation` |
 | Lazy, extra dimensions | `radarx.retrieve.calibration` | `phidp_offset`, `z_offset`, `zdr_offset` |
-| Lazy, extra dimensions | `radarx.retrieve.columns` | `zdr_column`, `zdr_column_metrics` |
+| Lazy, extra dimensions | `radarx.retrieve.columns` | `kdp_column`, `kdp_column_metrics`, `zdr_column`, `zdr_column_metrics` |
+| Lazy, extra dimensions | `radarx.retrieve.tracking` | `identify_cells` |
 | Lazy, extra dimensions | `radarx.retrieve.dealias` | `correct_dual_prf`, `dealias_confidence`, `dealias_velocity` |
 | Lazy, extra dimensions | `radarx.retrieve.dealias_methods` | `dealias_ambiguity` |
 | Lazy, extra dimensions | `radarx.retrieve.dsd` | `dsd` |
@@ -167,6 +168,8 @@ dask arrays.
 | Computes | `radarx.retrieve.vertical_profiles` | `cvp`, `mask_above_melting_layer`, `melting_layer`, `melting_layer_ppi`, `qvp_timeseries`, `rd_qvp`, `rhi_qvp` |
 | Computes | `radarx.retrieve.vvp` | `vvp_winds` |
 | Computes | `radarx.retrieve.wind_profile` | `vad_profile` |
+| Computes | `radarx.retrieve.sorting` | `storm_size_sorting` |
+| Computes | `radarx.retrieve.tracking` | `track_cells`, `cell_statistics` |
 | Computes | `radarx.retrieve.zdr_arc` | `zdr_arc` |
 | Computes, cannot be lazy | `radarx.retrieve.lightning` | `cell_flash_rate`, `cluster_flashes` |
 | Computes, cannot be lazy | `radarx.retrieve.rain_trajectories` | `rain_source_points`, `trajectory_matched_times` |
@@ -264,6 +267,9 @@ notebooks/VIL_and_Water_Content
 notebooks/VIL_Operational_Layers
 notebooks/ZDR_Column
 notebooks/ZDR_Arc
+notebooks/KDP_Columns
+notebooks/Size_Sorting
+notebooks/Cell_Tracking
 ```
 
 ```{toctree}
