@@ -31,6 +31,10 @@ steps:
   wind;
 - `tc_decompose` rebuilds the winds on a polar grid and splits them into the
   symmetric part and the asymmetric parts.
+- `tc_ring_stats` gives the azimuthal mean and wavenumbers of any polar field (the
+  reflectivity) on rings around the centre, and `tc_structure` analyses a radial
+  profile of the wind or the reflectivity: the eyewall maximum, its width, secondary
+  maxima and the moat, wind radii, the vorticity and the angular momentum.
 
 `synthetic_vortex` and `vortex_profile` build an analytic vortex and forward-model
 it to Doppler velocity, which is how the retrieval is tested below against a
@@ -50,9 +54,10 @@ altitude that the papers use (radarx fits the gates directly), the figures of
 the papers beyond the values stated in their texts and tables, and the
 application to Typhoon Alex. Not implemented: the temporal part of Bell and Lee,
 the modified GBVTD for the cross-beam mean wind
-([Chen et al. 2013](https://doi.org/10.1175/JAMC-D-13-031.1)), two radars,
-eyewall and rainband diagnostics, and the wavenumber-1 criterion of Part II (which
-the paper itself rejects). The module documentation `radarx.retrieve.tc_winds`
+([Chen et al. 2013](https://doi.org/10.1175/JAMC-D-13-031.1)), and the extended GBVTD with
+two radars, and the wavenumber-1 criterion of Part II (which the paper itself
+rejects). The eyewall and ring diagnostics are in the section "Eyewall and ring
+diagnostics" below. The module documentation `radarx.retrieve.tc_winds`
 says which choices are radarx's own.
 ```
 
@@ -616,6 +621,126 @@ print(f"tc_center returns {float(guess.VT_MAX):.1f} m/s as the largest tangentia
       f"and the search is anchored at the first guess (limit {60} km)")
 ```
 
+## Eyewall and ring diagnostics
+
+`tc_ring_stats` fits a mean and the azimuthal wavenumbers 1 to 3 to any polar field on rings
+around the centre; for the reflectivity it gives the radial profile of the eyewall and the
+rainbands, their asymmetry and the fraction of every ring that has echo above a threshold.
+`tc_structure` finds in a radial profile (`VT0` of `gbvtd`, or the `MEAN` of `tc_ring_stats`)
+the primary maximum, its edges at half its prominence, the highest secondary maximum and the
+moat between the two (the signature of concentric eyewalls, Willoughby et al. 1982), the
+radii where the profile falls to given levels, and for the tangential wind the relative
+vorticity $\zeta = r^{-1}\partial(rV)/\partial r$, the angular velocity and the angular
+momentum (Kossin and Eastin 2001 describe the two regimes of the vorticity profile of the
+eyewall). The thresholds are radarx's own. A vortex with the decay exponent 1 is a Rankine vortex, whose
+vorticity is $2V_{max}/R_{max}$ inside the radius of maximum wind and zero outside; its retrieval gives
+
+```{code-cell} ipython3
+from radarx.retrieve import tc_ring_stats, tc_structure
+
+rankine = synthetic_vortex(center=CENTER, vmax=VMAX, rmw=RMW, xt=1.0, azimuth_step=1.0, max_range=130000.0)
+rankine_winds = gbvtd(rankine, CENTER, radii=np.arange(4000.0, 45001.0, 1000.0))
+rankine_structure = tc_structure(rankine_winds, levels=[25.0])
+print(f"maximum {float(rankine_structure.PEAK_VALUE):.1f} m/s at {float(rankine_structure.PEAK_RADIUS) / 1e3:.1f} km "
+      f"(truth {VMAX:.0f} at {RMW / 1e3:.0f}), eyewall {float(rankine_structure.INNER_EDGE) / 1e3:.1f} to "
+      f"{float(rankine_structure.OUTER_EDGE) / 1e3:.1f} km, 25 m/s at "
+      f"{float(rankine_structure.OUTER_LEVEL_RADIUS[0]) / 1e3:.1f} km (truth {2 * RMW / 1e3:.0f}), vorticity at 10 km "
+      f"{float(rankine_structure.VORTICITY.sel(radius=10000.0)) * 1e3:.2f}e-3 1/s (truth {2 * VMAX / RMW * 1e3:.2f}e-3)")
+```
+
+## Hurricane Harvey (2017) at landfall seen by Corpus Christi
+
+Harvey made landfall near Rockport, Texas, at about 03 UTC on 26 August 2017. The eye was
+about 60 km north-east of the NEXRAD radar at Corpus Christi (KCRP), close enough for the
+rings of GBVTD to close. The volume of 03:04 UTC is one of the open AWS NEXRAD archive. The
+Nyquist velocity (27.05 m/s) is read from the radial headers and the lowest Doppler cut is
+dealiased with UNRAVEL (the winds are more than twice the Nyquist velocity). The National
+Hurricane Center best track (HURDAT2, [Landsea and Franklin 2013](https://doi.org/10.1175/MWR-D-12-00254.1))
+has at 03 UTC the position 28.0 N, 96.9 W, a maximum wind of 115 kt (59 m/s) and a radius of maximum
+wind of 10 n mi (18.5 km); the radar sees the wind at 0.5 to 1 km above the surface, so the
+numbers are close, not equal.
+
+```{code-cell} ipython3
+import xradar as xd
+from xradar.io.backends.nexrad_level2 import NEXRADLevel2File
+
+from radarx.io.aws_data import download_file
+from radarx.retrieve import dealias_velocity
+
+kcrp = download_file("unidata-nexrad-level2", "2017/08/26/KCRP/KCRP20170826_030439_V06", ".")
+tree = xd.io.open_nexradlevel2_datatree(kcrp)
+with NEXRADLevel2File(kcrp) as nf:
+    nyq = [h["msg_31_data_header"]["RAD"]["nyquist_vel"] / 100.0 for h in nf.msg_31_data_header]
+sweeps = [n for n in tree.children if n.startswith("sweep")]
+harvey = tree["sweep_1"].to_dataset(inherit="all_coords").sortby("azimuth")
+harvey = harvey.assign_coords(nyquist_velocity=nyq[sweeps.index("sweep_1")])
+harvey["VRADH"] = harvey["VRADH"].where(harvey["VRADH"] > -63.9)
+harvey["DBZH"] = harvey["DBZH"].where(harvey["DBZH"] > -32.0)
+harvey["VRADH"] = dealias_velocity(harvey, "VRADH", method="unravel")
+best_track = dict(position=(28.0, -96.9), vmax=115 * 0.5144, rmw=10 * 1852.0)  # HURDAT2, 03 UTC
+
+found = tc_center(harvey, first_guess_latlon=best_track["position"], min_radius=5000.0, max_radius=60000.0,
+                  search_radius=40000.0)
+lat0, lon0 = float(harvey.latitude), float(harvey.longitude)
+bt_y = (best_track["position"][0] - lat0) * 111.2e3
+bt_x = (best_track["position"][1] - lon0) * 111.2e3 * np.cos(np.deg2rad(0.5 * (lat0 + best_track["position"][0])))
+print(f"centre {float(found.CENTER_LATITUDE):.2f} N, {-float(found.CENTER_LONGITUDE):.2f} W, "
+      f"{np.hypot(float(found.CENTER_X) - bt_x, float(found.CENTER_Y) - bt_y) / 1e3:.1f} km from the best track "
+      f"(uncertainty {float(found.CENTER_UNCERTAINTY):.0f} m); RMW {float(found.RMW) / 1e3:.1f} km (best track "
+      f"{best_track['rmw'] / 1e3:.1f}), maximum {float(found.VT_MAX):.1f} m/s (best track {best_track['vmax']:.1f})")
+```
+
+```{code-cell} ipython3
+hv_radii = np.arange(3000.0, 100001.0, 1000.0)
+hv_winds = gbvtd(harvey, found, radii=hv_radii, max_wavenumber=4)
+wind_profile = tc_structure(hv_winds, levels=[50.0])
+dbz_rings = tc_ring_stats(harvey, found, field="DBZH", radii=hv_radii, max_wavenumber=2, threshold=35.0)
+dbz_profile = tc_structure(dbz_rings, prominence=5.0)
+print(f"wind: maximum {float(wind_profile.PEAK_VALUE):.1f} m/s at {float(wind_profile.PEAK_RADIUS) / 1e3:.1f} km, "
+      f"eyewall {float(wind_profile.INNER_EDGE) / 1e3:.0f} to {float(wind_profile.OUTER_EDGE) / 1e3:.0f} km, "
+      f"maximum vorticity {float(wind_profile.VORTICITY.max()) * 1e3:.1f}e-3 1/s at {float(wind_profile.VORTICITY.idxmax()) / 1e3:.0f} km")
+print(f"reflectivity: maximum of the azimuthal mean {float(dbz_profile.PEAK_VALUE):.1f} dBZ at "
+      f"{float(dbz_profile.PEAK_RADIUS) / 1e3:.1f} km, wavenumber 1 {float(dbz_rings.WAVE1_AMPLITUDE.sel(radius=20000.0)):.1f} dB "
+      f"towards {float(dbz_rings.WAVE1_AZIMUTH.sel(radius=20000.0)):.0f} deg at 20 km")
+```
+
+```{code-cell} ipython3
+polar = tc_decompose(hv_winds, azimuth=np.arange(0.0, 360.0, 5.0))
+fig, axes = plt.subplots(2, 2, figsize=(11, 9), layout="constrained")
+ax = axes[0, 0]
+geo = harvey.xradar.georeference()
+m = ax.pcolormesh(geo.x / 1e3, geo.y / 1e3, geo.VRADH, cmap="RdBu_r", vmin=-60, vmax=60, shading="nearest")
+ax.plot(float(found.CENTER_X) / 1e3, float(found.CENTER_Y) / 1e3, "k*", ms=12)
+ax.plot(bt_x / 1e3, bt_y / 1e3, "wx", ms=10)
+ax.set(xlim=(-60, 140), ylim=(-70, 130), aspect="equal", title="dealiased velocity, 0.5 deg (* centre, x best track)")
+fig.colorbar(m, ax=ax, label="m/s")
+ax = axes[0, 1]
+ax.plot(hv_radii / 1e3, hv_winds.VT0, label="tangential")
+ax.plot(hv_radii / 1e3, hv_winds.VR0, label="radial")
+ax.axvline(best_track["rmw"] / 1e3, color="k", ls=":", label="best-track RMW")
+ax.set(xlabel="radius (km)", ylabel="axisymmetric wind (m/s)", title="GBVTD")
+ax.legend()
+ax = axes[1, 0]
+ax.plot(hv_radii / 1e3, dbz_rings.MEAN, label="mean")
+ax.fill_between(hv_radii / 1e3, dbz_rings.MEAN - dbz_rings.STD, dbz_rings.MEAN + dbz_rings.STD, alpha=0.2)
+ax.plot(hv_radii / 1e3, dbz_rings.WAVE1_AMPLITUDE, label="wavenumber 1")
+ax.set(xlabel="radius (km)", ylabel="DBZH (dBZ)", title="reflectivity on rings")
+ax.legend()
+ax = axes[1, 1]
+ax.plot(hv_radii / 1e3, wind_profile.VORTICITY * 1e3, label="vorticity (1e-3 1/s)")
+ax.plot(hv_radii / 1e3, polar.ASYMMETRY, label="asymmetry")
+ax.set(xlabel="radius (km)", title="axisymmetric vorticity and relative asymmetry")
+ax.legend()
+plt.show()
+```
+
+The retrieval stops at 62 km, the distance of the centre from the radar: a ring is only fitted
+where the radar is outside it, so the wind radii of the gale and hurricane forces of the best track
+(more than 60 km) are beyond what one radar at this distance gives. The axisymmetric wind falls
+from its maximum of about 60 m/s at 22 km to 36 m/s at 60 km, and the vorticity has its maximum
+inside the radius of maximum wind, in the eyewall ring of the second regime of Kossin and
+Eastin (2001).
+
 ## References
 
 - Bell, M. M., and W.-C. Lee, 2012: Objective tropical cyclone center tracking using single-Doppler radar. *J. Appl. Meteor. Climatol.*, **51** (5), 878-896, [doi:10.1175/JAMC-D-11-0167.1](https://doi.org/10.1175/JAMC-D-11-0167.1).
@@ -628,3 +753,6 @@ print(f"tc_center returns {float(guess.VT_MAX):.1f} m/s as the largest tangentia
 - Murillo, S. T., W.-C. Lee, M. M. Bell, F. D. Marks Jr., P. P. Dodge, and G. M. Barnes, 2011: Intercomparison of ground-based velocity track display (GBVTD)-retrieved circulation centers and structures of Hurricane Danny (1997) from two coastal WSR-88Ds. *Mon. Wea. Rev.*, **139**, 153-174. (Cited by Bell and Lee 2012; not read.)
 - Nelder, J. A., and R. Mead, 1965: A simplex method for function minimization. *Comput. J.*, **7** (4), 308-313, [doi:10.1093/comjnl/7.4.308](https://doi.org/10.1093/comjnl/7.4.308).
 - Knapp, K. R., M. C. Kruk, D. H. Levinson, H. J. Diamond, and C. J. Neumann, 2010: The International Best Track Archive for Climate Stewardship (IBTrACS). *Bull. Amer. Meteor. Soc.*, **91** (3), 363-376, [doi:10.1175/2009BAMS2755.1](https://doi.org/10.1175/2009BAMS2755.1). (Best-track position of Tauktae, NOAA NCEI IBTrACS v04r01.)
+- Kossin, J. P., and M. D. Eastin, 2001: Two distinct regimes in the kinematic and thermodynamic structure of the hurricane eye and eyewall. *J. Atmos. Sci.*, **58** (9), 1079-1090, [doi:10.1175/1520-0469(2001)058<1079:TDRITK>2.0.CO;2](https://doi.org/10.1175/1520-0469(2001)058<1079:TDRITK>2.0.CO;2).
+- Landsea, C. W., and J. L. Franklin, 2013: Atlantic hurricane database uncertainty and presentation of a new database format. *Mon. Wea. Rev.*, **141** (10), 3576-3592, [doi:10.1175/MWR-D-12-00254.1](https://doi.org/10.1175/MWR-D-12-00254.1).
+- Willoughby, H. E., J. A. Clos, and M. G. Shoreibah, 1982: Concentric eye walls, secondary wind maxima, and the evolution of the hurricane vortex. *J. Atmos. Sci.*, **39** (2), 395-411, [doi:10.1175/1520-0469(1982)039<0395:CEWSWM>2.0.CO;2](https://doi.org/10.1175/1520-0469(1982)039<0395:CEWSWM>2.0.CO;2).

@@ -36,13 +36,14 @@ shown.
 | 10 | machine-learning plumbing | `radarx.ml` |
 | 11 | beam blockage and terrain clutter from a digital elevation model | `beam_blockage` |
 | 12 | export to CfRadial1, CfRadial2, ODIM_H5, Zarr and CF NetCDF | `write_cfradial1`, `write_cfradial2`, `write_odim`, `write_zarr`, `write_netcdf_cf` |
-| 13 | tropical-cyclone winds from one radar: centre, GBVTD, decomposition | `tc_center`, `gbvtd`, `tc_decompose`, `synthetic_vortex`, `vortex_profile` |
+| 13 | tropical-cyclone winds from one radar: centre, GBVTD, decomposition, eyewall and ring diagnostics | `tc_center`, `gbvtd`, `tc_decompose`, `tc_ring_stats`, `tc_structure`, `synthetic_vortex`, `vortex_profile` |
 | 14 | polarimetric forward operator for WRF and MPAS model output | `wrf_state`, `mpas_state`, `forward_operator`, `to_radar_grid` |
 | 15 | dual-PRF velocity correction | `correct_dual_prf` |
 | 16 | ensembles and uncertainty of the retrievals: errors of the measurements, calibration and DSD prior propagated by Monte Carlo | `perturb_radar`, `measurement_error`, `ensemble_retrieval`, `ensemble_statistics`, `relation_scatter` |
 | 17 | ZDR column depth, area and volume above the freezing level | `zdr_column`, `zdr_column_metrics` |
 | 18 | ZDR arc and KDP-ZDR separation of supercells on a grid | `zdr_arc` |
 | 19 | volume matching of a ground radar and the GPM DPR, DPR drop size parameters, comparison with IMERG | `match_dpr`, `match_statistics`, `dpr_parallax`, `dpr_dsd`, `match_imerg` |
+| 20 | linear wind, divergence and deformation from one radar in analysis volumes (VVP) | `vvp_winds` |
 
 ```{code-cell} ipython3
 import math
@@ -160,6 +161,8 @@ from radarx.retrieve import (
     synthetic_vortex,
     tc_center,
     tc_decompose,
+    tc_ring_stats,
+    tc_structure,
     terminal_fall_speed,
     to_radar_grid,
     tornado_probability,
@@ -168,6 +171,7 @@ from radarx.retrieve import (
     trajectory_matched_times,
     vertical_source_distribution,
     vortex_profile,
+    vvp_winds,
     wrf_state,
     ziegler2013_precipitation,
     ziegler2013_profiles,
@@ -778,6 +782,24 @@ fig.colorbar(im, ax=axes[1], label="m/s")
 plt.show()
 ```
 
+The azimuthal statistics of a field around the centre and the structure of its radial
+profile follow: `tc_ring_stats` gives the mean and the wavenumbers of any polar field on
+rings (here the true tangential wind of the synthetic vortex, in practice the
+reflectivity), and `tc_structure` finds the eyewall maximum, its width and the
+vorticity of the retrieved winds.
+
+```{code-cell} ipython3
+tc_field = tc_ring_stats(tc_sweep, tc_found, field="VT_TRUE", radii=tc_radii, ring_width=2000.0)
+tc_eye = tc_structure(tc_rings, levels=[30.0])
+tc_eye_acc = tc_rings.radarx.tc_structure(levels=[30.0])  # the accessor
+tc_field_acc = tc_sweep.radarx.tc_ring_stats(tc_found, field="VT_TRUE", radii=tc_radii, ring_width=2000.0)  # the accessor
+print(f"maximum {float(tc_eye.PEAK_VALUE):.1f} m/s at {float(tc_eye.PEAK_RADIUS) / 1e3:.1f} km (truth 45 at 18), "
+      f"width {float(tc_eye.WIDTH) / 1e3:.1f} km, 30 m/s at {float(tc_eye.OUTER_LEVEL_RADIUS[0]) / 1e3:.0f} km; "
+      f"vorticity inside the eyewall {float(tc_eye.VORTICITY.sel(radius=10000.0)) * 1e3:.1f} 1e-3 1/s (truth {2 * 45 / 18000 * 1e3:.1f})")
+print("accessors agree:", bool(np.isclose(float(tc_eye_acc.PEAK_RADIUS), float(tc_eye.PEAK_RADIUS))
+                           and np.allclose(tc_field_acc.MEAN.values, tc_field.MEAN.values, equal_nan=True)))
+```
+
 ## 14. Forward operator for WRF and MPAS output
 
 A forward operator turns the microphysics state of a numerical model into the
@@ -1209,6 +1231,52 @@ where the beams are high. Three scans of 3, 6 and 9 mm/h that represent 10 minut
 6 mm/h in the half hour. The choices that the papers leave open (the footprint size, the weights, the
 fraction of the volume that must have data) are listed in the documentation of
 `radarx.retrieve.satellite_match`.
+## 20. Volume velocity processing
+
+A single Doppler radar sees only the radial velocity, but if the wind is a linear function of
+position inside a region, the gates of the region determine the wind at its centre, its
+gradients, the divergence and the deformation (VVP, Waldteufel and Corbin 1979, in the form of
+Doviak and Zrnic 1993). `vvp_winds` fits the linear model in cylinders around the nodes of a
+grid, from all sweeps of a volume. The data are synthetic: a linear wind with divergence,
+shear and vertical shear, seen by five sweeps of a radar.
+
+```{code-cell} ipython3
+from radarx.fundamentals.constants import EARTH_RADIUS
+from radarx.fundamentals.geometry import beam_center_height, ground_range
+
+vz_az = np.arange(0.5, 360.0, 1.0)
+vz_rng = np.arange(500.0, 60001.0, 500.0)
+vz_wind = dict(u0=5.0, ux=1e-4, uy=2e-4, uz=2e-3, v0=-3.0, vx=-5e-5, vy=3e-4, vz=-1e-3)
+vz_nodes = {}
+for i, el in enumerate((0.5, 1.5, 3.0, 5.0, 8.0)):
+    sw = xr.Dataset(
+        {"VRADH": (("azimuth", "range"), np.zeros((vz_az.size, vz_rng.size)))},
+        coords={"azimuth": vz_az, "range": vz_rng, "elevation": ("azimuth", np.full(vz_az.size, el)),
+                "altitude": 100.0, "latitude": 33.9, "longitude": -88.3},
+    )
+    reff = 4.0 / 3.0 * EARTH_RADIUS
+    s_ = ground_range(vz_rng[None, :], el, reff=reff, radar_height=100.0)
+    z_ = beam_center_height(vz_rng[None, :], el, radar_height=100.0, reff=reff)
+    theta = np.deg2rad(el) + s_ / reff  # local elevation of the beam
+    sa_, ca_ = np.sin(np.deg2rad(vz_az))[:, None], np.cos(np.deg2rad(vz_az))[:, None]
+    x_, y_ = s_ * sa_, s_ * ca_
+    u_ = vz_wind["u0"] + vz_wind["ux"] * x_ + vz_wind["uy"] * y_ + vz_wind["uz"] * z_
+    v_ = vz_wind["v0"] + vz_wind["vx"] * x_ + vz_wind["vy"] * y_ + vz_wind["vz"] * z_
+    sw["VRADH"] = sw["VRADH"].copy(data=np.cos(theta) * (u_ * sa_ + v_ * ca_))
+    vz_nodes[f"/sweep_{i}"] = sw
+vz_volume = xr.DataTree.from_dict({"/": xr.Dataset(coords={"latitude": 33.9, "longitude": -88.3, "altitude": 100.0}), **vz_nodes})
+vvp = vvp_winds(vz_volume, radius=15000.0, depth=2000.0, x=[-20000.0, 0.0, 25000.0], y=[30000.0], z=[1500.0, 3000.0], min_gates=200)
+vvp_acc = vz_volume.radarx.vvp_winds(radius=15000.0, depth=2000.0, x=[0.0], y=[30000.0], z=[1500.0], min_gates=200)  # the accessor
+print(f"divergence {float(vvp.divergence.mean()) * 1e4:.3f} 1e-4 1/s (truth {(vz_wind['ux'] + vz_wind['vy']) * 1e4:.1f}), "
+      f"standard error {float(vvp.divergence_error.max()):.1e} 1/s")
+print("accessor agrees:", bool(np.isclose(float(vvp_acc.u[0, 0, 0]), float(vvp.u.sel(x=0.0, y=30000.0, z=1500.0)))))
+```
+
+`u` and `v` are the modified components of the model, equal to the wind at the centre only
+where the vorticity term is small (`vorticity=` removes it for a known vorticity). The
+vorticity itself cannot be retrieved. The [VVP notebook](Volume_Velocity_Processing) checks the
+standard error against the worked example of Doviak and Zrnic and the winds against the VAD of a
+NEXRAD volume.
 
 ## 25. Radar-gauge merging
 
