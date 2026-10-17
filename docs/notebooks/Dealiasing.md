@@ -327,6 +327,10 @@ tuning them to this data.
 
 ## Vortex cores and the speed limit
 
+The [region dealiasing fixes notebook](Dealiasing_Region_Fixes) shows this, and the
+fix for thin necks between blocks of the region method, on a real NEXRAD volume
+(KBMX, 27 April 2011).
+
 The region method joins neighbouring gates whose velocities differ by less than
 $0.3\,V_n$ and shifts regions by whole intervals so that the velocity jumps
 between regions are smallest. A compact vortex signature, with peaks of about
