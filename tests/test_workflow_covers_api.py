@@ -39,6 +39,7 @@ PACKAGES = [
     "radarx.vis",
     "radarx.fundamentals",
     "radarx.core",
+    "radarx.level1",
 ]  # radarx.testing only holds the deprecated IMD helpers (see EXCEPTIONS)
 
 # Documented exceptions: the radarx IMD reader and its test-data helpers are
