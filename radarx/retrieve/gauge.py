@@ -1207,6 +1207,153 @@ def _kriged(s, method, G, Rg, R, rows, cols, name, params, nn, use_compiled, n_t
     return merged, np.sqrt(var[:n]), 0
 
 
+def _adjust_mfb(s, Rg, min_value, min_pairs, use_compiled, n_threads):
+    factor, pairs = _mean_field_bias(Rg, s.G, min_value, use_compiled, n_threads)
+    apply = pairs >= min_pairs
+    out = np.where(apply[:, None], s.R * np.where(apply, factor, 1.0)[:, None], s.R)
+    extra = {
+        "MEAN_FIELD_BIAS": _extra_array(
+            s,
+            np.where(apply, factor, np.nan).astype(np.float32),
+            "MEAN_FIELD_BIAS",
+            {
+                "long_name": "mean field bias, sum of gauge over sum of radar values",
+                "units": "1",
+            },
+        )
+    }
+    return out, np.where(apply, pairs, 0), None, extra
+
+
+def _adjust_rda(s, Rg, min_value, min_pairs):
+    factor, pairs = _range_adjustment(s, Rg, s.G, min_value, min_pairs)
+    apply = pairs > 0
+    out = np.where(apply[:, None], s.R * np.where(apply[:, None], factor, 1.0), s.R)
+    extra = {
+        "ADJUSTMENT_FACTOR": _field(
+            s,
+            np.where(apply[:, None], factor, np.nan).astype(np.float32),
+            "ADJUSTMENT_FACTOR",
+            {"long_name": "range-dependent adjustment factor", "units": "1"},
+        )
+    }
+    return out, pairs, None, extra
+
+
+def _adjust_brandes(s, Rg, min_value, min_pairs, k, use_compiled, n_threads):
+    G = s.G
+    ratio = np.full_like(G, np.nan)
+    pair = (Rg > min_value) & (G > min_value)
+    ratio[pair] = G[pair] / Rg[pair]
+    n_pair = pair.sum(axis=1)
+    factor = np.full((s.nt, s.npix), np.nan)
+    finite = np.isfinite(s.xr) & np.isfinite(s.yr)
+    area = float(np.ptp(s.xr[finite]) * np.ptp(s.yr[finite])) if finite.any() else 0.0
+    for n in np.unique(n_pair[n_pair >= min_pairs]):
+        rows = np.flatnonzero(n_pair == n)
+        kk = float(k) if k is not None else area / (2.0 * float(n))
+        if not kk > 0:
+            raise ValueError("k must be positive (the radar pixels have no extent)")
+        factor[rows] = _brandes(
+            s.xg, s.yg, ratio[rows], s.xr, s.yr, kk, use_compiled, n_threads
+        )
+    apply = np.isfinite(factor).any(axis=1)
+    out = np.where(apply[:, None], s.R * np.where(apply[:, None], factor, 1.0), s.R)
+    extra = {
+        "ADJUSTMENT_FACTOR": _field(
+            s,
+            factor.astype(np.float32),
+            "ADJUSTMENT_FACTOR",
+            {"long_name": "Brandes spatial adjustment factor", "units": "1"},
+        )
+    }
+    return out, np.where(apply, n_pair, 0), None, extra
+
+
+def _constant_rows(s, method, rows, cols, gs, rs, shortcut, out, std, used):
+    """Rows whose gauges (and drift) are constant: the field is its own estimate."""
+    r = rows[shortcut]
+    if method == "conditional":
+        out[r] = s.R[r] + (gs[shortcut, 0] - rs[shortcut, 0])[:, None]
+    else:
+        out[r] = gs[shortcut, 0][:, None]
+    std[r] = 0.0
+    used[r] = cols.size
+
+
+def _fit_for_method(s, method, model, cols, gs, rs, const_g, todo, opts):
+    """Variogram parameters of the rows ``todo`` of one group of gauges."""
+    if method == "ked":
+        vals = _ols_residual(gs[todo], rs[todo])
+    elif method == "conditional":
+        vals = np.where(const_g[todo, None], rs[todo], gs[todo])
+    else:
+        vals = gs[todo]
+    return _fit_rows(model, s.xg[cols], s.yg[cols], vals, *opts)[0]
+
+
+def _adjust_kriging(
+    s,
+    Rg,
+    method,
+    variogram,
+    model,
+    n_lags,
+    max_lag,
+    nn,
+    min_pairs,
+    use_compiled,
+    n_threads,
+):
+    G, R = s.G, s.R
+    out, used = R.copy(), np.zeros(s.nt, dtype=np.int64)
+    fixed = None
+    if variogram is not None:
+        fixed = _fixed_variogram(variogram, model, s.extra_shape, s.nt)
+        model = fixed[0]
+    mask = np.isfinite(G)
+    if method != "ok":
+        mask &= np.isfinite(Rg)
+    std = np.full((s.nt, s.npix), np.nan)
+    fallbacks = 0
+    for rows, cols in _row_groups(mask):
+        if cols.size < min_pairs:
+            continue
+        gs = G[np.ix_(rows, cols)]
+        rs = Rg[np.ix_(rows, cols)] if method != "ok" else None
+        const_g = np.ptp(gs, axis=1) == 0.0
+        shortcut = const_g
+        if method == "conditional":
+            shortcut = const_g & (np.ptp(rs, axis=1) == 0.0)
+        if shortcut.any():
+            _constant_rows(s, method, rows, cols, gs, rs, shortcut, out, std, used)
+        todo = ~shortcut
+        if not todo.any():
+            continue
+        r = rows[todo]
+        if fixed is not None:
+            name, params = fixed[0], fixed[1][r]
+        else:
+            opts = (n_lags, max_lag, use_compiled, n_threads)
+            params = _fit_for_method(
+                s, method, model, cols, gs, rs, const_g, todo, opts
+            )
+            name = model
+        est, sd, fb = _kriged(
+            s, method, G, Rg, R, r, cols, name, params, nn, use_compiled, n_threads
+        )
+        out[r] = est
+        std[r] = sd
+        used[r] = cols.size
+        fallbacks += fb
+    out = np.where(np.isfinite(R), out, np.nan)
+    std = np.where(np.isfinite(R), std, np.nan)
+    attrs = {"variogram_model": model, "n_neighbours": 0 if nn is None else nn}
+    if method == "ked":
+        attrs["ked_fallback"] = int(fallbacks)
+    return out, used, std, {}, attrs
+
+
 @dask_support("computes", "kriging needs every gauge and the whole field of each time.")
 @provenance(
     "Radar-gauge merging: mean field bias, range-dependent adjustment, Brandes, kriging"
@@ -1375,141 +1522,36 @@ def gauge_adjust(
     if s.ng < int(min_pairs):
         raise ValueError(f"there are {s.ng} gauges, fewer than min_pairs={min_pairs}")
     nn = None if n_neighbours is None else int(n_neighbours)
-    R, G = s.R, s.G
-    nt = s.nt
-    out = R.copy()
-    used = np.zeros(nt, dtype=np.int64)
-    std = None
-    extra = {}
+    mp = int(min_pairs)
     attrs = {"method": method}
-    fallbacks = 0
     Rg = _sample(s, radius) if method != "ok" else None
     if method in ("ok", "conditional", "ked"):
         _check_distinct(s.xg, s.yg)
-
     if method == "mfb":
-        factor, pairs = _mean_field_bias(Rg, G, min_value, use_compiled, n_threads)
-        apply = pairs >= int(min_pairs)
-        out = np.where(apply[:, None], R * np.where(apply, factor, 1.0)[:, None], R)
-        used = np.where(apply, pairs, 0)
-        extra["MEAN_FIELD_BIAS"] = _extra_array(
-            s,
-            np.where(apply, factor, np.nan).astype(np.float32),
-            "MEAN_FIELD_BIAS",
-            {
-                "long_name": "mean field bias, sum of gauge over sum of radar values",
-                "units": "1",
-            },
+        out, used, std, extra = _adjust_mfb(
+            s, Rg, min_value, mp, use_compiled, n_threads
         )
     elif method == "rda":
-        factor, pairs = _range_adjustment(s, Rg, G, min_value, int(min_pairs))
-        apply = pairs > 0
-        out = np.where(apply[:, None], R * np.where(apply[:, None], factor, 1.0), R)
-        used = pairs
-        extra["ADJUSTMENT_FACTOR"] = _field(
-            s,
-            np.where(apply[:, None], factor, np.nan).astype(np.float32),
-            "ADJUSTMENT_FACTOR",
-            {"long_name": "range-dependent adjustment factor", "units": "1"},
-        )
+        out, used, std, extra = _adjust_rda(s, Rg, min_value, mp)
     elif method == "brandes":
-        ratio = np.full_like(G, np.nan)
-        pair = (Rg > min_value) & (G > min_value)
-        ratio[pair] = G[pair] / Rg[pair]
-        n_pair = pair.sum(axis=1)
-        factor = np.full((nt, s.npix), np.nan)
-        finite = np.isfinite(s.xr) & np.isfinite(s.yr)
-        area = (
-            float(np.ptp(s.xr[finite]) * np.ptp(s.yr[finite])) if finite.any() else 0.0
-        )
-        for n in np.unique(n_pair[n_pair >= int(min_pairs)]):
-            rows = np.flatnonzero(n_pair == n)
-            if k is not None:
-                kk = float(k)
-            else:
-                kk = area / (2.0 * float(n))
-            if not kk > 0:
-                raise ValueError("k must be positive (the radar pixels have no extent)")
-            factor[rows] = _brandes(
-                s.xg, s.yg, ratio[rows], s.xr, s.yr, kk, use_compiled, n_threads
-            )
-        apply = np.isfinite(factor).any(axis=1)
-        out = np.where(apply[:, None], R * np.where(apply[:, None], factor, 1.0), R)
-        used = np.where(apply, n_pair, 0)
-        extra["ADJUSTMENT_FACTOR"] = _field(
-            s,
-            factor.astype(np.float32),
-            "ADJUSTMENT_FACTOR",
-            {"long_name": "Brandes spatial adjustment factor", "units": "1"},
+        out, used, std, extra = _adjust_brandes(
+            s, Rg, min_value, mp, k, use_compiled, n_threads
         )
     else:
-        fixed = None
-        if variogram is not None:
-            fixed = _fixed_variogram(variogram, model, s.extra_shape, nt)
-            model = fixed[0]
-        mask = np.isfinite(G)
-        if method != "ok":
-            mask &= np.isfinite(Rg)
-        std = np.full((nt, s.npix), np.nan)
-        for rows, cols in _row_groups(mask):
-            if cols.size < int(min_pairs):
-                continue
-            gs = G[np.ix_(rows, cols)]
-            rs = Rg[np.ix_(rows, cols)] if method != "ok" else None
-            const_g = np.ptp(gs, axis=1) == 0.0
-            both = (
-                const_g & (np.ptp(rs, axis=1) == 0.0)
-                if method == "conditional"
-                else None
-            )
-            shortcut = both if method == "conditional" else const_g
-            # a constant field is its own kriging estimate
-            if shortcut.any():
-                r = rows[shortcut]
-                if method == "conditional":
-                    shift = gs[shortcut, 0] - rs[shortcut, 0]
-                    out[r] = R[r] + shift[:, None]
-                else:
-                    out[r] = gs[shortcut, 0][:, None]
-                std[r] = 0.0
-                used[r] = cols.size
-            todo = ~shortcut
-            if not todo.any():
-                continue
-            r = rows[todo]
-            if fixed is not None:
-                name, params = fixed[0], fixed[1][r]
-            else:
-                if method == "ked":
-                    vals = _ols_residual(gs[todo], rs[todo])
-                elif method == "conditional":
-                    vals = np.where(const_g[todo, None], rs[todo], gs[todo])
-                else:
-                    vals = gs[todo]
-                params = _fit_rows(
-                    model,
-                    s.xg[cols],
-                    s.yg[cols],
-                    vals,
-                    n_lags,
-                    max_lag,
-                    use_compiled,
-                    n_threads,
-                )[0]
-                name = model
-            est, sd, fb = _kriged(
-                s, method, G, Rg, R, r, cols, name, params, nn, use_compiled, n_threads
-            )
-            out[r] = est
-            std[r] = sd
-            used[r] = cols.size
-            fallbacks += fb
-        attrs["variogram_model"] = model
-        attrs["n_neighbours"] = 0 if nn is None else nn
-        if method == "ked":
-            attrs["ked_fallback"] = int(fallbacks)
-        out = np.where(np.isfinite(R), out, np.nan)
-        std = np.where(np.isfinite(R), std, np.nan)
+        out, used, std, extra, more = _adjust_kriging(
+            s,
+            Rg,
+            method,
+            variogram,
+            model,
+            n_lags,
+            max_lag,
+            nn,
+            mp,
+            use_compiled,
+            n_threads,
+        )
+        attrs.update(more)
     if clip:
         out = np.where(out < 0.0, 0.0, out)
     units = radar.attrs.get("units")

@@ -39,7 +39,6 @@
 #include <cstdint>
 #include <limits>
 #include <map>
-#include <mutex>
 #include <numeric>
 #include <stdexcept>
 #include <string>
@@ -252,35 +251,49 @@ py::tuple variogram_py(const DArray& x, const DArray& y, const DArray& vals, int
     const double* py_ = y.data();
     const double* pv = vals.data();
     const double width = max_lag / static_cast<double>(n_lags);
-    std::vector<double> dist_sum(n_lags, 0.0), gam_sum(static_cast<size_t>(nv) * n_lags, 0.0);
-    std::vector<int64_t> count(n_lags, 0);
-    std::mutex lock;
+    // Rows of gauges go to threads in blocks; every block keeps its own sums and the blocks
+    // are added in order, so the result does not depend on the number of threads.
+    constexpr int64_t kRows = 16;
+    const int64_t nblocks = (ng + kRows - 1) / kRows;
+    std::vector<std::vector<double>> bd(nblocks), bg(nblocks);
+    std::vector<std::vector<int64_t>> bc(nblocks);
     {
         py::gil_scoped_release release;
-        parallel_blocks(ng, 1, n_threads, [&](int, int64_t i0, int64_t i1) {
-            std::vector<double> ds(n_lags, 0.0), gs(static_cast<size_t>(nv) * n_lags, 0.0);
-            std::vector<int64_t> cs(n_lags, 0);
-            for (int64_t i = i0; i < i1; ++i) {
-                for (int64_t j = i + 1; j < ng; ++j) {
-                    const double dx = px[i] - px[j], dy = py_[i] - py_[j];
-                    const double h = std::sqrt(dx * dx + dy * dy);
-                    if (!(h < max_lag)) continue;
-                    const int64_t b = std::min<int64_t>(static_cast<int64_t>(h / width), n_lags - 1);
-                    ds[b] += h;
-                    cs[b] += 1;
-                    for (int64_t t = 0; t < nv; ++t) {
-                        const double d = pv[t * ng + i] - pv[t * ng + j];
-                        gs[static_cast<size_t>(t) * n_lags + b] += d * d;
+        parallel_blocks(nblocks, 1, n_threads, [&](int, int64_t b0, int64_t b1) {
+            for (int64_t blk = b0; blk < b1; ++blk) {
+                std::vector<double>& ds = bd[blk];
+                std::vector<double>& gs = bg[blk];
+                std::vector<int64_t>& cs = bc[blk];
+                ds.assign(n_lags, 0.0);
+                gs.assign(static_cast<size_t>(nv) * n_lags, 0.0);
+                cs.assign(n_lags, 0);
+                const int64_t i0 = blk * kRows, i1 = std::min(ng, i0 + kRows);
+                for (int64_t i = i0; i < i1; ++i) {
+                    for (int64_t j = i + 1; j < ng; ++j) {
+                        const double dx = px[i] - px[j], dy = py_[i] - py_[j];
+                        const double h = std::sqrt(dx * dx + dy * dy);
+                        if (!(h < max_lag)) continue;
+                        const int64_t b =
+                            std::min<int64_t>(static_cast<int64_t>(h / width), n_lags - 1);
+                        ds[b] += h;
+                        cs[b] += 1;
+                        for (int64_t t = 0; t < nv; ++t) {
+                            const double d = pv[t * ng + i] - pv[t * ng + j];
+                            gs[static_cast<size_t>(t) * n_lags + b] += d * d;
+                        }
                     }
                 }
             }
-            std::lock_guard<std::mutex> guard(lock);
-            for (int64_t b = 0; b < n_lags; ++b) {
-                dist_sum[b] += ds[b];
-                count[b] += cs[b];
-            }
-            for (size_t k = 0; k < gs.size(); ++k) gam_sum[k] += gs[k];
         });
+    }
+    std::vector<double> dist_sum(n_lags, 0.0), gam_sum(static_cast<size_t>(nv) * n_lags, 0.0);
+    std::vector<int64_t> count(n_lags, 0);
+    for (int64_t blk = 0; blk < nblocks; ++blk) {
+        for (int64_t b = 0; b < n_lags; ++b) {
+            dist_sum[b] += bd[blk][b];
+            count[b] += bc[blk][b];
+        }
+        for (size_t k = 0; k < gam_sum.size(); ++k) gam_sum[k] += bg[blk][k];
     }
     py::array_t<double> lag(n_lags), gamma({nv, n_lags});
     py::array_t<int64_t> cnt(n_lags);

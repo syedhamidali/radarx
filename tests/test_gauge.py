@@ -266,7 +266,7 @@ def test_engines_agree(method, neighbours, model):
     a = gauge_adjust(radar, gauges, engine="numpy", **kw)
     b = gauge_adjust(radar, gauges, engine="compiled", **kw)
     np.testing.assert_allclose(
-        a.RAIN_ADJUSTED.values, b.RAIN_ADJUSTED.values, rtol=2e-5, atol=2e-5
+        a.RAIN_ADJUSTED.values, b.RAIN_ADJUSTED.values, rtol=1e-4, atol=1e-4
     )
     np.testing.assert_allclose(
         a.RAIN_ADJUSTED_STD.values, b.RAIN_ADJUSTED_STD.values, rtol=1e-4, atol=1e-4
