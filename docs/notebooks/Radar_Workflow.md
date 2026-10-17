@@ -2080,7 +2080,7 @@ products
 ## Function index
 
 Every public name of radarx (the `__all__` of `radarx.retrieve`, `radarx.grid`,
-`radarx.io`, `radarx.ml`, `radarx.vis`, `radarx.fundamentals`, `radarx.core`),
+`radarx.io`, `radarx.ml`, `radarx.vis`, `radarx.fundamentals`, `radarx.core`, `radarx.level1`),
 with its module and the section of this notebook or of the
 [second part](Radar_Workflow_Advanced) or the
 [third part](Radar_Workflow_Advanced_2) where it is used in an example. The
@@ -2285,6 +2285,16 @@ notebooks or from this index.
 | `read_sticknet` | `radarx.io.surface` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `read_sticknet_locations` | `radarx.io.surface` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `write_wrfda_radar` | `radarx.io.wrfda` | [core](Radar_Workflow): 16. Super-observations for data assimilation |
+| `notch_filter` | `radarx.level1.clutter` | [part 3](Radar_Workflow_Advanced_2): 23. Level I: IQ time series, clutter filtering and Doppler spectra |
+| `regression_filter` | `radarx.level1.clutter` | [part 3](Radar_Workflow_Advanced_2): 23. Level I: IQ time series, clutter filtering and Doppler spectra |
+| `as_iq` | `radarx.level1.iq` | [part 3](Radar_Workflow_Advanced_2): 23. Level I: IQ time series, clutter filtering and Doppler spectra |
+| `read_iq` | `radarx.level1.iq` | [part 3](Radar_Workflow_Advanced_2): 23. Level I: IQ time series, clutter filtering and Doppler spectra |
+| `simulate_iq` | `radarx.level1.iq` | [part 3](Radar_Workflow_Advanced_2): 23. Level I: IQ time series, clutter filtering and Doppler spectra |
+| `dealias_spectra` | `radarx.level1.spectra` | [part 3](Radar_Workflow_Advanced_2): 23. Level I: IQ time series, clutter filtering and Doppler spectra |
+| `doppler_spectra` | `radarx.level1.spectra` | [part 3](Radar_Workflow_Advanced_2): 23. Level I: IQ time series, clutter filtering and Doppler spectra |
+| `pulse_pair_moments` | `radarx.level1.spectra` | [part 3](Radar_Workflow_Advanced_2): 23. Level I: IQ time series, clutter filtering and Doppler spectra |
+| `spectral_moments` | `radarx.level1.spectra` | [part 3](Radar_Workflow_Advanced_2): 23. Level I: IQ time series, clutter filtering and Doppler spectra |
+| `spectral_noise` | `radarx.level1.spectra` | [part 3](Radar_Workflow_Advanced_2): 23. Level I: IQ time series, clutter filtering and Doppler spectra |
 | `list_models` | `radarx.ml.model` | [part 3](Radar_Workflow_Advanced_2): 10. Machine-learning plumbing |
 | `load_model` | `radarx.ml.model` | [part 3](Radar_Workflow_Advanced_2): 10. Machine-learning plumbing |
 | `Model` | `radarx.ml.model` | [part 3](Radar_Workflow_Advanced_2): 10. Machine-learning plumbing |

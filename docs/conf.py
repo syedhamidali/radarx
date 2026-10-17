@@ -69,7 +69,11 @@ def _write_cited_methods():
         module = (
             "radarx.grid"
             if func.__module__.startswith("radarx.grid")
-            else ("radarx.retrieve")
+            else (
+                "radarx.level1"
+                if func.__module__.startswith("radarx.level1")
+                else "radarx.retrieve"
+            )
         )
         based = "; ".join(radarx.citation._short_list(info.references))
         lines.append(

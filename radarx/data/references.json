@@ -3425,5 +3425,99 @@
   "journal": "Rec. ITU-R P.840-9",
   "publisher": "International Telecommunication Union",
   "url": "https://www.itu.int/rec/R-REC-P.840"
+ },
+ "10.1175/1520-0426(1999)016<1364:GCCWAR>2.0.CO;2": {
+  "authors": [
+   "Torres, S. M.",
+   "Zrnić, D. S."
+  ],
+  "year": 1999,
+  "title": "Ground Clutter Canceling with a Regression Filter",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "16",
+  "issue": "10",
+  "pages": "1364-1372",
+  "doi": "10.1175/1520-0426(1999)016<1364:GCCWAR>2.0.CO;2"
+ },
+ "10.1175/1520-0450(1975)014<0619:SOWDSA>2.0.CO;2": {
+  "authors": [
+   "Zrnić, D. S."
+  ],
+  "year": 1975,
+  "title": "Simulation of Weatherlike Doppler Spectra and Signals",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology",
+  "volume": "14",
+  "issue": "4",
+  "pages": "619-620",
+  "doi": "10.1175/1520-0450(1975)014<0619:SOWDSA>2.0.CO;2"
+ },
+ "10.1109/TAES.1977.308467": {
+  "authors": [
+   "Zrnić, D. S."
+  ],
+  "year": 1977,
+  "title": "Spectral Moment Estimates from Correlated Pulse Pairs",
+  "type": "article",
+  "journal": "IEEE Transactions on Aerospace and Electronic Systems",
+  "volume": "AES-13",
+  "issue": "4",
+  "pages": "344-354",
+  "doi": "10.1109/TAES.1977.308467"
+ },
+ "10.1175/1520-0450(1979)018<0189:TDCOMA>2.0.CO;2": {
+  "authors": [
+   "Srivastava, R. C.",
+   "Jameson, A. R.",
+   "Hildebrand, P. H."
+  ],
+  "year": 1979,
+  "title": "Time-Domain Computation of Mean and Variance of Doppler Spectra",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology",
+  "volume": "18",
+  "issue": "2",
+  "pages": "189-194",
+  "doi": "10.1175/1520-0450(1979)018<0189:TDCOMA>2.0.CO;2"
+ },
+ "10.1109/MSP.2011.941846": {
+  "authors": [
+   "Guo, H."
+  ],
+  "year": 2011,
+  "title": "A Simple Algorithm for Fitting a Gaussian Function [DSP Tips and Tricks]",
+  "type": "article",
+  "journal": "IEEE Signal Processing Magazine",
+  "volume": "28",
+  "issue": "5",
+  "pages": "134-137",
+  "doi": "10.1109/MSP.2011.941846"
+ },
+ "10.1109/PROC.1978.10837": {
+  "authors": [
+   "Harris, F."
+  ],
+  "year": 1978,
+  "title": "On the use of windows for harmonic analysis with the discrete Fourier transform",
+  "type": "article",
+  "journal": "Proceedings of the IEEE",
+  "volume": "66",
+  "issue": "1",
+  "pages": "51-83",
+  "doi": "10.1109/PROC.1978.10837"
+ },
+ "10.1109/TAU.1970.1162132": {
+  "authors": [
+   "Bluestein, L."
+  ],
+  "year": 1970,
+  "title": "A linear filtering approach to the computation of discrete Fourier transform",
+  "type": "article",
+  "journal": "IEEE Transactions on Audio and Electroacoustics",
+  "volume": "18",
+  "issue": "4",
+  "pages": "451-455",
+  "doi": "10.1109/TAU.1970.1162132"
  }
 }

@@ -46,6 +46,7 @@ shown.
 | 20 | linear wind, divergence and deformation from one radar in analysis volumes (VVP) | `vvp_winds` |
 | 21 | KDP columns, KDP-ZDR size sorting, storm-cell identification, tracking and statistics | `kdp_column`, `kdp_column_metrics`, `storm_size_sorting`, `identify_cells`, `track_cells`, `cell_statistics` |
 | 22 | Ka and W band cloud radar: gas, cloud liquid and rain attenuation, echo classification, dual-frequency ratio retrievals | `gas_specific_attenuation`, `cloud_liquid_attenuation`, `gas_path_attenuation`, `rain_attenuation_relation`, `rain_path_attenuation`, `classify_cloud_targets`, `dual_frequency_ratio`, `dfr_rain`, `dfr_snow` |
+| 23 | Level I: IQ time series, clutter filtering, Doppler spectra and moments, dealiasing with the spectra | `read_iq`, `as_iq`, `simulate_iq`, `regression_filter`, `notch_filter`, `doppler_spectra`, `spectral_noise`, `spectral_moments`, `pulse_pair_moments`, `dealias_spectra` |
 
 ```{code-cell} ipython3
 import math
@@ -1595,6 +1596,60 @@ a few dB at W band over a few kilometres, and it must be removed before the two 
 subtracted. The classification is the radar-only subset of the categories of Cloudnet; the
 dual-frequency retrievals assume a size distribution (gamma for rain, exponential for snow) and
 return NaN where the ratio saturates.
+
+## 23. Level I: IQ time series, clutter filtering and Doppler spectra
+
+Level I data are the complex samples (I and Q) of every gate and pulse of a dwell, and
+`radarx.level1` turns them into the radar moments. The data are synthetic, so that the
+answer is known: gates with velocities from -12 to 12 m/s, a width of 1.5 m/s, a signal 20 dB
+above the noise and ground clutter 30 dB stronger than the weather at zero velocity. The
+[Level I notebook](Level_I_Processing) shows the methods in detail, the textbook check of the
+estimator variances and a real storm.
+
+```{code-cell} ipython3
+from radarx import level1
+
+nyq = 0.1 / (4 * 1e-3)  # wavelength 10 cm, pulse repetition time 1 ms
+v_true = np.linspace(-12, 12, 300)
+iq = level1.simulate_iq(
+    v_true, width=1.5, power=100.0, noise=1.0, clutter_power=1e5, clutter_width=0.2,
+    n_pulses=64, wavelength=0.1, prt=1e-3, dims=("range",), seed=2,
+)
+# the same series from I and Q counts, as a reader gives them (raw files: read_iq)
+counts = (iq.transpose("range", "pulse").values * 20).round()
+iq = level1.as_iq(counts.real, counts.imag, scale=1 / 20, dims=("range", "pulse"), wavelength=0.1, prt=1e-3)
+with tempfile.TemporaryDirectory() as tmp:
+    path = Path(tmp) / "dwell.raw"
+    path.write_bytes(np.stack([counts.real, counts.imag], axis=-1).astype("<i2").tobytes())
+    same = level1.read_iq(path, shape=counts.shape, dims=("range", "pulse"), scale=1 / 20, wavelength=0.1, prt=1e-3)
+print(bool(np.allclose(same, iq)))
+
+far = np.abs(v_true) > 6.0
+filtered = level1.regression_filter(iq, order=3)  # the filter in the time domain
+spectra = level1.doppler_spectra(iq, window="blackman")
+notched = level1.notch_filter(spectra, half_width=3)  # or in the spectrum
+for label, moments in (
+    ("with clutter, pulse pair", level1.pulse_pair_moments(iq, noise=1.0)),
+    ("regression filter, pulse pair", level1.pulse_pair_moments(filtered["IQ"], noise="spectral")),
+    ("notch filter, spectral", level1.spectral_moments(notched, noise=level1.spectral_noise(spectra))),
+):
+    print(f"{label:30s} mean |error| {float(np.abs(moments.VRADH.values[far] - v_true[far]).mean()):5.2f} m/s")
+```
+
+Aliased velocities are brought back with the spectra, by continuity along the ray or towards a
+reference wind:
+
+```{code-cell} ipython3
+ramp = np.linspace(0, 70, 100)
+ray = level1.simulate_iq(ramp[None, :], width=2.0, power=300.0, noise=1.0, n_pulses=64,
+                         wavelength=0.1, prt=1e-3, dims=("azimuth", "range"), seed=5)
+ray_spectra = level1.doppler_spectra(ray)
+unfolded = level1.dealias_spectra(ray_spectra)
+with_reference = level1.dealias_spectra(ray_spectra, reference=xr.DataArray(ramp + 5.0, dims="range"))
+print(f"unfolded within 4 m/s: {float((abs(unfolded.VRADH - ramp) < 4).mean()):.2f}, "
+      f"with a reference {float((abs(with_reference.VRADH - ramp) < 4).mean()):.2f}; "
+      f"largest fold {int(unfolded.FOLD.max())}")
+```
 
 ## References
 
