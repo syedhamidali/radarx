@@ -200,6 +200,9 @@ notebooks/Superobs_Data_Assimilation
 :caption: Gridding and radar networks
 
 notebooks/Multi_Radar_Grid
+notebooks/Beam_Weighted_Gridding
+notebooks/Blockage_Weighted_Merge
+notebooks/Mixed_Order_Gridding
 notebooks/Radar_UGRID_uxarray
 ```
 
@@ -210,6 +213,8 @@ notebooks/Radar_UGRID_uxarray
 notebooks/Single_Doppler_Winds
 notebooks/Tropical_Cyclone_Winds
 notebooks/Multi_Doppler
+notebooks/Terrain_Following_Multi_Doppler
+notebooks/Velocity_Error_Model
 notebooks/Azimuthal_Shear
 ```
 

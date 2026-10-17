@@ -177,7 +177,8 @@ which is a projection on the beam, is mixed less with gates of other directions,
 and sharp edges stay sharp. The radius of influence still decides which gates
 take part. Radial velocity of the same volume at 2 km, gridded with the
 Cressman weights and with the beam weights, and the difference to the cone grid,
-which reproduces the gates:
+which reproduces the gates (the [beam-weighted gridding notebook](Beam_Weighted_Gridding)
+shows it on its own):
 
 ```{code-cell} ipython3
 def mask_velocity(ds):
