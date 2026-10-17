@@ -2921,5 +2921,141 @@
   "pages": "343-353",
   "publisher": "Springer International Publishing",
   "doi": "10.1007/978-3-030-24568-9_19"
+ },
+ "10.5194/hess-13-195-2009": {
+  "authors": [
+   "Goudenhoofdt, E.",
+   "Delobbe, L."
+  ],
+  "year": 2009,
+  "title": "Evaluation of radar-gauge merging methods for quantitative precipitation estimates",
+  "type": "article",
+  "journal": "Hydrology and Earth System Sciences",
+  "volume": "13",
+  "issue": "2",
+  "pages": "195-203",
+  "doi": "10.5194/hess-13-195-2009"
+ },
+ "10.1002/asl.85": {
+  "authors": [
+   "Sinclair, S.",
+   "Pegram, G."
+  ],
+  "year": 2005,
+  "title": "Combining radar and rain gauge rainfall estimates using conditional merging",
+  "type": "article",
+  "journal": "Atmospheric Science Letters",
+  "volume": "6",
+  "issue": "1",
+  "pages": "19-22",
+  "doi": "10.1002/asl.85"
+ },
+ "10.1175/1520-0450(1975)014<1339:OREWTA>2.0.CO;2": {
+  "authors": [
+   "Brandes, E. A."
+  ],
+  "year": 1975,
+  "title": "Optimizing Rainfall Estimates with the Aid of Radar",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology",
+  "volume": "14",
+  "issue": "7",
+  "pages": "1339-1345",
+  "doi": "10.1175/1520-0450(1975)014<1339:OREWTA>2.0.CO;2"
+ },
+ "10.1175/1520-0450(1991)030<0397:EOTMFB>2.0.CO;2": {
+  "authors": [
+   "Smith, J. A.",
+   "Krajewski, W. F."
+  ],
+  "year": 1991,
+  "title": "Estimation of the Mean Field Bias of Radar Rainfall Estimates",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology",
+  "volume": "30",
+  "issue": "4",
+  "pages": "397-412",
+  "doi": "10.1175/1520-0450(1991)030<0397:EOTMFB>2.0.CO;2"
+ },
+ "10.1007/978-3-662-05294-5": {
+  "authors": [
+   "Wackernagel, H."
+  ],
+  "year": 2003,
+  "title": "Multivariate Geostatistics",
+  "type": "book",
+  "publisher": "Springer Berlin Heidelberg",
+  "doi": "10.1007/978-3-662-05294-5"
+ },
+ "10.1007/BF01032109": {
+  "authors": [
+   "Cressie, N."
+  ],
+  "year": 1985,
+  "title": "Fitting variogram models by weighted least squares",
+  "type": "article",
+  "journal": "Journal of the International Association for Mathematical Geology",
+  "volume": "17",
+  "issue": "5",
+  "pages": "563-586",
+  "doi": "10.1007/BF01032109"
+ },
+ "10.2113/gsecongeo.58.8.1246": {
+  "authors": [
+   "Matheron, G."
+  ],
+  "year": 1963,
+  "title": "Principles of geostatistics",
+  "type": "article",
+  "journal": "Economic Geology",
+  "volume": "58",
+  "issue": "8",
+  "pages": "1246-1266",
+  "doi": "10.2113/gsecongeo.58.8.1246"
+ },
+ "10.1016/S0022-1694(00)00144-X": {
+  "authors": [
+   "Goovaerts, P."
+  ],
+  "year": 2000,
+  "title": "Geostatistical approaches for incorporating elevation into the spatial interpolation of rainfall",
+  "type": "article",
+  "journal": "Journal of Hydrology",
+  "volume": "228",
+  "issue": "1-2",
+  "pages": "113-129",
+  "doi": "10.1016/S0022-1694(00)00144-X"
+ },
+ "10.5194/amt-14-3169-2021": {
+  "authors": [
+   "Wolfensberger, D.",
+   "Gabella, M.",
+   "Boscacci, M.",
+   "Germann, U.",
+   "Berne, A."
+  ],
+  "year": 2021,
+  "title": "RainForest: a random forest algorithm for quantitative precipitation estimation over Switzerland",
+  "type": "article",
+  "journal": "Atmospheric Measurement Techniques",
+  "volume": "14",
+  "issue": "4",
+  "pages": "3169-3193",
+  "doi": "10.5194/amt-14-3169-2021"
+ },
+ "10.1175/2009JAMC2172.1": {
+  "authors": [
+   "Vulpiani, G.",
+   "Giangrande, S.",
+   "Marzano, F. S."
+  ],
+  "year": 2009,
+  "title": "Rainfall Estimation from Polarimetric S-Band Radar Measurements: Validation of a Neural Network Approach",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology and Climatology",
+  "volume": "48",
+  "issue": "10",
+  "pages": "2022-2036",
+  "doi": "10.1175/2009JAMC2172.1"
  }
 }

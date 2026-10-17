@@ -2305,6 +2305,9 @@ notebooks or from this index.
 | `to_radar_grid` | `radarx.retrieve.forward_operator` | [part 3](Radar_Workflow_Advanced_2): 14. Forward operator for WRF and MPAS output |
 | `wrf_state` | `radarx.retrieve.forward_operator` | [part 3](Radar_Workflow_Advanced_2): 14. Forward operator for WRF and MPAS output |
 | `mpas_state` | `radarx.retrieve.forward_operator` | [part 3](Radar_Workflow_Advanced_2): 14. Forward operator for WRF and MPAS output |
+| `gauge_adjust` | `radarx.retrieve.gauge` | [part 3](Radar_Workflow_Advanced_2): 19. Radar-gauge merging |
+| `gauge_variogram` | `radarx.retrieve.gauge` | [part 3](Radar_Workflow_Advanced_2): 19. Radar-gauge merging |
+| `radar_at_gauges` | `radarx.retrieve.gauge` | [part 3](Radar_Workflow_Advanced_2): 19. Radar-gauge merging |
 | `hail_kinetic_energy` | `radarx.retrieve.hail` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `hail_products` | `radarx.retrieve.hail` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `mesh` | `radarx.retrieve.hail` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
@@ -2339,6 +2342,7 @@ notebooks or from this index.
 | `rain_rate_kdp` | `radarx.retrieve.qpe` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
 | `rain_rate_z` | `radarx.retrieve.qpe` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
 | `rain_rate_z_zdr` | `radarx.retrieve.qpe` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
+| `rain_rate_ml` | `radarx.retrieve.qpe_ml` | [part 3](Radar_Workflow_Advanced_2): 20. Machine-learning rain rate |
 | `rain_shaft` | `radarx.retrieve.rain_collisions` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `rain_source_points` | `radarx.retrieve.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `rain_trajectories` | `radarx.retrieve.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
@@ -2436,6 +2440,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.estimate_motion` | [core](Radar_Workflow): 11. Storm motion, common analysis time and time interpolation |
 | `.radarx.evaporation` | [core](Radar_Workflow): 13. Evaporation |
 | `.radarx.forward_operator` | [part 3](Radar_Workflow_Advanced_2): 14. Forward operator for WRF and MPAS output |
+| `.radarx.gauge_adjust` | [part 3](Radar_Workflow_Advanced_2): 19. Radar-gauge merging |
 | `.radarx.gbvtd` | [part 3](Radar_Workflow_Advanced_2): 13. Tropical-cyclone winds from one radar |
 | `.radarx.grid_gates` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `.radarx.grid_lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
@@ -2479,6 +2484,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.rain_rate` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
 | `.radarx.rain_rate_a` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
 | `.radarx.rain_rate_kdp` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
+| `.radarx.rain_rate_ml` | [part 3](Radar_Workflow_Advanced_2): 20. Machine-learning rain rate |
 | `.radarx.rain_rate_z` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
 | `.radarx.rain_rate_z_zdr` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
 | `.radarx.rain_shaft` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |

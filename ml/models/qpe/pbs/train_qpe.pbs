@@ -1,0 +1,34 @@
+#!/bin/bash
+#PBS -N qpe_train
+#PBS -q cccr
+#PBS -l select=1:ncpus=96
+#PBS -l walltime=03:00:00
+#PBS -j oe
+#PBS -o /home/users/hamid/radarx_qpe/logs/
+# Train, export and evaluate the rain rate network of radarx.retrieve.rain_rate_ml
+# on simulated drop size distributions (ml/models/qpe). Submit with
+#   qsub ml/models/qpe/pbs/train_qpe.pbs
+# RADARX_SRC is a checkout of the radarx branch; RUN names the run.
+W=/home/users/hamid/radarx_qpe
+RADARX_SRC=${RADARX_SRC:-$W/radarx_src}
+RUN=${RUN:-sim-v1}
+EPOCHS=${EPOCHS:-60}
+mkdir -p $W/logs $W/runs
+export http_proxy=http://10.128.13.249:3128 https_proxy=http://10.128.13.249:3128
+. /home/users/hamid/miniconda3/etc/profile.d/conda.sh
+if ! conda env list | grep -q radarx_qpe; then
+    conda create -y -n radarx_qpe -c conda-forge --override-channels \
+        python=3.12 numpy scipy xarray pyproj pooch matplotlib pybind11 setuptools \
+        setuptools-scm onnx onnxruntime cmweather lat_lon_parser netCDF4 xmltodict boto3 cartopy
+    conda run -n radarx_qpe pip install xradar torch --index-url https://download.pytorch.org/whl/cpu \
+        --extra-index-url https://pypi.org/simple
+fi
+conda activate radarx_qpe
+cd $RADARX_SRC
+python setup.py build_ext --inplace > $W/logs/build_$RUN.log 2>&1 || exit 1
+export PYTHONPATH=$RADARX_SRC
+cd $RADARX_SRC/ml/models/qpe
+OUT=$W/runs/$RUN
+python train.py --out $OUT --epochs $EPOCHS --threads 96 > $W/logs/train_$RUN.log 2>&1 || exit 1
+python export.py $OUT $OUT/radarx-qpe-v1.onnx > $W/logs/export_$RUN.log 2>&1 || exit 1
+python evaluate.py $OUT/radarx-qpe-v1.onnx --out $OUT --figure > $W/logs/evaluate_$RUN.log 2>&1
