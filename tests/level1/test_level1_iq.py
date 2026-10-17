@@ -168,11 +168,12 @@ def test_read_netcdf_and_zarr(tmp_path):
         level1.read_iq(tmp_path / "iq2.nc")
     zarr = pytest.importorskip("zarr")  # noqa: F841
     store = tmp_path / "iq.zarr"
-    ds.to_zarr(store)
+    ds.to_zarr(store, encoding={v: {"chunks": ds[v].shape} for v in ds.data_vars})
     lazy = level1.read_iq(store)
     np.testing.assert_array_equal(lazy.values.real, i.astype(np.float32))
     zstore = tmp_path / "cplx.zarr"
-    xr.Dataset({"IQ": (dims, (i + 1j * q).astype(np.complex64))}).to_zarr(zstore)
+    cds = xr.Dataset({"IQ": (dims, (i + 1j * q).astype(np.complex64))})
+    cds.to_zarr(zstore, encoding={"IQ": {"chunks": cds.IQ.shape}})
     lazy = level1.read_iq(zstore, wavelength=WAVELENGTH)
     np.testing.assert_array_equal(lazy.values, (i + 1j * q).astype(np.complex64))
 
