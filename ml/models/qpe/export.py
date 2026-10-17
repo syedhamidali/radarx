@@ -31,7 +31,9 @@ def export(run, path):
     features = json.loads((run / "features.json").read_text())
     history = json.loads((run / "history.json").read_text())
     net = QPENet(features, tuple(history["args"]["hidden"]))
-    net.load_state_dict(torch.load(run / "model.pt", map_location="cpu"))
+    net.load_state_dict(
+        torch.load(run / "model.pt", map_location="cpu", weights_only=True)
+    )
     net.eval()
     x = torch.zeros(2, len(features))
     x[:, 3 if "rhohv" in features else 0] = 0.98
