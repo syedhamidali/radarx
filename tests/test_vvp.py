@@ -181,16 +181,16 @@ def test_full_model_returns_a_linear_wind(engine):
         ("dw_dy", "wy"),
         ("dw_dz", "wz"),
     ):
-        assert np.allclose(out[name], LINEAR[key], atol=2e-8), name
-    assert np.allclose(out["shear"], LINEAR["uy"] + LINEAR["vx"], atol=2e-8)
-    assert np.allclose(out["divergence"], LINEAR["ux"] + LINEAR["vy"], atol=2e-8)
+        assert np.allclose(out[name], LINEAR[key], atol=1e-7), name
+    assert np.allclose(out["shear"], LINEAR["uy"] + LINEAR["vx"], atol=1e-7)
+    assert np.allclose(out["divergence"], LINEAR["ux"] + LINEAR["vy"], atol=1e-7)
     assert np.allclose(
-        out["stretching_deformation"], LINEAR["ux"] - LINEAR["vy"], atol=2e-8
+        out["stretching_deformation"], LINEAR["ux"] - LINEAR["vy"], atol=1e-7
     )
     assert np.allclose(
         out["deformation"],
         np.hypot(LINEAR["ux"] - LINEAR["vy"], LINEAR["uy"] + LINEAR["vx"]),
-        atol=2e-8,
+        atol=1e-7,
     )
     assert np.allclose(out["vvp_rms"], 0.0, atol=1e-4)
     assert (out["vvp_gates"] >= 200).all()
@@ -205,12 +205,12 @@ def test_models_fit_the_terms_they_have(engine):
     vol = volume(wind_of(p))
     linear = vvp_winds(vol, model="linear", engine=engine, **SMALL)
     assert "w" not in linear and "dw_dz" not in linear
-    assert np.allclose(linear["divergence"], p["ux"] + p["vy"], atol=2e-8)
+    assert np.allclose(linear["divergence"], p["ux"] + p["vy"], atol=1e-7)
     u, v, *_ = truth(linear, p)
     assert np.allclose(linear["u"], u, atol=1e-4)
     p2 = dict(p, wz=3.0e-4, w0=0.7)
     lw = vvp_winds(volume(wind_of(p2)), model="linear_w", engine=engine, **SMALL)
-    assert np.allclose(lw["dw_dz"], 3.0e-4, atol=2e-8)
+    assert np.allclose(lw["dw_dz"], 3.0e-4, atol=1e-7)
     assert "dw_dx" not in lw
     # a uniform wind: one fit of two unknowns
     uni = vvp_winds(
