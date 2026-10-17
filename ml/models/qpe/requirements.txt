@@ -1,5 +1,5 @@
 # training and evaluation of the rain rate network (not needed to use radarx)
-torch>=2.6
-onnx>=1.21
-onnxruntime>=1.22
+torch>=2.8
+onnx>=1.22
+onnxruntime>=1.23
 matplotlib
