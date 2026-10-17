@@ -32,7 +32,11 @@ class ParallelBuildExt(build_ext):
 
 extra_compile_args = []
 if sys.platform != "win32":
-    extra_compile_args = ["-O3"]
+    # Read the Docs compiles the kernels inside a 15 minute build limit, so
+    # it gets a fast compile; wheels and local installs keep -O3.
+    # RADARX_OPT_LEVEL overrides both.
+    default_level = "1" if os.environ.get("READTHEDOCS") == "True" else "3"
+    extra_compile_args = ["-O" + os.environ.get("RADARX_OPT_LEVEL", default_level)]
 
 kernels = sorted(Path("radarx").rglob("_*.cpp"))
 
