@@ -2355,6 +2355,8 @@ notebooks or from this index.
 | `llsd` | `radarx.retrieve.shear` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `radial_divergence` | `radarx.retrieve.shear` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `single_doppler_winds` | `radarx.retrieve.single_doppler` | [part 3](Radar_Workflow_Advanced_2): 8. Wind from a single Doppler radar |
+| `tc_ring_stats` | `radarx.retrieve.tc_diagnostics` | [part 3](Radar_Workflow_Advanced_2): 13. Tropical-cyclone winds from one radar |
+| `tc_structure` | `radarx.retrieve.tc_diagnostics` | [part 3](Radar_Workflow_Advanced_2): 13. Tropical-cyclone winds from one radar |
 | `gbvtd` | `radarx.retrieve.tc_winds` | [part 3](Radar_Workflow_Advanced_2): 13. Tropical-cyclone winds from one radar |
 | `synthetic_vortex` | `radarx.retrieve.tc_winds` | [part 3](Radar_Workflow_Advanced_2): 13. Tropical-cyclone winds from one radar |
 | `tc_center` | `radarx.retrieve.tc_winds` | [part 3](Radar_Workflow_Advanced_2): 13. Tropical-cyclone winds from one radar |
@@ -2376,6 +2378,7 @@ notebooks or from this index.
 | `liquid_water_content` | `radarx.retrieve.vil` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `vil` | `radarx.retrieve.vil` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `vil_density` | `radarx.retrieve.vil` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
+| `vvp_winds` | `radarx.retrieve.vvp` | [part 3](Radar_Workflow_Advanced_2): 20. Volume velocity processing |
 | `bulk_shear` | `radarx.retrieve.wind_profile` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
 | `bunkers_storm_motion` | `radarx.retrieve.wind_profile` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
 | `layer_mean_wind` | `radarx.retrieve.wind_profile` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
@@ -2501,10 +2504,13 @@ The methods of the `.radarx` accessors:
 | `.radarx.to_radar_grid` | [part 3](Radar_Workflow_Advanced_2): 14. Forward operator for WRF and MPAS output |
 | `.radarx.to_uxarray` | [core](Radar_Workflow): 10. Cone gridding, Max-CAPPI, interactive view and UGRID |
 | `.radarx.to_zarr` | [part 3](Radar_Workflow_Advanced_2): 12. Export to files |
+| `.radarx.tc_ring_stats` | [part 3](Radar_Workflow_Advanced_2): 13. Tropical-cyclone winds from one radar |
+| `.radarx.tc_structure` | [part 3](Radar_Workflow_Advanced_2): 13. Tropical-cyclone winds from one radar |
 | `.radarx.tc_center` | [part 3](Radar_Workflow_Advanced_2): 13. Tropical-cyclone winds from one radar |
 | `.radarx.tornado_probability` | [part 3](Radar_Workflow_Advanced_2): 7. Tornado detection and biological echo |
 | `.radarx.trajectories` | [part 3](Radar_Workflow_Advanced_2): 9. Diabatic Lagrangian analysis |
 | `.radarx.vad_profile` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
+| `.radarx.vvp_winds` | [part 3](Radar_Workflow_Advanced_2): 20. Volume velocity processing |
 | `.radarx.vil` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.vil_density` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.z_offset` | [core](Radar_Workflow): 15. Noise and calibration |

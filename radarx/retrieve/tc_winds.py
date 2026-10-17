@@ -78,8 +78,8 @@ application to Typhoon Alex. The temporal steps of Bell and Lee (polynomial
 fits over time and the simplex centre likelihood, their sections 3b and 3c)
 need a series of volumes and are not implemented. Not implemented either: the
 modified GBVTD that retrieves the cross-beam mean wind (Chen et al. 2013,
-MGBVTD), the extended GBVTD with two radars (Liou et al. 2005), and diagnostics
-of the eyewall or the rainbands.
+MGBVTD) and the extended GBVTD with two radars (Liou et al. 2005). The eyewall
+and rainband diagnostics are in :mod:`radarx.retrieve.tc_diagnostics`.
 
 Geometry and the equations
 --------------------------

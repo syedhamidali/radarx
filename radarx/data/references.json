@@ -590,6 +590,49 @@
   "pages": "396-409",
   "doi": "10.1175/1520-0450(1964)003<0396:ATFMDI>2.0.CO;2"
  },
+ "10.1175/1520-0450(1979)018<0532:OTAOSD>2.0.CO;2": {
+  "authors": [
+   "Waldteufel, P.",
+   "Corbin, H."
+  ],
+  "year": 1979,
+  "title": "On the Analysis of Single-Doppler Radar Data",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology",
+  "volume": "18",
+  "issue": "4",
+  "pages": "532-542",
+  "doi": "10.1175/1520-0450(1979)018<0532:OTAOSD>2.0.CO;2"
+ },
+ "10.1175/1520-0469(1982)039<0395:CEWSWM>2.0.CO;2": {
+  "authors": [
+   "Willoughby, H. E.",
+   "Clos, J. A.",
+   "Shoreibah, M. G."
+  ],
+  "year": 1982,
+  "title": "Concentric Eye Walls, Secondary Wind Maxima, and the Evolution of the Hurricane Vortex",
+  "type": "article",
+  "journal": "Journal of the Atmospheric Sciences",
+  "volume": "39",
+  "issue": "2",
+  "pages": "395-411",
+  "doi": "10.1175/1520-0469(1982)039<0395:CEWSWM>2.0.CO;2"
+ },
+ "10.1175/1520-0469(2001)058<1079:TDRITK>2.0.CO;2": {
+  "authors": [
+   "Kossin, J. P.",
+   "Eastin, M. D."
+  ],
+  "year": 2001,
+  "title": "Two Distinct Regimes in the Kinematic and Thermodynamic Structure of the Hurricane Eye and Eyewall",
+  "type": "article",
+  "journal": "Journal of the Atmospheric Sciences",
+  "volume": "58",
+  "issue": "9",
+  "pages": "1079-1090",
+  "doi": "10.1175/1520-0469(2001)058<1079:TDRITK>2.0.CO;2"
+ },
  "10.1175/1520-0493(1959)087<0367:AOOAS>2.0.CO;2": {
   "authors": [
    "Cressman, G. P."

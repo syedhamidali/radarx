@@ -130,6 +130,7 @@ dask arrays.
 | Lazy | `radarx.retrieve.beam_path` | `beam_path` |
 | Lazy | `radarx.retrieve.forward_operator` | `forward_operator`, `to_radar_grid` |
 | Lazy | `radarx.retrieve.rain_collisions` | `rain_shaft` |
+| Lazy | `radarx.retrieve.tc_diagnostics` | `tc_ring_stats` |
 | Lazy | `radarx.retrieve.tc_winds` | `gbvtd`, `tc_center`, `tc_decompose` |
 | Computes | `radarx.grid.cone` | `grid_cones` |
 | Computes | `radarx.grid.gates` | `grid_gates`, `grid_rhi` |
@@ -157,11 +158,13 @@ dask arrays.
 | Computes | `radarx.retrieve.single_doppler` | `single_doppler_winds` |
 | Computes | `radarx.retrieve.tornado` | `tornado_probability`, `tornet_inputs` |
 | Computes | `radarx.retrieve.vertical_profiles` | `cvp`, `mask_above_melting_layer`, `melting_layer`, `melting_layer_ppi`, `qvp_timeseries`, `rd_qvp`, `rhi_qvp` |
+| Computes | `radarx.retrieve.vvp` | `vvp_winds` |
 | Computes | `radarx.retrieve.wind_profile` | `vad_profile` |
 | Computes | `radarx.retrieve.zdr_arc` | `zdr_arc` |
 | Computes, cannot be lazy | `radarx.retrieve.lightning` | `cell_flash_rate`, `cluster_flashes` |
 | Computes, cannot be lazy | `radarx.retrieve.rain_trajectories` | `rain_source_points`, `trajectory_matched_times` |
 | Computes, cannot be lazy | `radarx.retrieve.superobs` | `superobs` |
+| Computes, cannot be lazy | `radarx.retrieve.tc_diagnostics` | `tc_structure` |
 | Computes, cannot be lazy | `radarx.retrieve.tornado` | `rotation_couplets` |
 
 ```{toctree}
