@@ -315,32 +315,12 @@ def melting_layer_gradient(
     >>> layer = radarx.retrieve.melting_layer_gradient(profile)  # doctest: +SKIP
     """
     use_compiled = _use_compiled(engine)
-    if not isinstance(profiles, xr.Dataset) or "height" not in profiles.dims:
-        raise ValueError("profiles must be a Dataset with a 'height' dimension.")
-    names = {}
-    for key, value, cands, std in (
-        ("dbz", dbz, _DBZ_NAMES, _DBZ_STANDARD),
-        ("rhohv", rhohv, _RHOHV_NAMES, _RHOHV_STANDARD),
-        ("zdr", zdr, _ZDR_NAMES, _ZDR_STANDARD),
-    ):
-        names[key] = _resolve_field(profiles, value, cands, std, key)
-        if names[key] is None:
-            raise ValueError(f"melting_layer_gradient needs a {key} profile.")
+    names = _field_names(profiles, dbz, rhohv, zdr)
     h = np.asarray(profiles["height"].values, dtype=np.float64)
     if np.any(np.diff(h) <= 0):
         raise ValueError("height must be strictly ascending.")
-    keep = np.ones(h.size, dtype=bool)
-    if height_range is not None:
-        if len(height_range) != 2 or not height_range[0] < height_range[1]:
-            raise ValueError("height_range must be (lowest, highest) in metres.")
-        keep = (h >= height_range[0]) & (h <= height_range[1])
-    if keep.sum() < 3:
-        raise ValueError("a profile needs at least three heights.")
-    window = np.inf
-    if top_window is not None:
-        window = float(top_window)
-        if not window >= 0.0:
-            raise ValueError("top_window must not be negative.")
+    keep = _height_selection(h, height_range)
+    window = _search_window(top_window)
     template = profiles[names["dbz"]]
     other = [d for d in template.dims if d != "height"]
     shape = tuple(template.sizes[d] for d in other)
@@ -353,57 +333,97 @@ def melting_layer_gradient(
     zh, zd, rho = (as2d(names[k]) for k in ("dbz", "zdr", "rhohv"))
     hk = np.ascontiguousarray(h[keep])
     if use_compiled:
-        bottom, top, step = _kernel.melting_layer_gradient(
+        found = _kernel.melting_layer_gradient(
             zh, zd, rho, hk, window, n_threads=int(n_threads or 0)
         )
     else:
-        bottom, top, step = _detect_numpy(zh, zd, rho, hk, window)
+        found = _detect_numpy(zh, zd, rho, hk, window)
+    layer = _layer(hk, *found)
+    coords = {n: c for n, c in template.coords.items() if "height" not in c.dims}
+    return fields_as_float32(_layer_dataset(layer, other, shape, coords))
+
+
+def _field_names(profiles, dbz, rhohv, zdr):
+    """Names of the Z, rhohv and ZDR profiles of a Dataset with ``height``."""
+    if not isinstance(profiles, xr.Dataset) or "height" not in profiles.dims:
+        raise ValueError("profiles must be a Dataset with a 'height' dimension.")
+    names = {}
+    for key, value, cands, std in (
+        ("dbz", dbz, _DBZ_NAMES, _DBZ_STANDARD),
+        ("rhohv", rhohv, _RHOHV_NAMES, _RHOHV_STANDARD),
+        ("zdr", zdr, _ZDR_NAMES, _ZDR_STANDARD),
+    ):
+        names[key] = _resolve_field(profiles, value, cands, std, key)
+        if names[key] is None:
+            raise ValueError(f"melting_layer_gradient needs a {key} profile.")
+    return names
+
+
+def _height_selection(h, height_range):
+    """Boolean mask of the heights used."""
+    keep = np.ones(h.size, dtype=bool)
+    if height_range is not None:
+        if len(height_range) != 2 or not height_range[0] < height_range[1]:
+            raise ValueError("height_range must be (lowest, highest) in metres.")
+        keep = (h >= height_range[0]) & (h <= height_range[1])
+    if keep.sum() < 3:
+        raise ValueError("a profile needs at least three heights.")
+    return keep
+
+
+def _search_window(top_window):
+    """The window of step 4 in metres (infinite for ``None``)."""
+    if top_window is None:
+        return np.inf
+    window = float(top_window)
+    if not window >= 0.0:
+        raise ValueError("top_window must not be negative.")
+    return window
+
+
+def _layer(h, bottom, top, step):
+    """Heights, flag and step from the gate indices of the detection."""
     found = bottom >= 0
-    top_h = np.where(found, hk[np.where(found, top, 0)], np.nan)
-    bottom_h = np.where(found, hk[np.where(found, bottom, 0)], np.nan)
+    top_h = np.where(found, h[np.where(found, top, 0)], np.nan)
+    bottom_h = np.where(found, h[np.where(found, bottom, 0)], np.nan)
     consistent = found & (top_h > bottom_h)
     flag = np.where(consistent, FLAGS["detected"], FLAGS["none"])
     flag = np.where(found & ~consistent, FLAGS["inconsistent"], flag)
-    top_h = np.where(consistent, top_h, np.nan)
-    bottom_h = np.where(consistent, bottom_h, np.nan)
-    step = np.where(consistent, step, 0)
-    coords = {n: c for n, c in template.coords.items() if "height" not in c.dims}
+    return {
+        "top": np.where(consistent, top_h, np.nan),
+        "bottom": np.where(consistent, bottom_h, np.nan),
+        "flag": flag.astype(np.int8),
+        "step": np.where(consistent, step, 0).astype(np.int8),
+    }
+
+
+def _layer_dataset(layer, dims, shape, coords):
+    """Dataset of the layer variables on ``dims``."""
     height = dict(standard_name="altitude", units="m")
+    top, bottom = layer["top"], layer["bottom"]
+
+    def wrap(values, long_name, **attrs):
+        return _wrap(values.reshape(shape), dims, coords, long_name, **attrs)
+
     out = xr.Dataset(
         {
-            "melting_layer_top": _wrap(
-                top_h.reshape(shape),
-                other,
-                coords,
-                "melting layer top above sea level",
-                **height,
+            "melting_layer_top": wrap(
+                top, "melting layer top above sea level", **height
             ),
-            "melting_layer_bottom": _wrap(
-                bottom_h.reshape(shape),
-                other,
-                coords,
-                "melting layer bottom above sea level",
-                **height,
+            "melting_layer_bottom": wrap(
+                bottom, "melting layer bottom above sea level", **height
             ),
-            "melting_layer_thickness": _wrap(
-                (top_h - bottom_h).reshape(shape),
-                other,
-                coords,
-                "thickness of the melting layer",
-                units="m",
+            "melting_layer_thickness": wrap(
+                top - bottom, "thickness of the melting layer", units="m"
             ),
-            "melting_layer_flag": _wrap(
-                flag.astype(np.int8).reshape(shape),
-                other,
-                coords,
+            "melting_layer_flag": wrap(
+                layer["flag"],
                 "melting layer detection flag",
                 flag_values=np.array(list(FLAGS.values()), dtype=np.int8),
                 flag_meanings=" ".join(FLAGS),
             ),
-            "melting_layer_top_step": _wrap(
-                step.astype(np.int8).reshape(shape),
-                other,
-                coords,
+            "melting_layer_top_step": wrap(
+                layer["step"],
                 "step of the algorithm that gave the melting layer top",
                 comment="3: the gradients agree; 4: the gradient of Z or of rhohv "
                 "gives a higher top; 5: the gate above the agreeing minima; 0: no layer",
@@ -411,7 +431,7 @@ def melting_layer_gradient(
         }
     )
     out.attrs["melting_layer_method"] = "gradients of Z, ZDR and rhohv"
-    return fields_as_float32(out)
+    return out
 
 
 @dask_support("computes", "the profile averages over all gates of the scan.")
