@@ -209,7 +209,8 @@ for (dm0, lwc, shape_mu), color in zip(((2.5, 2.0, 3.0), (4.0, 3.0, 6.0), (0.6, 
                                        (OKABE["blue"], OKABE["orange"], OKABE["green"])):
     lam = ((shape_mu + 3) * (shape_mu + 2) * (shape_mu + 1)) ** (1 / 3) / dm0
     shape = d_bins**shape_mu * np.exp(-lam * d_bins)
-    scale = lwc / np.trapezoid(np.pi / 6 * 1e-3 * d_bins**3 * shape, d_bins)
+    mass = np.pi / 6 * 1e-3 * d_bins**3 * shape
+    scale = lwc / np.sum(0.5 * (mass[1:] + mass[:-1]) * np.diff(d_bins))
     top = xr.DataArray(shape * scale, dims="diameter", coords={"diameter": d_bins})
     bins = rain_shaft(top, depth=depths)
     dm_bin = (6e-3 * bins.liquid_water_content / (np.pi * 1000 * bins.number_concentration)) ** (1 / 3) * 1e3

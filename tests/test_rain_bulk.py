@@ -291,7 +291,8 @@ def test_same_form_as_rain_shaft_output_and_comparison_with_the_bin_model():
     mu, dm0, lw = 3.0, 2.5, 2.0
     lam = ((mu + 3) * (mu + 2) * (mu + 1)) ** (1 / 3) / dm0
     shape = d**mu * np.exp(-lam * d)
-    w = np.trapezoid(np.pi / 6 * 1e-3 * d**3 * shape, d)
+    y = np.pi / 6 * 1e-3 * d**3 * shape
+    w = float(np.sum(0.5 * (y[1:] + y[:-1]) * np.diff(d)))
     nd = xr.DataArray(
         shape * lw / w, dims="diameter", coords={"diameter": ("diameter", d)}
     )
