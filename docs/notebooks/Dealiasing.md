@@ -45,7 +45,7 @@ import xradar as xd
 from xradar.io.backends.nexrad_level2 import NEXRADLevel2File
 
 import radarx  # noqa: F401
-from radarx.io.aws_data import download_file
+from open_radar_data import DATASETS
 ```
 
 ## A strongly aliased case
@@ -55,9 +55,7 @@ low-level jet, with radial velocities well beyond the Nyquist velocity of
 26.4 m/s.
 
 ```{code-cell} ipython3
-path = download_file(
-    "unidata-nexrad-level2", "2022/03/30/KGWX/KGWX20220330_234639_V06", "."
-)
+path = DATASETS.fetch("KGWX20220330_234639_V06")
 dtree = xd.io.open_nexradlevel2_datatree(path)
 ```
 

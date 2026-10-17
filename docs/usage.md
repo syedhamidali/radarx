@@ -200,13 +200,19 @@ notebooks/Exporting_Results
 :caption: Quality control and preprocessing
 
 notebooks/Echo_QC
+notebooks/Echo_Classifier_Gourley
+notebooks/Noise_and_Calibration
 notebooks/Dealiasing
+notebooks/Dealiasing_Region_Fixes
+notebooks/Dealiasing_Methods
 notebooks/KDP
 notebooks/Attenuation_Correction
 notebooks/Beam_Blockage
 notebooks/Beam_Refraction
+notebooks/Refractivity_Ducts
 notebooks/Advection_Correction
 notebooks/Superobs_Data_Assimilation
+notebooks/Level_I_Processing
 ```
 
 ```{toctree}
@@ -226,6 +232,7 @@ notebooks/Radar_UGRID_uxarray
 
 notebooks/Single_Doppler_Winds
 notebooks/Tropical_Cyclone_Winds
+notebooks/Volume_Velocity_Processing
 notebooks/Multi_Doppler
 notebooks/Terrain_Following_Multi_Doppler
 notebooks/Velocity_Error_Model
@@ -239,6 +246,7 @@ notebooks/Azimuthal_Shear
 notebooks/Hydrometeor_Classification
 notebooks/DSD_Retrieval
 notebooks/DSD_Canting_Sensitivity
+notebooks/DSD_Cao_Comparison
 notebooks/TMatrix_Validation
 notebooks/TMatrix_Textbook_Examples
 notebooks/TMatrix_Radar_Bands
@@ -247,8 +255,10 @@ notebooks/QVP
 notebooks/Evaporation
 notebooks/Rain_Size_Sorting
 notebooks/Rain_Collisions
+notebooks/Two_Moment_Rain_Shaft
 notebooks/Bayesian_DSD
 notebooks/Rainfall_Estimation
+notebooks/Gauge_Adjustment
 ```
 
 ```{toctree}
@@ -281,15 +291,19 @@ notebooks/VIL_Operational_Layers
 notebooks/ZDR_Column
 notebooks/ZDR_Arc
 notebooks/KDP_Columns
+notebooks/ZDR_KDP_Column_Sections
 notebooks/Size_Sorting
 notebooks/Cell_Tracking
 ```
 
 ```{toctree}
 :maxdepth: 2
-:caption: Model verification
+:caption: Model verification, nowcasting and satellite comparison
 
 notebooks/Forward_Operator
+notebooks/Ensemble_Uncertainty
+notebooks/Nowcasting
+notebooks/Satellite_Matching
 ```
 
 ```{toctree}
@@ -298,6 +312,7 @@ notebooks/Forward_Operator
 
 notebooks/Machine_Learning
 notebooks/ML_KDP
+notebooks/ML_Rainfall_Estimation
 notebooks/ML_Single_Doppler
 ```
 
