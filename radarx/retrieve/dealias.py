@@ -28,7 +28,16 @@ concepts quoted here are not checked against the papers.
    whose velocities differ by less than ``threshold * Vn`` are joined with a
    union-find. Inside such a region the field is continuous, so all its gates
    share one fold. Velocity jumps of about :math:`2 V_n` (fold lines) separate
-   regions. The default ``threshold=0.3`` is radarx's own choice.
+   regions. The default ``threshold=0.3`` is radarx's own choice. A thin
+   neck of gates with in-between velocities (a vortex core, a gradient
+   across a fold line) can join the two sides of a fold line through a chain
+   of small steps and make one region of two blocks that are a fold apart.
+   Only the gates joined to all four neighbours (their cores) connect
+   regions, and only cores of at least 1000 gates; every other gate takes the
+   region of the neighbour it matches best. Two blocks joined by a neck then
+   stay two regions and the boundary between them decides their folds. A
+   sweep without a core of that size is segmented by the joins alone
+   (radarx choices).
 2. **Region graph.** For every pair of touching regions, the number of
    boundary gate pairs and the summed velocity jump across the boundary are
    accumulated. Regions separated by short gaps of empty gates (along or
@@ -235,6 +244,8 @@ _DISAGREE_GATE = (
 _DISAGREE_BLOCK = 1.5  # median of that ratio in a block that is a fold apart
 _DISAGREE_MIN_GATES = 1000  # connected gates of a block that is reported
 _MAX_RAY_GAP = 10  # empty rays bridged between regions
+_CORE_SIZE = 1000  # gates of a core that can seed a region (the same in the kernel)
+_CORE_JOINS = 4  # joined neighbours of a core gate (4 of 4; 0 turns the rule off)
 _GATE_PASSES = 2
 _GUARD_PASSES = 100  # passes of the speed guard (it peels a core from its edge)
 _GUARD_SIZE = (
@@ -420,10 +431,13 @@ def dealias_velocity(
     at least 1.5 Nyquist velocities, one of the two has the wrong fold there:
     a ``UserWarning`` is raised and the number of gates is stored in the
     ``dealias_disagreement_gates`` attribute of both sweeps. The tilts are
-    not corrected and the thresholds are radarx choices. On the lowest tilt of
-    the Tuscaloosa-Birmingham tornado volume of KBMX (27 April 2011, 22:19 UTC)
-    the region method puts a block of 29 500 gates one fold away from the
-    tilts above; compare ``method="unravel"`` where this warning appears.
+    not corrected and the thresholds are radarx choices. Compare
+    ``method="unravel"`` where this warning appears. On the lowest tilt of the
+    Tuscaloosa-Birmingham tornado volume of KBMX (27 April 2011, 22:19 UTC) a
+    block of 29 500 gates north of the radar was one fold away from the tilts
+    above, because a thin neck of in-between velocities beside the vortex made
+    one region of it and its neighbour; the regions are now cut at such necks
+    (see "Regions" above).
 
     Missing gates of ``method="unravel"``. The region method gives a value to
     every gate that has data. UNRAVEL makes a gate missing when its first step
@@ -1371,10 +1385,59 @@ def _ray_gap_links(valid, links, max_ray_gap):
     return np.concatenate(a), np.concatenate(b)
 
 
-def _region_folds_numpy(vel, links, nyq, threshold, max_gap, max_iterations):
-    """Steps 1-3 (NumPy/SciPy): relative fold and component of every gate."""
+def _segments(n, valid, v, ja, jb, core_joins):
+    """
+    Region id of every gate from the joined pairs ``ja`` - ``jb``.
+
+    A gate with at least ``core_joins`` joined neighbours is a core gate.
+    Cores connect through their joined pairs, and a core of at least
+    ``_CORE_SIZE`` gates seeds a region. Every other gate takes, one ring
+    per pass, the region of the assigned joined neighbour closest in
+    velocity (the lower gate index on a tie), so a thin neck of in-between
+    gates no longer merges the regions on its two sides. Gates that no seed
+    reaches stay together as the joined pairs connect them. Without a seed,
+    or with ``core_joins=0``, the regions are the connected joined gates.
+    """
     from scipy.sparse import coo_matrix
     from scipy.sparse.csgraph import connected_components
+
+    def connected(a, b):
+        graph = coo_matrix((np.ones(a.size), (a, b)), shape=(n, n))
+        return connected_components(graph, directed=False)[1]
+
+    if core_joins <= 0:
+        return connected(ja, jb)
+    degree = np.bincount(ja, minlength=n) + np.bincount(jb, minlength=n)
+    core = valid & (degree >= core_joins)
+    both = core[ja] & core[jb]
+    comp = connected(ja[both], jb[both])
+    big = np.bincount(comp[core], minlength=comp.max() + 1) >= _CORE_SIZE
+    comp = np.where(core & big[comp], comp, -1)
+    if (comp < 0).all():
+        return _segments(n, valid, v, ja, jb, 0)
+    ea = np.concatenate([ja, jb])
+    eb = np.concatenate([jb, ja])
+    gap = np.abs(v[ea] - v[eb])
+    # a loose gate joins its closest assigned neighbour, one ring per pass
+    while True:
+        sel = (comp[ea] < 0) & (comp[eb] >= 0)
+        if not sel.any():
+            break
+        a, b, d = ea[sel], eb[sel], gap[sel]
+        order = np.lexsort((b, d, a))
+        a, b = a[order], b[order]
+        head = np.r_[True, a[1:] != a[:-1]]
+        comp[a[head]] = comp[b[head]]
+    # what no core reaches stays together as before
+    loose = valid & (comp < 0)
+    if loose.any():
+        keep = loose[ja] & loose[jb]
+        comp[loose] = comp.max() + 1 + connected(ja[keep], jb[keep])[loose]
+    return comp
+
+
+def _region_folds_numpy(vel, links, nyq, threshold, max_gap, max_iterations):
+    """Steps 1-3 (NumPy/SciPy): relative fold and component of every gate."""
 
     nray, ngate = vel.shape
     n = nray * ngate
@@ -1386,8 +1449,7 @@ def _region_folds_numpy(vel, links, nyq, threshold, max_gap, max_iterations):
 
     # 1. regions, numbered by their first gate
     join = np.abs(v[ga] - v[gb]) < threshold * nyq
-    graph = coo_matrix((np.ones(join.sum()), (ga[join], gb[join])), shape=(n, n))
-    _, comp = connected_components(graph, directed=False)
+    comp = _segments(n, valid, v, ga[join], gb[join], _CORE_JOINS)
     first = np.full(comp.max() + 1, n, dtype=np.int64)
     np.minimum.at(first, comp[valid], np.flatnonzero(valid))
     rank = np.argsort(np.argsort(first, kind="stable"), kind="stable")
