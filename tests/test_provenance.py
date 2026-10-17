@@ -97,6 +97,8 @@ KEY_MARKS = {
     "roc-mesocyclone-detection": "WSR-88D Radar Operations Center",
     "melnikov-2004": "Melnikov, V. M., and D. S. Zrni",
     "giangrande-2004": "Giangrande, S. E., A. V. Ryzhkov, V. M. Melnikov",
+    "itu-r-p676-13": "Rec. ITU-R P.676-13",
+    "itu-r-p840-9": "Rec. ITU-R P.840-9",
 }
 
 

@@ -2305,6 +2305,12 @@ notebooks or from this index.
 | `z_offset` | `radarx.retrieve.calibration` | [core](Radar_Workflow): 15. Noise and calibration |
 | `phidp_offset` | `radarx.retrieve.calibration` | [core](Radar_Workflow): 15. Noise and calibration |
 | `create_cappi` | `radarx.retrieve.cappi` | [core](Radar_Workflow): Other ways to grid, section and plot |
+| `classify_cloud_targets` | `radarx.retrieve.cloud_classification` | [part 3](Radar_Workflow_Advanced_2): 22. Ka and W band cloud radar |
+| `cloud_liquid_attenuation` | `radarx.retrieve.cloud_attenuation` | [part 3](Radar_Workflow_Advanced_2): 22. Ka and W band cloud radar |
+| `gas_path_attenuation` | `radarx.retrieve.cloud_attenuation` | [part 3](Radar_Workflow_Advanced_2): 22. Ka and W band cloud radar |
+| `gas_specific_attenuation` | `radarx.retrieve.cloud_attenuation` | [part 3](Radar_Workflow_Advanced_2): 22. Ka and W band cloud radar |
+| `rain_attenuation_relation` | `radarx.retrieve.cloud_attenuation` | [part 3](Radar_Workflow_Advanced_2): 22. Ka and W band cloud radar |
+| `rain_path_attenuation` | `radarx.retrieve.cloud_attenuation` | [part 3](Radar_Workflow_Advanced_2): 22. Ka and W band cloud radar |
 | `baroclinic_generation` | `radarx.retrieve.coldpool` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `buoyancy` | `radarx.retrieve.coldpool` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `cold_pool_intensity` | `radarx.retrieve.coldpool` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
@@ -2347,6 +2353,9 @@ notebooks or from this index.
 | `forward_grid` | `radarx.retrieve.dsd_bayes` | [core](Radar_Workflow): 7. Rain drop size distribution |
 | `ducting_layers` | `radarx.retrieve.ducts` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `modified_refractivity` | `radarx.retrieve.ducts` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
+| `dfr_rain` | `radarx.retrieve.dual_frequency` | [part 3](Radar_Workflow_Advanced_2): 22. Ka and W band cloud radar |
+| `dfr_snow` | `radarx.retrieve.dual_frequency` | [part 3](Radar_Workflow_Advanced_2): 22. Ka and W band cloud radar |
+| `dual_frequency_ratio` | `radarx.retrieve.dual_frequency` | [part 3](Radar_Workflow_Advanced_2): 22. Ka and W band cloud radar |
 | `ensemble_retrieval` | `radarx.retrieve.ensemble` | [part 3](Radar_Workflow_Advanced_2): 16. Ensembles and uncertainty of the retrievals |
 | `ensemble_statistics` | `radarx.retrieve.ensemble` | [part 3](Radar_Workflow_Advanced_2): 16. Ensembles and uncertainty of the retrievals |
 | `measurement_error` | `radarx.retrieve.ensemble` | [part 3](Radar_Workflow_Advanced_2): 16. Ensembles and uncertainty of the retrievals |
@@ -2483,6 +2492,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.bulk_shear` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
 | `.radarx.bunkers_storm_motion` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
 | `.radarx.cell_statistics` | [part 3](Radar_Workflow_Advanced_2): 21. Storm diagnostics: KDP columns, size sorting and cells |
+| `.radarx.classify_cloud_targets` | [part 3](Radar_Workflow_Advanced_2): 22. Ka and W band cloud radar |
 | `.radarx.cluster_flashes` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `.radarx.cold_pool_intensity` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `.radarx.correct_attenuation` | [core](Radar_Workflow): 5. ΦDP processing and KDP |
@@ -2495,6 +2505,8 @@ The methods of the `.radarx` accessors:
 | `.radarx.dealias_ambiguity` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
 | `.radarx.dealias_confidence` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
 | `.radarx.dealias_r2d2` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
+| `.radarx.dfr_rain` | [part 3](Radar_Workflow_Advanced_2): 22. Ka and W band cloud radar |
+| `.radarx.dfr_snow` | [part 3](Radar_Workflow_Advanced_2): 22. Ka and W band cloud radar |
 | `.radarx.diabatic_lagrangian` | [part 3](Radar_Workflow_Advanced_2): 9. Diabatic Lagrangian analysis |
 | `.radarx.disdrometer` | [part 2](Radar_Workflow_Advanced): 2. Disdrometers |
 | `.radarx.dsd` | [core](Radar_Workflow): 7. Rain drop size distribution |
@@ -2509,6 +2521,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.evaporation` | [core](Radar_Workflow): 13. Evaporation |
 | `.radarx.forward_operator` | [part 3](Radar_Workflow_Advanced_2): 14. Forward operator for WRF and MPAS output |
 | `.radarx.gauge_adjust` | [part 3](Radar_Workflow_Advanced_2): 25. Radar-gauge merging |
+| `.radarx.gas_path_attenuation` | [part 3](Radar_Workflow_Advanced_2): 22. Ka and W band cloud radar |
 | `.radarx.gbvtd` | [part 3](Radar_Workflow_Advanced_2): 13. Tropical-cyclone winds from one radar |
 | `.radarx.grid_gates` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `.radarx.grid_lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
@@ -2554,6 +2567,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.potential_temperatures` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `.radarx.qvp` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `.radarx.radial_divergence` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
+| `.radarx.rain_path_attenuation` | [part 3](Radar_Workflow_Advanced_2): 22. Ka and W band cloud radar |
 | `.radarx.rain_rate` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
 | `.radarx.rain_rate_a` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
 | `.radarx.rain_rate_kdp` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |

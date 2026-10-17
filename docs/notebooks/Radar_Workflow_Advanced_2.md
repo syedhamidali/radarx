@@ -45,6 +45,7 @@ shown.
 | 19 | volume matching of a ground radar and the GPM DPR, DPR drop size parameters, comparison with IMERG | `match_dpr`, `match_statistics`, `dpr_parallax`, `dpr_dsd`, `match_imerg` |
 | 20 | linear wind, divergence and deformation from one radar in analysis volumes (VVP) | `vvp_winds` |
 | 21 | KDP columns, KDP-ZDR size sorting, storm-cell identification, tracking and statistics | `kdp_column`, `kdp_column_metrics`, `storm_size_sorting`, `identify_cells`, `track_cells`, `cell_statistics` |
+| 22 | Ka and W band cloud radar: gas, cloud liquid and rain attenuation, echo classification, dual-frequency ratio retrievals | `gas_specific_attenuation`, `cloud_liquid_attenuation`, `gas_path_attenuation`, `rain_attenuation_relation`, `rain_path_attenuation`, `classify_cloud_targets`, `dual_frequency_ratio`, `dfr_rain`, `dfr_snow` |
 
 ```{code-cell} ipython3
 import math
@@ -1504,6 +1505,97 @@ plt.show()
 the user, as in the papers. `track_cells` takes the storm motion from the user or from
 `estimate_motion`.
 
+## 22. Ka and W band cloud radar
+
+A cloud radar at 35 or 94 GHz loses signal to oxygen and water vapour, to cloud liquid water and
+to rain, and the loss differs between the two bands. The calls below show every function on a
+synthetic vertically pointing section with a known answer; the notebook `Cloud_Radar` runs the same
+chain on a day of Ka and W band data of the Cloudnet station at Lindenberg and compares it with
+Cloudnet. The section is a stratiform cloud with a liquid layer at 1.5 to 2 km, a melting layer
+at 2.5 km and ice above.
+
+```{code-cell} ipython3
+from radarx.retrieve import (
+    classify_cloud_targets,
+    cloud_liquid_attenuation,
+    dfr_rain,
+    dfr_snow,
+    dual_frequency_ratio,
+    gas_path_attenuation,
+    gas_specific_attenuation,
+    rain_attenuation_relation,
+    rain_path_attenuation,
+)
+
+height = np.arange(0.0, 12001.0, 250.0)
+sounding = xr.Dataset(
+    {
+        "pressure": ("height", 101325.0 * np.exp(-height / 8000.0)),
+        "temperature": ("height", 288.15 - 6.5e-3 * height),
+        "specific_humidity": ("height", 0.008 * np.exp(-height / 2500.0)),
+    },
+    coords={"height": height},
+)
+gates = np.arange(150.0, 7000.0, 30.0)
+section = xr.Dataset(
+    {"DBZ": (("time", "range"), np.full((6, gates.size), -10.0))},
+    coords={
+        "time": np.arange(6),
+        "range": gates - 100.0,
+        "height": ("range", gates),  # height above sea level of a vertical beam
+        "radar_frequency": 94.0,
+    },
+)
+lwc = xr.zeros_like(section.DBZ)
+lwc[:, (gates > 1500) & (gates < 2000)] = 0.2  # g m-3, a liquid layer
+
+# specific attenuation of the gases and of liquid water at the two radar frequencies
+for f in (35.0, 94.0):
+    gas = gas_specific_attenuation(f, 1013.25, 288.15, vapor_density=7.5)
+    print(f"{f:.0f} GHz at sea level: gas {float(gas.A_GAS):.2f} dB/km, "
+          f"cloud water {float(cloud_liquid_attenuation(f, 273.15)):.2f} dB/km per g/m3")
+
+# two-way attenuation along the beam, and the accessor
+pia = gas_path_attenuation(section, sounding, lwc=lwc)
+via = section.radarx.gas_path_attenuation(sounding, lwc=lwc)
+print("W band, 7 km: gas", round(float(pia.PIA_GAS.isel(time=0, range=-1)), 2), "dB, liquid layer",
+      round(float(pia.PIA_CLOUD_LIQUID.isel(time=0, range=-1)), 2), "dB;", bool(np.allclose(via.PIA_GAS, pia.PIA_GAS)))
+
+# classification from the reflectivity, the depolarization ratio and the temperature
+dbz = np.where(gates < 2500.0, 5.0, -5.0)
+section["DBZ"] = (("time", "range"), np.tile(dbz, (6, 1)))
+section["ldr"] = (("time", "range"), np.full((6, gates.size), -28.0))
+section["temperature"] = ("range", np.interp(gates, height, sounding.temperature.values))
+classes = classify_cloud_targets(section, "temperature", ldr="ldr")
+same = section.radarx.classify_cloud_targets("temperature", ldr="ldr")
+print({name: int((classes == code).sum()) for name, code in (("drizzle/rain", 2), ("melting", 4), ("ice", 3))}, bool((same == classes).all()))
+
+# dual-frequency ratio and the retrievals of rain and snow
+ratio = dual_frequency_ratio(section.DBZ, section.DBZ - 6.0, pia_ka=0.2, pia_w=1.2)
+rain = dfr_rain(ratio, section.DBZ)
+snow = dfr_snow(ratio, section.DBZ)
+print("DFR", float(ratio.isel(time=0, range=0)), "dB; rain Dm", round(float(rain.DM.isel(time=0, range=0)), 2),
+      "mm; snow Dm", round(float(snow.DM.isel(time=0, range=-1)), 2), "mm")
+print(bool(np.allclose(ratio.radarx.dfr_rain(section.DBZ).DM, rain.DM, equal_nan=True)),
+      bool(np.allclose(ratio.radarx.dfr_snow(section.DBZ).IWC, snow.IWC, equal_nan=True)))
+
+# attenuation by rain: k = a Z^b fitted to T-matrix scattering, and the Hitschfeld-Bordan solution
+relation = rain_attenuation_relation(35.0)
+print(f"35 GHz: k = {float(relation.a):.4g} Z^{float(relation.b):.2f}")
+rain_dbz = xr.DataArray(np.full(60, 30.0), dims="range", coords={"range": 100.0 + 30.0 * np.arange(60)})
+k = float(relation.a) * (10 ** (30.0 / 10)) ** float(relation.b)
+attenuated = rain_dbz - 2 * k * 0.03 * (np.arange(60) + 0.5)
+rain_pia = rain_path_attenuation(attenuated, 35.0, a=float(relation.a), b=float(relation.b), max_pia=30.0)
+print("two-way rain attenuation at the end:", round(float(rain_pia[-1]), 1), "dB; accessor",
+      bool(np.allclose(attenuated.radarx.rain_path_attenuation(a=float(relation.a), b=float(relation.b), max_pia=30.0), rain_pia)))
+```
+
+The attenuation of the gases and the cloud liquid water is a few tenths of a dB at Ka band and
+a few dB at W band over a few kilometres, and it must be removed before the two reflectivities are
+subtracted. The classification is the radar-only subset of the categories of Cloudnet; the
+dual-frequency retrievals assume a size distribution (gamma for rain, exponential for snow) and
+return NaN where the ratio saturates.
+
 ## References
 
 - Feng, Z., J. Hardin, H. C. Barnes, J. Li, L. R. Leung, A. Varble, and Z. Zhang, 2023: PyFLEXTRKR: a flexible feature tracking Python software for convective cloud analysis. *Geoscientific Model Development*, **16**, 2753-2776, <https://doi.org/10.5194/gmd-16-2753-2023>
@@ -1511,6 +1603,7 @@ the user, as in the papers. `track_cells` takes the storm motion from the user o
 - Holleman, I., and H. Beekhuis, 2003: Analysis and Correction of Dual PRF Velocity Data. *Journal of Atmospheric and Oceanic Technology*, **20**, 443-453, <https://doi.org/10.1175/1520-0426(2003)20<443:AACODP>2.0.CO;2>
 - Huffman, G. J., et al., 2020: Integrated Multi-satellitE Retrievals for the Global Precipitation Measurement (GPM) Mission (IMERG). *Satellite Precipitation Measurement*, Springer, 343-353, <https://doi.org/10.1007/978-3-030-24568-9_19>
 - Gao, J., M. Xue, A. Shapiro, and K. K. Droegemeier, 1999: A Variational Method for the Analysis of Three-Dimensional Wind Fields from Two Doppler Radars. *Monthly Weather Review*, **127**, 2128-2142, <https://doi.org/10.1175/1520-0493(1999)127<2128:AVMFTA>2.0.CO;2>
+- Illingworth, A. J., et al., 2007: Cloudnet: Continuous evaluation of cloud profiles in seven operational models using ground-based observations. *Bulletin of the American Meteorological Society*, **88**, 883-898, <https://doi.org/10.1175/BAMS-88-6-883>
 - Jung, Y., G. Zhang, and M. Xue, 2008: Assimilation of Simulated Polarimetric Radar Data for a Convective Storm Using the Ensemble Kalman Filter. Part I: Observation Operators for Reflectivity and Polarimetric Variables. *Monthly Weather Review*, **136**, 2228-2245, <https://doi.org/10.1175/2007MWR2083.1>
 - Lin, T.-Y., K. Winner, G. Bernstein, A. Mittal, A. M. Dokter, K. G. Horton, C. Nilsson, B. M. Van Doren, A. Farnsworth, F. A. La Sorte, S. Maji, and D. Sheldon, 2019: MistNet: Measuring historical bird migration in the US using archived weather radar data and convolutional neural networks. *Methods in Ecology and Evolution*, **10**, 1908-1922, <https://doi.org/10.1111/2041-210X.13280>
 - Lin, Y.-L., R. D. Farley, and H. D. Orville, 1983: Bulk Parameterization of the Snow Field in a Cloud Model. *Journal of Climate and Applied Meteorology*, **22**, 1065-1092, <https://doi.org/10.1175/1520-0450(1983)022<1065:BPOTSF>2.0.CO;2>
