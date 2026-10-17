@@ -1018,6 +1018,8 @@ plt.show()
 
 ## 17. ZDR columns
 
+The [ZDR column notebook](ZDR_Column) has this example with a section and a real case.
+
 Drops that an updraft lofts above the freezing level freeze slowly, so a column
 of differential reflectivity of 1 dB or more stands above the 0 °C level, and its
 depth follows the strength of the updraft (Snyder et al. 2015). `zdr_column`
@@ -1061,6 +1063,8 @@ The depth needs a freezing level in the vertical reference of the grid (a
 sounding or a model) and a calibrated $Z_{DR}$.
 
 ## 18. ZDR arc and KDP-ZDR separation
+
+The [ZDR arc notebook](ZDR_Arc) shows the same storm with its panels and the effect of the FFD vector.
 
 In the forward flank of a supercell the storm-relative wind sorts the drops by size: the
 big ones fall out near the inflow edge and form an arc of high $Z_{DR}$, the small ones are

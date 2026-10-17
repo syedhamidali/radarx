@@ -69,6 +69,8 @@ ax.grid(alpha=0.3);
 
 ## Scattering by single drops: canting, frequency, temperature
 
+The [canting and frequency sensitivity notebook](DSD_Canting_Sensitivity) repeats this section with the error of the retrieved $D_m$ over a range of sizes.
+
 The tables above are fixed to 7 degrees of canting and three frequencies.
 `radarx.fundamentals.raindrop_scattering` computes the same quantities for any
 wavelength, temperature, axis ratio and canting width with a threaded C++
