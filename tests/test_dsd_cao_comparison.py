@@ -16,7 +16,7 @@ import importlib
 import numpy as np
 import pytest
 import xarray as xr
-from scipy.integrate import cumulative_trapezoid
+from scipy.integrate import cumulative_trapezoid, trapezoid
 from scipy.special import gamma, gammaincinv
 
 import radarx  # noqa: F401
@@ -139,7 +139,7 @@ def test_atlas_negative_part_is_negligible():
     for m, lm in zip(mu, lam):
         law = 9.65 - 10.3 * np.exp(-0.6 * dd)
         assert law.min() < 0
-        part = 6e-4 * np.pi * np.trapezoid(law * dd ** (m + 3) * np.exp(-lm * dd), dd)
+        part = 6e-4 * np.pi * trapezoid(law * dd ** (m + 3) * np.exp(-lm * dd), dd)
         total = (
             6e-4
             * np.pi

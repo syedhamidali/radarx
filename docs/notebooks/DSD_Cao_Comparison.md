@@ -35,7 +35,7 @@ T-matrix code (`radarx.fundamentals.raindrop_scattering`):
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
-from scipy.integrate import cumulative_trapezoid
+from scipy.integrate import cumulative_trapezoid, trapezoid
 from scipy.special import gamma
 
 import radarx  # noqa: F401  registers the .radarx accessors
@@ -165,7 +165,7 @@ for zdr_value in (0.5, 1.0, 1.75, 3.0):
     m = np.interp(zdr_value, zdr[o], mu[o])
     lm = np.interp(zdr_value, zdr[o], lam[o])
     dd = np.linspace(0.0, 0.109, 20001)
-    negative = 6e-4 * np.pi * np.trapezoid(
+    negative = 6e-4 * np.pi * trapezoid(
         (9.65 - 10.3 * np.exp(-0.6 * dd)) * dd ** (m + 3) * np.exp(-lm * dd), dd
     )
     total = (
