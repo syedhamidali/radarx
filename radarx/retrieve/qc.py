@@ -11,7 +11,7 @@ echo (insects, birds, ground clutter, anomalous propagation, sea clutter,
 second-trip echo, noise) gate by gate, before KDP, hydrometeor
 classification, rain rates or gridding.
 
-Two methods are available (option ``method`` of :func:`echo_mask`).
+Three methods are available (option ``method`` of :func:`echo_mask`).
 
 ``method="radarx"`` (default) is a weighted fuzzy-logic scheme in the manner of
 Gourley et al. (2007) [1] and Krause (2016) [2]: local features of the
@@ -30,9 +30,17 @@ the six memberships of its Fig. 2, the weights of its Table 1, standard
 deviations over nine range bins, the threshold of 0.8 (warm season) or 0.7
 (cold season) and the post-processing rules of its Sect. 2. The Notes of
 :func:`echo_mask` list what the paper specifies and what radarx had to choose.
-The method of Gourley et al. (2007) [1] is not implemented, because its
-membership functions are density estimates of C-band data of one radar that
-the paper shows in a figure only (see the Notes).
+
+``method="gourley2007"`` is the three-class classifier of Gourley et al.
+(2007) [1]: the texture (root-mean-square difference to the 3 x 3 neighbouring
+gates, their Eq. 1) of :math:`Z_{DR}` and :math:`\\Phi_{DP}` and
+:math:`\\rho_{hv}` are looked up in membership functions of the three classes
+precipitation, ground clutter and clear air, aggregated with the weights of
+their Eqs. 3 and 4, the thresholds of their Table 1 suppress classes, and the
+class with the largest aggregation value wins; a despeckling step follows.
+The paper shows its membership functions (density estimates of C-band data of
+one radar) in a figure only, so radarx tabulates them from the figure and
+accepts other tables (see the Notes).
 
 For ``method="radarx"``, every feature is computed along the ray over a
 window of ``window`` km centred on the gate:
@@ -152,6 +160,7 @@ from .._sweepwise import (
     ray_coordinate,
     ray_dimension,
 )
+from . import _gourley_numpy, _gourley_tables
 from .dealias import _ray_links, _sweep_mapping
 from .kdp import _DBZH_NAMES, _PHIDP_NAMES, _RHOHV_NAMES, _find, _gate_spacing
 
@@ -162,6 +171,14 @@ try:
 except ImportError:  # pragma: no cover - depends on the build
     _qc = None
     HAS_COMPILED_KERNEL = False
+
+try:
+    from . import _gourley
+
+    HAS_COMPILED_GOURLEY = True
+except ImportError:  # pragma: no cover - depends on the build
+    _gourley = None
+    HAS_COMPILED_GOURLEY = False
 
 _ZDR_NAMES = (
     "ZDR",
@@ -174,7 +191,16 @@ _SNR_NAMES = ("SNRH", "SNR", "signal_to_noise_ratio")
 CLASSES = {0: "no_echo", 1: "meteorological", 2: "non_meteorological", 3: "speckle"}
 
 #: Values of the ``method`` option of :func:`echo_mask`.
-METHODS = ("radarx", "krause2016")
+METHODS = ("radarx", "krause2016", "gourley2007")
+
+#: Membership tables ``(x, precipitation, ground_clutter, clear_air)`` of
+#: ``method="gourley2007"``, read from Fig. 3 of Gourley et al. (2007).
+GOURLEY_MEMBERSHIPS = _gourley_tables.DEFAULT_MEMBERSHIPS
+#: Weights of ``method="gourley2007"`` (Eq. 4 of Gourley et al. 2007).
+GOURLEY_WEIGHTS = _gourley_tables.DEFAULT_WEIGHTS
+#: Suppression thresholds of ``method="gourley2007"`` (Table 1 of Gourley et
+#: al. 2007).
+GOURLEY_RULES = _gourley_tables.DEFAULT_RULES
 
 #: Features in the order of the kernel.
 FEATURES = (
@@ -624,15 +650,15 @@ def _krause_compiled(sweeps, p, n_threads):
 # --------------------------------------------------------------------------
 
 
-def _use_compiled(engine):
+def _use_compiled(engine, available):
     """Whether to run the compiled kernel for the requested ``engine``."""
     if engine not in ("auto", "compiled", "numpy"):
         raise ValueError(
             f"engine must be 'auto', 'compiled' or 'numpy', not {engine!r}"
         )
-    if engine == "compiled" and not HAS_COMPILED_KERNEL:
+    if engine == "compiled" and not available:
         raise ImportError("the compiled echo classification kernel is not available")
-    return HAS_COMPILED_KERNEL and engine != "numpy"
+    return available and engine != "numpy"
 
 
 def _is_nexrad(ds, root_attrs=None):
@@ -701,8 +727,8 @@ def _prepare_sweep(ds, fields, window):
         "phidp": _find(ds, phidp, _PHIDP_NAMES, phidp is not None),
         "snr": _find(ds, snr, _SNR_NAMES, snr is not None),
     }
-    if len(fields) > 5:  # method "krause2016": radial velocity, Zh at 3 km
-        vrad, zh3 = fields[5:]
+    if len(fields) > 5:  # radial velocity and Zh at 3 km (krause2016) or Z variability
+        vrad, zh3 = fields[5:]  # ("gourley2007", in the slot of zh3)
         names["vrad"] = _find(ds, vrad, VELOCITY, vrad is not None)
         names["zh3"] = _find(ds, zh3, (), zh3 is not None)
     da = ds[names["dbzh"]]
@@ -722,11 +748,24 @@ def _prepare_sweep(ds, fields, window):
         ],
         "links": np.ascontiguousarray(links, dtype=np.uint8),
         "h": max(1, round(0.5 * float(window) / dr)),
+        "rng_km": np.ascontiguousarray(ds["range"].values, dtype=np.float64) / 1000.0,
     }
 
 
 def _polarimetric(sweep):
     return any(sweep["names"].get(r) is not None for r in ("zdr", "rhohv", "phidp"))
+
+
+_SCORE_COMMENTS = {
+    "radarx": "weighted mean fuzzy membership, 3 x 3 average; "
+    "meteorological at >= {threshold}",
+    "krause2016": "aggregation value A of Krause (2016), the weighted mean of the "
+    "memberships; meteorological at A >= {threshold} after the post-processing rules",
+    "gourley2007": "share of the precipitation class in the sum of the aggregation "
+    "values of the three classes of Gourley et al. (2007) after the suppression "
+    "thresholds; meteorological where the precipitation class has the largest "
+    "aggregation value (the threshold is not used)",
+}
 
 
 def _wrap_sweep(sweep, score, cls, threshold, comment=None, method="radarx"):
@@ -754,14 +793,7 @@ def _wrap_sweep(sweep, score, cls, threshold, comment=None, method="radarx"):
                 {
                     "long_name": "Meteorological echo score",
                     "units": "1",
-                    "comment": (
-                        "weighted mean fuzzy membership, 3 x 3 average; "
-                        f"meteorological at >= {threshold}"
-                        if method == "radarx"
-                        else "aggregation value A of Krause (2016), the weighted "
-                        "mean of the memberships; meteorological at "
-                        f"A >= {threshold} after the post-processing rules"
-                    ),
+                    "comment": _SCORE_COMMENTS[method].format(threshold=threshold),
                 },
             ),
             "METEO_MASK": (
@@ -784,7 +816,31 @@ def _wrap_sweep(sweep, score, cls, threshold, comment=None, method="radarx"):
     return out
 
 
+def _gourley_batch(sweeps, params, n_threads, use_compiled):
+    """The classifier of Gourley et al. (2007) for sweeps given as dicts."""
+    module = _gourley if use_compiled else _gourley_numpy
+    args = [[sw[role] for sw in sweeps] for role in ("dbzh", "zdr", "rhohv", "phidp")]
+    args += [[sw["vrad"] for sw in sweeps], [sw["zh3"] for sw in sweeps]]
+    args += [[sw["snr"] for sw in sweeps], [sw["links"] for sw in sweeps]]
+    args += [[sw["rng_km"] for sw in sweeps]]
+    scores, classes = module.classify(
+        *args,
+        np.asarray(params["floors"], dtype=np.float64),
+        float(params["snr_min"]),
+        params["mem_x"],
+        params["mem_y"],
+        params["weights"],
+        params["rules"],
+        params["slopes"],
+        bool(params["despeckle"]),
+        int(n_threads or 0),
+    )
+    return list(zip(scores, classes))
+
+
 def _classify_batch(sweeps, params, n_threads, use_compiled):
+    if params.get("method") == "gourley2007":
+        return _gourley_batch(sweeps, params, n_threads, use_compiled)
     if params.get("method") == "krause2016":
         if use_compiled:
             scores, classes = _krause_compiled(sweeps, params, n_threads)
@@ -799,12 +855,12 @@ def _classify_batch(sweeps, params, n_threads, use_compiled):
 def _core(batch, params, n_threads, use_compiled):
     """Score and class of sweeps given as ``((links, h), fields)``."""
     sweeps = []
-    for (links, h), arrays in batch:
+    for (links, h, rng_km), arrays in batch:
         sweep = {
             role: None if a is None else np.ascontiguousarray(a, dtype=np.float64)
             for role, a in zip(_ALL_ROLES, arrays)
         }
-        sweeps.append({**sweep, "links": links, "h": h})
+        sweeps.append({**sweep, "links": links, "h": h, "rng_km": rng_km})
     return _classify_batch(sweeps, params, n_threads, use_compiled)
 
 
@@ -815,7 +871,10 @@ def _run(sweeps, params, n_threads, use_compiled):
     )
     return apply_sweeps_many(
         core,
-        [Sweep(sw["fields"], context=(sw["links"], sw["h"])) for sw in sweeps],
+        [
+            Sweep(sw["fields"], context=(sw["links"], sw["h"], sw["rng_km"]))
+            for sw in sweeps
+        ],
         (Output(np.float32), Output(np.int8)),
     )
 
@@ -897,7 +956,9 @@ def _fixed_angle(ds):
 @renamed_arguments(dbzh="dbz", vrad="field", snr_min="min_snr")
 @provenance(
     "Fuzzy-logic echo score in the manner of Gourley 2007 and Krause 2016, own memberships "
-    "and weights (method='krause2016': the MetSignal algorithm of Krause 2016)"
+    "and weights (method='krause2016': the MetSignal algorithm of Krause 2016; "
+    "method='gourley2007': the three-class classifier of Gourley et al. 2007 with "
+    "membership tables read from its Fig. 3)"
 )
 def echo_mask(
     obj,
@@ -910,6 +971,7 @@ def echo_mask(
     method="radarx",
     field=None,
     zh_3km=None,
+    zsigma=None,
     window=None,
     threshold=None,
     limits=None,
@@ -918,6 +980,10 @@ def echo_mask(
     min_size=None,
     min_snr=3.0,
     phidp_texture="circular",
+    memberships=None,
+    rules=None,
+    range_correction=None,
+    despeckle=None,
     nodata="auto",
     split_cuts=True,
     n_threads=None,
@@ -944,7 +1010,7 @@ def echo_mask(
         ``PHIDP``, ``uncorrected_differential_phase``, ``differential_phase``,
         ``PHI``; ``SNRH``, ``SNR``, ``signal_to_noise_ratio``. Missing
         optional fields are left out of the classification.
-    method : {"radarx", "krause2016"}, optional
+    method : {"radarx", "krause2016", "gourley2007"}, optional
         ``"radarx"`` (default) is the scheme described above, in the manner of
         Gourley et al. (2007) [1] and Krause (2016) [2] with memberships and
         weights of radarx. ``"krause2016"`` is the MetSignal algorithm of
@@ -954,13 +1020,31 @@ def echo_mask(
         ``window`` are not accepted, ``spin_threshold`` and
         ``phidp_texture`` are not used, and the score ``METEO_SCORE`` is the
         aggregation value A of the paper, not averaged over 3 x 3 gates.
+        ``"gourley2007"`` is the classifier of Gourley et al. (2007) [1] (see
+        Notes). It accepts ``weights`` (keys ``"rhohv"``, ``"zdr_texture"``,
+        ``"phidp_texture"``), ``memberships``, ``rules``,
+        ``range_correction``, ``despeckle``, ``field`` and ``zsigma``;
+        ``limits``, ``window``, ``threshold``, ``min_size``,
+        ``spin_threshold`` and ``phidp_texture`` are not accepted. The score
+        ``METEO_SCORE`` is the share of the precipitation class in the sum of
+        the aggregation values of the three classes; a gate is meteorological
+        where that class has the largest value, not at a fixed threshold.
     field : str, optional
-        Radial velocity field (m/s) of ``method="krause2016"``. By default the
+        Radial velocity field (m/s) of ``method="krause2016"`` and
+        ``method="gourley2007"`` (where it only enters the suppression of the
+        ground-clutter class, ``rules["vrad_max"]``). By default the
         first of ``VRADH``, ``VRAD``, ``VRADV``, ``VEL``, ``VELOCITY``,
         ``velocity``, ``radial_velocity`` that a sweep holds. Where it is
         missing, as in the surveillance cut of a NEXRAD split cut, the
         velocity term is left out of the weighted mean. Not valid for
         ``method="radarx"``, which does not use velocity.
+    zsigma : str, optional
+        Field with the pulse-to-pulse variability of the reflectivity (dB),
+        the "sigma" of Gourley et al. (2007) [1] (the mean absolute difference
+        of the reflectivity of adjacent pulses), for ``method="gourley2007"``
+        only. Where it exceeds ``rules["zsigma_max"]`` the ground-clutter class
+        is suppressed. No such field is stored in NEXRAD Level II data; without
+        it the rule is not applied.
     zh_3km : str, optional
         Name of a field of the sweeps with the reflectivity (dBZ) at 3 km
         height of the previous volume scan on the same gates, for the
@@ -1009,6 +1093,40 @@ def echo_mask(
         :func:`radarx.retrieve.estimate_kdp`. On synthetic rain with KDP 5 to
         30 degrees/km both classify all gates as meteorological. Both rules
         are radarx choices.
+    memberships : dict, optional
+        ``method="gourley2007"`` only. Membership tables of ``"rhohv"``,
+        ``"zdr_texture"`` (dB) and ``"phidp_texture"`` (degrees) as ``(x,
+        precipitation, ground_clutter, clear_air)``: the grid ``x`` (increasing)
+        and the three density curves on it, interpolated linearly and held
+        constant beyond the ends. Defaults in
+        :data:`radarx.retrieve.qc.GOURLEY_MEMBERSHIPS`, read from Fig. 3 of
+        [1] (see Notes); refit them for other radars and wavelengths, as the
+        paper advises.
+    rules : dict, optional
+        ``method="gourley2007"`` only. Thresholds of Table 1 of [1], given
+        keys replace the defaults of :data:`radarx.retrieve.qc.GOURLEY_RULES`
+        and None switches one off. Precipitation is suppressed at
+        ``rhohv_min`` (0.7), ``phidp_min`` (-40 degrees), ``dbz_min`` (5 dBZ)
+        and ``phidp_texture_max`` (100 degrees); ground clutter at
+        ``zsigma_max`` (5 dB) and ``vrad_max`` (5 m/s, absolute radial
+        velocity); clear air at ``dbz_max`` (30 dBZ). The paper tuned them to
+        the C-band radar of Trappes.
+    range_correction : dict, optional
+        ``method="gourley2007"`` only. Linear increase with range (per km)
+        beyond ``"start_km"`` (default 45, as in [1]) that is subtracted from
+        the textures: keys ``"zdr"`` (dB/km), ``"phidp"`` (degrees/km),
+        ``"start_km"``. Default: no correction. The paper fits the slopes to
+        12 scans of its radar (Fig. 2, from which about 0.008 dB/km and 0.05
+        degrees/km can be read, 1.5 degree elevation, 0.5 degree beams, 240 m
+        gates); they depend on the gate and beam size and the elevation, so
+        radarx does not apply them unasked.
+    despeckle : bool, optional
+        ``method="gourley2007"`` only. Apply the despeckling of [1] (default
+        True): an isolated precipitation gate (fewer than three of its eight
+        neighbours precipitation) becomes non-meteorological (class 3), a
+        clear-air gate with more than six precipitation neighbours becomes
+        precipitation. The paper does it on a 1 km Cartesian grid; radarx
+        applies it to the neighbouring rays and gates of the polar sweep.
     min_snr : float, optional
         Gates with an SNR below this (dB) have no echo, if an SNR field is
         used. Default 3 (radarx choice).
@@ -1150,6 +1268,7 @@ def echo_mask(
       precipitation, ground clutter and clear air (their Eq. 3); their
       suppression thresholds (Table 1, p. 1446) and their despeckling of
       precipitation pixels on a 1 km grid (p. 1446) have no counterpart.
+      ``method="gourley2007"`` has all of them (see below).
 
     Method ``krause2016``. From the paper (Krause 2016 [2], Sect. 2, Table 1,
     Fig. 2, Sect. 4): the inputs :math:`Z_h`, :math:`\\rho_{hv}`, radial
@@ -1188,19 +1307,65 @@ def echo_mask(
     surveillance cut of a split cut, so that cut is classified without the
     velocity term (weights 7 instead of 8).
 
-    Gourley et al. (2007) [1] is not implemented as a method. Its three-class
-    classifier rests on membership functions that are Gaussian-kernel density
-    estimates of C-band data of one radar (Trappes, Fig. 3 and Eq. 2)
-    published as plots only; the text
-    gives the modes (:math:`\\rho_{hv}` 0.97, 0.92 and 0.42 for precipitation,
-    ground clutter and clear air; texture of :math:`Z_{DR}` 0.4, 5.2 and 2.5
-    dB; texture of :math:`\\Phi_{DP}` 4, 125 and 35 degrees), the overlap
-    areas of the weights (0.243, 0.203, 0.081 giving 1 : 1.20 : 3.00 by
-    Eq. 4) and one membership example, not the curves. The slope of the
-    range correction of the texture (Eq. 1, Fig. 2) and the pulse-to-pulse
-    variability of Z of Table 1 are not given either. Curves digitised
-    from the figure would be an invention at S band. The method is built to
-    be refitted for each radar and wavelength.
+    Method ``gourley2007``. From the paper (Gourley et al. 2007 [1], Sect. 2b
+    and 3): the texture of :math:`Z_{DR}` and :math:`\\Phi_{DP}` is the
+    root-mean-square difference
+    :math:`\\sqrt{\\sum_{i,j} (y_{a,b} - y_{a+i,b+j})^2 / (m n)}` over the
+    3 (azimuth) x 3 (range) gates around the gate (Eq. 1, p. 1441); for each
+    class (precipitation, ground clutter, clear air) the aggregation value
+    :math:`Q = \\sum_j \\hat f_j(x_j) W_j / \\sum_j W_j` of the memberships of
+    :math:`\\rho_{hv}` and the two textures (Eq. 3, p. 1444) with
+    :math:`W_j \\propto 1/A_j` from the overlap areas 0.243, 0.203 and 0.081
+    (Eq. 4: 1 : 1.20 : 3.00); the class with the largest :math:`Q` is assigned
+    (p. 1445); the thresholds of Table 1 (p. 1446) overrule it, which "is
+    equivalent to assigning a zero membership value", so radarx sets the
+    :math:`Q` of the suppressed class to zero; then the despeckling (p. 1446).
+    The memberships are the density estimates of Fig. 3 (p. 1444), of C-band
+    data of the Trappes radar. The paper does not tabulate them, and radarx
+    reads them from the figure: ``GOURLEY_MEMBERSHIPS`` holds piecewise linear
+    curves through points read by eye, which reproduce the modes of the text
+    (:math:`\\rho_{hv}` 0.97, 0.92, 0.42; texture of :math:`Z_{DR}` 0.4, 5.2,
+    2.5 dB; texture of :math:`\\Phi_{DP}` 4, 125, 35 degrees for
+    precipitation, ground clutter, clear air to within the point spacing) and
+    its one worked example (at :math:`\\rho_{hv} = 0.97` the memberships 0.149,
+    0.030 and 0.007). The overlap areas of these tables are 0.22, 0.24 and 0.10
+    against the 0.243, 0.203 and 0.081 of the paper, an indication of the
+    reading error. The curves are in the units of the figure, so the
+    aggregation values are not on a scale of 0 to 1. At 3 x 3 gates the
+    texture depends on the gate spacing and beam width of the radar (the
+    paper's data have 240 m gates and 0.5 degree rays), and the curves are for
+    C band; for other radars pass ``memberships`` refitted on data of that
+    radar, as the paper advises.
+
+    What the paper does not state, and radarx chooses: gates without echo or
+    without a valid value of the field are left out of the texture and of
+    the divisor (the sum of Eq. 1 is divided by the number of gates with
+    data, the centre included), the texture needs at least three neighbours
+    with data, the difference of :math:`\\Phi_{DP}` is wrapped into
+    [-180, 180) degrees, a variable without data at a gate leaves its term
+    out of every class, the same weights apply to the three classes (the paper
+    uses one weight per variable), the thresholds of Table 1 act as
+    ``rhohv < 0.7``, ``PhiDP < -40``, ``Z < 5`` and ``texture(PhiDP) > 100``
+    (precipitation), ``zsigma > 5`` and ``abs(V) > 5`` (ground clutter) and
+    ``Z > 30`` (clear air) at the gate itself, ties go to the non-meteorological
+    class (precipitation needs a strictly larger value, ground clutter a
+    strictly larger value than clear air), a gate with echo but with none of
+    the three variables is class 3 and has no score, the despeckling takes
+    all classes from the classification before it (so the order of the gates
+    does not matter), and a clear-air gate is the only non-meteorological class
+    that can be converted to precipitation (ground clutter is not). The
+    classes clear air and ground clutter are not told apart in ``ECHO_CLASS``
+    (both 2). The Doppler cuts of NEXRAD split cuts are handled as for the
+    other methods. Compared with ``method="radarx"`` the method treats
+    low reflectivity differently: below 5 dBZ every gate is non-meteorological,
+    also light snow or drizzle with high :math:`\\rho_{hv}`; use
+    ``rules={"dbz_min": None}`` to drop that rule.
+
+    Switching the default of ``echo_mask`` to ``"gourley2007"`` would change the
+    classification of about 5 to 7 % of the echo gates on the NEXRAD and
+    C-band volumes tried (see the notebook ``Echo_QC``): mainly gates with low
+    reflectivity or low :math:`\\rho_{hv}` that ``"radarx"`` keeps, and narrow
+    radial streaks of low :math:`\\rho_{hv}`.
 
     References
     ----------
@@ -1243,6 +1408,7 @@ def echo_mask(
     if method not in METHODS:
         raise ValueError(f"method must be one of {METHODS}, not {method!r}")
     krause = method == "krause2016"
+    gourley = method == "gourley2007"
     if krause:
         taken = {"limits": limits, "weights": weights, "window": window}
         given = [k for k, v in taken.items() if v is not None]
@@ -1253,7 +1419,47 @@ def echo_mask(
                 "method='radarx'"
             )
     elif field is not None or zh_3km is not None:
-        raise ValueError("vrad and zh_3km are used by method='krause2016' only")
+        if not gourley:
+            raise ValueError(
+                "field and zh_3km are used by method='krause2016' only (field also "
+                "by 'gourley2007')"
+            )
+        if zh_3km is not None:
+            raise ValueError("zh_3km is used by method='krause2016' only")
+    if gourley:
+        taken = {
+            "limits": limits,
+            "window": window,
+            "threshold": threshold,
+            "min_size": min_size,
+        }
+        given = [k for k, v in taken.items() if v is not None]
+        if given or spin_threshold != 2.0 or phidp_texture != "circular":
+            given += ["spin_threshold"] * (spin_threshold != 2.0)
+            given += ["phidp_texture"] * (phidp_texture != "circular")
+            raise ValueError(
+                "method='gourley2007' uses the 3 x 3 texture, the class with the "
+                "largest aggregation value and the despeckling of the paper; "
+                f"{given} are options of the other methods"
+            )
+        gmem = _gourley_tables.memberships(memberships)
+        gwts = _gourley_tables.weights(weights)
+        grules = _gourley_tables.rules(rules)
+        gcorr = _gourley_tables.range_correction(range_correction)
+        despeckle = True if despeckle is None else bool(despeckle)
+        threshold = 0.0
+    else:
+        taken = {
+            "memberships": memberships,
+            "range_correction": range_correction,
+            "despeckle": despeckle,
+            "zsigma": zsigma,
+        }
+        given = [k for k, v in taken.items() if v is not None]
+        if rules is not None:
+            given.append("rules")
+        if given:
+            raise ValueError(f"{given} are options of method='gourley2007' only")
     if threshold is None:
         threshold = KRAUSE_THRESHOLDS["warm"] if krause else 0.6
     if min_size is None:
@@ -1266,14 +1472,30 @@ def echo_mask(
         raise ValueError(
             f"phidp_texture must be 'circular' or 'detrended', not {phidp_texture!r}"
         )
-    lim, wts = _options(limits, weights)
-    use_compiled = _use_compiled(engine)
+    lim, wts = (None, None) if gourley else _options(limits, weights)
+    use_compiled = _use_compiled(
+        engine, HAS_COMPILED_GOURLEY if gourley else HAS_COMPILED_KERNEL
+    )
     fields = (dbz, zdr, rhohv, phidp, snr)
     if krause:
         fields += (field, zh_3km)
+    elif gourley:
+        fields += (field, zsigma)
     obj = as_sweep(obj)
 
     def params(nexrad):
+        if gourley:
+            return {
+                "method": method,
+                "floors": _floors(nodata, nexrad, _ROLES + ("vrad",)),
+                "snr_min": float(min_snr),
+                "mem_x": gmem[0],
+                "mem_y": gmem[1],
+                "weights": gwts,
+                "rules": grules,
+                "slopes": gcorr,
+                "despeckle": despeckle,
+            }
         if krause:
             return {
                 "method": method,

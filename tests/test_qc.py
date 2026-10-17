@@ -770,7 +770,7 @@ def test_krause_defaults_and_options():
 def test_krause_option_errors():
     ds = _krause_sweep(**_ideal())
     with pytest.raises(ValueError, match="method"):
-        echo_mask(ds, method="gourley2007")
+        echo_mask(ds, method="gourley")
     for bad in (
         {"limits": {"rhohv": (0, 1, 2, 3)}},
         {"weights": {"rhohv": 2.0}},

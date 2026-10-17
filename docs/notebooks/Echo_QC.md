@@ -209,14 +209,87 @@ The MetSignal score has no 3 x 3 averaging and no speckle filter; `min_size`
 adds the radarx filter if wanted. The default scheme is unchanged and removes
 less echo.
 
-The method of Gourley et al. (2007) is not implemented: its membership functions
-are density estimates of the C-band data of one radar that the paper shows as
-plots only, so their numbers cannot be taken from it.
+## The classifier of Gourley et al. (2007)
+
+`method="gourley2007"` follows the structure of the paper. The texture of
+$Z_{DR}$ and $\Phi_{DP}$ is the root-mean-square difference between a gate and
+its 3 x 3 neighbours (rays times gates). Each of the three variables, $\rho_{hv}$
+and the two textures, has a membership in each of three classes (precipitation,
+ground clutter, clear air). The aggregation value of a class is the weighted
+mean of its memberships, with the weights 1 : 1.2 : 3 that the paper derives from
+the overlap of the precipitation and non-precipitation curves. The class with
+the largest value wins. The thresholds of the paper's Table 1 set the value of a
+class to zero where that class is impossible (for example precipitation below 5
+dBZ or with $\rho_{hv} < 0.7$), and a despeckling step turns isolated
+precipitation gates into non-meteorological ones and clear-air gates enclosed by
+precipitation into precipitation.
+
+The paper shows its membership functions as plots of density estimates from the C-band
+radar of Trappes. Radarx tabulates them from that figure
+(`radarx.retrieve.qc.GOURLEY_MEMBERSHIPS`); they reproduce the modes and the
+numbers quoted in the text, and the textures depend on the gate and beam size, so
+`memberships` accepts tables fitted to your radar. The paper corrects the textures
+for a linear increase with range beyond 45 km; the slope depends on the radar
+and is not applied unless `range_correction` is given.
+
+```{code-cell} ipython3
+gq = dtree.radarx.echo_mask(method="gourley2007", field="VRADH")
+c_default = qc["sweep_0"].ds.ECHO_CLASS.values
+c_gourley = gq["sweep_0"].ds.ECHO_CLASS.values
+echo_gates = c_default > 0
+met_d, met_g = c_default == 1, c_gourley == 1
+diff = np.full(c_default.shape, np.nan)
+diff[echo_gates & met_d & met_g] = 0
+diff[echo_gates & met_d & ~met_g] = 1
+diff[echo_gates & ~met_d & met_g] = 2
+diff[echo_gates & ~met_d & ~met_g] = 3
+
+fig, axs = plt.subplots(1, 3, figsize=(17, 5.8), constrained_layout=True)
+for ax, c, title in (
+    (axs[0], c_default, 'method="radarx" (default)'),
+    (axs[1], c_gourley, 'method="gourley2007"'),
+):
+    ax.pcolormesh(x, y, np.where(c > 0, c, np.nan), vmin=0.5, vmax=3.5, cmap=classes, shading="auto")
+    ax.set_title(title)
+pm = axs[2].pcolormesh(
+    x, y, diff, vmin=-0.5, vmax=3.5,
+    cmap=ListedColormap(["#2a78d6", "#d03030", "#eda100", "#c8c8c8"]), shading="auto",
+)
+cb = fig.colorbar(pm, ax=axs[2])
+cb.set_ticks([0, 1, 2, 3], labels=["both meteorological", "only default", "only Gourley", "both not"])
+axs[2].set_title("Meteorological echo in the two methods")
+for ax in axs:
+    ax.set_aspect("equal")
+    ax.set_xlim(-250, 250)
+    ax.set_ylim(-250, 250)
+    ax.set_xlabel("x (km)")
+print(f"agreement on {echo_gates.sum()} echo gates: {100 * np.mean((met_d == met_g)[echo_gates]):.1f} %")
+for name, region in regions.items():
+    sel = region & echo_gates
+    print(f"{name:45s} removed: default {100 * np.mean(~met_d[sel]):5.1f} %, Gourley {100 * np.mean(~met_g[sel]):5.1f} %")
+```
+
+The two methods agree on about 93 % of the echo gates of this sweep. The
+Gourley classifier removes less of the biological echo (86 % against 97 %) and
+more of the weak echo around the squall line, where gates with
+$\rho_{hv} < 0.7$ or below 5 dBZ cannot be precipitation under Table 1. It also needs the polarimetric
+variables: beyond about 300 km the surveillance cut holds no $\rho_{hv}$, $Z_{DR}$ or
+$\Phi_{DP}$, so these gates are echo without a class (class 3) and count as removed
+in the "light rain west" line, while the default scheme classifies them from the
+texture of the reflectivity alone. Radial streaks of low $\rho_{hv}$ in the north
+are removed only by the Gourley classifier. `rules={"dbz_min": None}` drops the
+reflectivity rule and `rules` changes the other thresholds of Table 1.
+The Doppler velocity (`field`) only enters through the ground-clutter threshold, and
+the pulse-to-pulse variability of the reflectivity (`zsigma`) needs a field that
+NEXRAD Level II data do not hold.
 
 ## Options
 
-- `method` chooses `"radarx"` (default) or `"krause2016"`; `vrad` and `zh_3km`
-  are the extra fields of the latter,
+- `method` chooses `"radarx"` (default), `"krause2016"` or `"gourley2007"`;
+  `field` (radial velocity), `zh_3km` and `zsigma` are the extra fields of the
+  other two,
+- for `"gourley2007"`: `memberships`, `weights`, `rules` (Table 1),
+  `range_correction` and `despeckle`,
 - `limits` and `weights` change the membership of each feature of the default
   scheme (`radarx.retrieve.qc.DEFAULT_LIMITS`, `DEFAULT_WEIGHTS`),
 - `threshold`, `window` (km), `min_size` (gates) and `spin_threshold` (dB),
