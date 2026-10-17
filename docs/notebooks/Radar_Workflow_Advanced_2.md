@@ -1509,9 +1509,9 @@ the user, as in the papers. `track_cells` takes the storm motion from the user o
 
 A cloud radar at 35 or 94 GHz loses signal to oxygen and water vapour, to cloud liquid water and
 to rain, and the loss differs between the two bands. The calls below show every function on a
-synthetic vertically pointing section with a known answer; the notebook `Cloud_Radar` runs the same
-chain on a day of Ka and W band data of the Cloudnet station at Lindenberg and compares it with
-Cloudnet. The section is a stratiform cloud with a liquid layer at 1.5 to 2 km, a melting layer
+synthetic vertically pointing section with a known answer; the notebooks `Cloud_Radar_Attenuation`, `Cloud_Radar_Classification` and
+`Dual_Frequency_Ratio` go into each step, the last two on a day of Ka and W band data of the Cloudnet
+station at Lindenberg compared with Cloudnet. The section is a stratiform cloud with a liquid layer at 1.5 to 2 km, a melting layer
 at 2.5 km and ice above.
 
 ```{code-cell} ipython3
