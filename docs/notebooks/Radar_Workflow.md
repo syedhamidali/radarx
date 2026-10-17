@@ -2314,6 +2314,7 @@ notebooks or from this index.
 | `hid_classes` | `radarx.retrieve.hid` | [core](Radar_Workflow): 6. Hydrometeor classification |
 | `hail_fall_speed` | `radarx.retrieve.ice_fall` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `melting_snow_fall_speed` | `radarx.retrieve.ice_fall` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
+| `match_imerg` | `radarx.retrieve.imerg` | [part 3](Radar_Workflow_Advanced_2): 19. Radar and satellite matching |
 | `estimate_kdp` | `radarx.retrieve.kdp` | [core](Radar_Workflow): 5. ΦDP processing and KDP |
 | `trajectories` | `radarx.retrieve.lagrangian` | [part 3](Radar_Workflow_Advanced_2): 9. Diabatic Lagrangian analysis |
 | `cell_flash_rate` | `radarx.retrieve.lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
@@ -2344,6 +2345,10 @@ notebooks or from this index.
 | `size_sorting` | `radarx.retrieve.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `surface_dsd` | `radarx.retrieve.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `trajectory_matched_times` | `radarx.retrieve.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
+| `dpr_dsd` | `radarx.retrieve.satellite_match` | [part 3](Radar_Workflow_Advanced_2): 19. Radar and satellite matching |
+| `dpr_parallax` | `radarx.retrieve.satellite_match` | [part 3](Radar_Workflow_Advanced_2): 19. Radar and satellite matching |
+| `match_dpr` | `radarx.retrieve.satellite_match` | [part 3](Radar_Workflow_Advanced_2): 19. Radar and satellite matching |
+| `match_statistics` | `radarx.retrieve.satellite_match` | [part 3](Radar_Workflow_Advanced_2): 19. Radar and satellite matching |
 | `attenuation_coefficients` | `radarx.retrieve.attenuation` | [core](Radar_Workflow): 5. ΦDP processing and KDP |
 | `azimuthal_shear` | `radarx.retrieve.shear` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `azimuthal_shear_layer_max` | `radarx.retrieve.shear` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
@@ -2448,6 +2453,8 @@ The methods of the `.radarx` accessors:
 | `.radarx.liquid_water_content` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.llsd` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `.radarx.mask_above_melting_layer` | [core](Radar_Workflow): 8. QVP time series and melting layer |
+| `.radarx.match_dpr` | [part 3](Radar_Workflow_Advanced_2): 19. Radar and satellite matching |
+| `.radarx.match_imerg` | [part 3](Radar_Workflow_Advanced_2): 19. Radar and satellite matching |
 | `.radarx.measurement_error` | [part 3](Radar_Workflow_Advanced_2): 16. Ensembles and uncertainty of the retrievals |
 | `.radarx.melting_layer` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `.radarx.melting_layer_ppi` | [core](Radar_Workflow): 8. QVP time series and melting layer |
