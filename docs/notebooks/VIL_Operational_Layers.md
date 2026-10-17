@@ -97,11 +97,10 @@ message and the rest is skipped.
 import xradar as xd
 
 from radarx.io.aws_data import download_file
+from open_radar_data import DATASETS
 
 try:
-    volume_path = download_file(
-        "unidata-nexrad-level2", "2022/03/30/KGWX/KGWX20220330_235959_V06", "data"
-    )
+    volume_path = DATASETS.fetch("KGWX20220330_235959_V06")
     dvl_path = download_file(
         "unidata-nexrad-level3", "GWX_DVL_2022_03_30_23_59_59", "data"
     )

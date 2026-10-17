@@ -93,26 +93,24 @@ up to the column top.
 ## The squall line of 30 March 2022 at KGWX
 
 The lowest cuts of a WSR-88D volume of the KGWX radar (Columbus, Mississippi) from
-the open NEXRAD archive on AWS, gridded at 1 km by 250 m with `grid_cones`. The
+the `open-radar-data` package, gridded at 1 km by 250 m with `grid_cones`. The
 no-data codes are masked. The freezing level is not measured here: the 4000 m
 used is an assumption for a warm sector in spring, in the vertical reference of the grid
 (above sea level). A sounding or a model gives the real value; the next cell shows
-how much it matters. If the archive cannot be reached, the notebook ends with the
+how much it matters. If the file cannot be fetched, the notebook ends with the
 synthetic result only.
 
 ```{code-cell} ipython3
 import xradar as xd
 
 from radarx.grid import grid_cones
-from radarx.io.aws_data import download_file
+from open_radar_data import DATASETS
 
 try:
-    path = download_file(
-        "unidata-nexrad-level2", "2022/03/30/KGWX/KGWX20220330_234639_V06", "data"
-    )
+    path = DATASETS.fetch("KGWX20220330_234639_V06")
 except Exception as err:  # offline: keep the synthetic result
     path = None
-    print("NEXRAD archive not reachable:", type(err).__name__)
+    print("open-radar-data file not reachable:", type(err).__name__)
 
 if path is not None:
     volume = xd.io.open_nexradlevel2_datatree(
@@ -173,6 +171,9 @@ $Z_{DR}$ must also be calibrated, because a bias of 0.5 dB moves the 1 dB
 threshold by half its value, and a column is only as deep as the vertical
 resolution of the gridded volume, which is poor at long range where the beams are
 wide.
+
+A vertical section through one of these columns, together with the KDP column of the same
+updraft, is in [ZDR and KDP columns in a vertical section](ZDR_KDP_Column_Sections).
 
 ## References
 

@@ -45,7 +45,7 @@ from xradar.io.backends.nexrad_level2 import NEXRADLevel2File
 import radarx  # noqa: F401
 from radarx.fundamentals.constants import EARTH_RADIUS
 from radarx.fundamentals.geometry import beam_center_height, ground_range
-from radarx.io.aws_data import download_file
+from open_radar_data import DATASETS
 from radarx.retrieve import vad_profile, vvp, vvp_winds
 ```
 
@@ -105,7 +105,7 @@ low-level jet of more than 35 m/s. The velocity is dealiased first (the Nyquist 
 from the radial headers, as in the dealiasing notebook).
 
 ```{code-cell} ipython3
-path = download_file("unidata-nexrad-level2", "2022/03/30/KGWX/KGWX20220330_234639_V06", ".")
+path = DATASETS.fetch("KGWX20220330_234639_V06")
 dtree = xd.io.open_nexradlevel2_datatree(path)
 with NEXRADLevel2File(path) as nf:
     nyquist = [h["msg_31_data_header"]["RAD"]["nyquist_vel"] / 100.0 for h in nf.msg_31_data_header]

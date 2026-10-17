@@ -58,18 +58,16 @@ import xradar as xd
 from onnx import TensorProto, helper
 
 import radarx.ml as ml
-from radarx.io.aws_data import download_file
+from open_radar_data import DATASETS
 ```
 
 ## A sweep of the KGWX squall line
 
 The KGWX (Columbus AFB, Mississippi) WSR-88D volume of 30 March 2022, 23:46
-UTC, from the NOAA NEXRAD archive on AWS. NEXRAD no-data codes are masked.
+UTC, from the `open-radar-data` package. NEXRAD no-data codes are masked.
 
 ```{code-cell} ipython3
-file = download_file(
-    "unidata-nexrad-level2", "2022/03/30/KGWX/KGWX20220330_234639_V06", "downloads"
-)
+file = DATASETS.fetch("KGWX20220330_234639_V06")
 
 
 def mask_no_data(ds):

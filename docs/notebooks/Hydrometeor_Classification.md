@@ -45,7 +45,7 @@ import xradar as xd
 from matplotlib.colors import BoundaryNorm, ListedColormap
 
 import radarx  # noqa: F401  (registers the .radarx accessors)
-from radarx.io.aws_data import download_file
+from open_radar_data import DATASETS
 from radarx.io.sounding import isotherm_height, wet_bulb_zero_height
 from radarx.retrieve import hid_classes
 ```
@@ -57,9 +57,7 @@ The KGWX (Columbus AFB, Mississippi) WSR-88D volume of 30 March 2022
 trailing stratiform region. The NEXRAD no-data codes are masked first.
 
 ```{code-cell} ipython3
-file = download_file(
-    "unidata-nexrad-level2", "2022/03/30/KGWX/KGWX20220330_234639_V06", "./downloads"
-)
+file = DATASETS.fetch("KGWX20220330_234639_V06")
 raw = xd.io.open_nexradlevel2_datatree(file)
 
 

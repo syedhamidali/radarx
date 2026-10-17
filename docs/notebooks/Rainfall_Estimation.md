@@ -70,7 +70,7 @@ from matplotlib.colors import BoundaryNorm, ListedColormap
 from open_radar_data import DATASETS
 
 import radarx  # noqa: F401  registers the .radarx accessors
-from radarx.io.aws_data import download_file
+from open_radar_data import DATASETS
 from radarx.retrieve import (
     dsd,
     estimate_kdp,
@@ -229,9 +229,7 @@ $Z_{DR}$ comes from the radar as it is, and KDP from `estimate_kdp`. The ERA5
 profile places the melting layer for the classification.
 
 ```{code-cell} ipython3
-file = download_file(
-    "unidata-nexrad-level2", "2022/03/30/KGWX/KGWX20220330_234639_V06", "./downloads"
-)
+file = DATASETS.fetch("KGWX20220330_234639_V06")
 raw = xd.io.open_nexradlevel2_datatree(file)
 
 

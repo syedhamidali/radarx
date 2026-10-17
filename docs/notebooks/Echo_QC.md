@@ -55,7 +55,7 @@ import xradar as xd
 from matplotlib.colors import ListedColormap
 
 import radarx  # noqa: F401  registers the .radarx accessors
-from radarx.io.aws_data import download_file
+from open_radar_data import DATASETS
 from radarx.retrieve import echo_mask
 ```
 
@@ -66,9 +66,7 @@ west of the radar. East of it, ahead of the line, a region of weak echo with
 $Z_{DR}$ above 5 dB and low, noisy $\rho_{hv}$: insects or birds.
 
 ```{code-cell} ipython3
-path = download_file(
-    "unidata-nexrad-level2", "2022/03/30/KGWX/KGWX20220330_234639_V06", "."
-)
+path = DATASETS.fetch("KGWX20220330_234639_V06")
 dtree = xd.io.open_nexradlevel2_datatree(path)
 dtree.load()
 ```

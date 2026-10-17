@@ -88,6 +88,9 @@ height per grid column. The threshold is 0.75 °/km for S band, 1.5 for C band
 coefficient. The paper gives neither the width of the Gaussian filter nor the extent
 of a column, so `smooth` (in grid cells) and `min_depth` are choices that you can change.
 
+For a real case, with a vertical section through a ZDR column and a KDP column of a
+squall line, see [ZDR and KDP columns in a vertical section](ZDR_KDP_Column_Sections).
+
 ## What is not here
 
 - **ZDR column rules of the paper.** van Lier-Walqui et al. measure the ZDR height with a

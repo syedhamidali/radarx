@@ -36,15 +36,13 @@ import xradar as xd
 
 import radarx  # noqa: F401  (registers the .radarx accessors)
 from radarx.io import sounding
-from radarx.io.aws_data import download_file
+from open_radar_data import DATASETS
 ```
 
 ## The radar volume
 
 ```{code-cell} ipython3
-file = download_file(
-    "unidata-nexrad-level2", "2022/03/30/KGWX/KGWX20220330_234639_V06", "./downloads"
-)
+file = DATASETS.fetch("KGWX20220330_234639_V06")
 dtree = xd.io.open_nexradlevel2_datatree(file, sweep=[0, 1, 2, 3])
 dtree = dtree.xradar.georeference()
 site = dtree["sweep_0"].to_dataset(inherit="all_coords")

@@ -35,7 +35,7 @@ import xradar as xd
 from matplotlib.colors import ListedColormap
 
 import radarx  # noqa: F401  registers the .radarx accessors
-from radarx.io.aws_data import download_file
+from open_radar_data import DATASETS
 
 warnings.filterwarnings("ignore", message="The input coordinates to pcolormesh")
 ```
@@ -44,8 +44,8 @@ warnings.filterwarnings("ignore", message="The input coordinates to pcolormesh")
 
 The case is the squall line of KGWX (Columbus, Mississippi) on 30 March 2022,
 with a patch of insects or birds ahead of it (weak echo, $Z_{DR}$ above 5 dB,
-low and noisy $\rho_{hv}$). The volume comes from the public NEXRAD archive on
-AWS. Without a network connection the notebook builds a small synthetic sweep
+low and noisy $\rho_{hv}$). The volume comes from the
+`open-radar-data` package. Without a network connection the notebook builds a small synthetic sweep
 with the same three ingredients: rain, biological echo and ground clutter.
 
 ```{code-cell} ipython3
@@ -94,13 +94,11 @@ def synthetic_volume(seed=0):
 
 def load_volume():
     try:
-        path = download_file(
-            "unidata-nexrad-level2", "2022/03/30/KGWX/KGWX20220330_234639_V06", "."
-        )
+        path = DATASETS.fetch("KGWX20220330_234639_V06")
         dtree = xd.io.open_nexradlevel2_datatree(path)
         dtree.load()
         return dtree, "KGWX 30 March 2022 23:46 UTC"
-    except Exception as err:  # offline or archive unavailable
+    except Exception as err:  # offline or file unavailable
         print(f"no NEXRAD data ({type(err).__name__}), using the synthetic sweep")
         return synthetic_volume()
 
