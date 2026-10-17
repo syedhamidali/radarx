@@ -6,6 +6,7 @@
 # Distributed under the MIT License. See LICENSE for more info.
 
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -30,6 +31,7 @@ class NotebookItem(pytest.Item):
     def runtest(self):
         old_cwd = os.getcwd()
         old_sys_path = sys.path.copy()
+        old_cache = os.environ.get("RADARX_CACHE_DIR")
 
         try:
             # ensure project root is importable
@@ -40,6 +42,17 @@ class NotebookItem(pytest.Item):
             # run in temp dir
             tmp_path = Path(self.config._tmp_path_factory.mktemp("notebook"))
             os.chdir(tmp_path)
+
+            # A cold read of Google's ARCO-ERA5 takes minutes; as in the
+            # documentation build (docs/conf.py), start from the small
+            # pre-extracted subset (KGWX region, 23 and 00 UTC, 30-31 March 2022).
+            if old_cache is None:
+                cache = tmp_path / "radarx-cache"
+                shutil.copytree(
+                    Path(__file__).parent / "data" / "era5",
+                    cache / "soundings" / "era5",
+                )
+                os.environ["RADARX_CACHE_DIR"] = str(cache)
 
             if self.parent.path.suffix == ".md":
                 nb = jupytext.read(self.parent.path)
@@ -91,6 +104,8 @@ class NotebookItem(pytest.Item):
         finally:
             os.chdir(old_cwd)
             sys.path = old_sys_path
+            if old_cache is None:
+                os.environ.pop("RADARX_CACHE_DIR", None)
 
     def repr_failure(self, excinfo):
         if isinstance(excinfo.value, NotebookException):
