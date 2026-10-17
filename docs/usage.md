@@ -276,6 +276,7 @@ notebooks/Dual_Frequency_Ratio
 
 notebooks/Soundings_and_ERA5
 notebooks/Diabatic_Lagrangian
+notebooks/Diabatic_Lagrangian_Real_Data
 notebooks/Cold_Pools_and_Wind_Profiles
 ```
 
