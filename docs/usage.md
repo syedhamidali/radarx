@@ -249,6 +249,15 @@ notebooks/Rainfall_Estimation
 
 ```{toctree}
 :maxdepth: 2
+:caption: Cloud radar (Ka and W band)
+
+notebooks/Cloud_Radar_Attenuation
+notebooks/Cloud_Radar_Classification
+notebooks/Dual_Frequency_Ratio
+```
+
+```{toctree}
+:maxdepth: 2
 :caption: Thermodynamics and cold pools
 
 notebooks/Soundings_and_ERA5

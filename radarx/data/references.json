@@ -3249,5 +3249,181 @@
   "issue": "2",
   "pages": "737-758",
   "doi": "10.1175/MWR-D-15-0100.1"
+ },
+ "10.1007/BF01008897": {
+  "authors": [
+   "Liebe, H. J.",
+   "Hufford, G. A.",
+   "Manabe, T."
+  ],
+  "year": 1991,
+  "title": "A model for the complex permittivity of water at frequencies below 1 THz",
+  "type": "article",
+  "journal": "International Journal of Infrared and Millimeter Waves",
+  "volume": "12",
+  "issue": "7",
+  "pages": "659-675",
+  "doi": "10.1007/BF01008897"
+ },
+ "10.1175/1520-0426(2000)017<0027:MCSICU>2.0.CO;2": {
+  "authors": [
+   "Hogan, R. J.",
+   "Illingworth, A. J.",
+   "Sauvageot, H."
+  ],
+  "year": 2000,
+  "title": "Measuring Crystal Size in Cirrus Using 35- and 94-GHz Radars",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "17",
+  "issue": "1",
+  "pages": "27-37",
+  "doi": "10.1175/1520-0426(2000)017<0027:MCSICU>2.0.CO;2"
+ },
+ "10.1175/BAMS-88-6-883": {
+  "authors": [
+   "Illingworth, A. J.",
+   "Hogan, R. J.",
+   "O'Connor, E. J.",
+   "Bouniol, D.",
+   "Brooks, M. E.",
+   "Delanoé, J.",
+   "Donovan, D. P.",
+   "Eastment, J. D.",
+   "Gaussiat, N.",
+   "Goddard, J. W. F.",
+   "Haeffelin, M.",
+   "Klein Baltink, H.",
+   "Krasnov, O. A.",
+   "Pelon, J.",
+   "Piriou, J.-M.",
+   "Protat, A.",
+   "Russchenberg, H. W. J.",
+   "Seifert, A.",
+   "Tompkins, A. M.",
+   "van Zadelhoff, G.-J.",
+   "Vinit, F.",
+   "Willén, U.",
+   "Wilson, D. R.",
+   "Wrench, C. L."
+  ],
+  "year": 2007,
+  "title": "Cloudnet: Continuous Evaluation of Cloud Profiles in Seven Operational Models Using Ground-Based Observations",
+  "type": "article",
+  "journal": "Bulletin of the American Meteorological Society",
+  "volume": "88",
+  "issue": "6",
+  "pages": "883-898",
+  "doi": "10.1175/BAMS-88-6-883"
+ },
+ "10.1002/2014JD023023": {
+  "authors": [
+   "Tridon, F.",
+   "Battaglia, A."
+  ],
+  "year": 2015,
+  "title": "Dual-frequency radar Doppler spectral retrieval of rain drop size distributions and entangled dynamics variables",
+  "type": "article",
+  "journal": "Journal of Geophysical Research: Atmospheres",
+  "volume": "120",
+  "issue": "11",
+  "pages": "5585-5601",
+  "doi": "10.1002/2014JD023023"
+ },
+ "10.1002/2015JD023156": {
+  "authors": [
+   "Kneifel, S.",
+   "von Lerber, A.",
+   "Tiira, J.",
+   "Moisseev, D.",
+   "Kollias, P.",
+   "Leinonen, J."
+  ],
+  "year": 2015,
+  "title": "Observed relations between snowfall microphysics and triple-frequency radar measurements",
+  "type": "article",
+  "journal": "Journal of Geophysical Research: Atmospheres",
+  "volume": "120",
+  "issue": "12",
+  "pages": "6034-6055",
+  "doi": "10.1002/2015JD023156"
+ },
+ "10.1175/1520-0426(1995)012<0410:IMOTIW>2.0.CO;2": {
+  "authors": [
+   "Brown, P. R. A.",
+   "Francis, P. N."
+  ],
+  "year": 1995,
+  "title": "Improved Measurements of the Ice Water Content in Cirrus Using a Total-Water Probe",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "12",
+  "issue": "2",
+  "pages": "410-414",
+  "doi": "10.1175/1520-0426(1995)012<0410:IMOTIW>2.0.CO;2"
+ },
+ "10.21105/joss.02123": {
+  "authors": [
+   "Tukiainen, S.",
+   "O'Connor, E.",
+   "Korpinen, A."
+  ],
+  "year": 2020,
+  "title": "CloudnetPy: A Python package for processing cloud remote sensing data",
+  "type": "article",
+  "journal": "Journal of Open Source Software",
+  "volume": "5",
+  "issue": "53",
+  "pages": "2123",
+  "doi": "10.21105/joss.02123"
+ },
+ "10.1029/2007JD009744": {
+  "authors": [
+   "Warren, S. G.",
+   "Brandt, R. E."
+  ],
+  "year": 2008,
+  "title": "Optical constants of ice from the ultraviolet to the microwave: A revised compilation",
+  "type": "article",
+  "journal": "Journal of Geophysical Research: Atmospheres",
+  "volume": "113",
+  "issue": "D14",
+  "pages": "D14220",
+  "doi": "10.1029/2007JD009744"
+ },
+ "10.1175/1520-0450(1998)037<1510:ADWRMT>2.0.CO;2": {
+  "authors": [
+   "Matrosov, S. Y."
+  ],
+  "year": 1998,
+  "title": "A Dual-Wavelength Radar Method to Measure Snowfall Rate",
+  "type": "article",
+  "journal": "Journal of Applied Meteorology",
+  "volume": "37",
+  "issue": "11",
+  "pages": "1510-1521",
+  "doi": "10.1175/1520-0450(1998)037<1510:ADWRMT>2.0.CO;2"
+ },
+ "itu-r-p676-13": {
+  "authors": [
+   "ITU-R"
+  ],
+  "year": 2022,
+  "title": "Recommendation ITU-R P.676-13: Attenuation by atmospheric gases and related effects",
+  "type": "report",
+  "journal": "Rec. ITU-R P.676-13",
+  "publisher": "International Telecommunication Union",
+  "url": "https://www.itu.int/rec/R-REC-P.676"
+ },
+ "itu-r-p840-9": {
+  "authors": [
+   "ITU-R"
+  ],
+  "year": 2023,
+  "title": "Recommendation ITU-R P.840-9: Attenuation due to clouds and fog",
+  "type": "report",
+  "journal": "Rec. ITU-R P.840-9",
+  "publisher": "International Telecommunication Union",
+  "url": "https://www.itu.int/rec/R-REC-P.840"
  }
 }
