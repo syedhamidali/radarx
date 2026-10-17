@@ -214,6 +214,7 @@ notebooks/Azimuthal_Shear
 
 notebooks/Hydrometeor_Classification
 notebooks/DSD_Retrieval
+notebooks/DSD_Canting_Sensitivity
 notebooks/TMatrix_Validation
 notebooks/TMatrix_Textbook_Examples
 notebooks/TMatrix_Radar_Bands
@@ -242,6 +243,10 @@ notebooks/Cold_Pools_and_Wind_Profiles
 notebooks/Lightning
 notebooks/Tornado_Detection
 notebooks/Hail_Products
+notebooks/VIL_and_Water_Content
+notebooks/VIL_Operational_Layers
+notebooks/ZDR_Column
+notebooks/ZDR_Arc
 ```
 
 ```{toctree}

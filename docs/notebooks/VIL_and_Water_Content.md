@@ -149,6 +149,8 @@ are truncated (`VIL_TOP_TRUNCATED`).
 
 ### Below the lowest beam
 
+The [VIL layers notebook](VIL_Operational_Layers) compares `fill_below` and `layers="operational"` with the Level III DVL on its own.
+
 The lowest beam rises from a few hundred metres above the radar at 20 km to
 2.5 km at 150 km, and the VIL leaves out the layer below it, so it is a lower bound
 (`VIL_LOWER_BOUND`). `fill_below=True` extends the lowest value down to the
