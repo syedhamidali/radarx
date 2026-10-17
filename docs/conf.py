@@ -303,6 +303,7 @@ _RTD_CACHE_ONLY = [
     "notebooks/ZDR_KDP_Column_Sections.md",
     "notebooks/ZDR_Column.md",
     "notebooks/Dealiasing.md",
+    "notebooks/Diabatic_Lagrangian_Real_Data.md",
     "notebooks/Echo_Classifier_Gourley.md",
     "notebooks/Echo_QC.md",
     "notebooks/Hydrometeor_Classification.md",

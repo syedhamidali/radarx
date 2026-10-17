@@ -31,7 +31,9 @@ Rain and graupel along the trajectories come from a precipitation closure;
 the default uses the radarx DSD retrieval ($Z_H$, $Z_{DR}$) and the
 hydrometeor classification. This notebook builds a small synthetic storm, so
 it runs anywhere; with real data the winds come from
-`radarx.retrieve.multi_doppler` analyses joined along `time`.
+`radarx.retrieve.multi_doppler` analyses joined along `time`. The
+[real-data notebook](Diabatic_Lagrangian_Real_Data) runs the analysis on four
+KGWX volumes of a squall line, with ERA5 and surface stations.
 
 ```{code-cell} ipython3
 import matplotlib.pyplot as plt
