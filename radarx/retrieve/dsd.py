@@ -35,9 +35,13 @@ Methods
 own construction (a table of :math:`Z_{DR}` against :math:`\\Lambda` on a
 geometric grid of 0.3-20 mm\\ :sup:`-1`, 2000 points, discarding the part
 where :math:`\\mu \\le -0.99`) rather than an iterative or polynomial
-solution as in the cited papers; Cao et al. (2008, Eqs. 9-11) give
-polynomial fits of :math:`R`, :math:`W` and :math:`D_0` against
-:math:`Z_{DR}` for the same relation, which radarx does not use.
+solution as in the cited papers. Cao et al. (2008, Eqs. 8-11) give
+polynomial fits of :math:`N_T`, :math:`R`, :math:`W` and :math:`D_0` against
+:math:`Z_{DR}` that they fitted directly to sorted and averaged Oklahoma 2D
+video disdrometer spectra, not through the :math:`\\mu`-:math:`\\Lambda` relation;
+radarx does not use them. The constrained retrieval departs from the
+:math:`R` and :math:`D_0` polynomials above about 1.2 dB, see "Limits of the
+constrained method" below.
 ``"normalized"``
     Normalized gamma DSD (Testud et al. 2001; Bringi et al. 2002)
 
@@ -278,6 +282,56 @@ Figs. 10-11) have cluster means of :math:`\\log_{10} N_w` of 3-3.5
 :math:`\\pm 1\\sigma` bars of about 2.5-5, and their retrieval table spans
 :math:`3 \\le \\log_{10} N_w \\le 5` (Appendix, Eq. A2).
 
+Limits of the constrained method
+--------------------------------
+The constrained family has one spectrum per :math:`Z_{DR}`, so where measured
+spectra differ from the :math:`\\mu`-:math:`\\Lambda` line the retrieved
+:math:`R` and :math:`D_0` are biased. At S band (20 °C, 7° of canting) the
+default relation gives, against Eqs. 9 and 11 of Cao et al. (2008) at
+:math:`Z_{DR}` of 0.5, 1, 1.5, 2 and 3 dB, an :math:`R` of 0.93, 1.10, 1.23,
+1.25 and 1.03 times the polynomial and a :math:`D_0` of 1.00, 0.92, 0.88, 0.86
+and 0.89 times the polynomial: within the scatter of the disdrometer fits
+(a bias of 9 % in :math:`R` and 7 % in :math:`D_0` over 0.15-4 dB, their Table
+4) up to 1 dB, +25 % in :math:`R` and -14 % in :math:`D_0` at 1.5-2 dB.
+The notebook ``DSD_Cao_Comparison`` separates the causes with the T-matrix code
+of :mod:`radarx.fundamentals.tmatrix`:
+
+- the fall speed is not one: the part of the Atlas et al. (1973) law below
+  0.109 mm, which is negative, is a few parts in :math:`10^6` of the rain rate,
+  and the drag-balance fall speed of :func:`terminal_fall_speed` changes the
+  rain rate by less than 0.1 %;
+- the approximation :math:`D_0 \\approx (3.67 + \\mu)/\\Lambda` is within 0.15 % of
+  the median of the :math:`D^3 N` distribution for :math:`Z_{DR}` of 0.3-3 dB;
+- the scattering assumptions move the comparison but do not remove it: Cao et
+  al. (2008) do not state the canting or axis ratio of their disdrometer
+  :math:`Z_{DR}`, and 0 or 10 degrees instead of 7 change the ratio of
+  :math:`R` at 1.75 dB from 1.26 to 1.34 or 1.17; frequency (2.8 or 3 GHz) and
+  temperature (0-30 °C) change it by less than 0.5 %;
+- the rest is the family. Spectra that follow the relation of Cao et al.
+  (2008) but have no drops above 5 mm are retrieved with +19 % in :math:`R` and
+  -13 % in :math:`D_0` at 1.5-2 dB (+5 % and -3 % for a 6 mm limit); the lookup
+  table counts drops up to 8 mm. On 731 one-minute Parsivel spectra of the PERiLS
+  2022 PIPS (Dawson et al. 2025; 22 and 30 March 2022, southeastern United
+  States; :math:`Z_H` and :math:`Z_{DR}` from the radarx tables, so without
+  a scattering mismatch) the default retrieval gave :math:`R` 1.20 and
+  :math:`D_0` 0.87 times the spectra at 1.5-2 dB (1.19 and 0.87 below 1 dB),
+  the relation of Zhang et al. (2001) 1.13 and 0.93, and the polynomials of
+  Cao et al. (2008) 0.96 and 1.00. :func:`radarx.retrieve.rain_rate_z_zdr`
+  gave 1.05.
+
+Do not rely on the constrained retrieval for :math:`R` and :math:`D_0` where
+
+- :math:`Z_{DR}` exceeds about 1.2 dB: treat :math:`R` as 20-25 % high and
+  :math:`D_0` as 12-14 % low, or use the polynomial of Cao et al. (2008,
+  Eq. 9, :math:`Z_{DR}` 0.15-4 dB) or :func:`radarx.retrieve.rain_rate_z_zdr`;
+- the gate is in a big-drop region (high :math:`Z_{DR}` for the reflectivity, as
+  at the leading edge of convection): the adjustment of Cao et al. (2008,
+  Eq. 16) is not implemented;
+- :math:`Z_{DR}` or :math:`Z_H` is miscalibrated or attenuated: an offset of 0.2
+  dB in :math:`Z_{DR}` changes :math:`R` by 16-29 % and :math:`D_0` by 6-8 %;
+- the echo is not rain (hail, the melting layer, clutter): pass ``mask``;
+- ``ZDR_CLIPPED`` is set.
+
 Disdrometers
 ------------
 :func:`dsd_spectrum` rebuilds :math:`N(D)` from the retrieved parameters on
@@ -334,6 +388,10 @@ Cao, Q., G. Zhang, E. Brandes, T. Schuur, A. Ryzhkov, and K. Ikeda, 2008:
 Analysis of video disdrometer and polarimetric radar data to characterize
 rain microphysics in Oklahoma. *J. Appl. Meteor. Climatol.*, **47** (8),
 2238-2255, https://doi.org/10.1175/2008JAMC1732.1
+
+Dawson, D., M. Biggerstaff, and S. Waugh, 2025: PERiLS_2022: Portable In Situ
+Precipitation Stations (PIPS) Data. Version 1.0. NSF NCAR Earth Observing
+Laboratory, https://doi.org/10.26023/HFBG-7W5M-WA00
 
 Cao, Q., and G. Zhang, 2009: Errors in estimating raindrop size distribution
 parameters employing disdrometer and simulated raindrop spectra. *J. Appl.
@@ -1231,8 +1289,15 @@ def dsd(
     these are 0.6 dB, 27 % and 12-21 % (:math:`\\mu` = 3; section
     "Sensitivity to canting and frequency" of :mod:`radarx.retrieve.dsd`).
     The rain rate uses the sea-level fall speed of Atlas et al. (1973) (Bringi and
-    Chandrasekar 2001, Eq. 7.65b) without density correction; the moments
-    follow Ulbrich (1983) and Testud et al. (2001).
+    Chandrasekar 2001, Eq. 7.65b) without density correction (the part of the
+    law below 0.109 mm, where it is negative, is a few parts in
+    :math:`10^6` of the rain rate); the moments follow Ulbrich (1983) and
+    Testud et al. (2001). With ``method="constrained"`` the rain rate is
+    about 20-25 % high and :math:`D_0` 12-14 % low at :math:`Z_{DR}` of
+    1.5-2 dB compared with the polynomial estimators of Cao et al. (2008)
+    and with measured spectra, and a 0.2 dB error in :math:`Z_{DR}` changes
+    the rain rate by 16-29 %; see "Limits of the constrained method" in
+    :mod:`radarx.retrieve.dsd`.
 
     References
     ----------
