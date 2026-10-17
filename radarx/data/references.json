@@ -2851,5 +2851,19 @@
   "issue": "2",
   "pages": "371-386",
   "doi": "10.1175/JTECH-D-20-0056.1"
+ },
+ "10.1016/0021-9991(75)90037-6": {
+  "authors": [
+   "Gal-Chen, T.",
+   "Somerville, R. C. J."
+  ],
+  "year": 1975,
+  "title": "On the use of a coordinate transformation for the solution of the Navier-Stokes equations",
+  "type": "article",
+  "journal": "Journal of Computational Physics",
+  "volume": "17",
+  "issue": "2",
+  "pages": "209-228",
+  "doi": "10.1016/0021-9991(75)90037-6"
  }
 }

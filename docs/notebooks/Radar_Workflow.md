@@ -79,6 +79,7 @@ import radarx  # noqa: F401  registers the .radarx accessors
 from radarx.grid import (
     gate_corners,
     grid_cones,
+    grid_cones_mixed,
     grid_gates,
     grid_radar,
     grid_radars,
@@ -171,6 +172,7 @@ from radarx.retrieve import (
     storm_relative_wind,
     superobs,
     vad_profile,
+    velocity_error,
     vil,
     vil_density,
     z_offset,
@@ -1552,6 +1554,34 @@ print("the accessor of the first volume and grid_radars give the same mosaic:",
       bool(np.allclose(mosaic.DBZH_merged, mosaic_fn.DBZH_merged, equal_nan=True)))
 ```
 
+The radial velocity of the analysis is interpolated from the polar grid, and
+linear interpolation between sweeps that are a few degrees apart leaves
+undulations at the horizontal spacing of the beams where the wind changes
+quickly with height (Collis et al. 2010). `grid_cones_mixed` grids a volume
+with their mixed-order interpolation, a weighted sum of the two orders of
+interpolation, and `multi_doppler_input(..., velocity_interpolation="mixed")`
+uses it for the analysis; the retrieved vertical velocity changes by the
+amount printed here (see the [multi-Doppler notebook](Multi_Doppler) for a case
+with a known answer):
+
+```{code-cell} ipython3
+with timed("12c2. mixed-order velocity gridding"):
+    vr_linear = grid_cones(kgwx, ["VRADH_dealiased"], x=x, y=y, z=z).VRADH_dealiased
+    vr_mixed = grid_cones_mixed(kgwx, "VRADH_dealiased", x, y, z).VRADH_dealiased
+    md_mixed = multi_doppler_input(
+        [kgwx, kbmx], x, y, z, field="VRADH_dealiased", time=analysis_time, motion=motion,
+        velocity_interpolation="mixed",
+    )
+    wind_mixed = md_mixed.radarx.multi_doppler(background, field="VRADH_dealiased")
+both = (wind.n_radars >= 2) & (wind.beam_crossing_angle > 30)
+dv = (vr_mixed - vr_linear).where(vr_linear.notnull() & vr_mixed.notnull())
+dw = (wind_mixed.w - wind.w).where(both)
+print(f"KGWX radial velocity, mixed minus linear: rms {float(np.sqrt((dv ** 2).mean())):.2f} m/s; "
+      f"dual-Doppler w, mixed minus linear: rms {float(np.sqrt((dw ** 2).mean())):.2f} m/s "
+      f"({int(both.sum())} cells)")
+del md_mixed, wind_mixed
+```
+
 `era5_column` is the three-dimensional counterpart of `era5_profile`: it
 interpolates ERA5 to every cell of a grid (here the wind that is used as the
 background of the multi-Doppler analysis, rotated to the grid axes), and
@@ -1883,6 +1913,24 @@ ax.legend(frameon=False)
 plt.show()
 ```
 
+The SNR sets how well a radial velocity is known. `velocity_error` gives the
+standard deviation of the pulse-pair velocity estimate from the SNR, the
+spectrum width, the wavelength, the Nyquist velocity and the number of pulse
+pairs (Doviak and Zrnic 1993, Eq. 6.22), and its result can be passed as
+`obs_error` to `multi_doppler` to weight the gates:
+
+```{code-cell} ipython3
+with timed("15b. velocity error from the SNR"):
+    sigma_v = velocity_error(
+        snr_vol[s0].SNR, 4.0, wavelength=0.1071, nyquist=float(sweep0.nyquist_velocity), n_pairs=64
+    )
+print(f"velocity error at an SNR of 5, 15 and 30 dB (4 m/s width, 64 pairs): "
+      f"{float(velocity_error(5.0, 4.0, wavelength=0.1071, nyquist=float(sweep0.nyquist_velocity))):.2f}, "
+      f"{float(velocity_error(15.0, 4.0, wavelength=0.1071, nyquist=float(sweep0.nyquist_velocity))):.2f}, "
+      f"{float(velocity_error(30.0, 4.0, wavelength=0.1071, nyquist=float(sweep0.nyquist_velocity))):.2f} m/s; "
+      f"median over the 0.5° sweep {float(sigma_v.median()):.2f} m/s")
+```
+
 ## 16. Super-observations for data assimilation
 
 A volume has millions of gates, a model a few hundred thousand cells, and the
@@ -2143,6 +2191,7 @@ notebooks or from this index.
 | `grid_radar` | `radarx.grid.grid` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `make_3d_grid` | `radarx.grid.grid` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `stack_data` | `radarx.grid.grid` | [core](Radar_Workflow): Other ways to grid, section and plot |
+| `grid_cones_mixed` | `radarx.grid.mixed` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `grid_radars` | `radarx.grid.multi` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `merge_radars` | `radarx.grid.multi` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `network_bias` | `radarx.grid.multi` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
@@ -2277,6 +2326,7 @@ notebooks or from this index.
 | `multi_doppler` | `radarx.retrieve.multidoppler` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `multi_doppler_input` | `radarx.retrieve.multidoppler` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `radar_geometry` | `radarx.retrieve.multidoppler` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
+| `velocity_error` | `radarx.retrieve.multidoppler` | [core](Radar_Workflow): 15. Noise and calibration |
 | `noise_level` | `radarx.retrieve.noise` | [core](Radar_Workflow): 15. Noise and calibration |
 | `snr` | `radarx.retrieve.noise` | [core](Radar_Workflow): 15. Noise and calibration |
 | `correct_rhohv_noise` | `radarx.retrieve.noise` | [core](Radar_Workflow): 15. Noise and calibration |
@@ -2465,6 +2515,8 @@ The methods of the `.radarx` accessors:
 - Browning, K. A., and R. Wexler, 1968: The Determination of Kinematic Properties of a Wind Field Using Doppler Radar. *Journal of Applied Meteorology*, **7**, 105-113, <https://doi.org/10.1175/1520-0450(1968)007<0105:TDOKPO>2.0.CO;2>
 - Bunkers, M. J., B. A. Klimowski, J. W. Zeitler, R. L. Thompson, and M. L. Weisman, 2000: Predicting Supercell Motion Using a New Hodograph Technique. *Weather and Forecasting*, **15**, 61-79, <https://doi.org/10.1175/1520-0434(2000)015<0061:PSMUAN>2.0.CO;2>
 - Cao, Q., G. Zhang, E. Brandes, T. Schuur, A. Ryzhkov, and K. Ikeda, 2008: Analysis of Video Disdrometer and Polarimetric Radar Data to Characterize Rain Microphysics in Oklahoma. *Journal of Applied Meteorology and Climatology*, **47**, 2238-2255, <https://doi.org/10.1175/2008JAMC1732.1>
+- Collis, S., A. Protat, and K.-S. Chung, 2010: The Effect of Radial Velocity Gridding Artifacts on Variationally Retrieved Vertical Velocities. *Journal of Atmospheric and Oceanic Technology*, **27**, 1239-1246, <https://doi.org/10.1175/2010JTECHA1402.1>
+- Doviak, R. J., and D. S. Zrnic, 1993: *Doppler Radar and Weather Observations*, 2nd ed. Academic Press, ISBN 0-12-221422-6.
 - Gao, J., M. Xue, A. Shapiro, and K. K. Droegemeier, 1999: A Variational Method for the Analysis of Three-Dimensional Wind Fields from Two Doppler Radars. *Monthly Weather Review*, **127**, 2128-2142, <https://doi.org/10.1175/1520-0493(1999)127<2128:AVMFTA>2.0.CO;2>
 - Gorgucci, E., G. Scarchilli, and V. Chandrasekar, 1992: Calibration of Radars Using Polarimetric Techniques. *IEEE Transactions on Geoscience and Remote Sensing*, **30**, 853-858, <https://doi.org/10.1109/36.175319>
 - Gourley, J. J., P. Tabary, and J. Parent du Chatelet, 2006: Data Quality of the Meteo-France C-Band Polarimetric Radar. *Journal of Atmospheric and Oceanic Technology*, **23**, 1340-1356, <https://doi.org/10.1175/JTECH1912.1>

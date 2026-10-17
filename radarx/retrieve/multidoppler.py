@@ -34,7 +34,9 @@ for what this assumes about the height of the lowest level. Options of
 :func:`multi_doppler` weight the observations by their error and by the
 crossing angle of the beams, return the standard deviation of the retrieval
 error of ``u``, ``v`` and ``w`` from the covariance of the cost function, and
-adjust ``w`` so that it is zero at the top (O'Brien 1970).
+adjust ``w`` so that it is zero at the top (O'Brien 1970). ``terrain`` makes
+the levels follow a digital elevation model and :func:`velocity_error` gives
+the error of the radial velocity from the signal to noise ratio.
 :func:`dual_doppler_analytic` is the classical non-variational solution: the
 horizontal wind of every cell from the 2 x 2 (or least-squares) system of the
 radial velocities, and ``w`` from the upward, downward or O'Brien-adjusted
@@ -73,6 +75,7 @@ __all__ = [
     "multi_doppler",
     "multi_doppler_input",
     "radar_geometry",
+    "velocity_error",
 ]
 
 __doc__ = __doc__.format("\n   ".join(__all__))
@@ -450,6 +453,157 @@ def _obrien_adjust(w, rho, z, kind, use_compiled, n_threads):
 # ---------------------------------------------------------------------------
 
 
+@provenance(
+    "Standard deviation of the pulse-pair radial velocity estimate",
+    extra_refs=("doviak-zrnic-1993",),
+)
+def velocity_error(
+    snr,
+    spectrum_width,
+    *,
+    wavelength,
+    nyquist=None,
+    prt=None,
+    n_pairs=64,
+    pairs="contiguous",
+):
+    """
+    Standard deviation of the pulse-pair radial velocity estimate.
+
+    The variance of the mean velocity from the autocovariance (pulse pair)
+    estimator of ``n_pairs`` sample pairs, for a signal with a Gaussian
+    spectrum of width :math:`\\sigma_v` in white noise, Eqs. 6.22a and 6.22b of
+    Doviak and Zrnic (1993) [1]_ (from Zrnic 1977 [2]_):
+
+    .. math::
+
+       \\mathrm{var}(\\hat v) = \\frac{\\lambda^2}{32 \\pi^2 M \\rho^2(T_s) T_s^2}
+       \\left\\{ \\frac{1 - \\rho^2(T_s)}{2 \\sigma_{vn} \\sqrt{\\pi}}
+       + \\frac{N^2}{S^2} + \\frac{2N}{S}\\,[1 - \\rho(2T_s)] \\right\\}
+
+    for contiguous pairs (pulses that share a sample), and
+
+    .. math::
+
+       \\mathrm{var}(\\hat v) = \\frac{\\lambda^2}{32 \\pi^2 M \\rho^2(T_s) T_s^2}
+       \\left[ (1 + N/S)^2 - \\rho^2(T_s) \\right]
+
+    for independent pairs, with the correlation coefficient :math:`\\rho(T_s) =
+    \\exp(-8 \\pi^2 \\sigma_v^2 T_s^2 / \\lambda^2)` of the Gaussian spectrum
+    (Eq. 6.5), the normalized width :math:`\\sigma_{vn} = \\sigma_v / 2 v_a`, the
+    Nyquist velocity :math:`v_a = \\lambda / 4 T_s` and the signal to noise ratio
+    :math:`S/N`. The result goes into the ``obs_error`` of :func:`multi_doppler`
+    and :func:`dual_doppler_analytic`.
+
+    Parameters
+    ----------
+    snr : xarray.DataArray, array-like or float
+        Signal to noise ratio (dB), for example from :func:`radarx.retrieve.snr`.
+    spectrum_width : xarray.DataArray, array-like or float
+        Doppler spectrum width :math:`\\sigma_v` (m s-1), for example ``WRADH``.
+        The error is NaN where either input is NaN (which removes the
+        observation in :func:`multi_doppler`).
+    wavelength : float
+        Radar wavelength :math:`\\lambda` (m).
+    nyquist, prt : float, optional
+        Give one of them: the Nyquist velocity :math:`v_a` (m s-1) or the
+        pulse repetition time :math:`T_s` (s); :math:`v_a = \\lambda / 4 T_s`.
+    n_pairs : int, optional
+        Number of sample pairs :math:`M` averaged in the estimate. Default 64.
+    pairs : {"contiguous", "independent"}, optional
+        Whether the pairs share samples (uniformly spaced pulses, as on
+        NEXRAD; default) or are independent (Eq. 6.22b).
+
+    Returns
+    -------
+    xarray.DataArray or numpy.ndarray
+        Standard deviation of the velocity estimate (m s-1): a DataArray
+        when ``snr`` or ``spectrum_width`` is one, otherwise an array.
+
+    Notes
+    -----
+    The expressions come from a perturbation analysis that the book states is
+    valid for a large number of independent samples and a spectrum that is
+    narrow against the Nyquist interval (conditions 6.20a, b), roughly
+    :math:`2 \\pi M \\sigma_{vn} \\gg 1`. At low signal to noise ratios and
+    narrow widths it matches simulations only with many samples (Doviak and
+    Zrnic 1993, Section 6.4.1). The formulas give the noise of the estimate
+    of one gate and not the other errors of a gridded radial velocity: the
+    interpolation, the spread of the beam over the grid cell, aliasing and
+    clutter. Averaging gates in range or azimuth lowers the error, so take
+    ``n_pairs`` of the averaged data if you averaged. Only the weights of the
+    radars relative to each other matter when the errors are in the same
+    units, see ``obs_error`` of :func:`multi_doppler`.
+
+    References
+    ----------
+    .. [1] Doviak, R. J., and D. S. Zrnic, 1993: *Doppler Radar and Weather
+       Observations*, 2nd ed. Academic Press, ISBN 0-12-221422-6 (book, no
+       DOI). Eqs. 6.5, 6.22a, 6.22b (pp. 134-135).
+    .. [2] Zrnic, D. S., 1977: Spectral moment estimates from correlated pulse
+       pairs. *IEEE Trans. Aerosp. Electron. Syst.*, **AES-13**, 344-354
+       (cited by the book for the derivation, not read).
+
+    Examples
+    --------
+    >>> sigma = radarx.retrieve.velocity_error(
+    ...     snr_db, wrad, wavelength=0.1071, nyquist=26.5, n_pairs=64
+    ... )  # doctest: +SKIP
+    >>> wind = radarx.retrieve.multi_doppler(grids, obs_error=sigma)  # doctest: +SKIP
+    """
+    if pairs not in ("contiguous", "independent"):
+        raise ValueError(f"pairs must be 'contiguous' or 'independent', not {pairs!r}")
+    if (nyquist is None) == (prt is None):
+        raise ValueError("give either nyquist or prt")
+    if not wavelength > 0:
+        raise ValueError("wavelength must be positive")
+    if not n_pairs >= 1:
+        raise ValueError("n_pairs must be at least 1")
+    t_s = float(prt) if prt is not None else wavelength / (4.0 * float(nyquist))
+    if not t_s > 0:
+        raise ValueError("nyquist and prt must be positive")
+    template = None
+    if isinstance(snr, xr.DataArray) or isinstance(spectrum_width, xr.DataArray):
+        template, other = xr.broadcast(
+            snr if isinstance(snr, xr.DataArray) else xr.DataArray(snr),
+            (
+                spectrum_width
+                if isinstance(spectrum_width, xr.DataArray)
+                else xr.DataArray(spectrum_width)
+            ),
+        )
+        snr, spectrum_width = template.values, other.values
+    snr = np.asarray(snr, dtype=np.float64)
+    sigma = np.asarray(spectrum_width, dtype=np.float64)
+    if (sigma[np.isfinite(sigma)] < 0).any():
+        raise ValueError("spectrum_width must not be negative")
+    noise = 10.0 ** (-snr / 10.0)  # N / S
+    sigma_n = sigma * 2.0 * t_s / wavelength  # sigma_v / 2 v_a
+    c = 2.0 * np.pi**2
+    rho = np.exp(-c * sigma_n**2)  # rho(T_s), Eq. 6.5
+    rho_2 = np.exp(-c * (2.0 * sigma_n) ** 2)  # rho(2 T_s)
+    scale = wavelength**2 / (32.0 * np.pi**2 * n_pairs * rho**2 * t_s**2)
+    if pairs == "independent":
+        var = scale * ((1.0 + noise) ** 2 - rho**2)
+    else:
+        with np.errstate(invalid="ignore", divide="ignore"):
+            signal = np.where(
+                sigma_n > 0,
+                -np.expm1(-2.0 * c * sigma_n**2) / (2.0 * sigma_n * np.sqrt(np.pi)),
+                0.0,
+            )
+        var = scale * (signal + noise**2 + 2.0 * noise * (1.0 - rho_2))
+    out = np.sqrt(var)
+    if template is None:
+        return out
+    result = template.copy(data=out)
+    result.attrs = {
+        "long_name": "standard deviation of the velocity estimate",
+        "units": "m s-1",
+    }
+    return result.rename("velocity_error")
+
+
 @renamed_arguments(reflectivity="dbz")
 @provenance(
     "Terminal fall speed of precipitation from reflectivity",
@@ -495,8 +649,10 @@ def fall_speed(
         Air density in kg m-3, broadcastable to ``dbz``. Without it
         no density correction is made.
     freezing_level : float or xarray.DataArray, optional
-        Height of the 0 degC level (m above sea level), e.g. ``(y, x)``.
-        Without it the rain relation is used everywhere, which gives several
+        Height of the 0 degC level (m above sea level), e.g. ``(y, x)``,
+        compared with the ``z`` coordinate of ``dbz`` or, when it has one, with
+        its ``height`` coordinate on ``(z, y, x)`` (heights above sea level over
+        terrain). Without it the rain relation is used everywhere, which gives several
         m s-1 too much fall speed in the ice region (at 30 dBZ 5.8 m s-1
         against 1.3 m s-1). ``-inf`` and ``inf`` mark columns that are ice
         and rain at all heights.
@@ -531,10 +687,11 @@ def fall_speed(
     vt = rain[0] * z_lin ** rain[1]
     if freezing_level is not None:
         vt_ice = ice[0] * z_lin ** ice[1]
+        height = dbz.coords["height"] if "height" in dbz.coords else dbz["z"]
         if melting_depth > 0:
-            share = ((dbz["z"] - freezing_level) / melting_depth + 1.0).clip(0.0, 1.0)
+            share = ((height - freezing_level) / melting_depth + 1.0).clip(0.0, 1.0)
         else:
-            share = (dbz["z"] > freezing_level).astype(float)
+            share = (height > freezing_level).astype(float)
         vt = vt + share.fillna(0.0) * (vt_ice - vt)
     if air_density is not None:
         vt = vt * (reference_density / air_density) ** 0.4
@@ -683,6 +840,8 @@ def multi_doppler_input(
     time=None,
     motion=None,
     fill_below=False,
+    velocity_interpolation="linear",
+    mixed_order=0.5,
     n_threads=None,
     engine="auto",
 ):
@@ -725,6 +884,18 @@ def multi_doppler_input(
         or ``(u, v)`` in m s-1.
     fill_below : bool, optional
         Fill levels below the lowest sweep. Default False.
+    velocity_interpolation : {"linear", "mixed"}, optional
+        How ``field`` is interpolated from the polar grid. ``"linear"``
+        (default) is the cone gridding of :func:`radarx.grid.grid_radars`
+        (inside the sweeps, then in height). ``"mixed"`` blends it with the
+        horizontal-last interpolation of Collis et al. (2010) to reduce the
+        gridding artifacts that become spurious vertical velocities, see
+        :func:`radarx.grid.grid_cones_mixed` for the method and what it costs
+        (horizontal resolution at high elevations). Reflectivity is always
+        gridded as before.
+    mixed_order : float, optional
+        The exponent ``n`` of the weight of the horizontal-last result for
+        ``velocity_interpolation="mixed"``. Default 0.5.
     n_threads : int, optional
         Threads for the compiled kernels. Default: all cores.
     engine : {"auto", "compiled", "numpy"}, optional
@@ -746,7 +917,8 @@ def multi_doppler_input(
     checked against the paper; it assumes a steadily translating pattern, see
     :func:`radarx.retrieve.advect`). Interpolating the radial velocity from
     the polar grid can create gridding artifacts that affect the retrieved
-    vertical velocity (Collis et al. 2010 [2]_; see :func:`multi_doppler`).
+    vertical velocity (Collis et al. 2010 [2]_; see :func:`multi_doppler`);
+    ``velocity_interpolation="mixed"`` uses their mixed-order interpolation.
     The grid's lowest level determines where ``w = 0`` is imposed (see the
     Notes of :func:`multi_doppler`).
 
@@ -763,6 +935,16 @@ def multi_doppler_input(
     """
     from ..grid.multi import grid_radars
 
+    if velocity_interpolation not in ("linear", "mixed"):
+        raise ValueError(
+            "velocity_interpolation must be 'linear' or 'mixed', "
+            f"not {velocity_interpolation!r}"
+        )
+    mixed = velocity_interpolation == "mixed"
+    if mixed and not mixed_order >= 0:
+        raise ValueError(
+            f"mixed_order must be a number of at least 0, not {mixed_order!r}"
+        )
     if (time is None) != (motion is None):
         raise ValueError("give both time and motion, or neither")
     if not len(volumes):
@@ -783,12 +965,18 @@ def multi_doppler_input(
         z,
         origin=origin,
         data_vars=fields,
-        time=time,
-        motion=motion,
+        time=None if mixed else time,
+        motion=None if mixed else motion,
         fill_below=fill_below,
         n_threads=n_threads,
         engine=engine,
     )
+    if mixed:
+        g = _mix_velocity(g, volumes, field, mixed_order, n_threads, engine)
+        if motion is not None:
+            from ..grid.multi import _advect_radars
+
+            g = _advect_radars(g, fields, motion, time, engine, n_threads)
     names = [str(n) for n in g["radar"].values]
     nr = len(names)
     dims = ("radar", "z", "y", "x")
@@ -828,6 +1016,45 @@ def multi_doppler_input(
         "long_name": "beam elevation above the local horizon",
         "units": "degree",
     }
+    return g
+
+
+def _mix_velocity(g, volumes, field, order, n_threads, engine):
+    """Replace ``field`` of every radar of ``g`` by its mixed-order interpolation."""
+    import pyproj
+
+    from ..grid import mixed
+    from ..grid.cone import _load_volume
+
+    geod = pyproj.Geod(ellps="WGS84")
+    lon, lat = g["lon"].values, g["lat"].values
+    k_e = float(g.attrs.get("k_e", 4.0 / 3.0))
+    z = g["z"].values.astype(np.float64)
+    engine = "numpy" if engine == "numpy" else "auto"
+    values = g[field].transpose("radar", "z", "y", "x").values.copy()
+    for r, dtree in enumerate(volumes):
+        sweeps, site, _ = _load_volume(dtree)
+        az, _, dist = geod.inv(
+            np.full(lon.shape, site["longitude"]),
+            np.full(lat.shape, site["latitude"]),
+            lon,
+            lat,
+        )
+        values[r] = mixed.mix_orders(
+            values[r],
+            sweeps,
+            site.get("altitude", 0.0),
+            field,
+            dist,
+            az,
+            z,
+            order=order,
+            k_e=k_e,
+            n_threads=n_threads,
+            engine=engine,
+        )
+    g[field] = g[field].transpose("radar", "z", "y", "x").copy(data=values)
+    g[field].attrs["gridding_method"] = "mixed-order cone (Collis et al. 2010)"
     return g
 
 
@@ -1069,6 +1296,143 @@ def _shift_observations(
     return ds, vr_out, coef_out
 
 
+def _terrain_array(terrain, ds):
+    """Terrain height (m above sea level) on ``(y, x)`` as a float array."""
+    ny, nx = ds.sizes["y"], ds.sizes["x"]
+    if isinstance(terrain, xr.DataArray):
+        if "y" not in terrain.dims or "x" not in terrain.dims:
+            raise ValueError("terrain needs the dimensions y and x")
+        terrain = terrain.transpose("y", "x").values
+    h = np.asarray(terrain, dtype=np.float64)
+    if h.shape != (ny, nx):
+        raise ValueError(f"terrain must be on the grid (y, x) = ({ny}, {nx})")
+    if not np.isfinite(h).all():
+        raise ValueError("terrain must be finite")
+    return h
+
+
+def _interp_height(a, z, height):
+    """
+    Linear interpolation in height of ``a(..., z, y, x)`` onto ``height(z, y, x)``.
+
+    ``z`` is the evenly spaced, ascending height axis of ``a``. Heights outside
+    ``[z[0], z[-1]]`` give NaN; a height on a level takes that level, so that
+    NaN neighbours do not spread onto it.
+    """
+    z = np.asarray(z, dtype=np.float64)
+    nz = z.size
+    f = (height - z[0]) / (z[1] - z[0])
+    inside = (f >= -1e-9) & (f <= nz - 1 + 1e-9)
+    i0 = np.clip(np.floor(f + 1e-9).astype(int), 0, nz - 2)
+    t = np.clip(f - i0, 0.0, 1.0)
+    shape = a.shape[:-3] + height.shape
+    a0 = np.take_along_axis(a, np.broadcast_to(i0, shape), axis=-3)
+    a1 = np.take_along_axis(a, np.broadcast_to(i0 + 1, shape), axis=-3)
+    with np.errstate(invalid="ignore"):
+        out = (1.0 - t) * a0 + t * a1
+    out = np.where(t == 0.0, a0, np.where(t == 1.0, a1, out))
+    return np.where(inside, out, np.nan)
+
+
+def _terrain_following(ds, background, terrain, field, dbz):
+    """
+    The grids and the background on levels that follow the terrain.
+
+    The level ``k`` of column ``(y, x)`` is at the height ``terrain + z[k] -
+    z[0]`` above sea level, so that the lowest level is the ground. The radial
+    velocities and reflectivity (and the background) are interpolated linearly
+    in height from the Cartesian levels to these heights, and the beam
+    elevation is recomputed for them. Returns the new Dataset, whose ``z`` is
+    the height above the ground and whose coordinate ``height`` is the height
+    above sea level, the new background and the terrain slopes
+    ``(dh/dx, dh/dy)`` on ``(y, x)``.
+    """
+    for name in ("radar_x", "radar_y", "radar_altitude"):
+        if name not in ds:
+            raise ValueError(
+                f"terrain needs {name!r} on the 'radar' dimension to recompute "
+                "the beam elevation"
+            )
+    h = _terrain_array(terrain, ds)
+    z = ds["z"].values.astype(np.float64)
+    dz = _spacing(ds["z"])
+    if dz <= 0:
+        raise ValueError("z must increase for the terrain-following levels")
+    zstar = z - z[0]
+    height = h[None] + zstar[:, None, None]
+    dims4 = ("radar", "z", "y", "x")
+    dims3 = ("z", "y", "x")
+    nr = ds.sizes["radar"]
+    x = ds["x"].values[None, None, None, :]
+    y = ds["y"].values[None, None, :, None]
+    shape4 = (nr,) + height.shape
+    az, el = _beam_angles(
+        np.broadcast_to(x - ds["radar_x"].values[:, None, None, None], shape4),
+        np.broadcast_to(y - ds["radar_y"].values[:, None, None, None], shape4),
+        np.broadcast_to(height[None], shape4),
+        np.broadcast_to(ds["radar_altitude"].values[:, None, None, None], shape4),
+    )
+    coords = {c: ds.coords[c] for c in ds.coords if "z" not in ds.coords[c].dims}
+    coords["z"] = (
+        "z",
+        zstar,
+        {"long_name": "height above the terrain", "units": "m"},
+    )
+    coords["height"] = (
+        dims3,
+        height,
+        {"long_name": "height above sea level", "units": "m"},
+    )
+    new = xr.Dataset(coords=coords, attrs=ds.attrs)
+    for name, da in ds.data_vars.items():
+        if "z" not in da.dims:
+            new[name] = da
+    for name in (field, dbz):
+        if name in ds:
+            da = ds[name].transpose(..., "z", "y", "x")
+            new[name] = (
+                da.dims,
+                _interp_height(da.values, z, height).astype(da.dtype, copy=False),
+                da.attrs,
+            )
+    new["azimuth"] = (dims4, az.astype(np.float32), ds["azimuth"].attrs)
+    new["elevation"] = (dims4, el.astype(np.float32), ds["elevation"].attrs)
+    new["terrain"] = (
+        ("y", "x"),
+        h,
+        {"long_name": "terrain height above sea level", "units": "m"},
+    )
+    if background is not None:
+        bg = {}
+        for name, da in background.data_vars.items():
+            if "z" in da.dims:
+                missing = [d for d in ("y", "x") if d not in da.dims]
+                da = da.expand_dims({d: ds[d] for d in missing}).transpose(
+                    ..., "z", "y", "x"
+                )
+                bg[name] = (da.dims, _interp_height(da.values, z, height), da.attrs)
+            else:
+                bg[name] = da
+        background = xr.Dataset(
+            bg,
+            coords={c: coords[c] for c in ("z", "y", "x", "height") if c in coords},
+        )
+    dx, dy = _spacing(ds["x"]), _spacing(ds["y"])
+    slope = (np.gradient(h, dx, axis=1), np.gradient(h, dy, axis=0))
+    return new, background, slope
+
+
+def _check_terrain_options(terrain, weights):
+    """Errors for the combinations that terrain-following levels do not support."""
+    if terrain is None:
+        return
+    if weights["vorticity"] != 0.0:
+        raise ValueError(
+            "terrain is not implemented with the vorticity term: set "
+            "weights['vorticity'] = 0"
+        )
+
+
 def _observation_precision(obs_error, nr, shape3):
     """
     ``1 / obs_error**2`` on ``(radar, z, y, x)``, or None without ``obs_error``.
@@ -1121,8 +1485,16 @@ def _prepare(
     n_threads=None,
     obs_error=None,
     crossing_angle_weight=False,
+    terrain_slope=None,
 ):
-    """NumPy arrays of the variational problem on the grid of ``ds``."""
+    """
+    NumPy arrays of the variational problem on the grid of ``ds``.
+
+    With ``terrain_slope = (dh/dx, dh/dy)`` on ``(y, x)`` the levels of ``ds``
+    follow the terrain (see :func:`_terrain_following`) and the third control
+    variable is the vertical velocity relative to the terrain-following
+    levels, ``W = w - u dh/dx - v dh/dy``.
+    """
     nr = ds.sizes["radar"]
     dims = ("radar", "z", "y", "x")
     vr = ds[field].transpose(*dims).values.astype(np.float64)
@@ -1143,6 +1515,11 @@ def _prepare(
             use_compiled=use_compiled,
             n_threads=n_threads,
         )
+    if terrain_slope is not None:
+        # w = W + u dh/dx + v dh/dy: the beam sees (a + c hx) u + (b + c hy) v + c W
+        hx, hy = terrain_slope
+        coef[:, 0] = coef[:, 0] + coef[:, 2] * hx
+        coef[:, 1] = coef[:, 1] + coef[:, 2] * hy
 
     # density, background and freezing level
     shape3 = (ds.sizes["z"], ds.sizes["y"], ds.sizes["x"])
@@ -1163,9 +1540,10 @@ def _prepare(
                 bg[q] = _fill_column(b)
         freezing = _background_freezing_level(background)
     if rho is None:
-        rho = np.broadcast_to(
-            _standard_density(zc.values)[:, None, None], shape3
-        ).copy()
+        z_asl = (
+            ds["height"].values if "height" in ds.coords else zc.values[:, None, None]
+        )
+        rho = np.broadcast_to(_standard_density(z_asl), shape3).copy()
 
     vt = np.zeros((nr,) + shape3)
     if use_fall_speed:
@@ -1234,7 +1612,7 @@ def _prepare(
         w_fixed[0] = wb
         height = (
             float(zc.values[0]) - float(np.max(ds["radar_altitude"].values))
-            if ("radar_altitude" in ds)
+            if ("radar_altitude" in ds and terrain_slope is None)
             else None
         )
         if (
@@ -1288,6 +1666,7 @@ def _prepare(
         vort_scale=h * h / _VREF,
         free=free,
         w_fixed=w_fixed,
+        terrain_slope=terrain_slope,
         first_guess=first_guess,
         vr=vr,
         vfall=vt,
@@ -1617,6 +1996,10 @@ def _posterior_error(
             p *= rz_new / rz
             p += z
             rz = rz_new
+        if problem["terrain_slope"] is not None:
+            hx, hy = problem["terrain_slope"]
+            x = x.copy()
+            x[2] = x[2] + x[0] * hx + x[1] * hy
         total += x * x
     return np.sqrt(total / int(n_samples))
 
@@ -1653,6 +2036,7 @@ def multi_doppler(
     melting_depth=500.0,
     w_boundary="bottom",
     w_bottom=0.0,
+    terrain=None,
     storm_motion=(0.0, 0.0),
     shift_winds=False,
     analysis_time=None,
@@ -1781,6 +2165,23 @@ def multi_doppler(
         ``w_boundary="bottom"``. Default 0. With a grid that starts above the
         ground, give the vertical velocity at ``z[0]`` implied by the flow
         below, for example from the low-level divergence.
+    terrain : xarray.DataArray or array, optional
+        Terrain height (m above sea level) on ``(y, x)`` of the grid, for
+        example from a digital elevation model. The analysis then runs on
+        levels that follow the terrain: level ``k`` of every column is at the
+        height ``terrain + z[k] - z[0]`` above sea level, so ``z[0]`` is the
+        ground; ``z[0]`` is typically 0 and the grid must reach the highest
+        terrain and the top of the analysis. The radial velocities,
+        reflectivity and background are interpolated linearly in height to
+        these levels and the beam elevation is recomputed. The vertical
+        velocity of the control vector is then the one relative to the levels,
+        :math:`W = w - u\\, \\partial h/\\partial x - v\\, \\partial h/\\partial y`,
+        so ``w_boundary="bottom"`` (``W = w_bottom``, default 0) is flow along
+        the ground, and ``w`` is returned; see the Notes. The result has ``z``
+        as the height above the terrain, the coordinate ``height`` (above sea
+        level, on ``(z, y, x)``) and the variable ``terrain``. Not available
+        with the vorticity term. Default None: levels at constant height above
+        sea level.
     storm_motion : tuple of float, optional
         ``(u, v)`` of the frame in which the vorticity is steady, m s-1; also
         the velocity of the wind pattern for ``shift_winds``.
@@ -1823,9 +2224,9 @@ def multi_doppler(
     obs_error : float, sequence of float, xarray.DataArray or array, optional
         Standard deviation (m s-1) of the error of the radial velocity: one
         number, one number per radar, or an array or DataArray that
-        broadcasts to ``(radar, z, y, x)`` (for example from the signal to
-        noise ratio or the reflectivity of the gate; radarx has no formula for
-        it, see the Notes). The weight of an observation in :math:`J_o` is
+        broadcasts to ``(radar, z, y, x)`` (for example
+        :func:`velocity_error` of the signal to noise ratio and the spectrum
+        width of the gate, see the Notes). The weight of an observation in :math:`J_o` is
         multiplied by :math:`1 / \\sigma^2` (m-2 s2), so a radar with twice the
         error counts a quarter as much. A NaN error removes the observation.
         Default None: every observation has the weight ``weights['observation']``
@@ -1907,9 +2308,11 @@ def multi_doppler(
 
     Gridding artifacts. The radial velocities enter on a Cartesian grid. Linear
     interpolation from the polar grid can create periodic artifacts that
-    produce spurious vertical velocities (Collis et al. 2010 [4]_); radarx's
-    cone gridding (:func:`radarx.grid.grid_cones`) does not implement their
-    mixed-order interpolation, so retrieved ``w`` can contain such artifacts.
+    produce spurious vertical velocities (Collis et al. 2010 [4]_);
+    radarx's cone gridding (:func:`radarx.grid.grid_cones`) is of that kind, so
+    retrieved ``w`` can contain such artifacts. Their mixed-order interpolation
+    is available as ``multi_doppler_input(..., velocity_interpolation="mixed")``
+    and :func:`radarx.grid.grid_cones_mixed`.
 
     Solvers. The conjugate-gradient iteration is that of Hestenes and Stiefel
     (1952) [5]_ with a preconditioner built on the discrete cosine transform
@@ -1942,19 +2345,52 @@ def multi_doppler(
     accordingly. The statement that
     the condition belongs at the ground is the standard one for
     dual-Doppler analyses; it is not checked against the text of Gao et
-    al. (1999) or Potvin et al. (2012). There is no terrain following
-    option: a lower boundary that follows a digital elevation model needs the
-    cost function in terrain-following coordinates (the impermeability
-    condition at the surface is :math:`w = u\\, \\partial h/\\partial x + v\\,
-    \\partial h/\\partial y`), which radarx does not implement; pass the
-    ``w`` at ``z[0]`` as ``w_bottom`` instead.
+    al. (1999) or Potvin et al. (2012).
+
+    Terrain-following lower boundary. With ``terrain`` the levels follow the
+    ground, :math:`z = h(x, y) + z^*`, where :math:`z^* = z - z[0]` is the
+    height above the terrain (the simplest terrain-following coordinate, with
+    the spacing of the levels the same in every column; Gal-Chen and Somerville
+    1975 [10]_ introduced the family of such transformations, whose
+    equations are not checked here and which usually also scale the
+    coordinate to a flat top). For a function :math:`f(x, y, z) =
+    F(x, y, z^*)`, :math:`\\partial_x f = \\partial_x F - h_x\\, \\partial_{z^*}
+    F`, so with the density :math:`\\rho` as a field of the grid the anelastic
+    continuity equation becomes
+
+    .. math::
+
+       \\partial_x(\\rho u) + \\partial_y(\\rho v)
+       + \\partial_{z^*}(\\rho W) = 0, \\qquad
+       W = w - u\\, h_x - v\\, h_y ,
+
+    the same equation as on flat levels for the vertical velocity ``W``
+    relative to the levels, and the impermeability condition at the ground,
+    :math:`w = u\\, h_x + v\\, h_y`, is :math:`W = 0` at
+    :math:`z^* = 0`. radarx therefore keeps the cost function, its kernel and
+    the solvers and changes the observation operator, which becomes
+    :math:`(a + c\\, h_x) u + (b + c\\, h_y) v + c W` for the direction cosines
+    :math:`(a, b, c)` of the beam; ``w`` is returned. The derivation is
+    elementary calculus (chain rule) and is not taken from a paper. Smoothness and background act on ``u``, ``v`` and ``W`` in the new
+    coordinates. The slopes :math:`h_x, h_y` are centred differences of the
+    terrain on the horizontal grid (one-sided at the edges); the terrain is
+    not smoothed, so a terrain much rougher than the grid gives noisy slopes
+    and a noisy ``w``. The data are interpolated linearly in height from the
+    original levels to the terrain-following ones (a vertical resampling of
+    gridded velocities, with the interpolation error that has), levels above
+    the top of the grid are missing, and over a mountain of height :math:`h`
+    the analysis reaches only :math:`z_{top} - h` above the ground. The beam is
+    not blocked by terrain: cells hidden behind a ridge have to be masked in
+    the input (see :func:`radarx.retrieve.beam_blockage`). The vorticity term
+    is not available with ``terrain``.
 
     Observation weights. With ``obs_error`` the weight of the observation of
-    radar :math:`k` in :math:`J_o` is :math:`C_o / \\sigma_k^2`; radarx has no
-    model of :math:`\\sigma_k` from the signal to noise ratio or the
-    reflectivity, since the formula for the variance of the pulse-pair
-    velocity estimate (Zrnic 1977; Doviak and Zrnic 1993) is not implemented;
-    give the error from the radar's own noise model. The error of the
+    radar :math:`k` in :math:`J_o` is :math:`C_o / \\sigma_k^2`.
+    :func:`velocity_error` gives :math:`\\sigma_k` of the pulse-pair velocity
+    estimate from the signal to noise ratio and the spectrum width (Doviak and
+    Zrnic 1993, Eq. 6.22); it is the noise of the estimate of one gate, not the
+    error of the gridded velocity, so a radar's own noise model may be better.
+    The error of the
     horizontal wind from two radars depends on the crossing angle of the beams
     (derived in :func:`dual_doppler_analytic`): the minimiser of :math:`J_o`
     already weights the observations through this geometry, and
@@ -2035,6 +2471,10 @@ def multi_doppler(
     .. [9] O'Brien, J. J., 1970: Alternative solutions to the classical
        vertical velocity problem. *J. Appl. Meteor.*, **9**, 197-203,
        https://doi.org/10.1175/1520-0450(1970)009<0197:ASTTCV>2.0.CO;2
+    .. [10] Gal-Chen, T., and R. C. J. Somerville, 1975: On the use of a
+       coordinate transformation for the solution of the Navier-Stokes
+       equations. *J. Comput. Phys.*, **17**, 209-228,
+       https://doi.org/10.1016/0021-9991(75)90037-6
 
     Examples
     --------
@@ -2076,6 +2516,10 @@ def multi_doppler(
         for name in ("z", "y", "x"):
             if name in background.dims and background.sizes[name] != ds.sizes[name]:
                 raise ValueError("the background must be on the grid of the radar data")
+    _check_terrain_options(terrain, w_)
+    slope = None
+    if terrain is not None:
+        ds, background, slope = _terrain_following(ds, background, terrain, field, dbz)
     t_start = _time.perf_counter()
     problem = _prepare(
         ds,
@@ -2095,6 +2539,7 @@ def multi_doppler(
         n_threads=n_threads,
         obs_error=obs_error,
         crossing_angle_weight=crossing_angle_weight,
+        terrain_slope=slope,
     )
     state0 = problem["first_guess"]
     if first_guess is not None:
@@ -2196,6 +2641,7 @@ def dual_doppler_analytic(
     melting_depth=500.0,
     boundary="upward",
     w_bottom=0.0,
+    terrain=None,
     obrien_error="linear",
     iterations=3,
     n_threads=None,
@@ -2275,6 +2721,12 @@ def dual_doppler_analytic(
     w_bottom : float or xarray.DataArray, optional
         ``w`` (m s-1, or on ``(y, x)``) at ``z[0]`` for ``"upward"`` and
         ``"obrien"``. Default 0.
+    terrain : xarray.DataArray or array, optional
+        Terrain height (m above sea level) on ``(y, x)``, as for
+        :func:`multi_doppler`: levels follow the terrain, the integration of the
+        continuity equation is that of :math:`W = w - u\\, \\partial h/\\partial x -
+        v\\, \\partial h/\\partial y` from ``W = w_bottom`` at the ground, and ``w``
+        is returned. Default None.
     obrien_error : {"linear", "constant"}, optional
         Shape of the adjustment for ``boundary="obrien"``, as in
         :func:`multi_doppler`.
@@ -2382,6 +2834,9 @@ def dual_doppler_analytic(
         raise ValueError("iterations must be at least 1")
     use_compiled = _use_compiled(engine)
     ds = _as_multi_radar(grids, field)
+    slope = None
+    if terrain is not None:
+        ds, background, slope = _terrain_following(ds, background, terrain, field, dbz)
     weights = dict(DEFAULT_WEIGHTS, smoothness_vertical=DEFAULT_WEIGHTS["smoothness"])
     p = _prepare(
         ds,
@@ -2395,6 +2850,7 @@ def dual_doppler_analytic(
         freezing_level=freezing_level,
         melting_depth=melting_depth,
         obs_error=obs_error,
+        terrain_slope=slope,
     )
     shape = p["shape"]
     valid = p["weight"] > 0
@@ -2433,6 +2889,8 @@ def dual_doppler_analytic(
         diff = (w_new - w)[np.isfinite(w_new) & np.isfinite(w)]
         change = float(np.sqrt(np.mean(diff**2))) if diff.size else np.nan
         w = w_new
+    if slope is not None:
+        w = w + u * slope[0] + v * slope[1]
     dims = ("z", "y", "x")
     coords = {c: ds.coords[c] for c in ds.coords if set(ds.coords[c].dims) <= set(dims)}
     wind_attrs = {"units": "m s-1"}
@@ -2514,6 +2972,12 @@ def dual_doppler_analytic(
     }
     if boundary == "obrien":
         out.attrs["obrien_error"] = obrien_error
+    if slope is not None:
+        out["terrain"] = ds["terrain"]
+        out.attrs["terrain_following"] = (
+            "levels at terrain + z; w = W + u dh/dx + v dh/dy with W from "
+            "the continuity equation in terrain-following coordinates"
+        )
     return out
 
 
@@ -2532,10 +2996,16 @@ def _output(ds, p, state, final, history, level_of, results, weights, elapsed):
     coef = p["coef"].reshape((nr, 3) + p["shape"])
     valid = p["weight"] > 0
     model = coef[:, 0] * u + coef[:, 1] * v + coef[:, 2] * (w - p["vfall"])
+    w_cost = w
+    if p["terrain_slope"] is not None:
+        # w from the terrain-following W (the mass divergence below is that of W)
+        w = w + u * p["terrain_slope"][0] + v * p["terrain_slope"][1]
     resid = np.where(valid, model - p["vr"], np.nan)
     rho = p["rho"]
     mass = (
-        _d1(rho * u, 2, p["dx"]) + _d1(rho * v, 1, p["dy"]) + _d1(rho * w, 0, p["dz"])
+        _d1(rho * u, 2, p["dx"])
+        + _d1(rho * v, 1, p["dy"])
+        + _d1(rho * w_cost, 0, p["dz"])
     ) / rho
     vt = p["vfall"][0]
     coords = {c: ds.coords[c] for c in ds.coords if set(ds.coords[c].dims) <= set(dims)}
@@ -2636,6 +3106,8 @@ def _output(ds, p, state, final, history, level_of, results, weights, elapsed):
     for c in ("radar_name", "time"):
         if c in ds.coords and ds.coords[c].dims == ("radar",):
             out = out.assign_coords({c: ds.coords[c]})
+    if "terrain" in ds:
+        out["terrain"] = ds["terrain"]
     if nr >= 2:
         out["beam_crossing_angle"] = (
             dims,
@@ -2655,6 +3127,11 @@ def _output(ds, p, state, final, history, level_of, results, weights, elapsed):
         "message": str([str(r.message) for r in results]),
         "run_time_s": float(elapsed),
     }
+    if p["terrain_slope"] is not None:
+        out.attrs["terrain_following"] = (
+            "levels at terrain + z; w = W + u dh/dx + v dh/dy with W from "
+            "the continuity equation in terrain-following coordinates"
+        )
     return out
 
 

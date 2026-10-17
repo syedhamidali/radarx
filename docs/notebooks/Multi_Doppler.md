@@ -64,6 +64,12 @@ gridding and `advect`), add a background (`radarx.io.sounding`), retrieve.
   gridding artifacts on variationally retrieved vertical velocities. *J.
   Atmos. Oceanic Technol.*, **27**, 1239-1246,
   https://doi.org/10.1175/2010JTECHA1402.1
+- Doviak, R. J., and D. S. Zrnic, 1993: *Doppler Radar and Weather
+  Observations*, 2nd ed. Academic Press, ISBN 0-12-221422-6.
+- Gal-Chen, T., and R. C. J. Somerville, 1975: On the use of a coordinate
+  transformation for the solution of the Navier-Stokes equations. *J.
+  Comput. Phys.*, **17**, 209-228,
+  https://doi.org/10.1016/0021-9991(75)90037-6
 - Shapiro, A., 1993: The use of an exact solution of the Navier-Stokes
   equations in a validation test of a three-dimensional nonhydrostatic
   numerical model. *Mon. Wea. Rev.*, **121**, 2420-2425,
@@ -299,9 +305,189 @@ ax.legend()
 plt.show()
 ```
 
-The lower boundary stays at the lowest grid level (`w_bottom`); a boundary
-that follows a digital elevation model, and the mixed-order interpolation of
-Collis et al. (2010) at the gridding step, are not implemented.
+## A lower boundary that follows the terrain
+
+The impermeability condition belongs at the ground. `terrain` (the height of
+the ground on the grid, for example from a digital elevation model) makes
+`multi_doppler` and `dual_doppler_analytic` work on levels that follow it: the
+level `k` of a column is at `terrain + z[k] - z[0]`, so `z[0]` is the ground
+and `z` of the result is the height above the terrain. With the vertical
+velocity relative to these levels, `W = w - u dh/dx - v dh/dy`, the anelastic
+continuity equation keeps its form, `W = 0` at the ground is flow along the
+terrain, and `w` is returned (see the Notes of `multi_doppler`).
+
+An exact flow over a Gaussian hill of 2 km height, `u = U + a x`, `v = V + a y`,
+`w = -2 a (z - h) + u dh/dx + v dh/dy`, which satisfies the continuity
+equation and flows along the ground, seen by the same two virtual radars
+(the radial velocity is exact, without noise):
+
+```{code-cell} ipython3
+def hill_flow(h0=2000.0, scale=10e3, step=2000.0, a=2e-4, u0=8.0, v0=4.0):
+    x = y = np.arange(-40e3, 40e3 + 1, step)
+    z = np.arange(0.0, 12e3 + 1, 1000.0)
+    X, Y = np.meshgrid(x, y)
+    h = h0 * np.exp(-(X**2 + Y**2) / (2 * scale**2))
+    hx, hy = -X / scale**2 * h, -Y / scale**2 * h
+    Z = z[:, None, None]
+    u, v = u0 + a * X[None] + 0 * Z, v0 + a * Y[None] + 0 * Z
+    w = -2 * a * (Z - h[None]) + u * hx[None] + v * hy[None]
+    ds = xr.Dataset(
+        {"radar_x": ("radar", [-25e3, 25e3]), "radar_y": ("radar", [-20e3, -20e3]),
+         "radar_altitude": ("radar", [0.0, 0.0])},
+        coords={"radar": [0, 1], "z": z, "y": y, "x": x},
+    )
+    geo = rx.retrieve.radar_geometry(ds)
+    el, az = np.radians(geo.elevation.values), np.radians(geo.azimuth.values)
+    vr = np.cos(el) * (np.sin(az) * u + np.cos(az) * v) + np.sin(el) * w
+    near = (np.hypot(ds.x - ds.radar_x, ds.y - ds.radar_y) < 60e3).transpose("radar", "y", "x")
+    ds["VRADH"] = (("radar", "z", "y", "x"), np.where(near.values[:, None], vr, np.nan))
+    dims = ("z", "y", "x")
+    bg = xr.Dataset(
+        {"u": (dims, np.full(u.shape, u0)), "v": (dims, np.full(u.shape, v0)),
+         "air_density": (dims, np.ones(u.shape))},
+        coords={"z": z, "y": y, "x": x},
+    )
+    w_above_ground = -2 * a * Z + (u0 + a * X)[None] * hx[None] + (v0 + a * Y)[None] * hy[None]
+    return ds, bg, xr.DataArray(h, dims=("y", "x"), name="terrain"), w, w_above_ground
+
+
+hill, hill_bg, terrain, w_cartesian, w_following = hill_flow()
+flat = rx.retrieve.multi_doppler(hill, hill_bg, fall_speed_correction=False)
+follow = rx.retrieve.multi_doppler(hill, hill_bg, terrain=terrain, fall_speed_correction=False)
+
+above = (hill.z.values[:, None, None] >= terrain.values[None])
+ok_flat = ((flat.beam_crossing_angle > 30) & (flat.n_radars >= 2)).values & above
+ok_follow = ((follow.beam_crossing_angle > 30) & (follow.n_radars >= 2)).values
+e_flat = np.sqrt(np.mean((flat.w.values - w_cartesian)[ok_flat] ** 2))
+e_follow = np.sqrt(np.mean((follow.w.values - w_following)[ok_follow] ** 2))
+print(f"RMS error of w above the ground: constant-height levels {e_flat:.2f} m/s, "
+      f"terrain-following {e_follow:.2f} m/s (the true w has an RMS of "
+      f"{np.sqrt(np.mean(w_following[ok_follow] ** 2)):.1f} m/s)")
+```
+
+```{code-cell} ipython3
+fig, axes = plt.subplots(1, 3, figsize=(15, 4), layout="constrained", sharey=True)
+j = 20  # y = 0
+vmax = 1.0
+kw = dict(cmap="RdBu_r", vmin=-vmax, vmax=vmax, shading="auto")
+height_above_sea = follow.height.isel(y=j) / 1e3
+im = axes[0].pcolormesh(follow.x / 1e3, height_above_sea,
+                        (follow.w - w_following).isel(y=j).where(ok_follow[:, j]), **kw)
+axes[0].set_title("terrain-following: error of w")
+axes[1].pcolormesh(flat.x / 1e3, flat.z / 1e3,
+                   (flat.w - w_cartesian).isel(y=j).where(ok_flat[:, j]), **kw)
+axes[1].set_title("constant-height levels: error of w")
+axes[2].plot(follow.x / 1e3, terrain.isel(y=j) / 1e3, "k")
+axes[2].fill_between(follow.x / 1e3, 0, terrain.isel(y=j) / 1e3, color="0.8")
+axes[2].set_title("terrain at y = 0")
+for ax in axes:
+    ax.set_xlabel("x (km)")
+axes[0].set_ylabel("height above sea level (km)")
+fig.colorbar(im, ax=axes[:2], label="m/s")
+plt.show()
+```
+
+Levels of constant height impose `w = 0` at the lowest level, which is
+inside the hill; the error then spreads up the column. The slopes are
+centred differences of the terrain on the grid, so a terrain much rougher
+than the grid gives a noisy `w`. The terrain is not used to mask the beam
+blockage behind ridges (see `beam_blockage`), and the data are interpolated
+linearly in height to the terrain-following levels.
+
+## Observation errors from the signal to noise ratio
+
+The variance of a radial velocity from the pulse-pair estimator depends on
+the signal to noise ratio, the spectrum width and the number of pulse pairs
+(Doviak and Zrnic 1993, Eqs. 6.22a and b, from Zrnic 1977). `velocity_error`
+evaluates it, and its result goes into `obs_error`:
+
+```{code-cell} ipython3
+width = np.linspace(0.5, 8.0, 60)
+fig, ax = plt.subplots(figsize=(6.5, 4))
+for snr in (0, 5, 10, 20):
+    sd = rx.retrieve.velocity_error(snr, width, wavelength=0.1071, nyquist=26.5, n_pairs=64)
+    ax.plot(width, sd, label=f"SNR {snr} dB")
+ax.set_xlabel("spectrum width (m/s)")
+ax.set_ylabel("standard deviation of the velocity (m/s)")
+ax.set_title("S band, Nyquist velocity 26.5 m/s, 64 pairs")
+ax.legend()
+plt.show()
+```
+
+The model is checked in the tests against the standard deviation of
+simulated pulse-pair estimates (within 6 %) and against the WSR-88D figure in
+the book (about 1 m/s at 8 dB, 4 m/s width, 40 to 200 samples). On a grid,
+compute `snr` and take the spectrum width from the volume (`WRADH`), both
+gridded like the velocity, and pass `obs_error=velocity_error(...)`; where the
+width or the signal to noise ratio is missing the error is NaN and the
+observation is left out. Only the relative sizes of the errors of the radars
+matter for the weights of the other terms (see `obs_error`).
+
+## Mixed-order interpolation of the radial velocity
+
+Where the radial velocity changes quickly with height and the beams are a few
+degrees apart, interpolating inside each sweep first and between sweeps last
+leaves undulations at the horizontal spacing of the beams, and the mass
+continuity equation turns their divergence into spurious vertical velocity
+(Collis et al. 2010). `radarx.grid.grid_cones_mixed` blends this result with the
+one of the opposite order of interpolation, weighted by the beam elevation
+(`order` is the exponent of their Eq. 6), and `multi_doppler_input` has the
+option `velocity_interpolation="mixed"`. A 20 m/s jet at 7 km, seen by a volume
+of twelve sweeps from 0.5 to 42 degrees:
+
+```{code-cell} ipython3
+from xradar.georeference import antenna_to_cartesian
+
+
+def jet(z):
+    return 20.0 * np.exp(-(((z - 7000.0) / 1500.0) ** 2))
+
+
+ranges = np.arange(250.0, 80e3, 250.0)
+azimuths = np.arange(0.5, 360.0, 1.0)
+sweeps = {}
+for k, elevation in enumerate((0.5, 1.5, 3.0, 5.0, 7.5, 10.0, 13.0, 17.0, 22.0, 28.0, 35.0, 42.0)):
+    _, _, gate_z = antenna_to_cartesian(ranges[None, :], azimuths[:, None], elevation, site_altitude=100.0)
+    vr = jet(gate_z) * np.cos(np.radians(elevation)) * np.sin(np.radians(azimuths))[:, None]
+    sweeps[f"sweep_{k}"] = xr.Dataset(
+        {"VRADH": (("azimuth", "range"), vr)},
+        coords={"azimuth": azimuths, "range": ranges,
+                "elevation": ("azimuth", np.full(azimuths.size, elevation)),
+                "time": ("azimuth", np.full(azimuths.size, np.datetime64("2026-01-01T00:00")))},
+    )
+volume = xr.DataTree.from_dict(
+    {"/": xr.Dataset(coords={"latitude": 45.0, "longitude": 10.0, "altitude": 100.0}), **sweeps}
+)
+
+gx = np.arange(-60e3, 60e3 + 1, 2e3)
+gz = np.arange(1000.0, 13e3, 500.0)
+vertical_last = rx.grid.grid_cones(volume, "VRADH", gx, gx, gz).VRADH
+blended = rx.grid.grid_cones_mixed(volume, "VRADH", gx, gx, gz).VRADH
+horizontal_last = rx.grid.grid_cones_mixed(volume, "VRADH", gx, gx, gz, order=0.0).VRADH
+
+# the exact radial velocity of the jet at the grid points
+X, Z = np.meshgrid(gx, gz)
+elevation = rx.grid.mixed.antenna_elevation(np.abs(X), Z, 100.0)  # beam elevation of the point
+truth_section = jet(Z) * np.cos(np.radians(elevation)) * np.sign(X)
+fig, axes = plt.subplots(1, 3, figsize=(15, 4), layout="constrained", sharey=True)
+for ax, field, title in zip(axes, (vertical_last, blended, horizontal_last),
+                            ("vertical last (grid_cones)", "mixed, order 0.5", "horizontal last, order 0")):
+    section = field.sel(y=0.0)
+    err = section - truth_section
+    im = ax.pcolormesh(gx / 1e3, gz / 1e3, err, cmap="RdBu_r", vmin=-4, vmax=4, shading="auto")
+    rms = float(np.sqrt(np.nanmean(err.where(np.abs(section.x) > 10e3) ** 2)))
+    ax.set_title(f"{title}\nRMS error {rms:.2f} m/s")
+    ax.set_xlabel("x (km)")
+axes[0].set_ylabel("height (km)")
+fig.colorbar(im, ax=axes, label="gridded minus true radial velocity (m/s)")
+plt.show()
+```
+
+The undulations of the first panel are what the blend lowers; the price is
+a smoother field in the horizontal at high elevations, where the weight of
+the horizontal-last result grows to one. The exponent 0.5 is the value Collis
+et al. chose for their 17 tilts from 0.5 to 42 degrees and should be tuned to
+the scan strategy.
 
 ## A squall line seen by KGWX and KBMX
 
