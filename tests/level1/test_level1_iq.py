@@ -166,14 +166,25 @@ def test_read_netcdf_and_zarr(tmp_path):
     assert da.dims == dims
     with pytest.raises(ValueError, match="no variables"):
         level1.read_iq(tmp_path / "iq2.nc")
-    zarr = pytest.importorskip("zarr")  # noqa: F841
+
+
+def test_read_zarr(tmp_path):
+    pytest.importorskip("zarr")
+    i, q = samples()
+    dims = ("azimuth", "pulse", "range")
+    ds = xr.Dataset(
+        {"I": (dims, i.astype(np.float32)), "Q": (dims, q.astype(np.float32))}
+    )
     store = tmp_path / "iq.zarr"
-    ds.to_zarr(store, encoding={v: {"chunks": ds[v].shape} for v in ds.data_vars})
+    cds = xr.Dataset({"IQ": (dims, (i + 1j * q).astype(np.complex64))})
+    zstore = tmp_path / "cplx.zarr"
+    try:  # the oldest supported xarray cannot write with the newest zarr
+        ds.to_zarr(store)
+        cds.to_zarr(zstore)
+    except (AttributeError, ValueError, TypeError) as err:
+        pytest.skip(f"this xarray cannot write Zarr here: {err}")
     lazy = level1.read_iq(store)
     np.testing.assert_array_equal(lazy.values.real, i.astype(np.float32))
-    zstore = tmp_path / "cplx.zarr"
-    cds = xr.Dataset({"IQ": (dims, (i + 1j * q).astype(np.complex64))})
-    cds.to_zarr(zstore, encoding={"IQ": {"chunks": cds.IQ.shape}})
     lazy = level1.read_iq(zstore, wavelength=WAVELENGTH)
     np.testing.assert_array_equal(lazy.values, (i + 1j * q).astype(np.complex64))
 
