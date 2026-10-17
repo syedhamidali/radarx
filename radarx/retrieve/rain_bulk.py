@@ -125,6 +125,7 @@ import xarray as xr
 
 from .._provenance import provenance
 from .._registry import accessor_method
+from .._sweepwise import dask_support
 from . import _rain_bulk_numpy as _ref
 from . import rain_collisions as _rc
 
@@ -170,6 +171,7 @@ def _kernel(engine):
     return _rain_bulk if (HAS_COMPILED_KERNEL and engine != "numpy") else _ref
 
 
+@dask_support("lazy_only")
 @provenance(
     "Two-moment rain shaft with self-collection and breakup of Seifert (2008): "
     "shape parameter from the mean volume diameter, relaxation toward 1.1 mm"
