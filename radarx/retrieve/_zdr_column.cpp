@@ -3,10 +3,12 @@
 //
 // Depth of the ZDR column of every vertical column of a grid: the vertically
 // continuous depth above the freezing level in which ZDR is at least a threshold
-// (Snyder et al. 2015). Every column is independent, so threads take blocks of
-// columns from an atomic counter. The algorithm and the choices that are radarx's
-// own are described in the docstring of radarx/retrieve/columns.py; the NumPy
-// reference there follows the same steps.
+// (Snyder et al. 2015), and the KDP quantities of a slab above the freezing level
+// (van Lier-Walqui et al. 2016): the integral, the thickness at or above a threshold and
+// the height of the highest such level. Every column is independent, so threads take
+// blocks of columns from an atomic counter. The algorithms and the choices that are
+// radarx's own are described in the docstring of radarx/retrieve/columns.py; the NumPy
+// references there follow the same steps.
 
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
@@ -102,10 +104,70 @@ DArray depth_py(const DArray& zdr, const DArray& keep, const DArray& z, const DA
     return out;
 }
 
+// The KDP of a slab from the first level at or above the freezing level to slab_depth above
+// it (levels with z < level + slab_depth). Per column: the integral of the positive KDP of
+// the counted levels (degree), the summed thickness of the levels with KDP >= threshold (m)
+// and the height of the highest level at or above the freezing level, in the whole column,
+// with KDP >= threshold (m). A level counts when KDP is finite and keep is non-zero. The
+// integral and the thickness are NaN where no level of the slab counts; the top is NaN
+// where no level has KDP >= threshold.
+py::tuple kdp_slab_py(const DArray& kdp, const DArray& keep, const DArray& z,
+                      const DArray& thickness, const DArray& level, double threshold,
+                      double slab_depth, int n_threads) {
+    if (kdp.ndim() != 2 || keep.ndim() != 2) throw std::invalid_argument("kdp and keep must be 2-D");
+    const int64_t n = kdp.shape(0), nz = kdp.shape(1);
+    if (keep.shape(0) != n || keep.shape(1) != nz) throw std::invalid_argument("keep must have the shape of kdp");
+    if (z.size() != nz || thickness.size() != nz) throw std::invalid_argument("z and thickness must have one value per level");
+    if (level.size() != n) throw std::invalid_argument("level must have one value per column");
+    const std::vector<py::ssize_t> shape{static_cast<py::ssize_t>(n)};
+    DArray integral(shape), depth(shape), top(shape);
+    const double* pk = kdp.data();
+    const double* pw = keep.data();
+    const double* zz = z.data();
+    const double* th = thickness.data();
+    const double* lv = level.data();
+    double* pi = integral.mutable_data();
+    double* pd = depth.mutable_data();
+    double* pt = top.mutable_data();
+    {
+        py::gil_scoped_release release;
+        parallel_blocks(n, n_threads, [&](int64_t c0, int64_t c1) {
+            for (int64_t c = c0; c < c1; ++c) {
+                const double f = lv[c];
+                pi[c] = pd[c] = pt[c] = kNaN;
+                if (std::isnan(f)) continue;
+                const double* v = pk + c * nz;
+                const double* w = pw + c * nz;
+                bool any = false;
+                double sum = 0.0, thick = 0.0, highest = kNaN;
+                for (int64_t k = 0; k < nz; ++k) {
+                    if (zz[k] < f || !std::isfinite(v[k]) || w[k] == 0.0) continue;
+                    const bool in_slab = zz[k] < f + slab_depth;
+                    if (in_slab) {
+                        any = true;
+                        if (v[k] > 0.0) sum += v[k] * th[k] / 1000.0;
+                        if (v[k] >= threshold) thick += th[k];
+                    }
+                    if (v[k] >= threshold) highest = zz[k];
+                }
+                if (any) {
+                    pi[c] = sum;
+                    pd[c] = thick;
+                }
+                pt[c] = highest;
+            }
+        });
+    }
+    return py::make_tuple(integral, depth, top);
+}
+
 }  // namespace
 
 PYBIND11_MODULE(_zdr_column, m) {
-    m.doc() = "Depth of the ZDR column of every vertical column of a grid";
+    m.doc() = "Depth of the ZDR column and the KDP slab of every vertical column of a grid";
+    m.def("kdp_slab", &kdp_slab_py, py::arg("kdp"), py::arg("keep"), py::arg("z"),
+          py::arg("thickness"), py::arg("level"), py::arg("threshold"), py::arg("slab_depth"),
+          py::arg("n_threads") = 0);
     m.def("depth", &depth_py, py::arg("zdr"), py::arg("keep"), py::arg("z"), py::arg("thickness"),
           py::arg("level"), py::arg("threshold"), py::arg("n_threads") = 0);
 }

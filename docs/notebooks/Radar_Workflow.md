@@ -2313,6 +2313,8 @@ notebooks or from this index.
 | `cold_pool_perturbation` | `radarx.retrieve.coldpool` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `potential_temperatures` | `radarx.retrieve.coldpool` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `rkw_ratio` | `radarx.retrieve.coldpool` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
+| `kdp_column` | `radarx.retrieve.columns` | [part 3](Radar_Workflow_Advanced_2): 21. Storm diagnostics: KDP columns, size sorting and cells |
+| `kdp_column_metrics` | `radarx.retrieve.columns` | [part 3](Radar_Workflow_Advanced_2): 21. Storm diagnostics: KDP columns, size sorting and cells |
 | `zdr_column` | `radarx.retrieve.columns` | [part 3](Radar_Workflow_Advanced_2): 17. ZDR columns |
 | `zdr_column_metrics` | `radarx.retrieve.columns` | [part 3](Radar_Workflow_Advanced_2): 17. ZDR columns |
 | `dealias_confidence` | `radarx.retrieve.dealias` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
@@ -2421,10 +2423,14 @@ notebooks or from this index.
 | `tc_center` | `radarx.retrieve.tc_winds` | [part 3](Radar_Workflow_Advanced_2): 13. Tropical-cyclone winds from one radar |
 | `tc_decompose` | `radarx.retrieve.tc_winds` | [part 3](Radar_Workflow_Advanced_2): 13. Tropical-cyclone winds from one radar |
 | `vortex_profile` | `radarx.retrieve.tc_winds` | [part 3](Radar_Workflow_Advanced_2): 13. Tropical-cyclone winds from one radar |
+| `storm_size_sorting` | `radarx.retrieve.sorting` | [part 3](Radar_Workflow_Advanced_2): 21. Storm diagnostics: KDP columns, size sorting and cells |
 | `superobs` | `radarx.retrieve.superobs` | [core](Radar_Workflow): 16. Super-observations for data assimilation |
 | `rotation_couplets` | `radarx.retrieve.tornado` | [part 3](Radar_Workflow_Advanced_2): 7. Tornado detection and biological echo |
 | `tornado_probability` | `radarx.retrieve.tornado` | [part 3](Radar_Workflow_Advanced_2): 7. Tornado detection and biological echo |
 | `tornet_inputs` | `radarx.retrieve.tornado` | [part 3](Radar_Workflow_Advanced_2): 7. Tornado detection and biological echo |
+| `cell_statistics` | `radarx.retrieve.tracking` | [part 3](Radar_Workflow_Advanced_2): 21. Storm diagnostics: KDP columns, size sorting and cells |
+| `identify_cells` | `radarx.retrieve.tracking` | [part 3](Radar_Workflow_Advanced_2): 21. Storm diagnostics: KDP columns, size sorting and cells |
+| `track_cells` | `radarx.retrieve.tracking` | [part 3](Radar_Workflow_Advanced_2): 21. Storm diagnostics: KDP columns, size sorting and cells |
 | `cvp` | `radarx.retrieve.vertical_profiles` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `mask_above_melting_layer` | `radarx.retrieve.vertical_profiles` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `melting_layer` | `radarx.retrieve.vertical_profiles` | [core](Radar_Workflow): 8. QVP time series and melting layer |
@@ -2476,6 +2482,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.biological_echo` | [part 3](Radar_Workflow_Advanced_2): 7. Tornado detection and biological echo |
 | `.radarx.bulk_shear` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
 | `.radarx.bunkers_storm_motion` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
+| `.radarx.cell_statistics` | [part 3](Radar_Workflow_Advanced_2): 21. Storm diagnostics: KDP columns, size sorting and cells |
 | `.radarx.cluster_flashes` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `.radarx.cold_pool_intensity` | [part 2](Radar_Workflow_Advanced): 5. Surface stations, profilers and cold pools |
 | `.radarx.correct_attenuation` | [core](Radar_Workflow): 5. ΦDP processing and KDP |
@@ -2511,10 +2518,13 @@ The methods of the `.radarx` accessors:
 | `.radarx.hail_kinetic_energy` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.hail_products` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.hid` | [core](Radar_Workflow): 6. Hydrometeor classification |
+| `.radarx.identify_cells` | [part 3](Radar_Workflow_Advanced_2): 21. Storm diagnostics: KDP columns, size sorting and cells |
 | `.radarx.integrate_evaporation` | [core](Radar_Workflow): 13. Evaporation |
 | `.radarx.interpolate_profile` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `.radarx.interpolate_time` | [core](Radar_Workflow): 11. Storm motion, common analysis time and time interpolation |
 | `.radarx.kdp` | [core](Radar_Workflow): 5. ΦDP processing and KDP |
+| `.radarx.kdp_column` | [part 3](Radar_Workflow_Advanced_2): 21. Storm diagnostics: KDP columns, size sorting and cells |
+| `.radarx.kdp_column_metrics` | [part 3](Radar_Workflow_Advanced_2): 21. Storm diagnostics: KDP columns, size sorting and cells |
 | `.radarx.lightning_jump` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `.radarx.liquid_water_content` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.llsd` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
@@ -2558,6 +2568,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.rotation_couplets` | [part 3](Radar_Workflow_Advanced_2): 7. Tornado detection and biological echo |
 | `.radarx.shi` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.single_doppler_winds` | [part 3](Radar_Workflow_Advanced_2): 8. Wind from a single Doppler radar |
+| `.radarx.storm_size_sorting` | [part 3](Radar_Workflow_Advanced_2): 21. Storm diagnostics: KDP columns, size sorting and cells |
 | `.radarx.snr` | [core](Radar_Workflow): 15. Noise and calibration |
 | `.radarx.sounding` | [core](Radar_Workflow): 3. Environment |
 | `.radarx.storm_relative_helicity` | [core](Radar_Workflow): Sounding utilities and wind-profile parameters |
@@ -2575,6 +2586,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.tc_structure` | [part 3](Radar_Workflow_Advanced_2): 13. Tropical-cyclone winds from one radar |
 | `.radarx.tc_center` | [part 3](Radar_Workflow_Advanced_2): 13. Tropical-cyclone winds from one radar |
 | `.radarx.tornado_probability` | [part 3](Radar_Workflow_Advanced_2): 7. Tornado detection and biological echo |
+| `.radarx.track_cells` | [part 3](Radar_Workflow_Advanced_2): 21. Storm diagnostics: KDP columns, size sorting and cells |
 | `.radarx.trajectories` | [part 3](Radar_Workflow_Advanced_2): 9. Diabatic Lagrangian analysis |
 | `.radarx.vad_profile` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
 | `.radarx.vvp_winds` | [part 3](Radar_Workflow_Advanced_2): 20. Volume velocity processing |

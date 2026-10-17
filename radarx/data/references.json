@@ -3176,5 +3176,78 @@
   "issue": "9",
   "pages": "3065-3081",
   "doi": "10.1175/JAS3535.1"
+ },
+ "10.5194/gmd-12-4551-2019": {
+  "authors": [
+   "Heikenfeld, M.",
+   "Marinescu, P. J.",
+   "Christensen, M.",
+   "Watson-Parris, D.",
+   "Senf, F.",
+   "van den Heever, S. C.",
+   "Stier, P."
+  ],
+  "year": 2019,
+  "title": "tobac 1.2: towards a flexible framework for tracking and analysis of clouds in diverse datasets",
+  "type": "article",
+  "journal": "Geoscientific Model Development",
+  "volume": "12",
+  "issue": "11",
+  "pages": "4551-4570",
+  "doi": "10.5194/gmd-12-4551-2019"
+ },
+ "10.1175/WAF-D-18-0011.1": {
+  "authors": [
+   "Loeffler, S. D.",
+   "Kumjian, M. R."
+  ],
+  "year": 2018,
+  "title": "Quantifying the Separation of Enhanced ZDR and KDP Regions in Nonsupercell Tornadic Storms",
+  "type": "article",
+  "journal": "Weather and Forecasting",
+  "volume": "33",
+  "issue": "5",
+  "pages": "1143-1157",
+  "doi": "10.1175/WAF-D-18-0011.1"
+ },
+ "10.5194/gmd-16-2753-2023": {
+  "authors": [
+   "Feng, Z.",
+   "Hardin, J.",
+   "Barnes, H. C.",
+   "Li, J.",
+   "Leung, L. R.",
+   "Varble, A.",
+   "Zhang, Z."
+  ],
+  "year": 2023,
+  "title": "PyFLEXTRKR: a flexible feature tracking Python software for convective cloud analysis",
+  "type": "article",
+  "journal": "Geoscientific Model Development",
+  "volume": "16",
+  "issue": "10",
+  "pages": "2753-2776",
+  "doi": "10.5194/gmd-16-2753-2023"
+ },
+ "10.1175/MWR-D-15-0100.1": {
+  "authors": [
+   "van Lier-Walqui, M.",
+   "Fridlind, A. M.",
+   "Ackerman, A. S.",
+   "Collis, S.",
+   "Helmus, J.",
+   "MacGorman, D. R.",
+   "North, K.",
+   "Kollias, P.",
+   "Posselt, D. J."
+  ],
+  "year": 2016,
+  "title": "On Polarimetric Radar Signatures of Deep Convection for Model Evaluation: Columns of Specific Differential Phase Observed during MC3E*",
+  "type": "article",
+  "journal": "Monthly Weather Review",
+  "volume": "144",
+  "issue": "2",
+  "pages": "737-758",
+  "doi": "10.1175/MWR-D-15-0100.1"
  }
 }
