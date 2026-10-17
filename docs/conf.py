@@ -298,6 +298,19 @@ nb_execution_raise_on_error = True
 _RTD_CACHE_ONLY = [
     "notebooks/Radar_Workflow.md",
     "notebooks/Radar_Workflow_Advanced_2.md",
+    # real-data notebooks of the open-radar-data KGWX volumes: each downloads a
+    # volume and grids it, and together they do not fit in the build limit
+    "notebooks/ZDR_KDP_Column_Sections.md",
+    "notebooks/ZDR_Column.md",
+    "notebooks/Dealiasing.md",
+    "notebooks/Echo_Classifier_Gourley.md",
+    "notebooks/Echo_QC.md",
+    "notebooks/Hydrometeor_Classification.md",
+    "notebooks/Machine_Learning.md",
+    "notebooks/Rainfall_Estimation.md",
+    "notebooks/Soundings_and_ERA5.md",
+    "notebooks/VIL_Operational_Layers.md",
+    "notebooks/Volume_Velocity_Processing.md",
 ]
 
 _DOCS_CACHE_URL = (
