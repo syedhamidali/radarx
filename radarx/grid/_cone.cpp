@@ -32,6 +32,14 @@
 // Py-ART). Scan geometry plays no role, so PPI, RHI, sector and repeated sweeps
 // are handled alike.
 //
+// The "beam" weighting replaces the isotropic weight by the pulse volume of the
+// gate: a Gaussian of standard deviation sigma_theta * r across the beam
+// (sigma_theta^2 = theta_1^2 / (16 ln 2), the second central moment of the
+// two-way power pattern, Doviak and Zrnic 1993, Eq. 5.75) and sigma_r along it.
+// The weights are relative to the best candidate of the point, so that they do
+// not underflow far from every beam; the radius of influence still limits the
+// gates that take part.
+//
 // Beam geometry follows xradar.georeference.antenna_to_cartesian (effective
 // Earth radius k_e * a, k_e = 4/3 by default; Doviak and Zrnic 1993, Doppler
 // Radar and Weather Observations, 2nd ed., Eqs. 2.28b-d, pp. 21-22). The vertical step is analogous to the VI scheme of
@@ -506,16 +514,34 @@ std::vector<py::array_t<float>> grid_columns(
 // ---------------------------------------------------------------------------
 namespace {
 
-enum Weighting { kCressman = 0, kBarnes = 1, kNearest = 2 };
+enum Weighting { kCressman = 0, kBarnes = 1, kNearest = 2, kBeam = 3 };
+
+// Step [m] of the central difference that gives the beam direction at a gate, and the
+// smallest standard deviation [m] across the beam.
+constexpr double kBeamStep = 10.0;
+constexpr double kMinSigma = 1.0;
 
 struct GateCloud {
-    std::vector<double> x, y, z, v;
+    // position and value; for the beam weighting also the unit vector along the
+    // beam (ux, uy, uz) and the inverse variances across (ic) and along (ia) it
+    std::vector<double> x, y, z, v, ux, uy, uz, ic, ia;
     void append(const GateCloud& o) {
         x.insert(x.end(), o.x.begin(), o.x.end());
         y.insert(y.end(), o.y.begin(), o.y.end());
         z.insert(z.end(), o.z.begin(), o.z.end());
         v.insert(v.end(), o.v.begin(), o.v.end());
+        ux.insert(ux.end(), o.ux.begin(), o.ux.end());
+        uy.insert(uy.end(), o.uy.begin(), o.uy.end());
+        uz.insert(uz.end(), o.uz.begin(), o.uz.end());
+        ic.insert(ic.end(), o.ic.begin(), o.ic.end());
+        ia.insert(ia.end(), o.ia.begin(), o.ia.end());
     }
+};
+
+// A gate for the beam weighting: position, value, unit vector along the beam and the inverse
+// variances across and along it.
+struct BeamGate {
+    double x, y, z, v, ux, uy, uz, ic, ia;
 };
 
 struct GateSweep {
@@ -525,6 +551,7 @@ struct GateSweep {
     const double* elevation;
     const double* range;
     double dx, dy;
+    double sigma_r;
 };
 
 }  // namespace
@@ -537,14 +564,25 @@ py::array_t<float> grid_gates(const DArray& cx, const DArray& cy, const DArray& 
                               double earth_radius, double k_e, int weighting, double roi,
                               double roi_range_factor, double roi_height_factor,
                               int64_t min_gates, int n_threads,
-                              const std::vector<double>& shift) {
+                              const std::vector<double>& shift, double beam_sigma,
+                              const std::vector<double>& along_sigma) {
     const size_t nk = data.size();
     if (azimuth.size() != nk || elevation.size() != nk || range.size() != nk)
         throw std::invalid_argument("need the same number of data/azimuth/elevation/range arrays");
     if (!shift.empty() && shift.size() != 2 * nk)
         throw std::invalid_argument("shift needs a (dx, dy) pair per sweep");
-    if (weighting < kCressman || weighting > kNearest)
+    if (weighting < kCressman || weighting > kBeam)
         throw std::invalid_argument("unknown weighting");
+    const bool beam = weighting == kBeam;
+    if (beam) {
+        if (!(beam_sigma > 0.0) || !std::isfinite(beam_sigma))
+            throw std::invalid_argument("the beam weighting needs a positive beam_sigma");
+        if (along_sigma.size() != nk)
+            throw std::invalid_argument("the beam weighting needs an along_sigma per sweep");
+        for (double a : along_sigma)
+            if (!(a > 0.0) || !std::isfinite(a))
+                throw std::invalid_argument("along_sigma must be positive");
+    }
     if (!(roi > 0.0) || roi_range_factor < 0.0 || roi_height_factor < 0.0)
         throw std::invalid_argument("roi must be positive and the factors not negative");
     if (min_gates < 1) throw std::invalid_argument("min_gates must be at least 1");
@@ -560,7 +598,8 @@ py::array_t<float> grid_gates(const DArray& cx, const DArray& cy, const DArray& 
         sweeps[k] = {data[k].data(),      nray,
                      ngate,               azimuth[k].data(),
                      elevation[k].data(), range[k].data(),
-                     shift.empty() ? 0.0 : shift[2 * k], shift.empty() ? 0.0 : shift[2 * k + 1]};
+                     shift.empty() ? 0.0 : shift[2 * k], shift.empty() ? 0.0 : shift[2 * k + 1],
+                     beam ? along_sigma[k] : 0.0};
     }
 
     const double R = earth_radius * k_e;
@@ -621,18 +660,38 @@ py::array_t<float> grid_gates(const DArray& cx, const DArray& cy, const DArray& 
                         if (!std::isfinite(el) || !std::isfinite(az)) continue;
                         const double sin_el = std::sin(el), cos_el = std::cos(el);
                         const double sin_az = std::sin(az), cos_az = std::cos(az);
+                        // position of the point at slant range r on this ray
+                        auto place = [&](double r, double& px, double& py, double& pz_) {
+                            const double b = std::sqrt(2.0 * sin_el * r * sr + r * r + sr * sr);
+                            const double gs = R * std::asin(r * cos_el / b);
+                            px = gs * sin_az + sw.dx;
+                            py = gs * cos_az + sw.dy;
+                            pz_ = b - R;
+                        };
                         for (int64_t g = 0; g < sw.ngate; ++g) {
                             const double val = sw.data[q * sw.ngate + g];
                             if (std::isnan(val)) continue;
                             const double r = sw.range[g];
-                            const double b =
-                                std::sqrt(2.0 * sin_el * r * sr + r * r + sr * sr);
-                            const double gs = R * std::asin(r * cos_el / b);
-                            const double gx = gs * sin_az + sw.dx, gy = gs * cos_az + sw.dy;
-                            const double gz = b - R;
+                            double gx, gy, gz;
+                            place(r, gx, gy, gz);
                             if (!(gx >= x0 && gx <= x0 + ex && gy >= y0 && gy <= y0 + ey &&
                                   gz >= z0 && gz <= z0 + ez))
                                 continue;
+                            if (beam) {
+                                // beam direction: central difference of the path
+                                double ax, ay, az_, bx, by, bz;
+                                place(std::max(r - kBeamStep, 0.0), ax, ay, az_);
+                                place(r + kBeamStep, bx, by, bz);
+                                const double tx = bx - ax, ty = by - ay, tz = bz - az_;
+                                const double tn = std::sqrt(tx * tx + ty * ty + tz * tz);
+                                if (!(tn > 0.0)) continue;
+                                const double sc = std::max(beam_sigma * r, kMinSigma);
+                                cloud.ux.push_back(tx / tn);
+                                cloud.uy.push_back(ty / tn);
+                                cloud.uz.push_back(tz / tn);
+                                cloud.ic.push_back(1.0 / (sc * sc));
+                                cloud.ia.push_back(1.0 / (sw.sigma_r * sw.sigma_r));
+                            }
                             cloud.x.push_back(gx);
                             cloud.y.push_back(gy);
                             cloud.z.push_back(gz);
@@ -653,6 +712,13 @@ py::array_t<float> grid_gates(const DArray& cx, const DArray& cy, const DArray& 
         cloud.y.reserve(total);
         cloud.z.reserve(total);
         cloud.v.reserve(total);
+        if (beam) {
+            cloud.ux.reserve(total);
+            cloud.uy.reserve(total);
+            cloud.uz.reserve(total);
+            cloud.ic.reserve(total);
+            cloud.ia.reserve(total);
+        }
         for (auto& p : parts) {
             cloud.append(p);
             p = GateCloud();
@@ -677,6 +743,8 @@ py::array_t<float> grid_gates(const DArray& cx, const DArray& cy, const DArray& 
         }
         for (size_t b = 1; b < start.size(); ++b) start[b] += start[b - 1];
         std::vector<double> sx(ng), sy(ng), sz(ng), sv(ng);
+        std::vector<BeamGate> sb;  // the beam weighting reads whole gates: one record each
+        if (beam) sb.resize(ng);
         {
             std::vector<int64_t> fill(start.begin(), start.end() - 1);
             for (size_t i = 0; i < ng; ++i) {
@@ -685,6 +753,9 @@ py::array_t<float> grid_gates(const DArray& cx, const DArray& cy, const DArray& 
                 sy[at] = cloud.y[i];
                 sz[at] = cloud.z[i];
                 sv[at] = cloud.v[i];
+                if (beam)
+                    sb[at] = {cloud.x[i],  cloud.y[i],  cloud.z[i],  cloud.v[i], cloud.ux[i],
+                              cloud.uy[i], cloud.uz[i], cloud.ic[i], cloud.ia[i]};
             }
         }
 
@@ -708,6 +779,43 @@ py::array_t<float> grid_gates(const DArray& cx, const DArray& cy, const DArray& 
                         const int64_t iz0 = bucket(zc - rad, z0, nbz), iz1 = bucket(zc + rad, z0, nbz);
                         double num = 0.0, den = 0.0, best = r2, nearest = kNaN;
                         int64_t count = 0;
+                        if (beam) {
+                            // squared Mahalanobis distance of the point in the pulse volume
+                            // of each gate; the weights are taken relative to the smallest
+                            // one so that they cannot all underflow (num and den are
+                            // rescaled when a smaller one turns up)
+                            double m2min = 0.0;
+                            for (int64_t iz = iz0; iz <= iz1; ++iz)
+                                for (int64_t iy = iy0; iy <= iy1; ++iy) {
+                                    const int64_t row = (iz * nby + iy) * nbx;
+                                    for (int64_t i = start[row + ix0]; i < start[row + ix1 + 1];
+                                         ++i) {
+                                        const BeamGate& g = sb[i];
+                                        const double ddx = g.x - xc, ddy = g.y - yc,
+                                                     ddz = g.z - zc;
+                                        const double d2 = ddx * ddx + ddy * ddy + ddz * ddz;
+                                        if (!(d2 < r2)) continue;
+                                        const double par = ddx * g.ux + ddy * g.uy + ddz * g.uz;
+                                        const double m2 = std::max(d2 - par * par, 0.0) * g.ic +
+                                                          par * par * g.ia;
+                                        double w;
+                                        if (count == 0 || m2 < m2min) {
+                                            if (count > 0) {
+                                                const double f = std::exp(-0.5 * (m2min - m2));
+                                                num *= f;
+                                                den *= f;
+                                            }
+                                            m2min = m2;
+                                            w = 1.0;
+                                        } else {
+                                            w = std::exp(-0.5 * (m2 - m2min));
+                                        }
+                                        ++count;
+                                        num += w * g.v;
+                                        den += w;
+                                    }
+                                }
+                        } else
                         for (int64_t iz = iz0; iz <= iz1; ++iz)
                             for (int64_t iy = iy0; iy <= iy1; ++iy) {
                                 const int64_t row = (iz * nby + iy) * nbx;
@@ -767,7 +875,8 @@ PYBIND11_MODULE(_cone, m) {
           py::arg("k_e") = 4.0 / 3.0, py::arg("weighting") = 0, py::arg("roi") = 1000.0,
           py::arg("roi_range_factor") = 0.0, py::arg("roi_height_factor") = 0.0,
           py::arg("min_gates") = 1, py::arg("n_threads") = 0,
-          py::arg("shift") = std::vector<double>());
+          py::arg("shift") = std::vector<double>(), py::arg("beam_sigma") = 0.0,
+          py::arg("along_sigma") = std::vector<double>());
     m.def("grid_columns", &grid_columns, py::arg("ground"), py::arg("column_azimuth"),
           py::arg("z"), py::arg("radar"), py::arg("data"), py::arg("azimuth"),
           py::arg("elevation"), py::arg("range"), py::arg("site_altitude"),

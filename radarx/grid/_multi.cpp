@@ -323,13 +323,15 @@ std::tuple<py::array_t<float>, py::array_t<float>> beam_geometry(
 // distance weight exp(-d^2 / R^2), R = 50 km, of Zhang et al. (2005, J. Atmos.
 // Oceanic Technol. 22, 30-42, Fig. 15 on p. 41); beam_weight is Eq. 6 of
 // Lakshmanan et al. (2006); the time factor is a radarx choice. It is NOT
-// the exp[-(t^2 r^2) / beta] of Lakshmanan et al. (2006, Eq. 7). Returns the merged field and the
-// weight sum, float32 (nz, ncol...).
+// the exp[-(t^2 r^2) / beta] of Lakshmanan et al. (2006, Eq. 7). An optional quality array
+// (nradar, nz, ncol...) multiplies the weight of every cell (0 drops it; NaN counts as 1). Returns
+// the merged field and the weight sum, float32 (nz, ncol...).
 std::tuple<py::array_t<float>, py::array_t<float>> merge(
     const FArray& values, const std::vector<DArray>& ground, const DArray& z,
     const std::vector<double>& site_altitude, const std::vector<std::vector<double>>& elevations,
     const std::vector<double>& beamwidth, const std::vector<double>& time_offset,
-    double range_scale, double time_scale, double earth_radius, int n_threads, double k_e) {
+    double range_scale, double time_scale, double earth_radius, int n_threads, double k_e,
+    const FArray& quality) {
     const int64_t nr = static_cast<int64_t>(ground.size());
     if (nr == 0 || values.ndim() < 2 || values.shape(0) != nr)
         throw std::invalid_argument("values must be (nradar, nz, ...) with one ground per radar");
@@ -344,6 +346,9 @@ std::tuple<py::array_t<float>, py::array_t<float>> merge(
     if (values.size() != nr * nz * ncol) throw std::invalid_argument("values do not match ground");
     for (const auto& g : ground)
         if (g.size() != ncol) throw std::invalid_argument("every radar needs the same columns");
+    const bool has_quality = quality.size() > 0;
+    if (has_quality && quality.size() != values.size())
+        throw std::invalid_argument("quality must have the shape of values");
     std::vector<std::vector<double>> el(elevations);
     for (auto& e : el) std::sort(e.begin(), e.end());
     std::vector<double> wt(nr);
@@ -356,6 +361,7 @@ std::tuple<py::array_t<float>, py::array_t<float>> merge(
     float* pm = merged.mutable_data();
     float* pw = weight.mutable_data();
     const float* pv = values.data();
+    const float* pq = has_quality ? quality.data() : nullptr;
     std::vector<const double*> pg(nr);
     for (int64_t r = 0; r < nr; ++r) pg[r] = ground[r].data();
     const double* pz = z.data();
@@ -373,10 +379,16 @@ std::tuple<py::array_t<float>, py::array_t<float>> merge(
                 for (int64_t r = 0; r < nr; ++r) {
                     const float v = pv[(r * nz + iz) * ncol + c];
                     if (std::isnan(v)) continue;
+                    double q_cell = 1.0;
+                    if (has_quality) {
+                        const float qv = pq[(r * nz + iz) * ncol + c];
+                        if (!std::isnan(qv)) q_cell = qv;
+                        if (!(q_cell > 0.0)) continue;
+                    }
                     double rr, le, ae;
                     geometry(pg[r][c], R + site_altitude[r], b, R, rr, le, ae);
                     double q = range_scale > 0 ? rr / range_scale : 0.0;
-                    const double wgt = std::exp(-q * q) * beam_weight(ae, el[r], beamwidth[r]) * wt[r];
+                    const double wgt = std::exp(-q * q) * beam_weight(ae, el[r], beamwidth[r]) * wt[r] * q_cell;
                     num += wgt * v;
                     den += wgt;
                 }
@@ -492,7 +504,7 @@ PYBIND11_MODULE(_multi, m) {
           py::arg("site_altitude"), py::arg("elevations"), py::arg("beamwidth"),
           py::arg("time_offset"), py::arg("range_scale"), py::arg("time_scale"),
           py::arg("earth_radius") = 6371000.0, py::arg("n_threads") = 0,
-          py::arg("k_e") = 4.0 / 3.0);
+          py::arg("k_e") = 4.0 / 3.0, py::arg("quality") = FArray());
     m.def("pair_histograms", &pair_histograms, py::arg("values"), py::arg("range"),
           py::arg("max_range_ratio"), py::arg("bin_width"), py::arg("max_difference"),
           py::arg("n_threads") = 0, py::arg("select") = FArray(),

@@ -59,6 +59,7 @@ import cmweather  # noqa
 import fsspec
 import matplotlib.pyplot as plt
 import numpy as np
+import xarray as xr
 import xradar as xd
 
 import radarx as rx
@@ -210,4 +211,25 @@ ax.set(
     ylabel="north of the origin (km)",
     aspect="equal",
 )
+```
+
+## Beam blockage in the merge
+
+Where terrain blocks part of a radar's beam, that radar should count less. With
+`blockage` the weight is multiplied by `1 - b` for the blocked fraction `b` of
+the beam (0 to 1), and a radar is left out where `b` reaches `max_blockage`
+(default 0.5). `b` is a gridded field: compute `radarx.retrieve.beam_blockage`
+(`CBB`) from a digital elevation model for each volume, add it to the volume with
+`dtree.radarx.assign` and grid it with the other fields. Here a wedge to the
+north-east of KNQA stands in for a mountain: 80 percent of its beam is blocked
+there, so the merge uses the other two radars in the wedge.
+
+```{code-cell} ipython3
+wedge = (grid.azimuth > 30) & (grid.azimuth < 80) & (grid.radar == "KNQA")
+blocked = xr.where(wedge, 0.8, 0.0)  # (radar, y, x): the same at every height
+merged_blocked = rx.grid.merge_radars(grid.assign(CBB=blocked), "DBZH", bias=bias, blockage="CBB")
+change = (merged_blocked.DBZH - merged.DBZH).sel(z=2000.0).assign_coords(x=merged.x / 1e3, y=merged.y / 1e3)
+fig, ax = plt.subplots(figsize=(8, 6), layout="constrained")
+change.plot(ax=ax, cmap="RdBu_r", vmin=-10, vmax=10, cbar_kwargs={"label": "change of the merged DBZH (dB)"})
+ax.set(title="merge with the blockage of KNQA minus merge without", aspect="equal")
 ```

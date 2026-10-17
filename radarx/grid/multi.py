@@ -260,6 +260,7 @@ def _merge_numpy(
     time_scale,
     earth_radius=EARTH_RADIUS,
     k_e=K_E,
+    quality=None,
 ):
     """
     NumPy implementation of ``_multi.merge``.
@@ -268,7 +269,8 @@ def _merge_numpy(
     distance weight of Zhang et al. 2005, Fig. 15, p. 41, with R = 50 km) times
     the elevation weight of Lakshmanan et al. (2006), Eq. (6), times
     ``exp(-(dt/time_scale)^2)`` (radarx's own time weight, not Eq. 7 of
-    Lakshmanan et al. 2006; see :func:`merge_radars`).
+    Lakshmanan et al. 2006; see :func:`merge_radars`). ``quality``, if given,
+    multiplies the weight of every cell (0 drops it, NaN counts as 1).
     """
     num = np.zeros(values.shape[1:])
     den = np.zeros(values.shape[1:])
@@ -283,6 +285,10 @@ def _merge_numpy(
             w = w * np.exp(-((time_offset[r] / time_scale) ** 2))
         v = values[r].astype(np.float64)
         ok = np.isfinite(v)
+        if quality is not None:
+            q = np.nan_to_num(quality[r].astype(np.float64), nan=1.0)
+            w = w * q
+            ok = ok & (q > 0)
         num += np.where(ok, w * np.where(ok, v, 0.0), 0.0)
         den += np.where(ok, w, 0.0)
     with np.errstate(invalid="ignore", divide="ignore"):
@@ -1105,6 +1111,31 @@ def _radar_columns(grid, use_compiled=False, n_threads=None):
     return _column_geometry(x, y, origin, sites, use_compiled, n_threads)
 
 
+def _blockage_quality(obj, blockage, max_blockage, like):
+    """
+    Weight factor ``1 - b`` of the blockage ``b``, 0 where ``b >= max_blockage``.
+
+    ``b`` is a field of ``obj`` or a DataArray on ``(radar, z, y, x)`` or on some
+    of these dimensions (broadcast against the field ``like``); NaN stays NaN
+    (no terrain data: no penalty). ``None`` gives ``None``.
+    """
+    if blockage is None:
+        return None
+    max_blockage = float(max_blockage)
+    if not 0.0 < max_blockage <= 1.0:
+        raise ValueError(f"max_blockage must be in (0, 1], not {max_blockage!r}")
+    if isinstance(blockage, str):
+        if blockage not in obj:
+            raise ValueError(f"grid has no blockage field {blockage!r}")
+        blockage = obj[blockage]
+    blockage = blockage.broadcast_like(like)
+    b = blockage.transpose("radar", "z", "y", "x").values.astype(np.float32)
+    with np.errstate(invalid="ignore"):
+        quality = np.where(b >= max_blockage, 0.0, 1.0 - np.clip(b, 0.0, 1.0))
+    quality = np.where(np.isnan(b), np.nan, quality).astype(np.float32)
+    return np.ascontiguousarray(quality)
+
+
 def _no_echo_floor(no_echo, values, da):
     """
     Value of covered cells without an echo, one per radar, or ``None``.
@@ -1140,6 +1171,8 @@ def merge_radars(
     average="dbz",
     time_weight=None,
     k_e=None,
+    blockage=None,
+    max_blockage=0.5,
     n_threads=None,
     engine="auto",
 ):
@@ -1197,6 +1230,15 @@ def merge_radars(
 
     A scale of ``None`` or 0 switches its factor off.
 
+    Beam blockage. With ``blockage`` (a gridded fraction of the beam blocked by
+    terrain, e.g. the ``CBB`` of :func:`radarx.retrieve.beam_blockage` gridded
+    with the data) the weight is multiplied by ``1 - b``, and a radar is dropped
+    from the cells where ``b >= max_blockage``. A blocked radar then gives way
+    to the unblocked ones, and the merge does not depend on the blocked radar
+    where less than half of its beam gets through. The factor ``1 - b`` and the
+    default limit of 0.5 are radarx choices, not taken from a publication.
+    Cells where the blockage is NaN (no terrain data) are not penalised.
+
     Coverage and echo. Where one radar has an echo and another looks at the
     cell (``coverage`` in the grid) but reports nothing, the second radar is
     below its sensitivity there, not absent. Skipping it, as an average over
@@ -1246,6 +1288,12 @@ def merge_radars(
     k_e : float, optional
         Effective Earth radius factor of the beam geometry. Default: the
         grid's ``k_e`` attribute, else 4/3.
+    blockage : str or xarray.DataArray, optional
+        Fraction of the beam blocked by terrain (0 to 1) on ``(radar, z, y,
+        x)``, or on some of these dimensions: the name of a field of ``obj`` or
+        a DataArray. See above. Default ``None``: no blockage weight.
+    max_blockage : float, optional
+        Blockage at and above which a radar does not take part. Default 0.5.
     n_threads : int, optional
         Threads for the compiled kernel. Default: all cores.
     engine : {"auto", "compiled", "numpy"}, optional
@@ -1261,7 +1309,8 @@ def merge_radars(
     ------
     ValueError
         If a field is not in ``obj``, ``average`` or ``no_echo`` is not
-        valid, or a ``bias`` Dataset belongs to another field.
+        valid, a ``bias`` Dataset belongs to another field, ``blockage`` is
+        not a field of ``obj`` or ``max_blockage`` is not in (0, 1].
 
     References
     ----------
@@ -1278,6 +1327,9 @@ def merge_radars(
     Examples
     --------
     >>> merged = radarx.grid.merge_radars(grid, "DBZH")  # doctest: +SKIP
+    >>> merged = radarx.grid.merge_radars(  # doctest: +SKIP
+    ...     grid, "DBZH", blockage="CBB"
+    ... )
     """
     use_compiled = _use_compiled(engine)
     if isinstance(data_vars, str):
@@ -1317,6 +1369,7 @@ def merge_radars(
         if "coverage" in obj
         else None
     )
+    quality = _blockage_quality(obj, blockage, max_blockage, obj[data_vars[0]])
 
     out = {}
     for name in data_vars:
@@ -1352,9 +1405,10 @@ def merge_radars(
                 earth_radius=EARTH_RADIUS,
                 n_threads=int(n_threads or 0),
                 k_e=k_e,
+                **({} if quality is None else {"quality": quality}),
             )
         else:
-            merged, weight = _merge_numpy(*args, k_e=k_e)
+            merged, weight = _merge_numpy(*args, k_e=k_e, quality=quality)
         if average == "linear":
             with np.errstate(invalid="ignore", divide="ignore"):
                 merged = np.where(merged > 0, 10.0 * np.log10(merged), np.nan)
@@ -1362,6 +1416,10 @@ def merge_radars(
         attrs = dict(obj[name].attrs)
         attrs["comment"] = "weighted merge of all radars"
         attrs["merge_average"] = average
+        if quality is not None:
+            attrs["merge_blockage"] = (
+                f"weight (1 - b), radar dropped where b >= {float(max_blockage)}"
+            )
         out[name] = (("z", "y", "x"), merged, attrs)
         out[f"{name}_weight"] = (
             ("z", "y", "x"),

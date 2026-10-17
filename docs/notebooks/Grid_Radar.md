@@ -166,6 +166,40 @@ print(
 )
 ```
 
+## Beam weighting
+
+`weighting="beam"` weights a gate by the pulse volume instead of by its distance
+to the point: a Gaussian that is as wide across the beam as the two-way power
+pattern of a beam of half-power width `beamwidth` (Doviak and Zrnic 1993,
+Eq. 5.75) and as wide along it as `range_resolution` (default: the gate
+spacing). The beams that pass through the point dominate, so a radial velocity,
+which is a projection on the beam, is mixed less with gates of other directions,
+and sharp edges stay sharp. The radius of influence still decides which gates
+take part. Radial velocity of the same volume at 2 km, gridded with the
+Cressman weights and with the beam weights, and the difference to the cone grid,
+which reproduces the gates:
+
+```{code-cell} ipython3
+def mask_velocity(ds):
+    return ds.where(ds.VRADH > -63.9) if "VRADH" in ds else ds
+
+vel_tree = dtree.xradar.map_over_sweeps(mask_velocity)
+vel = {
+    "cone": rx.grid.grid_cones(vel_tree, "VRADH", xg, yg, zg),
+    "Cressman": vel_tree.radarx.grid_gates(["VRADH"], xg, yg, zg, weighting="cressman", roi=1000.0, beamwidth=1.0),
+    "beam": vel_tree.radarx.grid_gates(["VRADH"], xg, yg, zg, weighting="beam", roi=1000.0, beamwidth=1.0),
+}
+fig, axes = plt.subplots(1, 3, figsize=(16, 4.6), layout="constrained")
+for ax, (title, grid) in zip(axes, vel.items()):
+    v2km = grid["VRADH"].sel(z=2000.0)
+    v2km.plot(ax=ax, x="x", y="y", cmap="RdBu_r", vmin=-30, vmax=30)
+    ax.set(title=f"{title}, VRADH at 2 km", aspect="equal", xlim=(-80e3, 80e3), ylim=(-80e3, 80e3))
+for title in ("Cressman", "beam"):
+    both = vel["cone"]["VRADH"].notnull() & vel[title]["VRADH"].notnull()
+    diff = (vel[title]["VRADH"] - vel["cone"]["VRADH"]).where(both)
+    print(f"{title}: rms difference to the cone grid {float(np.sqrt((diff ** 2).mean())):.1f} m/s")
+```
+
 ## Vertical section
 
 `grid_rhi` grids onto a vertical plane through the radar at an azimuth, from the
