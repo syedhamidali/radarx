@@ -86,26 +86,55 @@ struct Buffers {
         : az(n), ad(n), ar(n), p1(n), p2(n), p3(n), q1(n), q2(n), q3(n), gz(n), gr(n) {}
 };
 
-// bottom, top (gate indices, -1 if none) and the step that gave the top.
-void detect(const double* zh, const double* zdr, const double* rho, const double* h, int64_t n,
-            double window, Buffers& b, int32_t* bottom, int32_t* top, int32_t* step) {
-    *bottom = *top = -1;
-    *step = 0;
-    double mz, md, mr;
-    if (!finite_max(zh, n, &mz) || !finite_max(zdr, n, &md) || !finite_max(rho, n, &mr)) return;
-    if (!(mz > 0.0) || !(md > 0.0) || !(mr > 0.0)) return;
+// Normalise Z, ZDR and rhohv by their maxima and form the three products with (1 - rhohv);
+// false if a variable has no value or a maximum that is not positive.
+bool prepare(const double* zh, const double* zdr, const double* rho, int64_t n, Buffers& b) {
+    double mz = 0.0, md = 0.0, mr = 0.0;
+    if (!finite_max(zh, n, &mz) || !finite_max(zdr, n, &md) || !finite_max(rho, n, &mr))
+        return false;
+    if (!(mz > 0.0) || !(md > 0.0) || !(mr > 0.0)) return false;
     for (int64_t i = 0; i < n; ++i) {
         b.az[i] = std::fabs(zh[i] / mz);
         b.ad[i] = std::fabs(zdr[i] / md);
         b.ar[i] = std::fabs(rho[i] / mr);
-    }
-    // the products Zh (1-rho), Zdr (1-rho) and Zh Zdr (1-rho) of the normalised values
-    for (int64_t i = 0; i < n; ++i) {
         const double c = 1.0 - b.ar[i];
         b.p1[i] = b.az[i] * c;
         b.p2[i] = b.ad[i] * c;
         b.p3[i] = b.az[i] * b.ad[i] * c;
     }
+    return true;
+}
+
+// The top of steps 3 to 5 of the paper from the gate `cmin` of the minima of the products;
+// -1 if the gate above the last one would be needed. `step` gets 3, 4 or 5.
+int64_t top_gate(const Buffers& b, const double* h, int64_t n, int64_t cmin, double window,
+                 int32_t* step) {
+    // the gates within `window` of the minima of the products (all gates if infinite)
+    int64_t lo = 0, hi = n - 1;
+    if (std::isfinite(window)) {
+        while (h[lo] < h[cmin] - window) ++lo;
+        while (h[hi] > h[cmin] + window) --hi;
+    }
+    const int64_t zmin = extreme(b.gz.data(), n, false, lo, hi);  // Z gradient minimum
+    const int64_t rmax = extreme(b.gr.data(), n, true, lo, hi);   // rho gradient maximum
+    int64_t top = cmin + 1;
+    *step = 5;
+    if (zmin == cmin && rmax == cmin) {
+        top = cmin;
+        *step = 3;
+    } else if (std::max(zmin, rmax) > cmin) {
+        top = std::max(zmin, rmax);
+        *step = 4;
+    }
+    return top < n ? top : -1;
+}
+
+// bottom, top (gate indices, -1 if none) and the step that gave the top.
+void detect(const double* zh, const double* zdr, const double* rho, const double* h, int64_t n,
+            double window, Buffers& b, int32_t* bottom, int32_t* top, int32_t* step) {
+    *bottom = *top = -1;
+    *step = 0;
+    if (!prepare(zh, zdr, rho, n, b)) return;
     gradient(b.p1.data(), h, n, b.q1.data());
     gradient(b.p2.data(), h, n, b.q2.data());
     gradient(b.p3.data(), h, n, b.q3.data());
@@ -118,27 +147,9 @@ void detect(const double* zh, const double* zdr, const double* rho, const double
         coincident(extreme(b.q1.data(), n, false), extreme(b.q2.data(), n, false),
                    extreme(b.q3.data(), n, false));
     if (bot < 0 || cmin < 0) return;
-    // the gates within `window` of the minima of the products (all gates if infinite)
-    int64_t lo = 0, hi = n - 1;
-    if (std::isfinite(window)) {
-        while (h[lo] < h[cmin] - window) ++lo;
-        while (h[hi] > h[cmin] + window) --hi;
-    }
-    const int64_t zmin = extreme(b.gz.data(), n, false, lo, hi);  // Z gradient minimum
-    const int64_t rmax = extreme(b.gr.data(), n, true, lo, hi);   // rho gradient maximum
-    int64_t t;
-    int32_t s;
-    if (zmin == cmin && rmax == cmin) {
-        t = cmin;
-        s = 3;
-    } else if (std::max(zmin, rmax) > cmin) {
-        t = std::max(zmin, rmax);
-        s = 4;
-    } else {
-        t = cmin + 1;
-        s = 5;
-    }
-    if (t >= n) return;
+    int32_t s = 0;
+    const int64_t t = top_gate(b, h, n, cmin, window, &s);
+    if (t < 0) return;
     *bottom = static_cast<int32_t>(bot);
     *top = static_cast<int32_t>(t);
     *step = s;
