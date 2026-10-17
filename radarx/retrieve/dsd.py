@@ -117,7 +117,14 @@ through the ``pytmatrix`` interface of Leinonen 2014) by
   output);
 - Gaussian canting angles with zero mean and 7° standard deviation. The
   value is attributed to the width of the canting distribution of Huang et
-  al. (2008); the number is not checked against that paper;
+  al. (2008); the number is not checked against that paper. Kumjian and
+  Ryzhkov (2010) use 20° and call it too wide for typical rain, for which
+  they find 10° more appropriate. The width and the frequencies are recorded
+  in the header of the CSV file and in the attributes of
+  :func:`scattering_table` (``canting_std``, ``frequency_ghz``), of the
+  :func:`dsd` and :func:`radar_from_dsd` products and of the forward table of
+  :func:`~radarx.retrieve.dsd_bayesian`, and the sensitivity to both is
+  quantified in the section below;
 - horizontal incidence (0° elevation), see the warning below;
 - the refractive index of water of Ray (1972), at 0, 10, 20 and 30 °C, and
   :math:`|K_w|^2 = 0.93` for all bands and temperatures (a convention, not
@@ -156,6 +163,104 @@ through the ``pytmatrix`` interface of Leinonen 2014) by
     :math:`Z_{DR}`); there is no ``elevation`` argument, correction or
     warning in the code. At C and X band the elevation dependence is not
     the Rayleigh one (resonance) and was not estimated.
+
+Sensitivity to canting and frequency
+------------------------------------
+The width of the canting distribution and the radar frequency change the
+single-drop :math:`Z_{DR}` and :math:`K_{DP}` that the tables hold, most for
+large drops. The numbers below are from
+:func:`radarx.fundamentals.raindrop_scattering` (T-matrix, 20 °C, Brandes et
+al. 2002 axis ratio, ``ddelt = 1e-3`` as in the tables), relative to the 7° of
+the tables; they are radarx computations, not values from a paper.
+
+*Canting, S band (2.8 GHz).* The single-drop :math:`Z_{DR}` of the table is
+0.62, 2.29, 3.98 and 5.00 dB for equal-volume diameters of 2, 4, 6 and 8 mm.
+With 10° of canting it is lower by 0.03, 0.11, 0.21 and 0.29 dB, with 20° by
+0.17, 0.65, 1.20 and 1.66 dB. :math:`K_{DP}` per drop is lower by 4.5 % (10°)
+and 26.9 % (20°) at every size (to 0.5 %) and at S, C and X band alike. For
+gamma DSDs the :math:`Z_{DR}` (and :math:`Z_H`) change as follows (:math:`N_w = 8000`
+m\\ :sup:`-3` mm\\ :sup:`-1`, S band):
+
+.. list-table::
+    :header-rows: 1
+
+    * - :math:`\\mu`
+      - :math:`D_m` (mm)
+      - :math:`Z_{DR}` at 7°
+      - change at 10°
+      - change at 20°
+      - :math:`Z_H` change at 20°
+    * - 3
+      - 1.5
+      - 0.75 dB
+      - -0.03 dB
+      - -0.20 dB
+      - -0.06 dB
+    * - 3
+      - 2.0
+      - 1.28 dB
+      - -0.06 dB
+      - -0.35 dB
+      - -0.10 dB
+    * - 3
+      - 3.0
+      - 2.37 dB
+      - -0.11 dB
+      - -0.67 dB
+      - -0.17 dB
+    * - -1
+      - 2.0
+      - 2.07 dB
+      - -0.10 dB
+      - -0.58 dB
+      - -0.15 dB
+    * - -1
+      - 3.0
+      - 2.98 dB
+      - -0.14 dB
+      - -0.86 dB
+      - -0.18 dB
+
+The changes are larger at C and X band than at S band (:math:`\\mu` = 3,
+:math:`D_m` = 3 mm: -0.16 and -0.98 dB at C band, -0.13 and -0.78 dB at X band,
+for 10° and 20°). Applying the tables of 7° to rain
+whose drops are canted by 10° makes the retrieved :math:`D_m` about 2-4 % too
+low and :math:`\\log_{10} N_w` 0.06-0.11 too high (normalized gamma DSD with
+:math:`\\mu` = 3, :math:`D_m` = 1-3 mm, S band, :math:`Z_H` unchanged; 3-7 %
+too low for :math:`\\mu` = -1 with :math:`D_m` = 1.5-3 mm); if the canting is 20°
+the :math:`D_m` is 12-21 % too low (17-32 % for :math:`\\mu` = -1) and
+:math:`\\log_{10} N_w` 0.4-0.7 too high, a larger error than the 6-8 % in
+:math:`D_m` of an elevation angle of 20° (above).
+
+*Frequency, S band.* Between 2.7 and 3.0 GHz (wavelengths of 11.1 to 10.0 cm)
+the :math:`Z_{DR}` of gamma DSDs with :math:`D_m` up to 3 mm changes by less
+than 0.06 dB (at most +0.02 dB at 2.7 GHz and -0.05 dB at 3.0 GHz, for
+:math:`\\mu` = -1 and :math:`D_m` = 3 mm; at most 0.01 dB at 2.75 GHz, the
+10.9 cm of Kumjian and Ryzhkov 2010), :math:`Z_H` by at most 0.08 dB at 2.7 GHz
+and 0.17 dB at 3.0 GHz, and :math:`K_{DP}`, which scales as :math:`1/\\lambda`,
+by -4 % (2.7 GHz), -2 % (2.75 GHz) and +7 to +9 % (3.0 GHz). The choice of
+2.8 GHz is therefore immaterial for :math:`Z_{DR}`; for :math:`K_{DP}` it is
+worth a few percent.
+
+*Comparison with Kumjian and Ryzhkov (2010).* Their scattering assumptions
+are 20° of canting and 10.9 cm. In the rain-shaft experiment of the preprint
+of that paper (2 km layer, 20 °C, S band) the changes of :math:`Z_{DR}` and
+:math:`K_{DP}` at the ground, computed with :func:`~radarx.retrieve.evaporation`,
+are about 30 % smaller with these assumptions than with 7° and 10.7 cm, for all
+DSDs (for :math:`\\mu` = 3 and a relative humidity of 10 % the :math:`Z_{DR}`
+change is 0.118 dB with the scattering of the table and 0.086 dB with theirs).
+The :math:`\\mu` = -1 case is where radarx differs most from the figure of the
+preprint: the :math:`Z_{DR}` change is 0.07 dB too large with the table and still
+0.04 dB too large with their assumptions (10 % relative humidity), so the
+difference does not come from canting or frequency. It more likely depends on
+the truncation of the DSD and the largest drops (the preprint uses 0.05 to
+7.95 mm); the observed soundings of their Tables 1 and 2 are not tabulated, so
+those cannot be reproduced from the text (radarx issue 274).
+
+To use another canting width, rebuild the table with
+``python ci/build_dsd_tables.py output.csv 10`` (a few seconds, source checkout)
+and replace ``radarx/retrieve/data/dsd_scattering.csv``; no argument of
+:func:`dsd` or :func:`radar_from_dsd` selects it.
 
 Rain only
 ---------
@@ -404,7 +509,45 @@ def _raw_table():
     return out
 
 
+def _parse_assumptions(line):
+    """Read the ``key=value`` pairs of the second header line of the table file."""
+    pairs = {
+        k.strip(): v.strip()
+        for k, _, v in (item.partition("=") for item in line.lstrip("# ").split(";"))
+    }
+    return {
+        "canting_std": float(pairs["canting_std_deg"]),
+        "frequency_ghz": {b: float(pairs[f"frequency_ghz_{b}"]) for b in BANDS},
+        "elevation": float(pairs["elevation_deg"]),
+    }
+
+
+@functools.lru_cache(maxsize=1)
+def _table_assumptions():
+    """
+    The scattering assumptions recorded in the header of the packaged table.
+
+    The second line of ``dsd_scattering.csv`` holds ``key=value`` pairs
+    separated by semicolons (written by ``ci/build_dsd_tables.py``): the width
+    of the canting distribution in degrees, the radar frequency of each band in
+    GHz, the elevation angle and the axis ratio and refractive index references.
+    """
+    path = resources.files("radarx.retrieve") / "data" / "dsd_scattering.csv"
+    with resources.as_file(path) as p, open(p) as f:
+        f.readline()
+        return _parse_assumptions(f.readline())
+
+
 _COLUMNS = ("sigma_h", "sigma_v", "copol_re", "copol_im", "kdp", "ah", "av")
+
+
+def _assumption_attrs(band):
+    """Canting width and frequency of the tables, for the attributes of products."""
+    assumed = _table_assumptions()
+    return {
+        "canting_std": assumed["canting_std"],
+        "frequency_ghz": assumed["frequency_ghz"][band],
+    }
 
 
 def _check_band(band):
@@ -459,7 +602,14 @@ def scattering_table(band="S", temperature=20.0):
     The values come from the T-matrix method (Mishchenko and Travis 1998)
     through the ``pytmatrix`` interface (Leinonen 2014), with Gaussian canting
     of 7 degrees standard deviation attributed to Huang et al. (2008; value not
-    checked against the paper) and the refractive index of Ray (1972).
+    checked against the paper) and the refractive index of Ray (1972). The
+    canting width and the frequency are read from the header of the table and
+    returned in the ``canting_std`` (degrees) and ``frequency_ghz`` attributes.
+    With 20 instead of 7 degrees the single-drop :math:`Z_{DR}` of a 4 mm drop
+    is lower by 0.65 dB and that of an 8 mm drop by 1.7 dB, :math:`K_{DP}` by
+    27 % (S band; the section "Sensitivity to canting and frequency" of
+    :mod:`radarx.retrieve.dsd` has the numbers for 10 degrees, DSDs and the
+    frequency).
     The T-matrix runs are for horizontal incidence (0 degrees elevation), so
     ZDR (and KDP) computed from these tables are those seen at low elevation;
     at 20 degrees elevation ZDR would be about 12 % lower (Rayleigh, S band
@@ -519,6 +669,7 @@ def scattering_table(band="S", temperature=20.0):
         c: ("diameter", data[:, i], {"long_name": n, "units": u})
         for i, (c, n, u) in enumerate(zip(_COLUMNS, names, units))
     }
+    assumed = _table_assumptions()
     ratio = (
         0.9951
         + 0.0251 * diam
@@ -546,7 +697,15 @@ def scattering_table(band="S", temperature=20.0):
             "wavelength_units": "mm",
             "temperature": float(temperature),
             "temperature_units": "degrees_Celsius",
-            "canting": "Gaussian, 0 mean, 7 degrees standard deviation",
+            "canting": (
+                "Gaussian, 0 mean, "
+                f"{assumed['canting_std']:g} degrees standard deviation"
+            ),
+            "canting_std": assumed["canting_std"],
+            "canting_std_units": "degree",
+            "frequency_ghz": assumed["frequency_ghz"][band],
+            "elevation": assumed["elevation"],
+            "elevation_units": "degree",
             "method": "T-matrix (pytmatrix), built by ci/build_dsd_tables.py",
         },
     )
@@ -1064,8 +1223,14 @@ def dsd(
     from a sweep or QVP at elevation above about 5 degrees is biased low
     (about 12 % at 20 degrees, so :math:`D_m` low by 6-8 % and :math:`N_w`
     high); see the Scattering tables section of
-    :mod:`radarx.retrieve.dsd` for the estimate and its limits. The rain
-    rate uses the sea-level fall speed of Atlas et al. (1973) (Bringi and
+    :mod:`radarx.retrieve.dsd` for the estimate and its limits. They also
+    assume Gaussian canting of 7 degrees and, for S band, 2.8 GHz (recorded
+    in the ``canting_std`` and ``frequency_ghz`` attributes of the result):
+    with 10 degrees :math:`Z_{DR}` is lower by 0.1 dB at 2 dB, :math:`K_{DP}`
+    by 4.5 %, and the retrieved :math:`D_m` 2-4 % too low; with 20 degrees
+    these are 0.6 dB, 27 % and 12-21 % (:math:`\\mu` = 3; section
+    "Sensitivity to canting and frequency" of :mod:`radarx.retrieve.dsd`).
+    The rain rate uses the sea-level fall speed of Atlas et al. (1973) (Bringi and
     Chandrasekar 2001, Eq. 7.65b) without density correction; the moments
     follow Ulbrich (1983) and Testud et al. (2001).
 
@@ -1153,6 +1318,7 @@ def dsd(
         "method": method,
         "band": band,
         "temperature": temperature,
+        **_assumption_attrs(band),
         "comment": (
             "gamma drop size distribution retrieved by radarx.retrieve.dsd; "
             "ZDR outside the lookup table is clipped to it"
@@ -1481,8 +1647,11 @@ def radar_from_dsd(nd, band="S", temperature=20.0, dim="diameter"):
 
     Notes
     -----
-    Horizontal incidence (0 degrees elevation) is assumed, as in the tables;
-    see :mod:`radarx.retrieve.dsd`. The Rayleigh scaling (:math:`D^6`) of the
+    Horizontal incidence (0 degrees elevation) is assumed, as in the tables,
+    and so are their Gaussian canting of 7 degrees and the frequencies of the
+    bands (recorded as ``canting_std`` and ``frequency_ghz`` in the attributes
+    of the result); the sensitivity of :math:`Z_{DR}` and :math:`K_{DP}` to
+    both is quantified in :mod:`radarx.retrieve.dsd`. The Rayleigh scaling (:math:`D^6`) of the
     backscatter terms below the smallest tabulated diameter (0.05 mm) is a
     radarx choice (it is exact in the Rayleigh limit). The rain rate and
     the other moments follow Bringi and Chandrasekar (2001), Eqs. 7.13, 7.61
@@ -1584,7 +1753,11 @@ def radar_from_dsd(nd, band="S", temperature=20.0, dim="diameter"):
     }
     for name, a in attrs.items():
         out[name].attrs = a
-    out.attrs = {"band": tab.attrs["band"], "temperature": float(temperature)}
+    out.attrs = {
+        "band": tab.attrs["band"],
+        "temperature": float(temperature),
+        **_assumption_attrs(tab.attrs["band"]),
+    }
     return out
 
 

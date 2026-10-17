@@ -36,7 +36,14 @@ Provenance and caveats are also summarised in
 
 Usage::
 
-    python ci/build_dsd_tables.py [output.csv]
+    python ci/build_dsd_tables.py [output.csv [canting_std_degrees]]
+
+The second argument rebuilds the table for another width of the canting
+distribution (7 by default, 10 is the value Kumjian and Ryzhkov 2010 call
+appropriate for typical rain, see the sensitivity section of
+:mod:`radarx.retrieve.dsd`). The header line of the CSV file records the canting
+width and the frequencies; ``radarx.retrieve.scattering_table`` reads them from
+there.
 
 References
 ----------
@@ -75,16 +82,19 @@ import numpy as np
 
 from radarx.fundamentals import tmatrix
 
-# radar wavelengths [mm]: 2.8, 5.6 and 9.4 GHz (radarx choices, representative
-# of S, C and X band; wavelength = c / f)
-BANDS = {"S": 299.792458 / 2.8, "C": 299.792458 / 5.6, "X": 299.792458 / 9.4}
+# radar frequencies [GHz]: 2.8, 5.6 and 9.4 (radarx choices, representative of
+# S, C and X band) and the wavelengths [mm] = c / f
+FREQUENCIES_GHZ = {"S": 2.8, "C": 5.6, "X": 9.4}
+BANDS = {band: 299.792458 / f for band, f in FREQUENCIES_GHZ.items()}
 TEMPERATURES = (0.0, 10.0, 20.0, 30.0)  # degrees Celsius
 DIAMETERS = np.round(np.arange(1, 161) * 0.05, 4)  # mm
 CANTING_STD = 7.0  # degrees (Huang et al. 2008; value not checked, see above)
 OUTPUT = Path(__file__).resolve().parents[1] / "radarx/retrieve/data/dsd_scattering.csv"
 
 
-def main(path=OUTPUT):
+def main(path=OUTPUT, canting_std=CANTING_STD):
+    """Write the table to ``path`` for Gaussian canting of ``canting_std`` degrees."""
+    canting_std = float(canting_std)
     rows = []
     for band, wl in BANDS.items():
         for t in TEMPERATURES:
@@ -94,7 +104,7 @@ def main(path=OUTPUT):
                 DIAMETERS,
                 wl,
                 temperature=t,
-                canting_std=CANTING_STD,
+                canting_std=canting_std,
                 ndgs=4,
                 ddelt=1e-3,  # the value of pytmatrix, with which the table was first built
             )
@@ -125,9 +135,11 @@ def main(path=OUTPUT):
     header = (
         "# Single-drop scattering of raindrops, T-matrix "
         "(radarx.fundamentals.tmatrix), built by ci/build_dsd_tables.py\n"
-        "# axis ratio Brandes et al. (2002); Gaussian canting, 0 mean, "
-        f"{CANTING_STD:g} deg std; horizontal incidence; water refractive "
-        "index Ray (1972)\n"
+        "# canting_std_deg="
+        f"{canting_std:g}; "
+        + "; ".join(f"frequency_ghz_{b}={f:g}" for b, f in FREQUENCIES_GHZ.items())
+        + "; elevation_deg=0; axis_ratio=Brandes et al. (2002); "
+        "canting=Gaussian, 0 mean; refractive_index=Ray (1972)\n"
         "# diameter: equal-volume diameter [mm]; sigma_h, sigma_v, copol_re, "
         "copol_im: backscatter cross sections and copolar correlation terms "
         "[mm2]\n"
@@ -147,4 +159,4 @@ def main(path=OUTPUT):
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:])
+    main(*sys.argv[1:3])

@@ -104,8 +104,64 @@ Celsius the $Z_{DR}$ of 8 mm drops changes by 0.3 dB. The
 differences between scattering assumptions in the literature (Kumjian and Ryzhkov 2010
 use 10.9 cm and 20 degrees of canting, which they call too wide for typical rainfall, where
 10 degrees is more appropriate; here 10.7 cm and 7 degrees) are therefore of the size of the
-large-drop signal itself, and the tables should be rebuilt (`ci/build_dsd_tables.py`, a few seconds) with the assumptions
-of the data they are applied to.
+large-drop signal itself. The tables record their assumptions (the width of the
+canting distribution and the frequency are attributes of `scattering_table` and
+of the `dsd` and `radar_from_dsd` products), and
+`python ci/build_dsd_tables.py output.csv 10` writes a table for another width
+in a few seconds.
+
+For gamma DSDs the effect is smaller than for the largest drops, but not small
+for the retrieval. The cell below gives the change of $Z_{DR}$ and $K_{DP}$ of
+normalized gamma DSDs ($N_w$ = 8000 m$^{-3}$ mm$^{-1}$, S band, 2.8 GHz) when the
+canting grows from the 7 degrees of the tables, and the $D_m$ that the table of
+7 degrees would retrieve from the $Z_{DR}$ of the more canted rain:
+
+```{code-cell} ipython3
+from scipy.integrate import trapezoid
+from scipy.special import gamma as gamma_function
+
+print(
+    "table:",
+    scattering_table("S").attrs["canting_std"],
+    "degrees,",
+    scattering_table("S").attrs["frequency_ghz"],
+    "GHz",
+)
+diam = scattering_table("S").diameter.values
+wavelength = 299.792458 / 2.8
+
+
+def zdr_kdp(std, mu, dm, nw=8000.0):
+    out = raindrop_scattering(diam, wavelength, canting_std=std, ddelt=1e-3)
+    f = 6.0 / 256.0 * (4 + mu) ** (mu + 4) / gamma_function(mu + 4)
+    nd = nw * f * (diam / dm) ** mu * np.exp(-(4 + mu) * diam / dm)
+    zh = trapezoid(nd * out.sigma_h.values, diam)
+    zv = trapezoid(nd * out.sigma_v.values, diam)
+    return 10 * np.log10(zh / zv), trapezoid(nd * out.kdp.values, diam)
+
+
+dm_grid = np.linspace(0.5, 4.0, 141)
+zdr_7 = {
+    mu: np.array([zdr_kdp(7.0, mu, x)[0] for x in dm_grid]) for mu in (3.0, -1.0)
+}
+print("mu  Dm  canting   dZDR (dB)  dKDP (%)  Dm retrieved with 7 degrees")
+for mu in (3.0, -1.0):
+    for dm in (1.5, 2.0, 3.0):
+        z7, k7 = zdr_kdp(7.0, mu, dm)
+        for std in (10.0, 20.0):
+            z, k = zdr_kdp(std, mu, dm)
+            retrieved = np.interp(z, zdr_7[mu], dm_grid)
+            print(
+                f"{mu:3.0f} {dm:3.1f} {std:6.0f}   {z - z7:9.2f}  {100 * (k / k7 - 1):8.1f}"
+                f"  {retrieved:6.2f}"
+            )
+```
+
+A table of 7 degrees applied to rain canted by 10 degrees retrieves a $D_m$ 2-4 %
+too low for $\mu$ = 3 (3-7 % for $\mu$ = -1); for 20 degrees it is 12-21 % too
+low (17-32 %), more than the 6-8 % of an elevation angle of 20 degrees (the last
+column). Between 2.7 and 3.0 GHz the $Z_{DR}$ of such DSDs changes by less than
+0.06 dB and $K_{DP}$ by -4 to +9 %.
 
 ## A squall line in Mississippi
 

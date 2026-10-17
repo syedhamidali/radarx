@@ -31,6 +31,25 @@ Single-drop scattering of raindrops, read by `radarx.retrieve.dsd`
 * Canting: Gaussian, zero mean, 7 degrees standard deviation, attributed to
   Huang et al. (2008), doi:10.1175/2008JTECHA1075.1 (value not checked
   against the paper).
+  Kumjian and Ryzhkov (2010, doi:10.1175/2010JAMC2243.1) use 20 degrees and
+  call it too wide for typical rain (10 degrees is more appropriate).
+* Recorded assumptions: the second header line of the CSV file holds
+  `canting_std_deg`, `frequency_ghz_S/C/X`, `elevation_deg` and the references of
+  the axis ratio and the refractive index as `key=value` pairs.
+  `radarx.retrieve.scattering_table` reads the canting width and the frequency
+  from there (attributes `canting_std`, `frequency_ghz`, `elevation`), and the
+  products of `dsd`, `radar_from_dsd` and `dsd_bayesian` carry `canting_std` and
+  `frequency_ghz`. `ci/build_dsd_tables.py output.csv 10` writes a table for
+  another canting width (the width is the second argument).
+* Sensitivity (T-matrix, S band, 20 degrees Celsius, relative to the 7 degrees of
+  the table): with 10 degrees the single-drop ZDR of 2, 4, 6, 8 mm drops is lower
+  by 0.03, 0.11, 0.21, 0.29 dB and KDP by 4.5 %; with 20 degrees by 0.17, 0.65,
+  1.20, 1.66 dB and KDP by 26.9 % (also at C and X band). For gamma DSDs
+  (mu = 3, Dm = 1.5-3 mm) ZDR is lower by 0.03-0.11 dB (10 degrees) and
+  0.20-0.67 dB (20 degrees); a table of 7 degrees applied to rain canted by 20
+  degrees retrieves Dm 12-21 % too low. Between 2.7 and 3.0 GHz the ZDR of DSDs
+  changes by less than 0.06 dB and KDP by -4 % to +9 %. The full numbers are in
+  the "Sensitivity to canting and frequency" section of `radarx.retrieve.dsd`.
 * Refractive index of water: the Debye-type fit of Ray (1972),
   doi:10.1364/AO.11.001836 (constants not checked against the
   paper); the Z_H normalization in
