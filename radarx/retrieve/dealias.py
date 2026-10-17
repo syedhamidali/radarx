@@ -273,7 +273,7 @@ _FAST_POCKET = 200  # gates of the largest pocket (one fold) that is reported
 @renamed_arguments(radar="obj")
 @provenance(
     "Velocity dealiasing: region-based (radarx's combination of published "
-    "concepts) or UNRAVEL (Louf et al. 2020)"
+    "concepts), UNRAVEL (Louf et al. 2020) or R2D2 (Feldmann et al. 2020)"
 )
 def dealias_velocity(
     obj,
@@ -346,9 +346,12 @@ def dealias_velocity(
         sweep then gives a Dataset instead of a DataArray; a volume gives the
         extra variable in every sweep node. Not available with
         ``products_only=False``.
-    method : {"region", "unravel"}, optional
+    method : {"region", "unravel", "r2d2"}, optional
         ``"region"`` (default) is the region-based method of the module
-        documentation. ``"unravel"`` is the UNRAVEL algorithm of Louf et al.
+        documentation. ``"r2d2"`` is :func:`radarx.retrieve.dealias_r2d2`
+        (Feldmann et al. 2020), which uses ``reference``, ``wind_profile``,
+        ``name``, ``n_threads`` and ``engine`` of the options.
+        ``"unravel"`` is the UNRAVEL algorithm of Louf et al.
         (2020) [5], which needs no reference velocity: it ignores
         ``threshold``, ``max_gap`` and ``max_iterations``, does not take
         ``wind_profile`` or ``reference``, and uses ``sweep_continuity`` for
@@ -492,6 +495,11 @@ def dealias_velocity(
        2020: UNRAVEL: A robust modular velocity dealiasing technique for
        Doppler radar. *J. Atmos. Oceanic Technol.*, **37** (5), 741-758,
        https://doi.org/10.1175/JTECH-D-19-0020.1
+    .. [6] Feldmann, M., C. N. James, M. Boscacci, D. Leuenberger, M. Gabella,
+       U. Germann, D. Wolfensberger, and A. Berne, 2020: R2D2: A region-based
+       recursive Doppler dealiasing algorithm for operational weather radar.
+       *J. Atmos. Oceanic Technol.*, **37** (12), 2341-2356,
+       https://doi.org/10.1175/JTECH-D-20-0054.1
 
     Examples
     --------
@@ -503,6 +511,19 @@ def dealias_velocity(
     """
     obj = as_sweep(obj)
     field = find_field(obj, VELOCITY, field)
+    if method == "r2d2":
+        return _dealias_r2d2(
+            obj,
+            field,
+            nyquist_velocity,
+            reference,
+            wind_profile,
+            name,
+            confidence,
+            products_only,
+            n_threads,
+            engine,
+        )
     if method not in ("region", "unravel"):
         raise ValueError(f"method must be 'region' or 'unravel', not {method!r}")
     if method == "unravel":
@@ -573,6 +594,38 @@ def dealias_velocity(
         confidence=confidence,
         method=method,
         **options,
+    )
+
+
+def _dealias_r2d2(
+    obj,
+    field,
+    nyquist,
+    reference,
+    wind_profile,
+    name,
+    confidence,
+    products_only,
+    n_threads,
+    engine,
+):
+    """``method="r2d2"``: see :func:`radarx.retrieve.dealias_methods.dealias_r2d2`."""
+    if confidence or not products_only:
+        raise ValueError(
+            "method='r2d2' needs products_only=True and has no confidence=True: "
+            "call dealias_confidence or dealias_ambiguity on the result"
+        )
+    from .dealias_methods import dealias_r2d2
+
+    return dealias_r2d2(
+        obj,
+        field,
+        nyquist,
+        reference=reference,
+        wind_profile=wind_profile,
+        name=name,
+        n_threads=n_threads,
+        engine=engine,
     )
 
 

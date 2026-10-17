@@ -338,6 +338,12 @@ PRODUCTS = {
         R.dealias_velocity(_dealiased(), nyquist_velocity=10.0).to_dataset(),
         nyquist_velocity=10.0,
     ),
+    "dealias_r2d2": lambda: R.dealias_r2d2(_dealiased(), nyquist_velocity=10.0),
+    "dealias_ambiguity": lambda: R.dealias_ambiguity(
+        R.dealias_velocity(_dealiased(), nyquist_velocity=10.0).to_dataset(),
+        nyquist_velocity=10.0,
+        compare=R.dealias_r2d2(_dealiased(), nyquist_velocity=10.0),
+    ),
     "dealias_velocity (confidence)": lambda: R.dealias_velocity(
         _dealiased(), nyquist_velocity=10.0, confidence=True
     ),
