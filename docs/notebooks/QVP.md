@@ -275,6 +275,65 @@ ax.legend()
 fig.tight_layout()
 ```
 
+## Melting layer from the gradients
+
+[Allabakash et al. (2019)](https://doi.org/10.3390/rs11232848) find the layer in the
+profile of an RHI scan from the gradients of Z, ZDR and ρhv and of their products with
+1 − ρhv, a refinement of the Z and ρhv gradients of
+[Wolfensberger et al. (2016)](https://doi.org/10.1002/qj.2672). The bottom is where the
+gradient maxima of two of the three products fall together, the top where their minima do,
+moved up to the minimum gradient of Z or the maximum gradient of ρhv if one of those is
+higher. `melting_layer_gradient` applies the rules to any profile on `height`, and
+`melting_layer_rhi` makes the profile of an RHI with `rhi_qvp` first.
+
+The rules were made for profiles of 100 m bins in stratiform precipitation. The native
+QVP has a gate every 26 m, so it is averaged in 100 m bins here. The paper searches the
+whole profile for the minimum gradient of Z; in snow Z falls with height and its steepest
+decrease can lie kilometres above the layer, so `top_window=500` (radarx's addition,
+off by default) searches within 500 m of the minima of the products, and `height_range`
+leaves out the noise at the echo top and the ground.
+
+```{code-cell} ipython3
+import numpy as np
+
+from radarx.retrieve import melting_layer_gradient
+
+edges = np.arange(0.0, 16000.0, 100.0)
+binned = (
+    tqvp[["DBZH", "ZDR", "RHOHV"]]
+    .groupby_bins("height", edges)
+    .mean()
+    .rename({"height_bins": "height"})
+    .transpose("time", "height")
+)
+binned["height"] = [interval.mid for interval in binned.height.values]
+grad = melting_layer_gradient(binned, height_range=(500.0, 8000.0), top_window=500.0)
+print(f"layer found in {int((grad.melting_layer_flag == 1).sum())} of {grad.time.size} profiles; "
+      f"median top {float(grad.melting_layer_top.median()):.0f} m, median bottom "
+      f"{float(grad.melting_layer_bottom.median()):.0f} m")
+
+fig, ax = plt.subplots(figsize=(10, 3.5))
+ax.fill_between(grad.time, grad.melting_layer_bottom, grad.melting_layer_top, alpha=0.3,
+                label="gradients")
+ax.plot(ml.time, ml.melting_layer_top, "k^:", ms=4, lw=1, label="onset top")
+ax.plot(ml.time, ml.melting_layer_bottom, "kv:", ms=4, lw=1, label="onset bottom")
+ax.plot(ml.time, ml.freezing_level, "C3-", label="BMX 0 °C")
+ax.plot(ml.time, ml.wet_bulb_zero_height, "C3--", label="BMX wet-bulb 0 °C")
+ax.set_ylim(2000, 6000)
+ax.set_ylabel("height above sea level [m]")
+ax.legend(loc="upper right", ncols=2, fontsize=8)
+ax.set_title("Melting layer from the gradients, ARMOR 11 April 2008")
+fig.tight_layout()
+```
+
+On these convective ARMOR profiles a layer is found in 15 of 25 profiles, with a median top
+of 3.65 km (the BMX wet-bulb 0 °C height is 3.59 km, the 0 °C height 3.86 km) and a
+median bottom 411 m above the bottom of the ρhv signature of `melting_layer`. Behind the KGWX
+squall line (S band, stratiform rain, 4 volumes from 00:12 to 01:05 UTC on 31 March 2022)
+the top is on average 113 m below the onset top and 60 m below the ERA5 wet-bulb 0 °C height
+of 3.51 km. Without `top_window` the tops of the KGWX profiles lie 1 to 3 km too high.
+`melting_layer_rhi` and the accessor `rhi.radarx.melting_layer_rhi()` take the same options.
+
 ## Rain-only products below the layer
 
 `mask_above_melting_layer` sets the rain rates and the drop size parameters to NaN
@@ -309,6 +368,9 @@ notebook for an example on a rain rate.
 - Allabakash, S., S. Lim, and B.-J. Jang, 2019: Melting layer detection and
   characterization based on range height indicator–quasi vertical profiles.
   *Remote Sens.*, **11**, 2848, <https://doi.org/10.3390/rs11232848>
+- Wolfensberger, D., D. Scipion, and A. Berne, 2016: Detection and characterization of
+  the melting layer based on polarimetric radar scans. *Quart. J. Roy. Meteor. Soc.*,
+  **142** (S1), 108–124, <https://doi.org/10.1002/qj.2672>
 - Cressman, G. P., 1959: An operational objective analysis system. *Mon. Wea.
   Rev.*, **87**, 367–374,
   <https://doi.org/10.1175/1520-0493(1959)087<0367:AOOAS>2.0.CO;2>
