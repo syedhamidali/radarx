@@ -30,6 +30,7 @@ from radarx.retrieve import (
     correct_dual_prf,
     correct_rhohv_noise,
     correct_zdr_noise,
+    dealias_ambiguity,
     dealias_confidence,
     dealias_velocity,
     dsd,
@@ -72,6 +73,7 @@ from . import (
 )
 from .sweepwise_helpers import CHUNKS, check_stack, check_volume, stacked, volume_of
 
+dealias_methods_mod = importlib.import_module("radarx.retrieve.dealias_methods")
 dsd_mod = importlib.import_module("radarx.retrieve.dsd")
 hid_mod = importlib.import_module("radarx.retrieve.hid")
 vil_mod = importlib.import_module("radarx.retrieve.vil")
@@ -355,6 +357,13 @@ CASES = [
         "dealias_confidence",
         dealias_confidence,
         dealias_mod.HAS_COMPILED_KERNEL,
+        alias_sweep,
+        field="VRADH",
+    ),
+    case(
+        "dealias_ambiguity",
+        dealias_ambiguity,
+        dealias_methods_mod.HAS_COMPILED_KERNEL,
         alias_sweep,
         field="VRADH",
     ),

@@ -2682,6 +2682,26 @@
   "pages": "741-758",
   "doi": "10.1175/JTECH-D-19-0020.1"
  },
+ "10.1175/JTECH-D-20-0054.1": {
+  "authors": [
+   "Feldmann, M.",
+   "James, C. N.",
+   "Boscacci, M.",
+   "Leuenberger, D.",
+   "Gabella, M.",
+   "Germann, U.",
+   "Wolfensberger, D.",
+   "Berne, A."
+  ],
+  "year": 2020,
+  "title": "R2D2: A Region-Based Recursive Doppler Dealiasing Algorithm for Operational Weather Radar",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "37",
+  "issue": "12",
+  "pages": "2341-2356",
+  "doi": "10.1175/JTECH-D-20-0054.1"
+ },
  "roc-mesocyclone-detection": {
   "authors": [
    "WSR-88D Radar Operations Center"

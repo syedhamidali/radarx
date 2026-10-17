@@ -117,6 +117,7 @@ dask arrays.
 | Lazy, extra dimensions | `radarx.retrieve.calibration` | `phidp_offset`, `z_offset`, `zdr_offset` |
 | Lazy, extra dimensions | `radarx.retrieve.columns` | `zdr_column`, `zdr_column_metrics` |
 | Lazy, extra dimensions | `radarx.retrieve.dealias` | `correct_dual_prf`, `dealias_confidence`, `dealias_velocity` |
+| Lazy, extra dimensions | `radarx.retrieve.dealias_methods` | `dealias_ambiguity` |
 | Lazy, extra dimensions | `radarx.retrieve.dsd` | `dsd` |
 | Lazy, extra dimensions | `radarx.retrieve.hid` | `hid` |
 | Lazy, extra dimensions | `radarx.retrieve.kdp` | `estimate_kdp` |
@@ -141,6 +142,7 @@ dask arrays.
 | Computes | `radarx.retrieve.biology` | `biological_echo` |
 | Computes | `radarx.retrieve.cappi` | `create_cappi` |
 | Computes | `radarx.retrieve.coldpool` | `baroclinic_generation`, `cold_pool_intensity`, `cold_pool_perturbation`, `potential_temperatures` |
+| Computes | `radarx.retrieve.dealias_methods` | `dealias_r2d2` |
 | Computes | `radarx.retrieve.diabatic_lagrangian` | `diabatic_lagrangian`, `microphysical_rates`, `polarimetric_precipitation`, `ziegler2013_precipitation` |
 | Computes | `radarx.retrieve.disdrometer` | `dsd_moments`, `fit_gamma`, `match_radar`, `number_concentration`, `process_disdrometer`, `radar_at_location`, `raupach_berne_correction` |
 | Computes | `radarx.retrieve.dsd` | `dsd_spectrum`, `fit_gamma_moments`, `radar_from_dsd` |

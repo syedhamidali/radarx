@@ -31,7 +31,7 @@ multi-radar steps.
 | 1 | volumes, Nyquist velocity, georeferencing | xradar, `download_file` |
 | 2 | non-meteorological echo removed | `dtree.radarx.echo_mask`, `apply_mask` |
 | 3 | environment: ERA5 profile and radiosonde, 0 °C height, humidity, wind-profile and parcel parameters (CAPE, CIN) | `dtree.radarx.sounding`, `read_sounding`, `bulk_shear` |
-| 4 | dealiased Doppler velocity and its confidence, VAD wind profile | `dtree.radarx.dealias`, `dealias_confidence`, `vad_profile` |
+| 4 | dealiased Doppler velocity and its confidence, a second method (R2D2) and the fold margin, VAD wind profile | `dtree.radarx.dealias`, `dealias_confidence`, `dealias_r2d2`, `dealias_ambiguity`, `vad_profile` |
 | 5 | processed ΦDP and KDP, attenuation correction | `dtree.radarx.kdp`, `correct_attenuation` |
 | 6 | hydrometeor classes | `dtree.radarx.hid` |
 | 7 | rain drop size distribution and rain rate, with the Bayesian posterior | `ds.radarx.dsd`, `dsd_bayesian` |
@@ -126,7 +126,9 @@ from radarx.retrieve import (
     correct_zdr_noise,
     create_cappi,
     cvp,
+    dealias_ambiguity,
     dealias_confidence,
+    dealias_r2d2,
     dealias_velocity,
     dsd_bayesian,
     dsd_prior,
@@ -624,6 +626,25 @@ pm = ppi(ax, doppler.assign(confidence=conf), "confidence", extent=150, cmap="vi
 fig.colorbar(pm, ax=ax, label="confidence of the fold")
 ax.set_title("KGWX 0.5° Doppler cut, 00:00 UTC")
 plt.show()
+```
+
+`dealias_r2d2` is a second method (Feldmann et al. 2020), built for strong shear
+between gates; with the ERA5 profile as first guess it works from the highest sweep
+down. `dealias_ambiguity` adds the evidence for the fold of every region of a
+dealiased sweep and, with `compare`, flags the gates where another dealiasing
+chooses another fold ([Dealiasing methods](Dealiasing_Methods)).
+
+```{code-cell} ipython3
+r2d2_volume = volumes[1].radarx.dealias_r2d2("VRADH", wind_profile=era5, name="VRADH_r2d2")
+r2d2_sweep = dealias_r2d2(doppler_in, "VRADH", wind_profile=era5)
+both = volumes[1].radarx.assign(r2d2_volume)
+ambiguity = both.radarx.dealias_ambiguity("VRADH_dealiased", compare="VRADH_r2d2")
+fold = dealias_ambiguity(
+    volumes[1]["sweep_1"].to_dataset(), "VRADH_dealiased"
+).VRADH_dealiased_fold_flag
+print(f"R2D2 and region folds differ on "
+      f"{float((r2d2_sweep != unfolded).sum() / unfolded.notnull().sum()):.2%} of the gates of the 0.5° cut; "
+      f"gates with a weak fold margin: {float(((fold & 1) > 0).sum() / (fold > 0).size):.2%}")
 ```
 
 The dealiased velocities of the higher sweeps also give the horizontal wind
@@ -2221,6 +2242,8 @@ notebooks or from this index.
 | `dealias_confidence` | `radarx.retrieve.dealias` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
 | `dealias_velocity` | `radarx.retrieve.dealias` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
 | `correct_dual_prf` | `radarx.retrieve.dealias` | [part 3](Radar_Workflow_Advanced_2): 15. Dual-PRF velocity correction |
+| `dealias_ambiguity` | `radarx.retrieve.dealias_methods` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
+| `dealias_r2d2` | `radarx.retrieve.dealias_methods` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
 | `diabatic_lagrangian` | `radarx.retrieve.diabatic_lagrangian` | [part 3](Radar_Workflow_Advanced_2): 9. Diabatic Lagrangian analysis |
 | `microphysical_rates` | `radarx.retrieve.diabatic_lagrangian` | [part 3](Radar_Workflow_Advanced_2): 9. Diabatic Lagrangian analysis |
 | `polarimetric_precipitation` | `radarx.retrieve.diabatic_lagrangian` | [part 3](Radar_Workflow_Advanced_2): 9. Diabatic Lagrangian analysis |
@@ -2368,7 +2391,9 @@ The methods of the `.radarx` accessors:
 | `.radarx.create_cappi` | [core](Radar_Workflow): Other ways to grid, section and plot |
 | `.radarx.cvp` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `.radarx.dealias` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
+| `.radarx.dealias_ambiguity` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
 | `.radarx.dealias_confidence` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
+| `.radarx.dealias_r2d2` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
 | `.radarx.diabatic_lagrangian` | [part 3](Radar_Workflow_Advanced_2): 9. Diabatic Lagrangian analysis |
 | `.radarx.disdrometer` | [part 2](Radar_Workflow_Advanced): 2. Disdrometers |
 | `.radarx.dsd` | [core](Radar_Workflow): 7. Rain drop size distribution |
