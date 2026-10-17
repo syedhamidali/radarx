@@ -314,7 +314,8 @@ level `k` of a column is at `terrain + z[k] - z[0]`, so `z[0]` is the ground
 and `z` of the result is the height above the terrain. With the vertical
 velocity relative to these levels, `W = w - u dh/dx - v dh/dy`, the anelastic
 continuity equation keeps its form, `W = 0` at the ground is flow along the
-terrain, and `w` is returned (see the Notes of `multi_doppler`).
+terrain, and `w` is returned (see the Notes of `multi_doppler`). The
+[terrain-following notebook](Terrain_Following_Multi_Doppler) repeats this test for both solvers.
 
 An exact flow over a Gaussian hill of 2 km height, `u = U + a x`, `v = V + a y`,
 `w = -2 a (z - h) + u dh/dx + v dh/dy`, which satisfies the continuity
@@ -399,7 +400,8 @@ linearly in height to the terrain-following levels.
 The variance of a radial velocity from the pulse-pair estimator depends on
 the signal to noise ratio, the spectrum width and the number of pulse pairs
 (Doviak and Zrnic 1993, Eqs. 6.22a and b, from Zrnic 1977). `velocity_error`
-evaluates it, and its result goes into `obs_error`:
+evaluates it, and its result goes into `obs_error` (the
+[velocity error notebook](Velocity_Error_Model) shows it on a KGWX sweep and in a retrieval):
 
 ```{code-cell} ipython3
 width = np.linspace(0.5, 8.0, 60)
@@ -432,7 +434,8 @@ continuity equation turns their divergence into spurious vertical velocity
 (Collis et al. 2010). `radarx.grid.grid_cones_mixed` blends this result with the
 one of the opposite order of interpolation, weighted by the beam elevation
 (`order` is the exponent of their Eq. 6), and `multi_doppler_input` has the
-option `velocity_interpolation="mixed"`. A 20 m/s jet at 7 km, seen by a volume
+option `velocity_interpolation="mixed"` (see the
+[mixed-order gridding notebook](Mixed_Order_Gridding)). A 20 m/s jet at 7 km, seen by a volume
 of twelve sweeps from 0.5 to 42 degrees:
 
 ```{code-cell} ipython3

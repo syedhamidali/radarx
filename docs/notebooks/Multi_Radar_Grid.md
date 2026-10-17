@@ -222,7 +222,9 @@ the beam (0 to 1), and a radar is left out where `b` reaches `max_blockage`
 (`CBB`) from a digital elevation model for each volume, add it to the volume with
 `dtree.radarx.assign` and grid it with the other fields. Here a wedge to the
 north-east of KNQA stands in for a mountain: 80 percent of its beam is blocked
-there, so the merge uses the other two radars in the wedge.
+there, so the merge uses the other two radars in the wedge. The
+[blockage-weighted merge notebook](Blockage_Weighted_Merge) scores the weight against a
+known answer.
 
 ```{code-cell} ipython3
 wedge = (grid.azimuth > 30) & (grid.azimuth < 80) & (grid.radar == "KNQA")
