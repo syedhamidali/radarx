@@ -2343,6 +2343,8 @@ notebooks or from this index.
 | `dsd_bayesian` | `radarx.retrieve.dsd_bayes` | [core](Radar_Workflow): 7. Rain drop size distribution |
 | `dsd_prior` | `radarx.retrieve.dsd_bayes` | [core](Radar_Workflow): 7. Rain drop size distribution |
 | `forward_grid` | `radarx.retrieve.dsd_bayes` | [core](Radar_Workflow): 7. Rain drop size distribution |
+| `ducting_layers` | `radarx.retrieve.ducts` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
+| `modified_refractivity` | `radarx.retrieve.ducts` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `ensemble_retrieval` | `radarx.retrieve.ensemble` | [part 3](Radar_Workflow_Advanced_2): 16. Ensembles and uncertainty of the retrievals |
 | `ensemble_statistics` | `radarx.retrieve.ensemble` | [part 3](Radar_Workflow_Advanced_2): 16. Ensembles and uncertainty of the retrievals |
 | `measurement_error` | `radarx.retrieve.ensemble` | [part 3](Radar_Workflow_Advanced_2): 16. Ensembles and uncertainty of the retrievals |
@@ -2395,6 +2397,7 @@ notebooks or from this index.
 | `rain_rate_z` | `radarx.retrieve.qpe` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
 | `rain_rate_z_zdr` | `radarx.retrieve.qpe` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
 | `rain_rate_ml` | `radarx.retrieve.qpe_ml` | [part 3](Radar_Workflow_Advanced_2): 26. Machine-learning rain rate |
+| `rain_shaft_bulk` | `radarx.retrieve.rain_bulk` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `rain_shaft` | `radarx.retrieve.rain_collisions` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `rain_source_points` | `radarx.retrieve.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `rain_trajectories` | `radarx.retrieve.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
@@ -2490,6 +2493,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.dsd` | [core](Radar_Workflow): 7. Rain drop size distribution |
 | `.radarx.dsd_bayesian` | [core](Radar_Workflow): 7. Rain drop size distribution |
 | `.radarx.dual_doppler_analytic` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
+| `.radarx.ducting_layers` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `.radarx.echo_mask` | [core](Radar_Workflow): 2. Remove non-meteorological echo |
 | `.radarx.echo_top` | [core](Radar_Workflow): 14. VIL, echo tops and water content |
 | `.radarx.ensemble_retrieval` | [part 3](Radar_Workflow_Advanced_2): 16. Ensembles and uncertainty of the retrievals |
@@ -2546,6 +2550,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.rain_rate_ml` | [part 3](Radar_Workflow_Advanced_2): 26. Machine-learning rain rate |
 | `.radarx.rain_rate_z` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
 | `.radarx.rain_rate_z_zdr` | [core](Radar_Workflow): 7. Rain drop size distribution, Rain rate |
+| `.radarx.rain_shaft_bulk` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `.radarx.rain_shaft` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `.radarx.rain_trajectories` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `.radarx.rd_qvp` | [core](Radar_Workflow): 8. QVP time series and melting layer |

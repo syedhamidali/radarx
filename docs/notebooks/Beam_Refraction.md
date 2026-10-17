@@ -219,6 +219,9 @@ The median `k_e` of the traced beams is the factor to pass as `k_e` to
 `radarx.grid.grid_radar`, the cone and merging functions and
 `beam_blockage`, which keep the effective radius model.
 
+The layers that trap the beam are found by `ducting_layers`, see the notebook
+`Refractivity_Ducts`.
+
 ## Limits
 
 - The atmosphere is horizontally homogeneous: a sea breeze front or an outflow

@@ -174,6 +174,8 @@ smallest bin of the grid is the fragments below 0.2 mm, which are put on the
 first pivot (the mass is conserved, the number is not): that is where the
 parameterisation is an extrapolation, see the limits below.
 
+The two-moment version of the shaft is in the notebook `Two_Moment_Rain_Shaft`.
+
 ## Conservation, accuracy and cost
 
 The rain rate is the flux of water and does not change with depth. The

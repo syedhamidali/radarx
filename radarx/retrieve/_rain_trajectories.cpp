@@ -294,7 +294,8 @@ inline void sphere_speed(double d, double& v, double& dv) {
 // Sea-level terminal speed (at least zero) and its derivative with respect to D.
 // Kinds: 0 Atlas et al. (1973), 1 a D^b exp(-f D), 2 polynomial, 3 sphere drag
 // balance below D = fc[0] mm and Atlas et al. above, 4 hail: power-law segments
-// V = a (D / 10)^b with fc = [nseg, breaks (nseg - 1), a_1, b_1, ...] (D in mm), 5 melting
+// V = a (D / 10)^b with fc = [nseg, breaks (nseg - 1), a_1, b_1, ...] (D in mm; kind 6 is the
+// same with the density factor (rho0 / rho)^0.5 instead of none), 5 melting
 // snow: (1 - psi) a D^b + psi V_rain(D) with fc = [psi, a, b, joining diameter of kind 3].
 inline void rain_speed(double d, double join, double& v, double& dv) {
     if (d < join) {
@@ -307,7 +308,7 @@ inline void rain_speed(double d, double join, double& v, double& dv) {
 }
 
 inline void v0_of(const Ctx& c, double d, double& v, double& dv) {
-    if (c.fall_kind == 4) {
+    if (c.fall_kind == 4 || c.fall_kind == 6) {
         const int nseg = static_cast<int>(c.fc[0]);
         int k = 0;
         while (k < nseg - 1 && d >= c.fc[1 + k]) ++k;
@@ -384,7 +385,9 @@ inline void rhs(const Ctx& c, Hints& h, double t, const State& y, const double* 
     const double d = std::sqrt(std::max(y.v[3], kDFloor * kDFloor));
     double v0, dv0;
     v0_of(c, d, v0, dv0);
-    const double dexp = c.fall_kind >= 4 ? 0.0 : 0.4;  // no density correction of ice laws
+    // no density correction of the hail laws of Heymsfield et al. (2020) and of melting snow
+    // (kinds 4, 5); the hail law of Milbrandt and Yau (2005, kind 6) has (rho0 / rho)^0.5
+    const double dexp = c.fall_kind == 6 ? 0.5 : (c.fall_kind >= 4 ? 0.0 : 0.4);
     const double corr = c.dens ? std::pow(c.rho0 / ev.rho, dexp) : 1.0;
     const double vt = v0 * corr;
     f.v[0] = wnd.u + turb[0];
@@ -681,8 +684,8 @@ py::tuple integrate_py(const DArray& x0, const DArray& y0, const DArray& z0,
     c.fc = fc.data();
     if (!(c.dt > 0.0) || !(c.max_time >= 0.0)) throw std::invalid_argument("bad time step");
     if (c.scheme != 2 && c.scheme != 4) throw std::invalid_argument("scheme must be 2 or 4");
-    if (c.fall_kind < 0 || c.fall_kind > 5) throw std::invalid_argument("bad fall_kind");
-    if (c.fall_kind == 4) {
+    if (c.fall_kind < 0 || c.fall_kind > 6) throw std::invalid_argument("bad fall_kind");
+    if (c.fall_kind == 4 || c.fall_kind == 6) {
         const int nseg = c.nfc > 0 ? static_cast<int>(c.fc[0]) : 0;
         if (nseg < 1 || c.nfc != 1 + (nseg - 1) + 2 * nseg)
             throw std::invalid_argument("hail law needs [nseg, breaks, a, b, ...]");

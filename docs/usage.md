@@ -129,7 +129,9 @@ dask arrays.
 | Lazy, extra dimensions | `radarx.retrieve.vil` | `echo_top`, `liquid_water_content`, `vil`, `vil_density` |
 | Lazy | `radarx.retrieve.beam_blockage` | `beam_blockage` |
 | Lazy | `radarx.retrieve.beam_path` | `beam_path` |
+| Lazy | `radarx.retrieve.ducts` | `ducting_layers` |
 | Lazy | `radarx.retrieve.forward_operator` | `forward_operator`, `to_radar_grid` |
+| Lazy | `radarx.retrieve.rain_bulk` | `rain_shaft_bulk` |
 | Lazy | `radarx.retrieve.rain_collisions` | `rain_shaft` |
 | Lazy | `radarx.retrieve.tc_diagnostics` | `tc_ring_stats` |
 | Lazy | `radarx.retrieve.tc_winds` | `gbvtd`, `tc_center`, `tc_decompose` |
