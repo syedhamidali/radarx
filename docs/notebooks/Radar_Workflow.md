@@ -36,7 +36,7 @@ multi-radar steps.
 | 6 | hydrometeor classes | `dtree.radarx.hid` |
 | 7 | rain drop size distribution and rain rate, with the Bayesian posterior | `ds.radarx.dsd`, `dsd_bayesian` |
 | 7c | rain rate from $Z_H$, $Z_{DR}$, $K_{DP}$ and $A$, and from the hydrometeor class | `dtree.radarx.rain_rate`, `rain_rate_z`, `rain_rate_kdp`, `rain_rate_z_zdr`, `rain_rate_a` |
-| 8 | QVP time series and melting layer, range-defined and columnar profiles, RHI profile, melting layer on PPIs, rain products capped at the melting layer | `qvp_timeseries`, `melting_layer`, `rd_qvp`, `cvp`, `rhi_qvp`, `melting_layer_ppi`, `mask_above_melting_layer` |
+| 8 | QVP time series and melting layer, range-defined and columnar profiles, RHI profile, melting layer on PPIs, rain products capped at the melting layer | `qvp_timeseries`, `melting_layer`, `rd_qvp`, `cvp`, `rhi_qvp`, `melting_layer_ppi`, `mask_above_melting_layer`, `melting_layer_gradient`, `melting_layer_rhi` |
 | 9 | azimuthal shear and radial divergence, layer-maximum azimuthal shear | `dtree.radarx.llsd`, `azimuthal_shear_layer_max` |
 | 10 | 3D grid, Max-CAPPI, other gridding functions, plotting functions, interactive view, UGRID | `dtree.radarx.to_grid`, `grid_cones`, `plot_ppi`, `to_uxarray` |
 | 11 | storm motion, common analysis time, time interpolation | `estimate_motion`, `advect`, `interpolate_time` |
@@ -151,7 +151,9 @@ from radarx.retrieve import (
     llsd,
     mask_above_melting_layer,
     melting_layer,
+    melting_layer_gradient,
     melting_layer_ppi,
+    melting_layer_rhi,
     mesh,
     multi_doppler_input,
     noise_level,
@@ -1115,6 +1117,31 @@ print(f"RHI profile: {int(ok.sum())} bins of 100 m, RMS difference from the prof
       f"sampled from {float(np.sqrt((diff.where(ok) ** 2).mean())):.2f} dB; accessor agrees:",
       bool(rhi_acc.DBZH.equals(rhi_profile.DBZH)))
 melting_layer(rhi_profile)[["melting_layer_bottom", "melting_layer_top"]]
+```
+
+`melting_layer_gradient` finds the layer from the gradients of Z, ZDR and ρhv and of
+their combinations with 1 − ρhv, as Allabakash et al. (2019) do for the profile of
+an RHI: the bottom is where the gradient maxima of two of the three combinations
+fall together, the top where their minima do, corrected by the gradients of Z and
+ρhv. It takes any profile on `height`, and `melting_layer_rhi` builds the profile
+of the RHI first, with the settings of the paper. The paper searches the whole
+profile; `height_range` keeps the noise at the echo top out of the gradients, and
+`top_window` (radarx's addition) keeps the steepest decrease of Z in the snow, which
+can be kilometres above the layer, from being taken for its top.
+
+```{code-cell} ipython3
+limits = dict(height_range=(1e3, 8e3), top_window=500.0)
+layer_gradient = melting_layer_gradient(rhi_profile, **limits)
+layer_rhi = melting_layer_rhi(rhi, rmin=2e3, rmax=30e3, **limits)
+layer_rhi_acc = rhi.radarx.melting_layer_rhi(rmin=2e3, rmax=30e3, **limits)
+layer_gradient_acc = rhi_profile.radarx.melting_layer_gradient(**limits)
+print("accessors agree:", bool(layer_rhi_acc.melting_layer_top.equals(layer_rhi.melting_layer_top)),
+      bool(layer_gradient_acc.melting_layer_top.equals(layer_gradient.melting_layer_top)))
+layer_onset = melting_layer(rhi_profile)
+print(f"gradients: {float(layer_gradient.melting_layer_bottom):.0f} to {float(layer_gradient.melting_layer_top):.0f} m "
+      f"(top from step {int(layer_gradient.melting_layer_top_step)}); "
+      f"onset of the ρhv signature: {float(layer_onset.melting_layer_bottom):.0f} to "
+      f"{float(layer_onset.melting_layer_top):.0f} m")
 ```
 
 ## 9. Azimuthal shear and radial divergence
@@ -2345,6 +2372,8 @@ notebooks or from this index.
 | `grid_lightning` | `radarx.retrieve.lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `lightning_jump` | `radarx.retrieve.lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `vertical_source_distribution` | `radarx.retrieve.lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
+| `melting_layer_gradient` | `radarx.retrieve.melting_layer_gradients` | [core](Radar_Workflow): 8. QVP time series and melting layer |
+| `melting_layer_rhi` | `radarx.retrieve.melting_layer_gradients` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `dual_doppler_analytic` | `radarx.retrieve.multidoppler` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `fall_speed` | `radarx.retrieve.multidoppler` | [part 3](Radar_Workflow_Advanced_2): 9. Diabatic Lagrangian analysis |
 | `multi_doppler` | `radarx.retrieve.multidoppler` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
@@ -2482,7 +2511,9 @@ The methods of the `.radarx` accessors:
 | `.radarx.match_imerg` | [part 3](Radar_Workflow_Advanced_2): 19. Radar and satellite matching |
 | `.radarx.measurement_error` | [part 3](Radar_Workflow_Advanced_2): 16. Ensembles and uncertainty of the retrievals |
 | `.radarx.melting_layer` | [core](Radar_Workflow): 8. QVP time series and melting layer |
+| `.radarx.melting_layer_gradient` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `.radarx.melting_layer_ppi` | [core](Radar_Workflow): 8. QVP time series and melting layer |
+| `.radarx.melting_layer_rhi` | [core](Radar_Workflow): 8. QVP time series and melting layer |
 | `.radarx.melting_snow_fall_speed` | [part 2](Radar_Workflow_Advanced): 4. Raindrop trajectories and size sorting |
 | `.radarx.merge_radars` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
 | `.radarx.mesh` | [core](Radar_Workflow): 14. VIL, echo tops and water content |

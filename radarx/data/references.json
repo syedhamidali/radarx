@@ -39,6 +39,21 @@
   "publisher": "Wiley",
   "doi": "10.1002/9780470682104"
  },
+ "10.1002/qj.2672": {
+  "authors": [
+   "Wolfensberger, D.",
+   "Scipion, D.",
+   "Berne, A."
+  ],
+  "year": 2016,
+  "title": "Detection and characterization of the melting layer based on polarimetric radar scans",
+  "type": "article",
+  "journal": "Quarterly Journal of the Royal Meteorological Society",
+  "volume": "142",
+  "issue": "S1",
+  "pages": "108-124",
+  "doi": "10.1002/qj.2672"
+ },
  "10.1007/978-0-306-48100-0": {
   "authors": [
    "Pruppacher, H. R.",
