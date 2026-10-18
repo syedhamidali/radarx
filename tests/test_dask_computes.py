@@ -23,6 +23,7 @@ from radarx._sweepwise import DASK_SUPPORT
 
 from . import (
     test_advection,
+    test_azimuth_qc,
     test_cappi,
     test_dealias,
     test_hail,
@@ -177,6 +178,8 @@ CASES = {
     "qvp_timeseries": qvp_series,
     "rd_qvp": rd_qvp,
     "shi": hail_grid,
+    "azimuth_flags": test_azimuth_qc.flags_case,
+    "fix_azimuth": test_azimuth_qc.fill_case,
 }
 
 

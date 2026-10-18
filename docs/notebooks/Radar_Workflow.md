@@ -28,7 +28,7 @@ multi-radar steps.
 
 | Step | What it adds | radarx call |
 |---|---|---|
-| 1 | volumes, Nyquist velocity, georeferencing | xradar, `download_file` |
+| 1 | volumes, Nyquist velocity, georeferencing, ray-angle check | xradar, `download_file`, `dtree.radarx.azimuth_flags`, `fix_azimuth` |
 | 2 | non-meteorological echo removed | `dtree.radarx.echo_mask`, `apply_mask` |
 | 3 | environment: ERA5 profile and radiosonde, 0 °C height, humidity, wind-profile and parcel parameters (CAPE, CIN) | `dtree.radarx.sounding`, `read_sounding`, `bulk_shear` |
 | 4 | dealiased Doppler velocity and its confidence, a second method (R2D2) and the fold margin, VAD wind profile | `dtree.radarx.dealias`, `dealias_confidence`, `dealias_r2d2`, `dealias_ambiguity`, `vad_profile` |
@@ -115,9 +115,11 @@ from radarx.io import (
 )
 from radarx.io.aws_data import download_file
 from radarx.retrieve import (
+    AZIMUTH_FLAGS,
     advect,
     apply_mask,
     attenuation_coefficients,
+    azimuth_flags,
     azimuthal_shear,
     azimuthal_shear_layer_max,
     bulk_shear,
@@ -139,6 +141,7 @@ from radarx.retrieve import (
     estimate_kdp,
     estimate_motion,
     evaporation,
+    fix_azimuth,
     forward_grid,
     hail_kinetic_energy,
     hail_products,
@@ -304,6 +307,57 @@ client = get_s3_client()
 available = list_available_files("unidata-nexrad-level2", "2022/03/30/KGWX/KGWX20220330_23")
 print(f"{len(available)} KGWX volumes between 23:00 and 23:59 UTC, the first: {available[0]}")
 ```
+
+### Check the ray angles
+
+The ray angles of a sweep should step evenly. A jump in them (a ray with a wrong
+azimuth, a duplicated ray, rays out of order or rays missing) turns into a shifted or
+stretched storm when the sweep is gridded and into false shear and wind. `azimuth_flags`
+finds the jumps and `fix_azimuth` repairs what can be repaired. The sweeps here are
+clean, so no ray is flagged:
+
+```{code-cell} ipython3
+checked = raw[1].radarx.azimuth_flags()
+flagged = sum(int((checked[n].azimuth_flag > 0).sum()) for n in checked.match("sweep_*").children)
+print(f"rays with a flag in {len(checked.match('sweep_*').children)} sweeps: {flagged}")
+print("flag bits:", AZIMUTH_FLAGS)
+```
+
+To see what it finds, we take the lowest sweep, remove four rays after ray 119 (as when the
+recording drops rays) and give ray 200 a wrong azimuth:
+
+```{code-cell} ipython3
+sweep0 = raw[1]["sweep_0"].to_dataset()
+broken = sweep0.isel(azimuth=np.r_[0:120, 124:sweep0.sizes["azimuth"]])
+az = broken.azimuth.values.copy()
+az[196] += 40.0
+broken = broken.assign_coords(azimuth=az)
+
+found = azimuth_flags(broken)
+bad = found.azimuth_flag.values
+for name, bit in AZIMUTH_FLAGS.items():
+    print(f"{name:10s} rays {np.flatnonzero(bad & bit).tolist()}")
+print("rays missing after the gap:", int(found.azimuth_missing_rays.sum()))
+```
+
+The wrong azimuth is an outlier and is repaired by interpolation; the gap is reported and is
+not repaired, since the angles of the missing rays are not known. `method="fill"` inserts a
+ray of missing values for each missing ray, so that the sweep has a regular ray spacing again
+(`"drop"` removes bad rays, `"regularize"` resamples on a regular grid):
+
+```{code-cell} ipython3
+filled = fix_azimuth(broken, "fill")
+same = broken.radarx.fix_azimuth("fill")  # the accessor gives the same result
+assert same.sizes == filled.sizes
+print(f"{broken.sizes['azimuth']} rays -> {filled.sizes['azimuth']} rays, "
+      f"{int(filled.azimuth_filled.sum())} added; largest azimuth step before "
+      f"{np.diff(broken.azimuth.values).max():.1f} deg, after {np.diff(filled.azimuth.values).max():.2f} deg")
+print("repaired angle of ray 200:", round(float(filled.azimuth.values[200]), 2),
+      "| original:", round(float(sweep0.azimuth.values[200]), 2))
+```
+
+The accessors do the same: `ds.radarx.fix_azimuth("fill")` and `dtree.radarx.fix_azimuth()` (a
+volume, sweep by sweep).
 
 ## 2. Remove non-meteorological echo
 
@@ -2360,6 +2414,7 @@ notebooks or from this index.
 | `scattering_table` | `radarx.retrieve.dsd` | [part 2](Radar_Workflow_Advanced): 2. Disdrometers |
 | `dsd_bayesian` | `radarx.retrieve.dsd_bayes` | [core](Radar_Workflow): 7. Rain drop size distribution |
 | `dsd_prior` | `radarx.retrieve.dsd_bayes` | [core](Radar_Workflow): 7. Rain drop size distribution |
+| `fix_azimuth` | `radarx.retrieve.azimuth_qc` | [core](Radar_Workflow): 1. Read the volumes |
 | `forward_grid` | `radarx.retrieve.dsd_bayes` | [core](Radar_Workflow): 7. Rain drop size distribution |
 | `ducting_layers` | `radarx.retrieve.ducts` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
 | `modified_refractivity` | `radarx.retrieve.ducts` | [part 2](Radar_Workflow_Advanced): 1. Radar equation, beam geometry, Doppler and unit helpers |
@@ -2440,6 +2495,8 @@ notebooks or from this index.
 | `match_dpr` | `radarx.retrieve.satellite_match` | [part 3](Radar_Workflow_Advanced_2): 19. Radar and satellite matching |
 | `match_statistics` | `radarx.retrieve.satellite_match` | [part 3](Radar_Workflow_Advanced_2): 19. Radar and satellite matching |
 | `attenuation_coefficients` | `radarx.retrieve.attenuation` | [core](Radar_Workflow): 5. ΦDP processing and KDP |
+| `AZIMUTH_FLAGS` | `radarx.retrieve.azimuth_qc` | [core](Radar_Workflow): 1. Read the volumes |
+| `azimuth_flags` | `radarx.retrieve.azimuth_qc` | [core](Radar_Workflow): 1. Read the volumes |
 | `azimuthal_shear` | `radarx.retrieve.shear` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `azimuthal_shear_layer_max` | `radarx.retrieve.shear` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `llsd` | `radarx.retrieve.shear` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
@@ -2502,6 +2559,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.advect` | [core](Radar_Workflow): 11. Storm motion, common analysis time and time interpolation |
 | `.radarx.apply_mask` | [core](Radar_Workflow): 2. Remove non-meteorological echo |
 | `.radarx.assign` | [core](Radar_Workflow): 4. Dealias the Doppler velocity |
+| `.radarx.azimuth_flags` | [core](Radar_Workflow): 1. Read the volumes |
 | `.radarx.azimuthal_shear` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `.radarx.azimuthal_shear_layer_max` | [core](Radar_Workflow): 9. Azimuthal shear and radial divergence |
 | `.radarx.background` | [core](Radar_Workflow): 12. Multi-radar grid and three-dimensional wind |
@@ -2540,6 +2598,7 @@ The methods of the `.radarx` accessors:
 | `.radarx.estimate_motion` | [core](Radar_Workflow): 11. Storm motion, common analysis time and time interpolation |
 | `.radarx.evaporation` | [core](Radar_Workflow): 13. Evaporation |
 | `.radarx.exceedance_probability` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
+| `.radarx.fix_azimuth` | [core](Radar_Workflow): 1. Read the volumes |
 | `.radarx.forward_operator` | [part 3](Radar_Workflow_Advanced_2): 14. Forward operator for WRF and MPAS output |
 | `.radarx.gauge_adjust` | [part 3](Radar_Workflow_Advanced_2): 25. Radar-gauge merging |
 | `.radarx.gas_path_attenuation` | [part 3](Radar_Workflow_Advanced_2): 22. Ka and W band cloud radar |

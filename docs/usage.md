@@ -143,6 +143,7 @@ dask arrays.
 | Computes | `radarx.grid.ugrid` | `to_uxarray` |
 | Computes | `radarx.ml.patches` | `polar_patches` |
 | Computes | `radarx.retrieve.advection` | `advect`, `estimate_motion`, `interpolate_time` |
+| Computes | `radarx.retrieve.azimuth_qc` | `azimuth_flags` |
 | Computes | `radarx.retrieve.biology` | `biological_echo` |
 | Computes | `radarx.retrieve.cappi` | `create_cappi` |
 | Computes | `radarx.retrieve.coldpool` | `baroclinic_generation`, `cold_pool_intensity`, `cold_pool_perturbation`, `potential_temperatures` |
@@ -175,6 +176,7 @@ dask arrays.
 | Computes | `radarx.retrieve.sorting` | `storm_size_sorting` |
 | Computes | `radarx.retrieve.tracking` | `track_cells`, `cell_statistics` |
 | Computes | `radarx.retrieve.zdr_arc` | `zdr_arc` |
+| Computes, cannot be lazy | `radarx.retrieve.azimuth_qc` | `fix_azimuth` |
 | Computes, cannot be lazy | `radarx.retrieve.lightning` | `cell_flash_rate`, `cluster_flashes` |
 | Computes, cannot be lazy | `radarx.retrieve.rain_trajectories` | `rain_source_points`, `trajectory_matched_times` |
 | Computes, cannot be lazy | `radarx.retrieve.superobs` | `superobs` |

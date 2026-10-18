@@ -3806,5 +3806,79 @@
   "issue": "7878",
   "pages": "672-677",
   "doi": "10.1038/s41586-021-03854-z"
+ },
+ "10.1080/01621459.1974.10482962": {
+  "authors": [
+   "Hampel, F. R."
+  ],
+  "year": 1974,
+  "title": "The influence curve and its role in robust estimation",
+  "type": "article",
+  "journal": "Journal of the American Statistical Association",
+  "volume": "69",
+  "issue": "346",
+  "pages": "383-393",
+  "doi": "10.1080/01621459.1974.10482962"
+ },
+ "10.1016/j.jesp.2013.03.013": {
+  "authors": [
+   "Leys, C.",
+   "Ley, C.",
+   "Klein, O.",
+   "Bernard, P.",
+   "Licata, L."
+  ],
+  "year": 2013,
+  "title": "Detecting outliers: Do not use standard deviation around the mean, use absolute deviation around the median",
+  "type": "article",
+  "journal": "Journal of Experimental Social Psychology",
+  "volume": "49",
+  "issue": "4",
+  "pages": "764-766",
+  "doi": "10.1016/j.jesp.2013.03.013"
+ },
+ "10.1175/jtech1978.1": {
+  "authors": [
+   "Huuskonen, A.",
+   "Holleman, I."
+  ],
+  "year": 2007,
+  "title": "Determining weather radar antenna pointing using signals detected from the sun at low antenna elevations",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "24",
+  "issue": "3",
+  "pages": "476-483",
+  "doi": "10.1175/jtech1978.1"
+ },
+ "10.1175/2009jtecha1213.1": {
+  "authors": [
+   "Holleman, I.",
+   "Huuskonen, A.",
+   "Kurri, M.",
+   "Beekhuis, H."
+  ],
+  "year": 2010,
+  "title": "Operational monitoring of weather radar receiving chain using the sun",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "27",
+  "issue": "1",
+  "pages": "159-166",
+  "doi": "10.1175/2009jtecha1213.1"
+ },
+ "10.1175/jtech-d-22-0118.1": {
+  "authors": [
+   "Louf, V.",
+   "Protat, A."
+  ],
+  "year": 2023,
+  "title": "Real-time monitoring of weather radar network calibration and antenna pointing",
+  "type": "article",
+  "journal": "Journal of Atmospheric and Oceanic Technology",
+  "volume": "40",
+  "issue": "7",
+  "pages": "823-844",
+  "doi": "10.1175/jtech-d-22-0118.1"
  }
 }
