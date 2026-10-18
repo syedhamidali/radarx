@@ -222,7 +222,7 @@ def _flag_dataset(ds, name, flags, fixed, delta, params):
     out["azimuth_fixed"] = xr.DataArray(
         fixed,
         dims=(dim,),
-        attrs={"long_name": f"repaired ray {name}", "units": "degrees", **attrs},
+        attrs={"long_name": f"repaired ray {name}", "units": "degree", **attrs},
     )
     out["azimuth_missing_rays"] = xr.DataArray(
         _missing_rays(flags, fixed, delta),
@@ -233,7 +233,7 @@ def _flag_dataset(ds, name, flags, fixed, delta, params):
         float(delta),
         attrs={
             "long_name": "typical angle step from ray to ray (the sign is the scan direction)",
-            "units": "degrees",
+            "units": "degree",
             **attrs,
         },
     )
@@ -445,7 +445,7 @@ def _fix_sweep(ds, name, flags, fixed, delta, method, regularize_tolerance):
         out["azimuth_raw"] = xr.DataArray(
             ds[name].values,
             dims=(dim,),
-            attrs={"long_name": f"ray {name} before the repair", "units": "degrees"},
+            attrs={"long_name": f"ray {name} before the repair", "units": "degree"},
         )
         out["azimuth_flag"] = flag_var
         return out
