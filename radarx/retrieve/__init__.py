@@ -22,6 +22,7 @@ import pkgutil
 _SECTIONS = {
     "Quality control and preprocessing": [
         "qc",
+        "azimuth_qc",
         "dealias",
         "kdp",
         "attenuation",
