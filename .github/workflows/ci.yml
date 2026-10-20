@@ -80,7 +80,7 @@ jobs:
       run: |
         python -m pip install coverage pytest-cov pytest-xdist pytest-mock
     - name: Cache the test data
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cache/open-radar-data
@@ -92,7 +92,7 @@ jobs:
         key: test-data-${{ runner.os }}-v1
         restore-keys: test-data-${{ runner.os }}-
     - name: Cache the NEXRAD volumes the tests and notebooks download
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: .download_cache
         key: nexrad-downloads-${{ runner.os }}-${{ hashFiles('tests/**/*.py', 'docs/notebooks/*.md') }}
@@ -151,7 +151,7 @@ jobs:
       run: |
         python -m pip install pytest-xdist pytest-mock
     - name: Cache the test data
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cache/open-radar-data
@@ -163,7 +163,7 @@ jobs:
         key: test-data-${{ runner.os }}-v1
         restore-keys: test-data-${{ runner.os }}-
     - name: Cache the NEXRAD volumes the tests and notebooks download
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: .download_cache
         key: nexrad-downloads-${{ runner.os }}-${{ hashFiles('tests/**/*.py', 'docs/notebooks/*.md') }}
@@ -207,7 +207,7 @@ jobs:
       run: |
         python -m pip install pytest-xdist pytest-mock
     - name: Cache the test data
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cache/open-radar-data
@@ -215,7 +215,7 @@ jobs:
         key: test-data-${{ runner.os }}-v1
         restore-keys: test-data-${{ runner.os }}-
     - name: Cache the NEXRAD volumes the tests and notebooks download
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: .download_cache
         key: nexrad-downloads-${{ runner.os }}-${{ hashFiles('tests/**/*.py', 'docs/notebooks/*.md') }}
@@ -256,7 +256,7 @@ jobs:
       run: |
         python -m pip install pytest-xdist pytest-mock
     - name: Cache the test data
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cache/open-radar-data
@@ -264,7 +264,7 @@ jobs:
         key: test-data-${{ runner.os }}-v1
         restore-keys: test-data-${{ runner.os }}-
     - name: Cache the NEXRAD volumes the tests and notebooks download
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: .download_cache
         key: nexrad-downloads-${{ runner.os }}-${{ hashFiles('tests/**/*.py', 'docs/notebooks/*.md') }}
@@ -310,7 +310,7 @@ jobs:
       run: |
         python -m pip install coverage pytest-cov pytest-xdist pytest-mock
     - name: Cache the NEXRAD volumes the tests and notebooks download
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: .download_cache
         key: nexrad-downloads-${{ runner.os }}-${{ hashFiles('tests/**/*.py', 'docs/notebooks/*.md') }}
