@@ -65,7 +65,7 @@ jobs:
       id: date
       run: echo "today=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
     - name: Install micromamba environment
-      uses: mamba-org/setup-micromamba@v2
+      uses: mamba-org/setup-micromamba@v3
       with:
           environment-name: radarx-unit-tests
           environment-file: ${{env.CONDA_ENV_FILE}}
@@ -138,7 +138,7 @@ jobs:
       id: date
       run: echo "today=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
     - name: Install micromamba environment
-      uses: mamba-org/setup-micromamba@v2
+      uses: mamba-org/setup-micromamba@v3
       with:
           environment-name: radarx-unit-tests
           environment-file: ${{env.CONDA_ENV_FILE}}
@@ -191,7 +191,7 @@ jobs:
       run: echo "today=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
     # the floor of requirements.txt: xarray 2024.10.0 and xradar 0.11
     - name: Install micromamba environment
-      uses: mamba-org/setup-micromamba@v2
+      uses: mamba-org/setup-micromamba@v3
       with:
           environment-name: radarx-unit-tests
           environment-file: ${{env.CONDA_ENV_FILE}}
@@ -242,7 +242,7 @@ jobs:
       id: date
       run: echo "today=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
     - name: Install micromamba environment
-      uses: mamba-org/setup-micromamba@v2
+      uses: mamba-org/setup-micromamba@v3
       with:
           environment-name: radarx-unit-tests
           environment-file: ${{env.CONDA_ENV_FILE}}
@@ -296,7 +296,7 @@ jobs:
       id: date
       run: echo "today=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
     - name: Install micromamba environment
-      uses: mamba-org/setup-micromamba@v2
+      uses: mamba-org/setup-micromamba@v3
       with:
           environment-name: radarx-notebook-tests
           environment-file: ${{env.CONDA_ENV_FILE}}
