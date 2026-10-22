@@ -93,7 +93,7 @@ jobs:
       RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
     steps:
       - name: Download the notebook outputs
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: jupyter-cache
           path: docs-cache
