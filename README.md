@@ -103,13 +103,7 @@ dtree.radarx.plot.ppi("DBZH", sweeps=0)
 grid.radarx.plot.max_cappi("DBZH")
 ```
 
-See the [documentation](https://radarx.readthedocs.io/) for more examples, including CAPPIs, IMD data and unstructured grids.
-
-> [!WARNING]
-> The radarx IMD reader (`rx.io.read_sweep`, `rx.io.read_volume`, `rx.io.to_cfradial2`,
-> `rx.io.to_cfradial2_volumes`) is **deprecated** and will be removed in a future release.
-> IMD data is read natively by xradar (0.13.0 and later): use
-> `xr.open_dataset(file, engine="imd")` or `xd.io.open_imd_datatree(files)` instead.
+See the [documentation](https://radarx.readthedocs.io/) for more examples, including CAPPIs, IMD data (read with xradar's IMD backend) and unstructured grids.
 
 
 ## Documentation

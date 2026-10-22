@@ -3,7 +3,6 @@
 boto3
 cartopy
 cmweather
-lat_lon_parser
 matplotlib
 netCDF4
 numpy
@@ -11,7 +10,6 @@ pooch
 pyproj
 scipy
 xarray>=2026.7.0
-xmltodict
 xradar>=0.13
 # optional radarx[plot] extra without datashader (tested in the notebook job)
 bokeh

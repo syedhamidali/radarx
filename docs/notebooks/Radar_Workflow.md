@@ -2137,10 +2137,8 @@ Every public name of radarx (the `__all__` of `radarx.retrieve`, `radarx.grid`,
 `radarx.io`, `radarx.ml`, `radarx.vis`, `radarx.fundamentals`, `radarx.core`, `radarx.level1`),
 with its module and the section of this notebook or of the
 [second part](Radar_Workflow_Advanced) or the
-[third part](Radar_Workflow_Advanced_2) where it is used in an example. The
-radarx IMD reader (`read_sweep`, `read_volume`, `to_cfradial2`,
-`to_cfradial2_volumes` and the helpers of `radarx.testing`) is deprecated
-and shown through xradar in the [IMD notebook](IMD_Radar_Data). A test
+[third part](Radar_Workflow_Advanced_2) where it is used in an example. IMD
+data is read with xradar and shown in the [IMD notebook](IMD_Radar_Data). A test
 (`tests/test_workflow_covers_api.py`) fails when a name is missing from the
 notebooks or from this index.
 

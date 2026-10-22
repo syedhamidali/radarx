@@ -23,7 +23,6 @@ except ModuleNotFoundError:  # pragma: no cover
 from . import level1  # noqa
 from . import ml  # noqa
 from . import retrieve  # noqa
-from . import testing  # noqa
 from . import vis  # noqa
 
 from .citation import cite, methods  # noqa
