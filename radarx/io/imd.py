@@ -12,7 +12,7 @@ xarray Dataset.
 
 .. deprecated:: 0.3.0
    The radarx IMD reader is deprecated and will be removed in the next
-   release. IMD data is read natively by xradar (releases after 0.12.0)::
+   release. IMD data is read natively by xradar (0.13.0 and later)::
 
        import xarray as xr
        import xradar as xd
@@ -112,7 +112,7 @@ def _deprecated(func):
             warnings.warn(
                 f"radarx.io.{func.__name__} is deprecated and will be removed in "
                 "the next radarx release. IMD data is read natively by "
-                f"xradar (releases after 0.12.0); use {replacement} instead.",
+                f"xradar (0.13.0 and later); use {replacement} instead.",
                 FutureWarning,
                 stacklevel=2,
             )

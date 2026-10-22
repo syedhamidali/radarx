@@ -27,7 +27,7 @@ dependencies:
   - setuptools
   - xarray>=2024.10.0
   - xmltodict
-  - xradar
+  - xradar>=0.13
   - hvplot>=0.11
   - holoviews>=1.20
   - bokeh
@@ -58,5 +58,3 @@ dependencies:
   - pip:
     # for the Barnes test in tests/grid/test_grid.py; supports Python < 3.13 only
     - fast-barnes-py @ git+https://github.com/MeteoSwiss/fast-barnes-py.git ; python_version < "3.13"
-    # IMD backend is only on xradar main until the next release
-    - git+https://github.com/openradar/xradar.git@main

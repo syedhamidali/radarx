@@ -12,7 +12,7 @@ pyproj
 scipy
 xarray>=2024.10.0
 xmltodict
-xradar>=0.11
+xradar>=0.13
 # optional radarx[plot] extra without datashader (tested in the notebook job)
 bokeh
 holoviews>=1.20

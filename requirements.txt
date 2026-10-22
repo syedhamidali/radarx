@@ -8,6 +8,6 @@ scipy
 xarray>=2024.10.0
 xmltodict
 matplotlib
-xradar>=0.11
+xradar>=0.13
 pooch
 boto3
