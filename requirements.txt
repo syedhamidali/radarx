@@ -5,7 +5,7 @@ numpy
 pyproj
 cartopy
 scipy
-xarray>=2026.4.0
+xarray>=2026.7.0
 xmltodict
 matplotlib
 xradar>=0.13

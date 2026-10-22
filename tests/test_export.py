@@ -438,7 +438,8 @@ def test_cfradial1_round_trip(volume, tmp_path):
         # booleans of the global attributes are "true" and "false", None is gone
         assert flat.attrs["avset_enabled"] == "true"
         assert "title" not in flat.attrs and "version" in flat.attrs
-        assert flat.attrs["Conventions"] == "Cf/Radial"
+        # xradar 0.13 names the optional group after the convention
+        assert flat.attrs["Conventions"].split()[0] == "Cf/Radial"
         # the provenance of the sweeps is on the global attributes ...
         root = provenance_of(flat.attrs)
         assert root["radarx_method"].count(TIME_SEP) == 1
