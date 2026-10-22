@@ -164,6 +164,8 @@ References
    cell_flash_rate
    vertical_source_distribution
    lightning_jump
+   flash_rate
+   glm_parallax
 """
 
 from __future__ import annotations
@@ -174,6 +176,8 @@ __all__ = [
     "cell_flash_rate",
     "vertical_source_distribution",
     "lightning_jump",
+    "flash_rate",
+    "glm_parallax",
 ]
 
 import re
@@ -1726,6 +1730,224 @@ def lightning_jump(
         "history": int(history),
     }
     return out
+
+
+@provenance("Flash counts and rates per time interval, with the data coverage")
+def flash_rate(obj, *, interval="1min", time_edges=None, coverage=None):
+    """
+    Number of flashes and the flash rate per time interval.
+
+    Parameters
+    ----------
+    obj : xarray.Dataset, xarray.DataArray or array-like
+        The flashes: a dataset with ``flash_time_start`` (as returned by
+        :func:`cluster_flashes`, or the flash table of a GLM file), or the
+        flash start times themselves.
+    interval : str or timedelta, optional
+        Length of the time bins, e.g. ``"1min"`` (default), when
+        ``time_edges`` is not given. The bins are aligned to multiples of
+        the interval and cover all flashes.
+    time_edges : array-like of datetime64, optional
+        Explicit bin edges (at least two, increasing); flashes outside are
+        not counted. The last bin may be shorter than the others; its rate
+        uses its own length.
+    coverage : sequence of (start, end), optional
+        The times the instrument data cover (for example the granules of
+        the GLM files read, or the span of the LMA files). A bin that is not
+        covered completely by one of these intervals has no count and no
+        rate (NaN), because a bin without data is not a bin without
+        lightning. Default: every bin is covered.
+
+    Returns
+    -------
+    xarray.Dataset
+        ``flash_count`` (1) and ``flash_rate`` (flashes min-1) on ``time``
+        (bin centres, with ``time_bounds``).
+
+    Notes
+    -----
+    A flash that starts exactly at the last edge is counted in the last bin.
+    The rate is the count divided by the length of the bin in minutes. Feed
+    the rate to :func:`lightning_jump` after averaging it over its period.
+
+    Examples
+    --------
+    >>> t = np.array(["2022-03-30T00:00:10", "2022-03-30T00:01:20"], "datetime64[ns]")
+    >>> radarx.retrieve.flash_rate(t, interval="1min").flash_count.values  # doctest: +SKIP
+    array([1., 1.])
+    """
+    if isinstance(obj, xr.Dataset):
+        if "flash_time_start" not in obj:
+            raise ValueError(
+                "the dataset has no flash_time_start; cluster the sources first"
+            )
+        times = obj["flash_time_start"].values
+    elif isinstance(obj, xr.DataArray):
+        times = obj.values
+    else:
+        times = obj
+    t = np.asarray(times, dtype="datetime64[ns]").ravel()
+    t = t[~np.isnat(t)]
+    edges = _time_edges(t, interval, time_edges)
+    n = edges.size - 1
+    ti = t.astype(np.int64)
+    ei = edges.astype(np.int64)
+    k = np.searchsorted(ei, ti, side="right") - 1
+    k[ti == ei[-1]] = n - 1  # a flash exactly at the end belongs to the last bin
+    ok = (k >= 0) & (k < n)
+    count = np.bincount(k[ok], minlength=n).astype(np.float64)
+    minutes = np.diff(ei) / 6e10
+    rate = count / minutes
+    if coverage is not None:
+        spans = [
+            (
+                np.datetime64(a, "ns").astype(np.int64),
+                np.datetime64(b, "ns").astype(np.int64),
+            )
+            for a, b in coverage
+        ]
+        for j in range(n):
+            if not any(a <= ei[j] and b >= ei[j + 1] for a, b in spans):
+                count[j] = np.nan
+                rate[j] = np.nan
+    out = xr.Dataset(
+        {
+            "flash_count": (
+                "time",
+                count,
+                {"long_name": "Number of flashes in the time interval", "units": "1"},
+            ),
+            "flash_rate": (
+                "time",
+                rate,
+                {"long_name": "Flash rate", "units": "min-1"},
+            ),
+        },
+        coords=_time_coords(edges),
+    )
+    out.attrs = {
+        "algorithm": "flash counts per interval",
+        "covered_only": int(coverage is not None),
+    }
+    return out
+
+
+_GLM_WGS84_A = 6378137.0
+_GLM_WGS84_F = 1.0 / 298.257223563
+_GLM_E2 = _GLM_WGS84_F * (2.0 - _GLM_WGS84_F)
+
+
+def _geodetic_to_ecef(lat, lon, h):
+    la, lo = np.radians(lat), np.radians(lon)
+    n = _GLM_WGS84_A / np.sqrt(1.0 - _GLM_E2 * np.sin(la) ** 2)
+    return np.stack(
+        np.broadcast_arrays(
+            (n + h) * np.cos(la) * np.cos(lo),
+            (n + h) * np.cos(la) * np.sin(lo),
+            (n * (1.0 - _GLM_E2) + h) * np.sin(la),
+        ),
+        axis=-1,
+    )
+
+
+def _ecef_to_geodetic(p):
+    x, y, z = p[..., 0], p[..., 1], p[..., 2]
+    rho = np.hypot(x, y)
+    lat = np.arctan2(z, rho * (1.0 - _GLM_E2))
+    h = np.zeros_like(lat)
+    for _ in range(6):
+        n = _GLM_WGS84_A / np.sqrt(1.0 - _GLM_E2 * np.sin(lat) ** 2)
+        h = rho / np.cos(lat) - n
+        lat = np.arctan2(z, rho * (1.0 - _GLM_E2 * n / (n + h)))
+    return np.degrees(lat), np.degrees(np.arctan2(y, x)), h
+
+
+@provenance("Parallax of a geostationary lightning detection along the line of sight")
+def glm_parallax(
+    latitude,
+    longitude,
+    *,
+    satellite_longitude,
+    height_from,
+    height_to,
+    satellite_height=35786023.0,
+    satellite_latitude=0.0,
+):
+    """
+    Move lightning positions along the line of sight of a geostationary satellite to another height.
+
+    A geostationary lightning imager (GLM on GOES) sees a flash along one
+    line of sight from the satellite and places it where that line crosses a
+    reference surface ``height_from`` above the WGS84 ellipsoid. A flash at
+    the height :math:`h` above that surface lies on the same line, nearer
+    the satellite, and is displaced horizontally by about :math:`\\Delta h
+    \\tan\\zeta` toward the sub-satellite point, with :math:`\\zeta` the
+    zenith angle of the satellite at the flash (about 40 to 50 degrees over
+    the central United States, so about 1 km per km of height). This
+    function returns the position vertically below the point where the line
+    of sight crosses the surface ``height_to`` above the ellipsoid.
+
+    Parameters
+    ----------
+    latitude, longitude : array-like
+        Positions as the product gives them (degrees).
+    satellite_longitude : float
+        Longitude of the satellite sub-point (degrees), e.g. the
+        ``nominal_satellite_subpoint_lon`` of a GLM file.
+    height_from : float
+        Height (m above the WGS84 ellipsoid) of the surface the positions
+        refer to. A GLM file does not state it for the "lightning
+        ellipsoid" its events are navigated to; the caller must supply a
+        value (and say that it is an assumption when it is).
+    height_to : float
+        Height (m) to move the positions to (for example a cloud-top height).
+    satellite_height : float, optional
+        Satellite height above the ellipsoid (m); default 35 786 023 m
+        (the ``nominal_satellite_height`` of GOES files).
+    satellite_latitude : float, optional
+        Latitude of the sub-point (degrees), default 0.
+
+    Returns
+    -------
+    latitude, longitude : numpy.ndarray
+        The moved positions (degrees). ``height_to == height_from`` returns the input and
+        a position under the satellite does not move.
+
+    Notes
+    -----
+    The crossing is found by bisection on the geodetic height along the line of sight
+    (to about a millimetre); the Earth is the WGS84 ellipsoid and the satellite a point.
+    A higher ``height_to`` than ``height_from`` moves a position toward the sub-satellite point, a
+    lower one away from it. Atmospheric refraction is not included.
+
+    References
+    ----------
+    The displacement of a ray at a height above the surface it is geolocated at is the parallax
+    that Schwaller and Morris (2011) give for a spaceborne radar,
+    https://doi.org/10.1175/2010JTECHA1403.1 ; this function is the same geometry for a satellite
+    at a finite distance, with no small-angle approximation.
+    """
+    lat = np.asarray(latitude, dtype=np.float64)
+    lon = np.asarray(longitude, dtype=np.float64)
+    lat, lon = np.broadcast_arrays(lat, lon)
+    if height_to == height_from:
+        return lat.copy(), lon.copy()
+    sat = _geodetic_to_ecef(satellite_latitude, satellite_longitude, satellite_height)
+    p0 = _geodetic_to_ecef(lat, lon, float(height_from))
+    d = p0 - sat
+    length = np.linalg.norm(d, axis=-1, keepdims=True)
+    u = d / length
+    s0 = length[..., 0]
+    lo = s0 - 400_000.0
+    hi = s0 + 400_000.0
+    for _ in range(46):
+        mid = 0.5 * (lo + hi)
+        h = _ecef_to_geodetic(sat + u * mid[..., None])[2]
+        high = h > height_to
+        lo = np.where(high, mid, lo)
+        hi = np.where(high, hi, mid)
+    la, lo_, _ = _ecef_to_geodetic(sat + u * (0.5 * (lo + hi))[..., None])
+    return la, lo_
 
 
 # --------------------------------------------------------------------------
