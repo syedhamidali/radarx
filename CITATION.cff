@@ -11,8 +11,8 @@ authors:
     family-names: Syed
     affiliation: Purdue University
     orcid: https://orcid.org/0000-0002-7188-2544
-version: 0.5.2
-date-released: 2026-10-18
+version: 0.5.3
+date-released: 2026-10-22
 repository-code: https://github.com/syedhamidali/radarx
 url: https://radarx.readthedocs.io/
 license: MIT
