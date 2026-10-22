@@ -108,7 +108,7 @@ See the [documentation](https://radarx.readthedocs.io/) for more examples, inclu
 > [!WARNING]
 > The radarx IMD reader (`rx.io.read_sweep`, `rx.io.read_volume`, `rx.io.to_cfradial2`,
 > `rx.io.to_cfradial2_volumes`) is **deprecated** and will be removed in a future release.
-> IMD data is read natively by xradar (releases after 0.12.0): use
+> IMD data is read natively by xradar (0.13.0 and later): use
 > `xr.open_dataset(file, engine="imd")` or `xd.io.open_imd_datatree(files)` instead.
 
 

@@ -30,6 +30,7 @@ import numpy as np
 import xarray as xr
 import xradar as xd
 from pyproj import CRS, Transformer
+from xradar.util import reindex_range
 
 from ._compat import renamed_arguments
 
@@ -153,29 +154,6 @@ def find_multidim_vars(obj, ndim=2):
     return [var for var in obj.data_vars if obj[var].ndim == ndim]
 
 
-def _index_range(ds):
-    """
-    Ensure ``range`` is an indexed coordinate so it takes part in alignment.
-
-    Recent xradar returns ``range`` without an index; ``reindex_like`` then
-    silently leaves that dimension untouched. Can be replaced by
-    ``xradar.util.reindex_range`` (openradar/xradar#411) once released.
-
-    Parameters
-    ----------
-    ds : xarray.Dataset
-        Sweep dataset.
-
-    Returns
-    -------
-    xarray.Dataset
-        Dataset with an index on ``range`` if it has a ``range`` coordinate.
-    """
-    if "range" in ds.coords and "range" not in ds.indexes:
-        ds = ds.set_xindex("range")
-    return ds
-
-
 @renamed_arguments(dtree="obj")
 def combine_nexrad_sweeps(obj):
     """
@@ -239,15 +217,27 @@ def combine_nexrad_sweeps(obj):
 
         # The largest range dataset is the primary dataset
         primary_swp, primary_ds = sweeps[0]
-        primary_ds = _index_range(primary_ds)
 
         for secondary_swp, secondary_ds in sweeps[1:]:  # Process smaller range datasets
-            # Align secondary dataset to the primary dataset's range. Gates
-            # beyond the secondary sweep's range become missing instead of
-            # repeating its last gate (same rule as xradar.util.reindex_range).
-            gate = float(np.median(np.diff(primary_ds["range"].values)))
-            aligned_secondary_ds = _index_range(secondary_ds).reindex_like(
-                primary_ds, method="nearest", tolerance=gate / 2
+            # Align the secondary dataset to the range gates of the primary one.
+            # Gates beyond the secondary sweep's range become missing.
+            primary_range = primary_ds["range"].values
+            gate = float(np.median(np.diff(primary_range)))
+            aligned_secondary_ds = reindex_range(
+                secondary_ds,
+                start_range=float(primary_range[0]),
+                stop_range=float(primary_range[-1]),
+                range_res=gate,
+                tolerance=gate / 2,
+            ).assign_coords(range=primary_ds["range"])
+            # and onto its rays, so that the merge does not take the union
+            aligned_secondary_ds = aligned_secondary_ds.reindex(
+                {
+                    dim: primary_ds[dim].values
+                    for dim in aligned_secondary_ds.indexes
+                    if dim != "range" and dim in primary_ds.indexes
+                },
+                method="nearest",
             )
 
             # Rename variables in the secondary dataset to avoid overwrites

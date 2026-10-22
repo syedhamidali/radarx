@@ -100,6 +100,35 @@ def test_combine_nexrad_sweeps():
     assert combined["/sweep_0"].to_dataset()["range"].size == 100
 
 
+def test_combine_nexrad_sweeps_keeps_the_rays_of_the_primary_sweep():
+    """A short sweep with other ray angles is snapped to the rays of the long one."""
+    az_long = np.arange(0.25, 360, 0.5)
+    az_short = np.arange(0.5, 360, 1.0)
+    ds1 = xr.Dataset(
+        {"DBZH": (("azimuth", "range"), np.ones((az_long.size, 100)))},
+        coords={
+            "sweep_fixed_angle": 0.5,
+            "azimuth": az_long,
+            "range": ("range", np.arange(100) * 250.0),
+        },
+    )
+    ds2 = xr.Dataset(
+        {"VRADH": (("azimuth", "range"), np.full((az_short.size, 60), 2.0))},
+        coords={
+            "sweep_fixed_angle": 0.5,
+            "azimuth": az_short,
+            "range": ("range", np.arange(60) * 250.0),
+        },
+    )
+    dtree = DataTree.from_dict({"/sweep_0": DataTree(ds1), "/sweep_1": DataTree(ds2)})
+    out = combine_nexrad_sweeps(dtree)["/sweep_0"].to_dataset()
+    assert out.sizes["azimuth"] == az_long.size
+    assert out.sizes["range"] == 100
+    np.testing.assert_array_equal(out["azimuth"], az_long)
+    assert not np.isnan(out["VRADH"].isel(range=slice(0, 60))).any()
+    assert np.isnan(out["VRADH"].isel(range=slice(60, None))).all()
+
+
 def test_combine_nexrad_sweeps_unindexed_range():
     """Sweeps whose ``range`` has no index (recent xradar) are aligned too."""
     rng_long = np.arange(0, 1000, 10.0)

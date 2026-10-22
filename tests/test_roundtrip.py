@@ -386,6 +386,21 @@ def _as_tree_or_dataset(obj):
     return obj
 
 
+def _same_time_unit(back, out):
+    """
+    Give the datetime variables of ``back`` the resolution of ``out``.
+
+    xarray decodes times written as seconds to ``datetime64[s]``, while pandas 2
+    builds the times of the products in nanoseconds; the values are the same.
+    """
+    if isinstance(back, xr.DataTree) or isinstance(out, xr.DataTree):
+        return back
+    for name, var in out.variables.items():
+        if name in back.variables and var.dtype.kind == "M":
+            back[name] = back[name].astype(var.dtype)
+    return back
+
+
 def _open(path, engine, tree):
     if tree:
         return xr.open_datatree(path, engine=engine)
@@ -407,7 +422,7 @@ def test_product_round_trip_is_identical(name, engine, tmp_path):
     back = _open(path, engine, tree)
     try:
         if not tree:
-            back = back.load()
+            back = _same_time_unit(back.load(), out)
         xr.testing.assert_identical(back, out)
     finally:
         back.close()

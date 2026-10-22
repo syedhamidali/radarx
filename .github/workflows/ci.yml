@@ -189,7 +189,7 @@ jobs:
     - name: Get date for the environment cache key
       id: date
       run: echo "today=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
-    # the floor of requirements.txt: xarray 2024.10.0 and xradar 0.11
+    # the floor of requirements.txt: xarray 2026.7.0 and xradar 0.13
     - name: Install micromamba environment
       uses: mamba-org/setup-micromamba@v3
       with:
@@ -200,8 +200,8 @@ jobs:
           create-args: >-
               python=3.12
               numpy=2
-              xarray=2024.10.0
-              xradar=0.11
+              xarray=2026.7.0
+              xradar=0.13
               pandas=2
     - name: Install pytest plugins via pip
       run: |
