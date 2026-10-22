@@ -30,7 +30,7 @@ from radarx._dtypes import FIELD_DTYPE, as_field, fields_as_float32
 #: unit symbols that radarx writes; the CF names for latitude and longitude
 SYMBOLS = {
     "m", "km", "mm", "s", "h", "min", "K", "degC", "Pa", "hPa", "kg", "g", "dB",
-    "dBZ", "dBW", "degree", "degrees_north", "degrees_east", "J", "W", "V",
+    "dBZ", "dBW", "degree", "degrees_north", "degrees_east", "J", "W", "V", "year",
 }  # fmt: skip
 FACTOR = re.compile(r"^([A-Za-z_]+)(-?\d+)?$")
 
