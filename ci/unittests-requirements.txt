@@ -10,7 +10,7 @@ numpy
 pooch
 pyproj
 scipy
-xarray>=2024.10.0
+xarray>=2026.4.0
 xmltodict
 xradar>=0.13
 # optional radarx[plot] extra without datashader (tested in the notebook job)
