@@ -2468,6 +2468,8 @@ notebooks or from this index.
 | `fss` | `radarx.retrieve.nowcast_verification` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
 | `rank_histogram` | `radarx.retrieve.nowcast_verification` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
 | `reliability` | `radarx.retrieve.nowcast_verification` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
+| `qpe_error_ensemble` | `radarx.retrieve.qpe_ensemble` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
+| `qpe_error_model` | `radarx.retrieve.qpe_ensemble` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
 | `exceedance_probability` | `radarx.retrieve.nowcasting` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
 | `nowcast` | `radarx.retrieve.nowcasting` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
 | `nowcast_model` | `radarx.retrieve.nowcasting` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
