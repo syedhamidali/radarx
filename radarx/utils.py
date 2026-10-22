@@ -230,6 +230,15 @@ def combine_nexrad_sweeps(obj):
                 range_res=gate,
                 tolerance=gate / 2,
             ).assign_coords(range=primary_ds["range"])
+            # and onto its rays, so that the merge does not take the union
+            aligned_secondary_ds = aligned_secondary_ds.reindex(
+                {
+                    dim: primary_ds[dim].values
+                    for dim in aligned_secondary_ds.indexes
+                    if dim != "range" and dim in primary_ds.indexes
+                },
+                method="nearest",
+            )
 
             # Rename variables in the secondary dataset to avoid overwrites
             if "DBZH" in aligned_secondary_ds:
