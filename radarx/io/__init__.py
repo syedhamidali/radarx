@@ -8,7 +8,6 @@ Radarx IO
 .. toctree::
     :maxdepth: 4
 
-.. automodule:: radarx.io.imd
 .. automodule:: radarx.io.aws_data
 .. automodule:: radarx.io.sounding
 .. automodule:: radarx.io.parcel
@@ -21,7 +20,6 @@ Radarx IO
 .. automodule:: radarx.io.export
 """
 
-from .imd import *  # noqa
 from .aws_data import *  # noqa
 from .sounding import *  # noqa
 from .parcel import *  # noqa

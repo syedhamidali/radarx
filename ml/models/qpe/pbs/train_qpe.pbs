@@ -19,7 +19,7 @@ export http_proxy=http://10.128.13.249:3128 https_proxy=http://10.128.13.249:312
 if ! conda env list | grep -q radarx_qpe; then
     conda create -y -n radarx_qpe -c conda-forge --override-channels \
         python=3.12 numpy scipy xarray pyproj pooch matplotlib pybind11 setuptools \
-        setuptools-scm onnx onnxruntime cmweather lat_lon_parser netCDF4 xmltodict boto3 cartopy
+        setuptools-scm onnx onnxruntime cmweather netCDF4 boto3 cartopy
     conda run -n radarx_qpe pip install xradar torch --index-url https://download.pytorch.org/whl/cpu \
         --extra-index-url https://pypi.org/simple
 fi

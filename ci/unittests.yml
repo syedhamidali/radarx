@@ -7,7 +7,6 @@ dependencies:
   - boto3
   - cartopy
   - cmweather
-  - lat_lon_parser
   - matplotlib-base
   - netCDF4
   - numpy
@@ -15,7 +14,6 @@ dependencies:
   - pyproj
   - scipy
   - xarray>=2026.7.0
-  - xmltodict
   - xradar>=0.13
   # optional radarx[plot] extra (pure Python); datashader, uxarray and the
   # notebook-only packages are tested in the notebook job (ci/notebooktests.yml)

@@ -91,12 +91,6 @@ def pytest_configure(config):
             DATASETS.fetch(name)
         except Exception:  # offline or server error: the tests report it
             pass
-    try:
-        from radarx.testing.test_data_imd import fetch_imd_test_data
-
-        fetch_imd_test_data()
-    except Exception:  # offline or server error: the tests report it
-        pass
 
 
 # Tests that take half a minute or more on a CI runner (measured with --durations): real
