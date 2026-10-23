@@ -2137,10 +2137,8 @@ Every public name of radarx (the `__all__` of `radarx.retrieve`, `radarx.grid`,
 `radarx.io`, `radarx.ml`, `radarx.vis`, `radarx.fundamentals`, `radarx.core`, `radarx.level1`),
 with its module and the section of this notebook or of the
 [second part](Radar_Workflow_Advanced) or the
-[third part](Radar_Workflow_Advanced_2) where it is used in an example. The
-radarx IMD reader (`read_sweep`, `read_volume`, `to_cfradial2`,
-`to_cfradial2_volumes` and the helpers of `radarx.testing`) is deprecated
-and shown through xradar in the [IMD notebook](IMD_Radar_Data). A test
+[third part](Radar_Workflow_Advanced_2) where it is used in an example. IMD
+data is read with xradar and shown in the [IMD notebook](IMD_Radar_Data). A test
 (`tests/test_workflow_covers_api.py`) fails when a name is missing from the
 notebooks or from this index.
 
@@ -2450,6 +2448,8 @@ notebooks or from this index.
 | `trajectories` | `radarx.retrieve.lagrangian` | [part 3](Radar_Workflow_Advanced_2): 9. Diabatic Lagrangian analysis |
 | `cell_flash_rate` | `radarx.retrieve.lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `cluster_flashes` | `radarx.retrieve.lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
+| `flash_rate` | `radarx.retrieve.lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
+| `glm_parallax` | `radarx.retrieve.lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `grid_lightning` | `radarx.retrieve.lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `lightning_jump` | `radarx.retrieve.lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
 | `vertical_source_distribution` | `radarx.retrieve.lightning` | [part 2](Radar_Workflow_Advanced): 6. Lightning mapping |
@@ -2468,8 +2468,11 @@ notebooks or from this index.
 | `fss` | `radarx.retrieve.nowcast_verification` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
 | `rank_histogram` | `radarx.retrieve.nowcast_verification` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
 | `reliability` | `radarx.retrieve.nowcast_verification` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
+| `areal_reduction_factor` | `radarx.retrieve.precip_frequency` | [part 3](Radar_Workflow_Advanced_2): 25. Rainfall in context |
+| `climatological_reference` | `radarx.retrieve.precip_frequency` | [part 3](Radar_Workflow_Advanced_2): 25. Rainfall in context |
 | `qpe_error_ensemble` | `radarx.retrieve.qpe_ensemble` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
 | `qpe_error_model` | `radarx.retrieve.qpe_ensemble` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
+| `return_period` | `radarx.retrieve.precip_frequency` | [part 3](Radar_Workflow_Advanced_2): 25. Rainfall in context |
 | `exceedance_probability` | `radarx.retrieve.nowcasting` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
 | `nowcast` | `radarx.retrieve.nowcasting` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
 | `nowcast_model` | `radarx.retrieve.nowcasting` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |

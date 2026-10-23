@@ -16,12 +16,12 @@ kernelspec:
 The India Meteorological Department (IMD) publishes radar data as NetCDF4
 files with an IRIS-inspired layout, one sweep per file. IMD data is read
 natively by [xradar](https://docs.openradarscience.org/projects/xradar/en/latest/notebooks/IMD.html)
-(releases after 0.12.0); radarx then grids, retrieves and plots it.
+(0.13.0 and later); radarx then grids, retrieves and plots it.
 
 ```{note}
-The radarx IMD reader (`rx.io.read_sweep`, `rx.io.read_volume`,
-`rx.io.to_cfradial2`, `rx.io.to_cfradial2_volumes`) is deprecated and will be
-removed in a future release. Use the xradar functions shown below instead.
+The IMD reader of earlier radarx versions (`rx.io.read_sweep`,
+`rx.io.read_volume`, `rx.io.to_cfradial2`, `rx.io.to_cfradial2_volumes`) has
+been removed. Use the xradar functions shown below instead.
 ```
 
 ```{code-cell} ipython3

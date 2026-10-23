@@ -40,22 +40,10 @@ PACKAGES = [
     "radarx.fundamentals",
     "radarx.core",
     "radarx.level1",
-]  # radarx.testing only holds the deprecated IMD helpers (see EXCEPTIONS)
+]
 
-# Documented exceptions: the radarx IMD reader and its test-data helpers are
-# deprecated (the files are read natively by xradar since its release after
-# 0.12.0) and are removed after the next xradar release, so the notebooks show
-# the xradar reader instead (see docs/notebooks/IMD_Radar_Data.md).
-DEPRECATED_IMD = {
-    "read_sweep",
-    "read_volume",
-    "to_cfradial2",
-    "to_cfradial2_volumes",
-    "fetch_imd_test_data",
-    "display_fetched_files",
-    "test_data_imd",
-}
-EXCEPTIONS = DEPRECATED_IMD
+# Documented exceptions: none at the moment (the deprecated IMD reader is gone).
+EXCEPTIONS = set()
 
 # Accessor attributes that are not retrievals (the plot accessor is shown with
 # its classes and ``.radarx.plot.<kind>`` calls).

@@ -157,7 +157,7 @@ dask arrays.
 | Computes | `radarx.retrieve.hail` | `hail_kinetic_energy`, `hail_products`, `mesh`, `posh`, `shi` |
 | Computes | `radarx.retrieve.imerg` | `match_imerg` |
 | Computes | `radarx.retrieve.lagrangian` | `trajectories` |
-| Computes | `radarx.retrieve.lightning` | `grid_lightning`, `vertical_source_distribution` |
+| Computes | `radarx.retrieve.lightning` | `flash_rate`, `grid_lightning`, `vertical_source_distribution` |
 | Computes | `radarx.retrieve.melting_layer_gradients` | `melting_layer_gradient`, `melting_layer_rhi` |
 | Computes | `radarx.retrieve.multidoppler` | `dual_doppler_analytic`, `multi_doppler`, `multi_doppler_input` |
 | Computes | `radarx.retrieve.qpe_ml` | `rain_rate_ml` |
@@ -165,6 +165,7 @@ dask arrays.
 | Computes | `radarx.retrieve.multidoppler` | `dual_doppler_analytic`, `multi_doppler`, `multi_doppler_input` |
 | Computes | `radarx.retrieve.nowcast_verification` | `brier_score`, `categorical_scores`, `crps`, `fss`, `rank_histogram`, `reliability` |
 | Computes | `radarx.retrieve.nowcasting` | `nowcast`, `nowcast_model` |
+| Computes | `radarx.retrieve.precip_frequency` | `climatological_reference`, `return_period` |
 | Computes | `radarx.retrieve.qpe_ensemble` | `qpe_error_ensemble`, `qpe_error_model` |
 | Computes | `radarx.retrieve.rain_trajectories` | `rain_trajectories`, `surface_dsd` |
 | Computes | `radarx.retrieve.satellite_match` | `match_dpr` |

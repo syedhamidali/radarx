@@ -32,7 +32,7 @@ written on the fly).
 | 3 | Bayesian DSD retrieval with uncertainty | `dsd_prior`, `forward_grid`, `dsd_bayesian` |
 | 4 | raindrop trajectories and size sorting, collisions in a rain shaft, hail and melting snow fall speeds | `rain_trajectories`, `size_sorting`, `surface_dsd`, `rain_shaft`, `rain_shaft_bulk`, `hail_fall_speed`, `melting_snow_fall_speed` |
 | 5 | surface stations, profilers, cold pools | `read_sticknet`, `read_pips`, `cold_pool_intensity` |
-| 6 | lightning mapping | `read_lma`, `cluster_flashes`, `lightning_jump` |
+| 6 | lightning mapping | `read_lma`, `cluster_flashes`, `flash_rate`, `glm_parallax`, `lightning_jump` |
 
 ```{code-cell} ipython3
 import math
@@ -115,9 +115,11 @@ from radarx.retrieve import (
     fall_speed,
     fit_gamma,
     fit_gamma_moments,
+    flash_rate,
     forward_grid,
     forward_operator,
     gbvtd,
+    glm_parallax,
     grid_lightning,
     hail_fall_speed,
     lightning_jump,
@@ -1278,6 +1280,19 @@ ax[1].set(xlabel="fraction of sources", ylabel="height (km MSL)", title="source 
 fig.autofmt_xdate()
 plt.show()
 print("accessor and function give the same jumps:", bool((jumps.jump_start == jumps_fn.jump_start).all()))
+```
+
+`flash_rate` counts the flashes of the whole domain per time interval; a bin that the data do
+not cover is NaN, not zero. A satellite lightning imager such as the GOES GLM sees a flash
+along a line of sight, so `glm_parallax` moves a position along it from the height the product
+refers to (here assumed 12 km) to another height, for example a cloud top of 9 km:
+
+```{code-cell} ipython3
+total = flash_rate(flashes, time_edges=minute_edges, coverage=[(start, start + np.timedelta64(30, "m"))])
+print("flashes in the first 30 min:", int(total.flash_count[:30].sum()), "; bins after the coverage are NaN:",
+      bool(np.isnan(total.flash_rate[31:]).all()))
+new_lat, new_lon = glm_parallax(37.0, -89.0, satellite_longitude=-75.2, height_from=12e3, height_to=9e3)
+print(f"a flash assumed at 9 km instead of 12 km moves {float(new_lat) - 37.0:+.3f} deg latitude, {float(new_lon) + 89.0:+.3f} deg longitude")
 ```
 
 ## References

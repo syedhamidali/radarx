@@ -14,7 +14,6 @@ report it.
 
 import sys
 
-import pooch
 from open_radar_data import DATASETS
 
 RAW = "https://raw.githubusercontent.com/"
@@ -26,7 +25,6 @@ PREFIXES = (
     "71_20181220_060628.pvol.h5",
     "IMD/JPR220822135253-IMD-B.nc",
 )
-IMD_BASE = RAW + "syedhamidali/pyscancf_examples/main/data/goa_c/"
 
 
 def main():
@@ -38,22 +36,6 @@ def main():
             DATASETS.fetch(name)
         except Exception as err:
             failed.append(f"{name}: {err}")
-    # the deprecated IMD reader's test files
-    from radarx.testing import test_data_imd
-
-    original = pooch.create
-
-    def create(*args, **kwargs):
-        kwargs["base_url"] = IMD_BASE
-        return original(*args, **kwargs)
-
-    try:
-        test_data_imd.pooch.create = create
-        test_data_imd.fetch_imd_test_data()
-    except Exception as err:
-        failed.append(f"IMD test data: {err}")
-    finally:
-        test_data_imd.pooch.create = original
     # the upstream weights of the ML models, converted once so that parallel tests
     # and notebooks do not convert them at the same time
     try:

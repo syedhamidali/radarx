@@ -48,6 +48,7 @@ shown.
 | 22 | Ka and W band cloud radar: gas, cloud liquid and rain attenuation, echo classification, dual-frequency ratio retrievals | `gas_specific_attenuation`, `cloud_liquid_attenuation`, `gas_path_attenuation`, `rain_attenuation_relation`, `rain_path_attenuation`, `classify_cloud_targets`, `dual_frequency_ratio`, `dfr_rain`, `dfr_snow` |
 | 23 | Level I: IQ time series, clutter filtering, Doppler spectra and moments, dealiasing with the spectra | `read_iq`, `as_iq`, `simulate_iq`, `regression_filter`, `notch_filter`, `doppler_spectra`, `spectral_noise`, `spectral_moments`, `pulse_pair_moments`, `dealias_spectra` |
 | 24 | nowcasting (extrapolation, S-PROG, STEPS), optical flow and verification scores | `nowcast`, `optical_flow`, `exceedance_probability`, `fss`, `crps`, `categorical_scores`, `brier_score`, `reliability`, `rank_histogram`, `qpe_error_model`, `qpe_error_ensemble`, `nowcast_model` |
+| 25 | rainfall in context: return period from precipitation frequency, areal reduction, climatological reference | `return_period`, `areal_reduction_factor`, `climatological_reference` |
 
 ```{code-cell} ipython3
 import math
@@ -1819,6 +1820,38 @@ ml.register_model("drift-toy", toy_path, hashlib.sha256(toy_path.read_bytes()).h
 learned = nowcast_model(history[-3:], "drift-toy", 3, scale=10.0)
 base = history[-1].DBZH.values
 print(learned.attrs["ml_model"], learned.dims, float((learned.isel(lead_time=2).values - base)[base >= 10].mean()))
+```
+
+## 25. Rainfall in context
+
+A depth of rain means more with its return period and with what is usual at the place. `return_period`
+reads the return period of a depth from precipitation frequency estimates (the depth for a few return
+periods, as in NOAA Atlas 14, interpolated in the logarithm of both; a depth outside the table is flagged,
+not extrapolated). The table describes *point* depths, so the mean over an area has to be turned into a
+point depth first with an areal reduction factor of your own (`areal_reduction_factor`; radarx ships no
+factors, because published curves depend on the region, the duration and the return period).
+`climatological_reference` gives a quantile of a record at each place, for example the 99.5th percentile of
+the one-hour totals, to compare with `depth / reference`. None of this is a flood forecast.
+
+```{code-cell} ipython3
+from radarx.retrieve import areal_reduction_factor, climatological_reference, return_period
+
+rng = np.random.default_rng(4)
+shape = (20, 20)
+coords = {"y": np.arange(20) * 1000.0, "x": np.arange(20) * 1000.0}
+mean_depth = xr.DataArray(40.0 + 20.0 * rng.random(shape), dims=("y", "x"), coords=coords, attrs={"units": "mm"})
+
+# point depths for 2, 10 and 100 years (a made-up table) and a factor for a 300 km2 basin
+arf = areal_reduction_factor(300.0, [10, 1000], [0.99, 0.85])
+rp_direct = return_period(mean_depth, [2, 10, 100], [50.0, 80.0, 160.0])
+rp_point = return_period(mean_depth / arf, [2, 10, 100], [50.0, 80.0, 160.0])
+print(f"factor {arf:.2f}: median return period {float(rp_direct.return_period.median()):.1f} years "
+      f"without it, {float(rp_point.return_period.median()):.1f} with it")
+
+hourly = xr.DataArray(rng.gamma(0.4, 3.0, (3000, 20, 20)).astype("f4"), dims=("time", "y", "x"), coords=coords,
+                      attrs={"units": "mm"})
+reference = climatological_reference(hourly, quantile=0.995)
+print(f"reference depth {float(reference.mean()):.1f} mm; an hour of 30 mm is {float((30.0 / reference).mean()):.1f} times it")
 ```
 
 ## References

@@ -43,8 +43,8 @@ and an xradar volume read from a file often does not get right:
   (`packing="keep"` keeps it);
 - stale encodings (chunk layout of the source file, time units) are dropped.
 
-The functions are named `write_*` because `radarx.io.to_cfradial2` is the
-converter of the deprecated IMD reader.
+The functions are named `write_*` to keep them apart from the
+`.radarx.to_cfradial2` accessor method, which exports one volume.
 
 ```{code-cell} ipython3
 import tempfile

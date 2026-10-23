@@ -99,7 +99,7 @@ dev = [
     # linting
     "pre-commit",
     "ruff",
-    "black[jupyter]==24.2.0",
+    "black[jupyter]==26.10.1",
     # docs
     "sphinx",
     "myst-nb",
