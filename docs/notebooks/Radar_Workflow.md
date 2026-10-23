@@ -2470,6 +2470,8 @@ notebooks or from this index.
 | `reliability` | `radarx.retrieve.nowcast_verification` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
 | `areal_reduction_factor` | `radarx.retrieve.precip_frequency` | [part 3](Radar_Workflow_Advanced_2): 25. Rainfall in context |
 | `climatological_reference` | `radarx.retrieve.precip_frequency` | [part 3](Radar_Workflow_Advanced_2): 25. Rainfall in context |
+| `qpe_error_ensemble` | `radarx.retrieve.qpe_ensemble` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
+| `qpe_error_model` | `radarx.retrieve.qpe_ensemble` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
 | `return_period` | `radarx.retrieve.precip_frequency` | [part 3](Radar_Workflow_Advanced_2): 25. Rainfall in context |
 | `exceedance_probability` | `radarx.retrieve.nowcasting` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |
 | `nowcast` | `radarx.retrieve.nowcasting` | [part 3](Radar_Workflow_Advanced_2): 24. Nowcasting and verification |

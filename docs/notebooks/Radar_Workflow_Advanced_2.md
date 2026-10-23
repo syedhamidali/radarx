@@ -47,7 +47,7 @@ shown.
 | 21 | KDP columns, KDP-ZDR size sorting, storm-cell identification, tracking and statistics | `kdp_column`, `kdp_column_metrics`, `storm_size_sorting`, `identify_cells`, `track_cells`, `cell_statistics` |
 | 22 | Ka and W band cloud radar: gas, cloud liquid and rain attenuation, echo classification, dual-frequency ratio retrievals | `gas_specific_attenuation`, `cloud_liquid_attenuation`, `gas_path_attenuation`, `rain_attenuation_relation`, `rain_path_attenuation`, `classify_cloud_targets`, `dual_frequency_ratio`, `dfr_rain`, `dfr_snow` |
 | 23 | Level I: IQ time series, clutter filtering, Doppler spectra and moments, dealiasing with the spectra | `read_iq`, `as_iq`, `simulate_iq`, `regression_filter`, `notch_filter`, `doppler_spectra`, `spectral_noise`, `spectral_moments`, `pulse_pair_moments`, `dealias_spectra` |
-| 24 | nowcasting (extrapolation, S-PROG, STEPS), optical flow and verification scores | `nowcast`, `optical_flow`, `exceedance_probability`, `fss`, `crps`, `categorical_scores`, `brier_score`, `reliability`, `rank_histogram`, `nowcast_model` |
+| 24 | nowcasting (extrapolation, S-PROG, STEPS), optical flow and verification scores | `nowcast`, `optical_flow`, `exceedance_probability`, `fss`, `crps`, `categorical_scores`, `brier_score`, `reliability`, `rank_histogram`, `qpe_error_model`, `qpe_error_ensemble`, `nowcast_model` |
 | 25 | rainfall in context: return period from precipitation frequency, areal reduction, climatological reference | `return_period`, `areal_reduction_factor`, `climatological_reference` |
 
 ```{code-cell} ipython3
@@ -1752,6 +1752,39 @@ scales that cannot be predicted, and an ensemble is judged by the CRPS, the Brie
 reliability instead. The synthetic pattern changes less in time than the noise that STEPS adds
 (the noise is estimated from the frames), so its rank histogram is a dome, too much spread; the
 [nowcasting notebook](Nowcasting) runs the methods on the NEXRAD squall line.
+
+An ensemble is also useful for a rainfall *accumulation*, whose error is not the error of a motion.
+`qpe_error_model` takes the parameters of a multiplicative lognormal error from pairs of radar and gauge
+accumulations (the root mean square of the log ratio, the share that is a common bias, and the spatial
+structure from an exponential variogram), `qpe_error_ensemble` builds members of an accumulation with that
+error (spatially correlated, mean-preserving, reproducible from a seed), and the scores above check the
+probabilities against the gauges. Here the truth is known: the radar is the truth divided by a correlated
+lognormal error of 35 %, and 400 gauges read the truth. The ensemble is an assumed error model, not a
+forecast, and it contains only the errors it is given.
+
+```{code-cell} ipython3
+from radarx.retrieve import qpe_error_ensemble, qpe_error_model
+
+n = 60
+yy, xx = np.mgrid[0:n, 0:n]
+rain = np.clip(25.0 + 20.0 * np.sin(xx / 9.0) * np.cos(yy / 11.0), 2.0, None)
+cells = {"y": np.arange(n) * 1000.0, "x": np.arange(n) * 1000.0}
+unit = xr.DataArray(np.ones((n, n), "f4"), dims=("y", "x"), coords=cells, attrs={"units": "mm"})
+error = qpe_error_ensemble(unit, sigma_ln=0.35, correlation_length=8e3, shares=(0.0, 0.8, 0.2), members=2, seed=5)
+radar_acc = xr.DataArray((rain / error.values[0]).astype("f4"), dims=("y", "x"), coords=cells, attrs={"units": "mm"})
+
+gi, gj = np.random.default_rng(2).integers(2, n - 2, (2, 400))
+model = qpe_error_model(radar_acc.values[gj, gi], rain[gj, gi], x=gi * 1000.0, y=gj * 1000.0)
+members = qpe_error_ensemble(
+    radar_acc, sigma_ln=float(model.sigma_ln), correlation_length=float(model.correlation_length),
+    shares=(float(model.share_common), float(model.share_spatial), float(model.share_nugget)),
+    members=100, seed=3,
+)
+p25 = exceedance_probability(members, 25.0)
+rel = reliability(xr.DataArray(p25.values[gj, gi]), xr.DataArray((rain[gj, gi] >= 25.0).astype(float)), bins=5)
+print(f"fitted sigma {float(model.sigma_ln):.2f} (true 0.35), correlation length {float(model.correlation_length) / 1e3:.1f} km (true 8)")
+print("observed frequency by probability bin:", rel.observed_frequency.values.round(2))
+```
 
 `nowcast_model` runs a trained network on the last frames. radarx ships no weights: a model is
 registered in `radarx.ml` with its licence and citation. A toy network built here (it adds

@@ -3880,5 +3880,19 @@
   "issue": "7",
   "pages": "823-844",
   "doi": "10.1175/jtech-d-22-0118.1"
+ },
+ "10.1137/S1064827592240555": {
+  "authors": [
+   "Dietrich, C. R.",
+   "Newsam, G. N."
+  ],
+  "year": 1997,
+  "title": "Fast and exact simulation of stationary Gaussian processes through circulant embedding of the covariance matrix",
+  "type": "article",
+  "journal": "SIAM Journal on Scientific Computing",
+  "volume": "18",
+  "issue": "4",
+  "pages": "1088-1107",
+  "doi": "10.1137/S1064827592240555"
  }
 }
