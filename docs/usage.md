@@ -157,7 +157,7 @@ dask arrays.
 | Computes | `radarx.retrieve.hail` | `hail_kinetic_energy`, `hail_products`, `mesh`, `posh`, `shi` |
 | Computes | `radarx.retrieve.imerg` | `match_imerg` |
 | Computes | `radarx.retrieve.lagrangian` | `trajectories` |
-| Computes | `radarx.retrieve.lightning` | `grid_lightning`, `vertical_source_distribution` |
+| Computes | `radarx.retrieve.lightning` | `flash_rate`, `grid_lightning`, `vertical_source_distribution` |
 | Computes | `radarx.retrieve.melting_layer_gradients` | `melting_layer_gradient`, `melting_layer_rhi` |
 | Computes | `radarx.retrieve.multidoppler` | `dual_doppler_analytic`, `multi_doppler`, `multi_doppler_input` |
 | Computes | `radarx.retrieve.qpe_ml` | `rain_rate_ml` |

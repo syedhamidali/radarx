@@ -16,6 +16,8 @@ from radarx.io import read_lma
 from radarx.retrieve import (
     cell_flash_rate,
     cluster_flashes,
+    flash_rate,
+    glm_parallax,
     grid_lightning,
     lightning_jump,
     vertical_source_distribution,
@@ -931,3 +933,114 @@ def test_split_long_flashes_edge_cases():
     np.testing.assert_array_equal(out, [0, 0, 1, 2, 2, 2, 3, 4])
     # nothing is longer than the limit: the labels are unchanged
     np.testing.assert_array_equal(L._split_long_flashes(labels, t, 10.0), labels)
+
+
+# --------------------------------------------------------------------------
+# flash_rate
+# --------------------------------------------------------------------------
+
+
+def _t(*seconds):
+    base = np.datetime64("2021-12-11T02:00:00", "ns")
+    return base + (np.array(seconds) * 1e9).astype("timedelta64[ns]")
+
+
+def test_flash_rate_hand_counted_with_gaps():
+    # flashes at 5, 10, 70, 71, 72 and 200 s; one-minute bins from 0 to 240 s; the data
+    # cover 0-180 s and 200-240 s, so the bin 180-240 s is not covered completely
+    edges = _t(0, 60, 120, 180, 240)
+    cov = [(_t(0)[0], _t(180)[0]), (_t(200)[0], _t(240)[0])]
+    out = flash_rate(_t(5, 10, 70, 71, 72, 200), time_edges=edges, coverage=cov)
+    np.testing.assert_array_equal(out.flash_count.values[:3], [2, 3, 0])
+    np.testing.assert_array_equal(out.flash_rate.values[:3], [2, 3, 0])
+    assert np.isnan(out.flash_count.values[3]) and np.isnan(out.flash_rate.values[3])
+    assert out.flash_rate.attrs["units"] == "min-1"
+    # without coverage every bin counts, the one with the flash at 200 s too
+    out2 = flash_rate(_t(5, 10, 70, 71, 72, 200), time_edges=edges)
+    np.testing.assert_array_equal(out2.flash_count.values, [2, 3, 0, 1])
+
+
+def test_flash_rate_short_last_bin_end_edge_and_interval():
+    # the last bin lasts 30 s: two flashes in it are 4 per minute; a flash exactly at the end is counted there
+    out = flash_rate(_t(65, 80, 90), time_edges=_t(0, 60, 90))
+    np.testing.assert_array_equal(out.flash_count.values, [0, 3])
+    assert out.flash_rate.values[1] == pytest.approx(6.0)
+    # the interval form aligns the bins to multiples of the interval
+    t = np.datetime64("2022-03-30T00:00:10", "ns") + np.array(
+        [0, 70], "timedelta64[s]"
+    ).astype("timedelta64[ns]")
+    out = flash_rate(t, interval="1min")
+    np.testing.assert_array_equal(out.flash_count.values, [1, 1])
+    with pytest.raises(ValueError):
+        flash_rate(_t(1), time_edges=_t(5))
+    with pytest.raises(ValueError):
+        flash_rate(xr.Dataset({"x": ("a", [1])}))
+
+
+def test_flash_rate_takes_clustered_flashes():
+    ds = xr.Dataset(
+        {"flash_time_start": ("number_of_flashes", _t(1, 2, 61))},
+    )
+    out = flash_rate(ds, interval="1min")
+    assert out.flash_count.sum() == 3
+
+
+# --------------------------------------------------------------------------
+# glm_parallax
+# --------------------------------------------------------------------------
+
+SAT_LON = -75.2
+
+
+def test_glm_parallax_identity_and_subsatellite_point():
+    la, lo = glm_parallax(
+        40.0, -89.0, satellite_longitude=SAT_LON, height_from=12e3, height_to=12e3
+    )
+    assert (float(la), float(lo)) == (40.0, -89.0)
+    la, lo = glm_parallax(
+        0.0, SAT_LON, satellite_longitude=SAT_LON, height_from=12e3, height_to=4e3
+    )
+    assert abs(float(la)) < 1e-9 and abs(float(lo) - SAT_LON) < 1e-9
+
+
+@pytest.mark.parametrize("lat,lon", [(36.5, -89.0), (45.0, -100.0), (30.0, -85.0)])
+def test_glm_parallax_size_against_the_spherical_formula(lat, lon):
+    # a spherical Earth: tan(zeta) = r sin(g) / (r cos(g) - R) for the central angle g to the sub-satellite
+    # point; the shift of a height change dh is dh tan(zeta) to first order
+    R, r = 6371e3, 6371e3 + 35786023.0
+    g = np.arccos(np.cos(np.radians(lat)) * np.cos(np.radians(lon - SAT_LON)))
+    expected = 5e3 * r * np.sin(g) / (r * np.cos(g) - R)
+    la, lo = glm_parallax(
+        lat, lon, satellite_longitude=SAT_LON, height_from=12e3, height_to=17e3
+    )
+    p1, p2 = np.radians(lat), np.radians(la)
+    a = (
+        np.sin((p2 - p1) / 2) ** 2
+        + np.cos(p1) * np.cos(p2) * np.sin(np.radians(lo - lon) / 2) ** 2
+    )
+    shift = 2 * 6371e3 * np.arcsin(np.sqrt(a))
+    assert shift == pytest.approx(expected, rel=0.03)
+
+
+def test_glm_parallax_direction_reversal_and_broadcast():
+    lat, lon = 36.5, -89.0
+    up = glm_parallax(
+        lat, lon, satellite_longitude=SAT_LON, height_from=12e3, height_to=16e3
+    )
+    down = glm_parallax(
+        lat, lon, satellite_longitude=SAT_LON, height_from=12e3, height_to=8e3
+    )
+    # higher: toward the sub-satellite point (south and east of this storm); lower: away from it
+    assert up[0] < lat and up[1] > lon and down[0] > lat and down[1] < lon
+    back = glm_parallax(
+        up[0], up[1], satellite_longitude=SAT_LON, height_from=16e3, height_to=12e3
+    )
+    assert abs(float(back[0]) - lat) < 1e-6 and abs(float(back[1]) - lon) < 1e-6
+    la, lo = glm_parallax(
+        [30.0, 40.0],
+        -89.0,
+        satellite_longitude=SAT_LON,
+        height_from=12e3,
+        height_to=10e3,
+    )
+    assert la.shape == lo.shape == (2,)
