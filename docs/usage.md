@@ -165,6 +165,7 @@ dask arrays.
 | Computes | `radarx.retrieve.multidoppler` | `dual_doppler_analytic`, `multi_doppler`, `multi_doppler_input` |
 | Computes | `radarx.retrieve.nowcast_verification` | `brier_score`, `categorical_scores`, `crps`, `fss`, `rank_histogram`, `reliability` |
 | Computes | `radarx.retrieve.nowcasting` | `nowcast`, `nowcast_model` |
+| Computes | `radarx.retrieve.precip_frequency` | `climatological_reference`, `return_period` |
 | Computes | `radarx.retrieve.rain_trajectories` | `rain_trajectories`, `surface_dsd` |
 | Computes | `radarx.retrieve.satellite_match` | `match_dpr` |
 | Computes | `radarx.retrieve.shear` | `azimuthal_shear_layer_max` |
