@@ -1732,6 +1732,7 @@ def lightning_jump(
     return out
 
 
+@dask_support("computes", "the flash counts are reduced over all flashes.")
 @provenance("Flash counts and rates per time interval, with the data coverage")
 def flash_rate(obj, *, interval="1min", time_edges=None, coverage=None):
     """
