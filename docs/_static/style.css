@@ -1,0 +1,15 @@
+.xr-wrap {
+    font-size: 0.85em;
+    margin-left: 1.25em;
+    padding-left: 1.25em;
+    /* border-left: thin var(--color-foreground-muted) solid; */
+    /* color: #c7d6e4; */
+    /* background-color: #a0abb7; */
+  }
+  .xr-array-wrap, .xr-var-data, .xr-var-preview {
+    font-size: 0.9em;
+  }
+  .table-wrapper{
+    font-family: var(--font-stack--monospace);
+    font-size: var(--font-size--small--2);
+  }

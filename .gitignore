@@ -112,6 +112,9 @@ docs/notebooks/downloads/
 # written by setuptools-scm
 radarx/version.py
 
+# macOS metadata
+.DS_Store
+
 # API pages written by docs/conf.py at build time
 docs/reference.rst
 docs/accessors.rst
@@ -126,3 +129,30 @@ docs/vis.rst
 docs/generated/
 docs/changes/unreleased.md
 .download_cache/
+
+# Additional sphinx-generated rst pages
+docs/_compat.rst
+docs/_dtypes.rst
+docs/_fields.rst
+docs/_gridcf.rst
+docs/_polar.rst
+docs/_provenance.rst
+docs/_sweepwise.rst
+docs/citation.rst
+docs/level1.rst
+docs/ml.rst
+docs/modules.rst
+docs/radarx.rst
+docs/radarx.core.rst
+docs/radarx.grid.rst
+docs/radarx.io.rst
+docs/radarx.testing.rst
+docs/radarx.vis.rst
+
+# Local notebook data and binary files
+docs/notebooks/*.ipynb
+docs/notebooks/*.nc
+docs/notebooks/IMD_OUT/
+docs/notebooks/radarx_data/
+docs/notebooks/confest.py
+examples/notebooks/*.nc
