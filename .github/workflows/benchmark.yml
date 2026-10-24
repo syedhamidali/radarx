@@ -34,7 +34,7 @@ jobs:
           python-version: "3.12"
       - name: Install radarx with its compiled kernels
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade "pip>=26.2.2" "certifi>=2026.10.19"
           python -m pip install .
       - name: Check the compiled kernels
         run: |
