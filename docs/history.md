@@ -5,6 +5,14 @@
 ```{include} changes/unreleased.md
 ```
 
+## 0.6.0 (2026-10-24)
+
+- **ADD:** Ensembles of the error of a rainfall accumulation: `qpe_error_ensemble` builds members of a multiplicative, lognormal, spatially correlated error (mean-preserving, reproducible from a seed) and `qpe_error_model` takes its parameters from radar-gauge pairs. ({pull}`351`) by [@syedhamidali](https://github.com/syedhamidali)
+- **ADD:** Rainfall in context: `return_period` (from precipitation frequency estimates, flagged outside the table), `areal_reduction_factor` (from a table the user supplies) and `climatological_reference` (a per-place quantile of a record). ({pull}`352`) by [@syedhamidali](https://github.com/syedhamidali)
+- **ADD:** `radarx.retrieve.flash_rate` counts flashes and gives the flash rate per time interval, with NaN for bins the data do not cover; `glm_parallax` moves lightning positions of a geostationary imager (GOES GLM) along the line of sight to another height. ({pull}`353`) by [@syedhamidali](https://github.com/syedhamidali)
+- **DEP:** The radarx IMD reader (`read_sweep`, `read_volume`, `to_cfradial2`, `to_cfradial2_volumes`) and `radarx.testing` are removed; read IMD data with xradar 0.13 (`xr.open_dataset(file, engine="imd")`, `xradar.io.open_imd_datatree`). The dependencies `lat_lon_parser` and `xmltodict` are dropped. ({issue}`92`, {pull}`355`) by [@syedhamidali](https://github.com/syedhamidali)
+- **MNT:** Pin `pip>=26.2.2` and `certifi>=2026.10.19` in all CI workflows to mitigate the eMudhra eMSign CA certificate security incident. ({pull}`357`) by [@syedhamidali](https://github.com/syedhamidali)
+
 ## 0.5.3 (2026-10-22)
 
 - **ADD:** Ray-angle quality control in `radarx.retrieve.azimuth_qc`: `azimuth_flags` finds bad single-ray angles (outliers), duplicated rays, rays out of scan order, gaps of missing rays (with their number) and missing angles in the azimuth of a PPI or the elevation of an RHI, from the median step between rays and the median deviation from the positions the neighbouring rays predict; `fix_azimuth` repairs the angles by interpolation (`"interpolate"`), removes the bad rays (`"drop"`), inserts a ray of missing values for every missing ray (`"fill"`) or resamples on a regular angle grid (`"regularize"`). A C++ kernel with a NumPy equivalent, accessors `.radarx.azimuth_flags` and `.radarx.fix_azimuth`, tested on synthetic sweeps and on a CPOL sector PPI with gaps of 2 to 6 rays. ({pull}`342`) by [@syedhamidali](https://github.com/syedhamidali)
