@@ -369,7 +369,7 @@ jobs:
           python -m build
           cp dist/radarx*.gz dist/radarx1.gz
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: radarx-1-${{github.event.number}}
           path: dist/radarx1.gz
@@ -410,7 +410,7 @@ jobs:
           python -m build
           cp dist/radarx*.gz dist/radarx0.gz
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: radarx-0-${{github.event.number}}
           path: dist/radarx0.gz
