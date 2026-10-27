@@ -17,7 +17,7 @@ jobs:
     name: lint and style checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
@@ -58,7 +58,7 @@ jobs:
           - python-version: "3.14"
             numpy-version: "1"
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with:
         fetch-depth: 0
     - name: Get date for the environment cache key
@@ -131,7 +131,7 @@ jobs:
           - os: windows-latest
             os-name: windows
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with:
         fetch-depth: 0
     - name: Get date for the environment cache key
@@ -183,7 +183,7 @@ jobs:
       RADARX_DOWNLOAD_CACHE: ${{ github.workspace }}/.download_cache
       RADARX_SKIP_SLOW: "1"
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with:
         fetch-depth: 0
     - name: Get date for the environment cache key
@@ -235,7 +235,7 @@ jobs:
       RADARX_DOWNLOAD_CACHE: ${{ github.workspace }}/.download_cache
       RADARX_SKIP_SLOW: "1"
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with:
         fetch-depth: 0
     - name: Get date for the environment cache key
@@ -289,7 +289,7 @@ jobs:
         python-version: ["3.12", "3.14"]
         numpy-version: ["2"]
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with:
         fetch-depth: 0
     - name: Get date for the environment cache key
@@ -351,7 +351,7 @@ jobs:
       run:
         shell: bash -l {0}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Set up Python
@@ -394,7 +394,7 @@ jobs:
       run:
         shell: bash -l {0}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Set up Python

@@ -41,7 +41,7 @@ jobs:
       # start from an empty cache, so that every notebook runs on this commit
       RADARX_DOCS_CACHE_URL: none
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Get date for the environment cache key
