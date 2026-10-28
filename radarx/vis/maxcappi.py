@@ -398,6 +398,54 @@ def _get_projection(ds):  # pragma: no cover
     return projection
 
 
+def _lambert_ticks(ax, ticks, side):  # pragma: no cover
+    """
+    Label the bottom or left edge of a Lambert axes at the given lon/lat lines.
+
+    Parameters
+    ----------
+    ax : cartopy.mpl.geoaxes.GeoAxes
+        Axes with a Lambert projection.
+    ticks : array-like
+        Longitudes (``side="bottom"``) or latitudes (``side="left"``).
+    side : {"bottom", "left"}
+        Axes edge that receives the tick labels.
+    """
+    import cartopy.crs as ccrs
+    from cartopy.mpl.gridliner import LATITUDE_FORMATTER, LONGITUDE_FORMATTER
+    from shapely.geometry import LineString
+
+    x0, x1, y0, y1 = ax.get_extent()
+    lon0, lon1, lat0, lat1 = ax.get_extent(ccrs.PlateCarree())
+    bottom = side == "bottom"
+    edge = LineString([(x0, y0), (x1, y0)] if bottom else [(x0, y0), (x0, y1)])
+    formatter = LONGITUDE_FORMATTER if bottom else LATITUDE_FORMATTER
+
+    positions, labels = [], []
+    for tick in ticks:
+        free = np.linspace(lat0, lat1, 30) if bottom else np.linspace(lon0, lon1, 30)
+        fixed = np.full_like(free, tick)
+        lon, lat = (fixed, free) if bottom else (free, fixed)
+        xyz = ax.projection.transform_points(ccrs.Geodetic(), lon, lat)
+        hit = edge.intersection(LineString(xyz[:, :2]))
+        if hit.is_empty:
+            continue
+        point = hit if hit.geom_type == "Point" else next(iter(hit.geoms))
+        if point.geom_type != "Point":
+            continue
+        positions.append(point.x if bottom else point.y)
+        labels.append(formatter(tick))
+
+    if bottom:
+        ax.xaxis.tick_bottom()
+        ax.set_xticks(positions)
+        ax.set_xticklabels(labels)
+    else:
+        ax.yaxis.tick_left()
+        ax.set_yticks(positions)
+        ax.set_yticklabels(labels)
+
+
 def _add_map_features(ax, lat_lines, lon_lines):  # pragma: no cover
     """
     Adds map features and gridlines to the plot.
@@ -471,14 +519,7 @@ def _add_map_features(ax, lat_lines, lon_lines):  # pragma: no cover
         ax.xaxis.set_major_formatter(LONGITUDE_FORMATTER)
         ax.yaxis.set_major_formatter(LATITUDE_FORMATTER)
 
-        import os
-        from contextlib import redirect_stdout
-
-        # Suppress output during import
-        with open(os.devnull, "w") as fnull, redirect_stdout(fnull):
-            from pyart.graph.gridmapdisplay import lambert_xticks, lambert_yticks
-
-        lambert_xticks(ax, lon_lines)  # pragma: no cover
-        lambert_yticks(ax, lat_lines)  # pragma: no cover
+        _lambert_ticks(ax, lon_lines, "bottom")  # pragma: no cover
+        _lambert_ticks(ax, lat_lines, "left")  # pragma: no cover
     else:  # pragma: no cover
         ax.gridlines(xlocs=lon_lines, ylocs=lat_lines)  # pragma: no cover
