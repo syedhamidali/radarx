@@ -36,7 +36,7 @@ jobs:
           CIBW_SKIP: "*-win32 *_i686 *-musllinux_*"
           # the compiled kernel must be in every wheel
           CIBW_TEST_COMMAND: python {project}/ci/check_compiled_kernel.py
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheels-${{ matrix.os }}
           path: ./wheelhouse/*.whl
@@ -52,7 +52,7 @@ jobs:
         run: |
           python -m pip install --upgrade "pip>=26.2.2" "certifi>=2026.10.19" build
           python -m build --sdist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sdist
           path: dist/*.tar.gz

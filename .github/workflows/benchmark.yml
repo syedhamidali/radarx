@@ -42,7 +42,7 @@ jobs:
       - name: Time the kernels
         run: |
           python ci/benchmark_kernels.py --repeats 5 --json benchmark.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: kernel-benchmark
