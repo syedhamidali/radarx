@@ -548,9 +548,11 @@ def hvplot_max_cappi(da, backend=None, **kwargs):
         x="z", y="y", xlabel="Height (km)", ylabel="", title="", clabel=clabel, **side
     )
     side_size = size // 3
-    plan.opts(frame_width=size, frame_height=size, backend="bokeh")
-    top.opts(frame_width=size, frame_height=side_size, backend="bokeh")
-    right.opts(frame_width=side_size, frame_height=size, backend="bokeh")
+    # the projections share their axes with the plan view, so only the height
+    # axes are drawn and the panels sit close to the plan view
+    plan.opts(frame_width=size, frame_height=size, title="", backend="bokeh")
+    top.opts(frame_width=size, frame_height=side_size, xaxis=None, backend="bokeh")
+    right.opts(frame_width=side_size, frame_height=size, yaxis=None, backend="bokeh")
     plan.opts(aspect=1, backend="matplotlib")
     top.opts(aspect=3, backend="matplotlib")
     right.opts(aspect=1 / 3, backend="matplotlib")
