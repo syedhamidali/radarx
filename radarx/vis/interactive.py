@@ -517,7 +517,6 @@ def hvplot_max_cappi(da, backend=None, **kwargs):
     >>> grid = dtree.radarx.to_grid(data_vars=["DBZH"])  # doctest: +SKIP
     >>> hvplot_max_cappi(grid["DBZH"], clim=(0, 60))  # doctest: +SKIP
     """
-    import holoviews as hv
 
     _assign_backend(backend)
     if not {"x", "y", "z"} <= set(da.dims):
@@ -533,6 +532,7 @@ def hvplot_max_cappi(da, backend=None, **kwargs):
         kwargs["clim"] = tuple(float(v) for v in np.nanpercentile(da, [2, 98]))
     size = kwargs.pop("frame_width", 400)
     clabel = kwargs.pop("clabel", None)
+    title = kwargs["title"]
     side = {
         k: v
         for k, v in kwargs.items()
@@ -556,8 +556,63 @@ def hvplot_max_cappi(da, backend=None, **kwargs):
     plan.opts(aspect=1, backend="matplotlib")
     top.opts(aspect=3, backend="matplotlib")
     right.opts(aspect=1 / 3, backend="matplotlib")
-    layout = _layout([top, hv.Empty(), plan, right], cols=2)
+    info = _max_cappi_info(da, title, side_size, size)
+    layout = _layout([top, info, plan, right], cols=2)
     return layout.opts(tight=True, hspace=0.05, vspace=0.05, backend="matplotlib")
+
+
+def _max_cappi_info(da, title, height, width):
+    """Text panel for the empty corner of the Max-CAPPI layout."""
+    import holoviews as hv
+
+    def attr(*names):
+        for name in names:
+            value = str(da.attrs.get(name, "")).strip()
+            if value and value.lower() not in ("none", "nan", "null"):
+                return value
+        return ""
+
+    site = attr("radar_name", "instrument_name")
+    lines = [(site.split(",")[0][:4], False)] if site else []
+    if "time" in da.coords and da["time"].size == 1:
+        when = da["time"].dt
+        lines += [
+            (when.strftime("%d %b %Y").item(), True),
+            (when.strftime("%H:%M:%S UTC").item(), True),
+        ]
+    units = attr("units")
+    lines.append((f"{title} ({units})" if units else title, False))
+    content = "\n".join(line for line, _ in lines)
+
+    def corner_label(plot, element):
+        # pin the text to the top-left pixel corner of the panel
+        from bokeh.models import Label
+
+        for i, (line, bold) in enumerate(lines):
+            plot.state.add_layout(
+                Label(
+                    x=0,
+                    y=height - i * 26,
+                    x_units="screen",
+                    y_units="screen",
+                    text=line,
+                    text_font_size="16pt",
+                    text_font_style="bold" if bold else "normal",
+                    text_baseline="top",
+                )
+            )
+
+    text = hv.Text(0, 0, content, fontsize=14)
+    return text.opts(
+        show_frame=False,
+        xaxis=None,
+        yaxis=None,
+        frame_width=width,
+        frame_height=height,
+        text_alpha=0,
+        hooks=[corner_label],
+        backend="bokeh",
+    ).opts(aspect=3, backend="matplotlib")
 
 
 def _layout(panels, cols):
