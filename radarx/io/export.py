@@ -234,6 +234,8 @@ def _fix_variable(var, target, packing):
         fill = attrs.pop("_FillValue")
         if kind == "f":
             encoding.setdefault("_FillValue", fill)
+    if kind in "iu":
+        encoding.pop("_FillValue", None)
     if kind == "f" and packing == "drop":
         stored = encoding.get("dtype")
         if stored is not None and np.dtype(stored).kind in "iu":
