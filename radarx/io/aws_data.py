@@ -125,7 +125,7 @@ def get_s3_client(anonymous=True):
 
 def list_available_files(bucket, prefix, anonymous=True):
     """
-    List files in an S3 bucket with the given prefix.
+    List files from all S3 response pages with the given prefix.
 
     Parameters
     ----------
@@ -159,8 +159,10 @@ def list_available_files(bucket, prefix, anonymous=True):
 
     s3 = get_s3_client(anonymous=anonymous)
     try:  # pragma: no cover
-        response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
-        files = [item["Key"] for item in response.get("Contents", [])]
+        pages = s3.get_paginator("list_objects_v2").paginate(
+            Bucket=bucket, Prefix=prefix
+        )
+        files = [item["Key"] for page in pages for item in page.get("Contents", [])]
         return files
     except botocore.exceptions.ClientError as e:  # pragma: no cover
         print(f"Failed to list files: {e}")  # pragma: no cover
