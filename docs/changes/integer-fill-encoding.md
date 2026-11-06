@@ -1,1 +1,0 @@
-- **FIX:** Remove integer `_FillValue` encodings as well as attributes when preparing exports, so class codes equal to a stale fill marker are not read back as missing.
